@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Asistente Comunidad Neurodivergente</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Panel local protegido</p>
+          <h1>Asistente Comunidad Neurodivergente</h1>
+          <p>Administración del bot para grupos autorizados de WhatsApp.</p>
+        </div>
+        <button id="logout" class="secondary hidden" type="button">Cerrar sesión</button>
+      </header>
+
+      <section id="notice" class="notice hidden" role="status" aria-live="polite"></section>
+
+      <section id="login-view" class="card narrow">
+        <h2>Acceso administrativo</h2>
+        <form id="login-form">
+          <label>
+            Usuario
+            <input name="username" value="admin" autocomplete="username" required />
+          </label>
+          <label>
+            Contraseña
+            <input name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <button type="submit">Ingresar</button>
+        </form>
+      </section>
+
+      <div id="panel-view" class="hidden">
+        <nav class="tabs" aria-label="Secciones del panel">
+          <button data-section="status" class="active">Estado</button>
+          <button data-section="groups">Grupos</button>
+          <button data-section="commands">Comandos</button>
+          <button data-section="administrators">Administradores</button>
+          <button data-section="settings">Configuración</button>
+        </nav>
+
+        <section id="section-status" class="panel-section">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Resumen operativo</p>
+              <h2>Estado</h2>
+            </div>
+            <button id="restart-connection" class="secondary">Reiniciar conexión</button>
+          </div>
+          <div id="status-cards" class="status-grid"></div>
+        </section>
+
+        <section id="section-groups" class="panel-section hidden">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Acceso controlado</p>
+              <h2>Grupos detectados</h2>
+            </div>
+            <button id="refresh-groups">Actualizar lista</button>
+          </div>
+          <p class="muted">Solo los grupos autorizados pueden activar el bot.</p>
+          <div id="groups-list" class="list"></div>
+        </section>
+
+        <section id="section-commands" class="panel-section hidden">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Respuestas editables</p>
+              <h2>Comandos</h2>
+            </div>
+            <button id="new-command">Crear comando</button>
+          </div>
+          <div id="command-editor" class="card inset hidden">
+            <h3 id="command-editor-title">Nuevo comando</h3>
+            <form id="command-form">
+              <input name="id" type="hidden" />
+              <div class="form-row">
+                <label>Nombre<input name="name" pattern="[a-z0-9_-]{2,32}" required /></label>
+                <label
+                  >Prioridad<input
+                    name="priority"
+                    type="number"
+                    min="-1000"
+                    max="1000"
+                    value="0"
+                    required
+                /></label>
+              </div>
+              <label
+                >Respuesta<textarea name="response" maxlength="4000" rows="5" required></textarea>
+              </label>
+              <label
+                >Palabras clave (una por línea)<textarea
+                  name="keywords"
+                  maxlength="4000"
+                  rows="3"
+                ></textarea>
+              </label>
+              <div class="preview">
+                <span>Vista previa</span>
+                <p id="response-preview"></p>
+              </div>
+              <div class="checks">
+                <label><input name="enabled" type="checkbox" checked /> Activo</label>
+                <label><input name="healthRelated" type="checkbox" /> Relacionado con salud</label>
+              </div>
+              <div class="actions">
+                <button type="submit">Guardar</button
+                ><button id="cancel-command" class="secondary" type="button">Cancelar</button>
+              </div>
+            </form>
+          </div>
+          <div id="commands-list" class="list"></div>
+        </section>
+
+        <section id="section-administrators" class="panel-section hidden">
+          <p class="eyebrow">Identidad verificada por número</p>
+          <h2>Administradores de WhatsApp</h2>
+          <form id="administrator-form" class="inline-form">
+            <label
+              >Número internacional<input name="number" placeholder="+56912345678" required
+            /></label>
+            <button type="submit">Agregar</button>
+          </form>
+          <div id="administrators-list" class="list"></div>
+        </section>
+
+        <section id="section-settings" class="panel-section hidden">
+          <p class="eyebrow">Comportamiento general</p>
+          <h2>Configuración</h2>
+          <form id="settings-form">
+            <label class="toggle"><input name="bot_enabled" type="checkbox" /> Bot activado</label>
+            <label
+              >Respuesta de respaldo<textarea
+                name="fallback_response"
+                maxlength="4000"
+                rows="4"
+                required
+              ></textarea>
+            </label>
+            <label
+              >Advertencia profesional<textarea
+                name="professional_warning"
+                maxlength="1000"
+                rows="3"
+                required
+              ></textarea>
+            </label>
+            <label
+              >Nivel de registros<select name="log_level">
+                <option>error</option>
+                <option>warn</option>
+                <option>info</option>
+                <option>debug</option>
+              </select></label
+            >
+            <div class="form-row">
+              <label
+                >Máximo por usuario<input
+                  name="user_rate_limit"
+                  type="number"
+                  min="1"
+                  max="100"
+                  required
+                />
+              </label>
+              <label
+                >Máximo por grupo<input
+                  name="group_rate_limit"
+                  type="number"
+                  min="1"
+                  max="500"
+                  required
+                />
+              </label>
+            </div>
+            <div class="form-row">
+              <label
+                >Ventana (segundos)<input
+                  name="rate_window_seconds"
+                  type="number"
+                  min="10"
+                  max="3600"
+                  required
+                />
+              </label>
+              <label
+                >Enfriamiento (segundos)<input
+                  name="user_cooldown_seconds"
+                  type="number"
+                  min="0"
+                  max="3600"
+                  required
+                />
+              </label>
+            </div>
+            <label
+              >Prevención de repetición (segundos)<input
+                name="repeat_window_seconds"
+                type="number"
+                min="0"
+                max="86400"
+                required
+              />
+            </label>
+            <p class="muted">
+              Los cambios de límites se aplican después de reiniciar la aplicación.
+            </p>
+            <button type="submit">Guardar cambios</button>
+          </form>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
