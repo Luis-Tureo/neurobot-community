@@ -42,6 +42,13 @@ export class MessageRateLimiter {
     return { allowed: true, reason: null, shouldNotify: false };
   }
 
+  public reset(): void {
+    this.users.clear();
+    this.groups.clear();
+    this.lastUserResponse.clear();
+    this.lastNotice.clear();
+  }
+
   private denied(
     noticeKey: string,
     reason: Exclude<RateLimitDecision['reason'], null>,

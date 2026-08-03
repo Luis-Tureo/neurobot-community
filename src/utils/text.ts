@@ -1,3 +1,5 @@
+import { canonicalPhoneIdentity } from '../messaging/identifiers.js';
+
 const combiningMarks = /[\u0300-\u036f]/g;
 const whitespace = /\s+/g;
 
@@ -48,9 +50,22 @@ export function maskPhoneNumber(identifier: string): string {
 }
 
 export function normalizeParticipantId(value: string): string {
-  const digits = value.split('@')[0]?.replace(/\D/g, '') ?? '';
-  if (digits.length < 8 || digits.length > 15) {
+  const canonical = canonicalPhoneIdentity(value);
+  if (canonical === null) {
     throw new Error('El número debe usar formato internacional y contener entre 8 y 15 dígitos.');
   }
-  return `${digits}@c.us`;
+  return canonical;
+}
+
+export function normalizeBotIdentifier(value: string): string {
+  let normalized = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/-+/gu, '-')
+    .replace(/^-|-$/gu, '');
+  if (normalized !== '' && !/^[a-z]/u.test(normalized)) normalized = `bot-${normalized}`;
+  normalized = normalized.slice(0, 40).replace(/-$/u, '');
+  return normalized;
 }

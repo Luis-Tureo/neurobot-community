@@ -26,6 +26,10 @@ export class ExpiringSet {
     }
   }
 
+  public clear(): void {
+    this.entries.clear();
+  }
+
   public get size(): number {
     return this.entries.size;
   }

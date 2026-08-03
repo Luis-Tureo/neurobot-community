@@ -7,6 +7,8 @@ describe('límites y deduplicación', () => {
     expect(set.checkAndAdd('mensaje', 100)).toBe(true);
     expect(set.checkAndAdd('mensaje', 500)).toBe(false);
     expect(set.checkAndAdd('mensaje', 1100)).toBe(true);
+    set.clear();
+    expect(set.checkAndAdd('mensaje', 1101)).toBe(true);
   });
 
   it('aplica enfriamiento por usuario', () => {
@@ -43,5 +45,7 @@ describe('límites y deduplicación', () => {
     groupLimiter.check('u1', 'g1', 0);
     groupLimiter.check('u2', 'g1', 1);
     expect(groupLimiter.check('u3', 'g1', 2).reason).toBe('group_limit');
+    groupLimiter.reset();
+    expect(groupLimiter.check('u3', 'g1', 3).allowed).toBe(true);
   });
 });

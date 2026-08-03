@@ -31,6 +31,10 @@ const environmentSchema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
   CHROME_EXECUTABLE_PATH: optionalTrimmedString,
+  AI_PROVIDER: z.enum(['groq', 'disabled']).default('groq'),
+  GROQ_API_KEY: optionalTrimmedString,
+  GROQ_MODEL: z.string().trim().min(1).max(120).default('llama-3.1-8b-instant'),
+  APP_ENCRYPTION_KEY: optionalTrimmedString,
 });
 
 export type Environment = {
@@ -52,6 +56,10 @@ export type Environment = {
   maxReconnectDelayMs: number;
   developmentMode: boolean;
   chromeExecutablePath?: string;
+  aiProvider: 'groq' | 'disabled';
+  groqApiKey?: string;
+  groqModel: string;
+  appEncryptionKey?: string;
 };
 
 export function loadEnvironment(
@@ -87,6 +95,12 @@ export function loadEnvironment(
     maxReconnectAttempts: value.MAX_RECONNECT_ATTEMPTS,
     maxReconnectDelayMs: value.MAX_RECONNECT_DELAY_SECONDS * 1000,
     developmentMode: value.DEVELOPMENT_MODE,
+    aiProvider: value.AI_PROVIDER,
+    ...(value.GROQ_API_KEY === undefined ? {} : { groqApiKey: value.GROQ_API_KEY }),
+    groqModel: value.GROQ_MODEL,
+    ...(value.APP_ENCRYPTION_KEY === undefined
+      ? {}
+      : { appEncryptionKey: value.APP_ENCRYPTION_KEY }),
     ...(value.CHROME_EXECUTABLE_PATH === undefined
       ? {}
       : { chromeExecutablePath: resolve(baseDirectory, value.CHROME_EXECUTABLE_PATH) }),

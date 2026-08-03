@@ -8,9 +8,38 @@ describe('persistencia SQLite', () => {
     const database = new AppDatabase(':memory:');
     database.migrate();
     database.migrate();
-    expect(database.getMigrationVersions()).toEqual([1]);
+    expect(database.getMigrationVersions()).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+    expect(database.getBotProfile('neurobot')).toMatchObject({
+      botName: 'Neurobot',
+      activationAlias: '@neurobot',
+      communityGreetingMessage: expect.stringContaining('Soy Neurobot'),
+    });
+    expect(database.getBot('neurobot')).toMatchObject({
+      connectorType: 'WHATSAPP_WEB',
+      operatingMode: 'COMMUNITY_GROUPS',
+      connectorMigrationLocked: true,
+      lifecycleStatus: 'CONNECTED',
+      deletionLocked: true,
+      capabilities: {
+        communitySingleTurnMode: true,
+        privateChatsEnabled: false,
+        conversationContinuationEnabled: false,
+        interactiveMenusEnabled: false,
+        numericMenuRepliesEnabled: false,
+        pollsAsMenusEnabled: false,
+        pollsForCommunityEngagementEnabled: true,
+      },
+    });
     expect(database.listCommands().map((item) => item.name)).toContain('ayuda');
-    expect(database.listCommands()).toHaveLength(7);
+    expect(database.listCommands()).toHaveLength(8);
+    expect(database.listPollTemplates()).toHaveLength(36);
+    expect(database.getPollConfiguration()).toEqual({
+      enabled: false,
+      sendTime: '13:00',
+      timezone: 'America/Santiago',
+      toleranceMinutes: 30,
+      selectionMode: 'SAME_FOR_ALL',
+    });
     database.close();
   });
 
@@ -78,6 +107,122 @@ describe('persistencia SQLite', () => {
     expect(serialized).toContain('grupo-anonimo');
     expect(serialized).not.toContain('56912345678');
     expect(serialized).not.toContain('body');
+    database.close();
+  });
+
+  it('persiste la configuración y el bloqueo diario de mensajes automáticos', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'asistente-automatic-db-'));
+    const path = join(directory, 'test.db');
+    const first = new AppDatabase(path);
+    first.migrate();
+    first.upsertDetectedGroup('grupo@g.us', 'Grupo');
+    first.setGroupAuthorized('grupo@g.us', true);
+    const configuration = first.getAutomaticMessageConfiguration();
+    expect(configuration).toMatchObject({
+      timezone: 'America/Santiago',
+      welcome: {
+        enabled: true,
+        batchWindowSeconds: 30,
+        groupSimultaneous: true,
+        reconciliationIntervalSeconds: 120,
+      },
+      dailyGreeting: { enabled: false, sendTime: '08:00', toleranceMinutes: 30 },
+      dailyRules: { enabled: false, sendTime: '20:00', toleranceMinutes: 30 },
+    });
+    configuration.dailyRules.enabled = true;
+    configuration.dailyRules.sendTime = '21:15';
+    first.saveAutomaticMessageConfiguration(configuration);
+    expect(first.claimScheduledDelivery('DAILY_RULES', 'grupo@g.us', '2026-08-02')).not.toBeNull();
+    first.close();
+
+    const second = new AppDatabase(path);
+    second.migrate();
+    expect(second.getAutomaticMessageConfiguration().dailyRules).toMatchObject({
+      enabled: true,
+      sendTime: '21:15',
+    });
+    expect(second.claimScheduledDelivery('DAILY_RULES', 'grupo@g.us', '2026-08-02')).toBeNull();
+    second.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('conserva textos personalizados y permite restaurar cada valor por separado', () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    const help = database.getCommand('ayuda');
+    if (help === null) throw new Error('Falta el comando de ayuda.');
+    database.saveCommand({
+      ...help,
+      response: 'Texto personalizado de ayuda',
+    });
+    const configuration = database.getAutomaticMessageConfiguration();
+    configuration.welcome.template = 'Bienvenida personalizada';
+    database.saveAutomaticMessageConfiguration(configuration);
+
+    database.migrate();
+    expect(database.getCommand('ayuda')).toMatchObject({
+      response: 'Texto personalizado de ayuda',
+      custom: true,
+    });
+    expect(database.getAutomaticMessageConfiguration().welcome.template).toBe(
+      'Bienvenida personalizada',
+    );
+    expect(database.getAutomaticTemplateCustomization()).toMatchObject({
+      WELCOME: true,
+      GREETING_WEEKDAY: false,
+    });
+
+    expect(database.restoreCommandDefault('ayuda')).toMatchObject({ custom: false });
+    expect(database.restoreAutomaticTemplate('WELCOME')).toBe(true);
+    expect(database.getAutomaticTemplateCustomization().WELCOME).toBe(false);
+    database.close();
+  });
+
+  it('archiva tras el plazo y elimina solamente registros vencidos con sus estados asociados', () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    const firstMissingAt = new Date('2026-01-01T00:00:00.000Z');
+    database.upsertDetectedGroup('grupo-inactivo@g.us', 'Grupo inactivo');
+    database.setGroupAuthorized('grupo-inactivo@g.us', true);
+    database.createManualDelivery(
+      'manual:test:cleanup',
+      'WELCOME',
+      'grupo-inactivo@g.us',
+      '2026-01-01',
+    );
+    database.markMissingGroups(new Set(), firstMissingAt);
+
+    const afterArchiveThreshold = new Date('2026-01-02T01:00:00.000Z');
+    expect(database.previewGroupCleanup(afterArchiveThreshold).archiveCandidates).toHaveLength(1);
+    expect(database.cleanupInactiveGroups(afterArchiveThreshold, false)).toMatchObject({
+      archived: 1,
+      deleted: 0,
+    });
+    expect(database.getGroupById('grupo-inactivo@g.us')).toMatchObject({
+      status: 'ARCHIVED',
+      authorized: false,
+    });
+
+    const afterRetention = new Date('2026-02-02T02:00:00.000Z');
+    expect(database.previewGroupCleanup(afterRetention).deleteCandidates).toHaveLength(1);
+    expect(database.cleanupInactiveGroups(afterRetention, true)).toMatchObject({ deleted: 1 });
+    expect(database.getGroupById('grupo-inactivo@g.us')).toBeNull();
+    expect(database.listScheduledDeliveries()).toHaveLength(0);
+    database.close();
+  });
+
+  it('solo publica grupos activos que fueron seleccionados expresamente', () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    database.upsertDetectedGroup('publico@g.us', 'Nombre interno');
+    database.upsertDetectedGroup('oculto@g.us', 'Grupo oculto');
+    database.setGroupPublicListing('publico@g.us', true, 'Nombre público');
+    database.archiveGroup('oculto@g.us');
+    database.setGroupPublicListing('oculto@g.us', true, 'No debe aparecer');
+
+    expect(database.listPublicOperationalGroups()).toMatchObject([
+      { id: 'publico@g.us', publicName: 'Nombre público' },
+    ]);
     database.close();
   });
 });

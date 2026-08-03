@@ -1,11 +1,13 @@
 import type { Logger } from 'pino';
 import type { ConnectionSnapshot, ConnectionState } from '../domain/types.js';
+import { serializeError } from '../infrastructure/safe-error.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 
 export type ConnectionManagerOptions = {
   maxAttempts: number;
   maxDelayMs: number;
   baseDelayMs?: number;
+  developmentMode?: boolean;
 };
 
 export class ConnectionManager {
@@ -14,6 +16,7 @@ export class ConnectionManager {
   private lastErrorCode: string | null = null;
   private reconnectAttempt = 0;
   private initialization: Promise<void> | null = null;
+  private restartOperation: Promise<void> | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private stopping = false;
 
@@ -33,6 +36,8 @@ export class ConnectionManager {
     } else if (state === 'auth_failure') {
       this.lastErrorCode = 'AUTH_FAILURE';
       this.clearReconnectTimer();
+    } else if (state === 'loading_chats' && reason !== undefined) {
+      this.lastErrorCode = normalizeErrorCode(reason);
     } else if (state === 'disconnected' && !this.stopping) {
       this.lastErrorCode = normalizeErrorCode(reason);
       this.scheduleReconnect();
@@ -42,12 +47,21 @@ export class ConnectionManager {
   public start(): Promise<void> {
     if (this.initialization !== null) return this.initialization;
     this.stopping = false;
-    this.state = 'authenticating';
+    this.state = 'initializing';
     this.initialization = this.client
       .initialize()
       .catch((error: unknown) => {
-        this.lastErrorCode = normalizeErrorCode(error instanceof Error ? error.message : 'unknown');
+        const details = serializeError(
+          error,
+          'WHATSAPP_INITIALIZATION_FAILED',
+          this.options.developmentMode ?? false,
+        );
+        this.lastErrorCode = details.errorCode;
         this.state = 'disconnected';
+        this.logger.error(
+          { ...details, operation: 'initializeClient' },
+          'No fue posible inicializar el cliente de WhatsApp',
+        );
         this.scheduleReconnect();
       })
       .finally(() => {
@@ -57,11 +71,13 @@ export class ConnectionManager {
   }
 
   public async restart(): Promise<void> {
-    this.clearReconnectTimer();
-    await this.client.destroy();
-    this.state = 'reconnecting';
-    this.reconnectAttempt = 0;
-    await this.start();
+    if (this.restartOperation !== null) return this.restartOperation;
+    const operation = this.restartOnce();
+    const tracked = operation.finally(() => {
+      if (this.restartOperation === tracked) this.restartOperation = null;
+    });
+    this.restartOperation = tracked;
+    return tracked;
   }
 
   public async stop(): Promise<void> {
@@ -96,9 +112,21 @@ export class ConnectionManager {
     this.logger.warn({ reconnectAttempt: this.reconnectAttempt, delay }, 'Reconexión programada');
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      void this.start();
+      void this.reconnectOnce();
     }, delay);
     this.reconnectTimer.unref();
+  }
+
+  private async restartOnce(): Promise<void> {
+    this.clearReconnectTimer();
+    this.reconnectAttempt = 0;
+    await this.reconnectOnce();
+  }
+
+  private async reconnectOnce(): Promise<void> {
+    this.state = 'reconnecting';
+    await this.client.destroy();
+    await this.start();
   }
 
   private clearReconnectTimer(): void {
@@ -109,8 +137,9 @@ export class ConnectionManager {
 
 function normalizeErrorCode(reason: string | undefined): string {
   if (reason === undefined || reason.trim() === '') return 'DISCONNECTED';
-  return reason
+  const normalized = reason
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, '_')
     .slice(0, 50);
+  return normalized.length >= 3 ? normalized : 'DISCONNECTED';
 }

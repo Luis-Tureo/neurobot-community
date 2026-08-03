@@ -9,6 +9,24 @@ export class RuleBasedResponseProvider implements ResponseProvider {
     if (request.activation === 'command' && request.commandName !== undefined) {
       const command = this.database.getCommand(request.commandName);
       if (command === null || !command.enabled) return this.fallback();
+      if (command.name === 'reglas') {
+        return {
+          text: this.database.getAutomaticMessageConfiguration().dailyRules.template,
+          commandName: command.name,
+        };
+      }
+      if (command.name === 'grupos') {
+        const publicGroups = this.database.listPublicOperationalGroups();
+        const text =
+          publicGroups.length === 0
+            ? command.custom
+              ? command.response
+              : '💬 No hay espacios públicos disponibles en este momento.\n\nConsulta a la administración.'
+            : `💬 Puedes unirte a los espacios que sean de tu interés:\n\n${publicGroups
+                .map((group) => group.publicName ?? group.name)
+                .join(' | ')}\n\nParticipa a tu ritmo y solicita los enlaces a la administración.`;
+        return { text, commandName: command.name };
+      }
       return {
         text: this.withWarning(command.response, command.healthRelated),
         commandName: command.name,

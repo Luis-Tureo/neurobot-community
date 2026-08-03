@@ -10,6 +10,7 @@ describe('proveedor de respuestas por reglas', () => {
   afterEach(() => database.close());
 
   it('selecciona comandos normalizados y respeta desactivación', () => {
+    database.restoreCommandDefault('ayuda');
     const provider = new RuleBasedResponseProvider(database);
     expect(
       provider.select({ text: '!ayuda', activation: 'command', commandName: 'ayuda' })?.commandName,
@@ -22,6 +23,7 @@ describe('proveedor de respuestas por reglas', () => {
   });
 
   it('busca palabras clave solo cuando se activa por mención o respuesta', () => {
+    database.restoreCommandDefault('actividades');
     const command = database.getCommand('actividades');
     database.replaceKeywords(command?.id ?? 0, [
       { term: 'actividad', priority: 5, enabled: true },

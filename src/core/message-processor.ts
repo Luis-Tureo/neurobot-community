@@ -1,17 +1,22 @@
 import { performance } from 'node:perf_hooks';
 import type { Logger } from 'pino';
-import type { ActivationType, ConnectionSnapshot, IncomingMessage } from '../domain/types.js';
+import type { AssistantQueryService } from '../ai/assistant-query-service.js';
+import { hashNormalizedQuestion, normalizeQuestionForCache } from '../ai/answer-cache-service.js';
+import type { ConnectionSnapshot, IncomingMessage } from '../domain/types.js';
+import { serializeError } from '../infrastructure/safe-error.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
-import { normalizeText, parseCommand } from '../utils/text.js';
+import { normalizeText } from '../utils/text.js';
 import { ExpiringSet } from './expiring-cache.js';
-import type { MessageRateLimiter } from './rate-limiter.js';
-import type { ResponseProvider } from './response-provider.js';
+import { containsActivationAliasAtStart, detectBotActivation } from './bot-activation.js';
+import type { ConversationFlowService } from './conversation-flow-service.js';
 
 export type MessageProcessorOptions = {
   maxMessageLength: number;
   repeatWindowMs: number;
+  developmentMode?: boolean;
+  isMaintenanceActive?: () => boolean;
 };
 
 export type ProcessResult =
@@ -27,211 +32,351 @@ export type ProcessResult =
 
 export class MessageProcessor {
   private readonly processedMessages = new ExpiringSet(10 * 60 * 1000);
-  private readonly repeatedResponses: ExpiringSet;
 
   public constructor(
     private readonly database: AppDatabase,
     private readonly client: MessagingClient,
-    private readonly provider: ResponseProvider,
-    private readonly rateLimiter: MessageRateLimiter,
+    private readonly queryService: AssistantQueryService,
     private readonly anonymizer: Anonymizer,
     private readonly logger: Logger,
     private readonly connectionSnapshot: () => ConnectionSnapshot,
     private readonly options: MessageProcessorOptions,
-  ) {
-    this.repeatedResponses = new ExpiringSet(options.repeatWindowMs);
-  }
+    private readonly botId = 'neurobot',
+    private readonly conversationFlow?: ConversationFlowService,
+  ) {}
 
   public async process(message: IncomingMessage): Promise<ProcessResult> {
     const started = performance.now();
-    if (!this.isProcessable(message)) return 'ignored';
-    if (!this.database.isGroupAuthorized(message.chatId)) return 'unauthorized_group';
-    if (!this.processedMessages.checkAndAdd(message.id)) return 'duplicate';
-
-    const command = parseCommand(message.body);
     const groupHash = this.anonymizer.identifier(message.chatId);
     const userHash = this.anonymizer.identifier(message.participantId);
-
-    if (command?.name === 'bot') {
-      return this.processAdministrativeCommand(message, command.args, groupHash, userHash, started);
+    const messageHash = this.anonymizer.identifier(message.id);
+    const context = { groupHash, userHash, messageHash };
+    if (this.options.isMaintenanceActive?.() === true) {
+      this.logger.info({ operation: 'activationCheck', reason: 'MAINTENANCE_MODE', ...context }, 'Procesamiento pausado por mantenimiento');
+      return 'ignored';
+    }
+    const rejection = this.processableRejectionReason(message);
+    if (rejection !== null) {
+      this.logger.info({ operation: 'activationCheck', reason: rejection, ...context }, 'Mensaje incompatible ignorado');
+      return 'ignored';
     }
 
-    const activation = activationType(message, command !== null);
-    if (activation === null) return 'ignored';
-    if (!this.database.getSetting('bot_enabled', true)) return 'bot_disabled';
-    if (this.database.getSilenceRemainingMs(message.chatId) > 0) return 'silenced';
-
-    const rateDecision = this.rateLimiter.check(userHash, groupHash);
-    if (!rateDecision.allowed) {
-      if (rateDecision.shouldNotify) {
-        await this.safeSend(
-          message,
-          'Se alcanzó temporalmente el límite de respuestas. Inténtalo nuevamente más tarde.',
-        );
+    const bot = this.database.getBot(this.botId);
+    if (bot === null || !bot.enabled) return 'bot_disabled';
+    if (!message.isGroup) {
+      if (!bot.capabilities.privateChatsEnabled || !bot.privateMessagesEnabled || this.conversationFlow === undefined) {
+        this.logger.info({ operation: 'activationCheck', reason: 'PRIVATE_CHAT_DISABLED', botId: this.botId, ...context }, 'El canal privado está desactivado');
+        return 'ignored';
       }
-      this.record(message, activation, command?.name, 'rate_limited', groupHash, userHash, started);
-      return 'rate_limited';
-    }
-
-    const selected = this.provider.select({
-      text: message.body,
-      activation,
-      ...(command === null ? {} : { commandName: command.name }),
-    });
-    if (selected === null) return 'ignored';
-
-    const responseFingerprint = this.anonymizer.fingerprint([
-      groupHash,
-      userHash,
-      normalizeText(message.body),
-      selected.text,
-    ]);
-    if (!this.repeatedResponses.checkAndAdd(responseFingerprint)) {
-      this.record(
-        message,
-        activation,
-        selected.commandName ?? undefined,
-        'repeated_response',
-        groupHash,
-        userHash,
-        started,
-      );
-      return 'repeated_response';
-    }
-
-    const sent = await this.safeSend(message, selected.text);
-    const result = sent ? 'responded' : 'send_failed';
-    this.record(
-      message,
-      activation,
-      selected.commandName ?? undefined,
-      result,
-      groupHash,
-      userHash,
-      started,
-    );
-    return result;
-  }
-
-  private isProcessable(message: IncomingMessage): boolean {
-    return (
-      message.isGroup &&
-      !message.fromMe &&
-      !message.isStatus &&
-      !message.isBroadcast &&
-      !message.isChannel &&
-      !message.hasMedia &&
-      message.body.trim() !== '' &&
-      message.body.length <= this.options.maxMessageLength
-    );
-  }
-
-  private async processAdministrativeCommand(
-    message: IncomingMessage,
-    args: string[],
-    groupHash: string,
-    userHash: string,
-    started: number,
-  ): Promise<ProcessResult> {
-    if (!this.database.isAdministrator(message.participantId)) {
-      await this.safeSend(message, 'Este comando está reservado para la administración.');
-      this.record(message, 'command', 'bot', 'admin_rejected', groupHash, userHash, started);
+      if (!this.processedMessages.checkAndAdd(message.id)) return 'duplicate';
+      if (this.botId === 'neurobot' && !this.database.getSetting('bot_enabled', true)) return 'bot_disabled';
+      const handled = await this.conversationFlow.handle(message.chatId, groupHash, userHash, message.body);
+      if (!handled) await this.conversationFlow.start(message.chatId, groupHash, userHash);
       return 'responded';
     }
+    if (!bot.groupsEnabled) return 'ignored';
+    const groupAuthorized = this.database.canBotSendToGroup(this.botId, message.chatId);
+    this.logger.info(
+      {
+        operation: 'groupAuthorizationCheck',
+        authorized: groupAuthorized,
+        reason: groupAuthorized ? 'GROUP_ACTIVE' : 'GROUP_INACTIVE_OR_BLOCKED',
+        comparedIdentifier: 'internal_group_id',
+        ...context,
+      },
+      'Se verificó el estado del grupo vinculado',
+    );
+    if (!groupAuthorized) return 'unauthorized_group';
 
-    const action = args[0];
-    let response: string;
-    let auditResource = 'bot';
-    if (action === 'activar' && args.length === 1) {
-      this.database.setSetting('bot_enabled', true);
-      response = 'El bot quedó activado.';
-    } else if (action === 'desactivar' && args.length === 1) {
-      this.database.setSetting('bot_enabled', false);
-      response = 'El bot quedó desactivado.';
-    } else if (action === 'estado' && args.length === 1) {
-      const remainingMs = this.database.getSilenceRemainingMs(message.chatId);
-      const connection = this.connectionSnapshot();
-      const enabledCommands = this.database.listCommands().filter((item) => item.enabled).length;
-      response = [
-        `Estado general: ${this.database.getSetting('bot_enabled', true) ? 'activado' : 'desactivado'}.`,
-        'Grupo autorizado: sí.',
-        `Silencio temporal: ${remainingMs > 0 ? `${Math.ceil(remainingMs / 60_000)} minuto(s) restante(s)` : 'inactivo'}.`,
-        `Comandos habilitados: ${enabledCommands}.`,
-        `Conexión: ${connection.state}.`,
-      ].join('\n');
-      auditResource = 'estado';
-    } else if (action === 'silencio' && args.length === 2) {
-      const minutes = Number(args[1]);
-      if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
-        response = 'La duración debe ser un número entero entre 1 y 1440 minutos.';
-        auditResource = 'silencio_invalido';
-      } else {
-        this.database.setSilence(message.chatId, new Date(Date.now() + minutes * 60_000));
-        response = `El bot quedó en silencio durante ${minutes} minuto(s) en este grupo.`;
-        auditResource = 'silencio';
-      }
-    } else {
-      response =
-        'Uso válido: !bot activar, !bot desactivar, !bot estado o !bot silencio <minutos>.';
-      auditResource = 'comando_invalido';
+    if (!this.processedMessages.checkAndAdd(message.id)) {
+      this.logger.info(
+        { operation: 'duplicateMessageIgnored', reason: 'DUPLICATE_MESSAGE', firstRegisteredBy: 'message', ...context },
+        'Se ignoró un mensaje duplicado',
+      );
+      return 'duplicate';
     }
 
-    const sent = await this.safeSend(message, response);
-    this.database.recordAudit({
-      actionType: action ?? 'ayuda',
-      resource: auditResource,
-      result: sent ? 'ok' : 'send_failed',
-      administratorHash: userHash,
-    });
-    this.record(
-      message,
-      'command',
-      'bot',
-      sent ? 'responded' : 'send_failed',
+    if (this.botId === 'neurobot' && !this.database.getSetting('bot_enabled', true)) {
+      this.logger.info({ operation: 'activationCheck', reason: 'BOT_DISABLED', ...context }, 'El bot está desactivado');
+      return 'bot_disabled';
+    }
+    if (this.botId === 'neurobot' && this.database.getSilenceRemainingMs(message.chatId) > 0) {
+      this.logger.info({ operation: 'activationCheck', reason: 'GROUP_SILENCED', ...context }, 'El grupo está silenciado');
+      return 'silenced';
+    }
+
+    const profile = this.database.getBotProfile(this.botId);
+    if (bot.capabilities.communitySingleTurnMode) {
+      const activation = detectBotActivation(
+        message,
+        message.botMentionToken ?? null,
+        this.database.listBotActivationAliases(this.botId),
+      );
+      if (activation.type === 'NOT_ACTIVATED') {
+        this.logger.info(
+          {
+            operation: 'activationCheck',
+            reason: activation.rejectionReason,
+            activationType: activation.type,
+            ...context,
+          },
+          'El mensaje no activó al asistente de pregunta única',
+        );
+        return 'ignored';
+      }
+      this.logger.info(
+        {
+          operation: activation.type === 'REAL_MENTION' ? 'REAL_MENTION_RECEIVED' : 'TEXT_ALIAS_RECEIVED',
+          activationType: activation.type,
+          result: 'ACCEPTED',
+          ...context,
+        },
+        'El mensaje activó al asistente de pregunta única',
+      );
+      this.database.recordTechnicalEvent({
+        eventType: activation.type === 'REAL_MENTION' ? 'REAL_MENTION_RECEIVED' : 'TEXT_ALIAS_RECEIVED',
+        botId: this.botId,
+        activationType: activation.type,
+        groupHash,
+        userHash,
+        result: 'ACCEPTED',
+      });
+      const interactionNow = new Date();
+      const interactionPeriod = localInteractionPeriod(interactionNow, profile.timezone);
+      const interaction = this.database.registerCommunityInteraction({
+        botId: this.botId,
+        profileId: profile.id,
+        userHash,
+        queryHash: hashNormalizedQuestion(normalizeQuestionForCache(activation.question)),
+        localDate: interactionPeriod.date,
+        hourBucket: interactionPeriod.hour,
+        now: interactionNow,
+      });
+      if (!interaction.allowed) {
+        const duplicate = interaction.reason === 'DUPLICATE_QUERY';
+        const operation = duplicate ? 'DUPLICATE_QUERY_SUPPRESSED' : 'INTERACTION_RATE_LIMITED';
+        this.database.recordTechnicalEvent({
+          eventType: operation,
+          botId: this.botId,
+          groupHash,
+          userHash,
+          result: interaction.reason,
+        });
+        this.logger.info(
+          { operation, botId: this.botId, reason: interaction.reason, ...context },
+          'La interacción fue suprimida de forma segura',
+        );
+        return duplicate ? 'duplicate' : 'rate_limited';
+      }
+      const answer = await this.queryService.answerQuestion(activation.question, groupHash, userHash);
+      const sent = await this.safeSend(message.chatId, answer.text, context);
+      this.database.recordTechnicalEvent({
+        eventType: 'message_processed',
+        botId: this.botId,
+        activationType: activation.type,
+        groupHash,
+        userHash,
+        result: sent ? answer.code : 'send_failed',
+        durationMs: Math.round(performance.now() - started),
+        ...(!sent ? { errorCode: 'MESSAGE_SEND_FAILED' } : {}),
+      });
+      return sent ? (answer.code === 'LIMIT_REACHED' ? 'rate_limited' : 'responded') : 'send_failed';
+    }
+    const aliasMentioned = containsActivationAlias(message.body, profile.activationAlias);
+    if (!message.mentionsBot && !aliasMentioned) {
+      if (
+        bot.capabilities.conversationContinuationEnabled &&
+        this.conversationFlow !== undefined &&
+        (await this.conversationFlow.handle(
+          message.chatId,
+          groupHash,
+          userHash,
+          message.body,
+          new Date(),
+          message.messageType === 'poll_vote',
+        ))
+      ) {
+        this.logger.info(
+          { operation: 'activationCheck', reason: 'ACTIVE_MENU_SELECTION', ...context },
+          'Se procesó una selección del menú comunitario sin exigir una nueva mención',
+        );
+        return 'responded';
+      }
+      this.logger.info(
+        {
+          operation: 'activationCheck',
+          reason: message.isReplyToBot ? 'REPLY_WITHOUT_MENTION' : 'NO_ACTIVATION_ALIAS',
+          ...context,
+        },
+        'El mensaje no contiene el alias de activación del bot',
+      );
+      return 'ignored';
+    }
+
+    const activationType = message.mentionsBot ? 'real_mention' : 'text_alias';
+    this.logger.info(
+      {
+        operation: message.mentionsBot ? 'REAL_MENTION_RECEIVED' : 'TEXT_ALIAS_RECEIVED',
+        activationType,
+        result: 'ACCEPTED',
+        ...context,
+      },
+      message.mentionsBot
+        ? 'Se recibió una mención real'
+        : 'Se recibió el alias público del asistente',
+    );
+    this.logger.info(
+      {
+        operation: 'activationCheck',
+        reason: 'ACTIVATION_ALIAS_ACCEPTED',
+        activationType,
+        ...context,
+      },
+      'El mensaje activó al asistente',
+    );
+    const effectiveMessage =
+      message.mentionsBot || !aliasMentioned
+        ? message
+        : {
+            ...message,
+            mentionsBot: true,
+            botMentionToken: profile.activationAlias,
+          };
+    const normalizedBody = normalizeText(message.body);
+    if (
+      bot.capabilities.interactiveMenusEnabled &&
+      this.conversationFlow !== undefined &&
+      /\b(?:ayuda|buenas|hola|holi|informacion|opciones|menu)\b/u.test(normalizedBody)
+    ) {
+      this.logger.info(
+        { operation: 'commandDetected', command: 'menu', ...context },
+        'Se detectó una solicitud del menú principal',
+      );
+      this.logger.info(
+        {
+          operation: 'responseAttempted',
+          botId: this.botId,
+          target: 'group',
+          responseType: 'menu',
+          ...context,
+        },
+        'Se intentará enviar el menú al grupo',
+      );
+      try {
+        const startedMenu = await this.conversationFlow.start(
+          message.chatId,
+          groupHash,
+          userHash,
+        );
+        if (startedMenu) {
+          this.logger.info(
+            {
+              operation: 'responseSent',
+              botId: this.botId,
+              target: 'group',
+              responseType: 'menu',
+              ...context,
+            },
+            'El menú fue enviado al grupo',
+          );
+          return 'responded';
+        }
+      } catch (error) {
+        this.logger.error(
+          {
+            ...serializeError(error, 'MENU_SEND_FAILED', this.options.developmentMode ?? false),
+            operation: 'responseFailed',
+            botId: this.botId,
+            target: 'group',
+            responseType: 'menu',
+            ...context,
+          },
+          'No fue posible enviar el menú al grupo',
+        );
+        return 'send_failed';
+      }
+    }
+    this.logger.info(
+      { operation: 'commandNotDetected', reason: 'FREE_TEXT_QUERY', ...context },
+      'El mensaje continuará como una consulta de texto',
+    );
+    const answer = await this.queryService.answer(effectiveMessage, groupHash, userHash);
+    const sent = await this.safeSend(message.chatId, answer.text, context);
+    if (sent) {
+      this.logger.info({ operation: 'AI_RESPONSE_SENT', result: answer.code, ...context }, 'La respuesta fue enviada al grupo');
+    }
+    this.database.recordTechnicalEvent({
+      eventType: 'message_processed',
+      botId: this.botId,
+      activationType,
       groupHash,
       userHash,
-      started,
-    );
-    return sent ? 'responded' : 'send_failed';
+      result: sent ? answer.code : 'send_failed',
+      durationMs: Math.round(performance.now() - started),
+      ...(!sent ? { errorCode: 'MESSAGE_SEND_FAILED' } : {}),
+    });
+    if (!sent) return 'send_failed';
+    return answer.code === 'LIMIT_REACHED' ? 'rate_limited' : 'responded';
   }
 
-  private async safeSend(message: IncomingMessage, text: string): Promise<boolean> {
+  public resetTransientState(): void {
+    this.processedMessages.clear();
+  }
+
+  private processableRejectionReason(message: IncomingMessage): string | null {
+    if (message.fromMe) return 'FROM_ME';
+    if (message.isStatus) return 'STATUS_MESSAGE';
+    if (message.isBroadcast) return 'BROADCAST_MESSAGE';
+    if (message.isChannel) return 'CHANNEL_MESSAGE';
+    if (message.hasMedia) return 'UNSUPPORTED_MEDIA';
+    if (typeof message.body !== 'string') return 'INVALID_BODY';
+    if (message.body.trim() === '') return 'EMPTY_BODY';
+    if (message.body.length > this.options.maxMessageLength) return 'MESSAGE_TOO_LONG';
+    return null;
+  }
+
+  private async safeSend(
+    groupId: string,
+    text: string,
+    context: { groupHash: string; userHash: string; messageHash: string },
+  ): Promise<boolean> {
+    this.logger.info({ operation: 'responseAttempted', botId: this.botId, target: 'group', ...context }, 'Se intentará enviar una respuesta al grupo');
     try {
-      await this.client.sendMessage(message.chatId, text, message.id);
+      await this.client.sendMessage(groupId, text);
+      this.logger.info({ operation: 'responseSent', botId: this.botId, target: 'group', ...context }, 'La respuesta fue enviada');
       return true;
     } catch (error) {
       this.logger.error(
-        { errorCode: error instanceof Error ? error.name : 'UNKNOWN_SEND_ERROR' },
-        'No fue posible enviar una respuesta',
+        {
+          ...serializeError(error, 'MESSAGE_SEND_FAILED', this.options.developmentMode ?? false),
+          operation: 'responseFailed',
+          botId: this.botId,
+          target: 'group',
+          connectionState: this.connectionSnapshot().state,
+          ...context,
+        },
+        'No fue posible enviar la respuesta',
       );
       return false;
     }
   }
-
-  private record(
-    _message: IncomingMessage,
-    activation: ActivationType,
-    commandName: string | undefined,
-    result: string,
-    groupHash: string,
-    userHash: string,
-    started: number,
-  ): void {
-    this.database.recordTechnicalEvent({
-      eventType: 'message_processed',
-      activationType: activation,
-      ...(commandName === undefined ? {} : { commandName }),
-      groupHash,
-      userHash,
-      result,
-      durationMs: Math.round(performance.now() - started),
-    });
-  }
 }
 
-function activationType(message: IncomingMessage, isCommand: boolean): ActivationType | null {
-  if (isCommand) return 'command';
-  if (message.mentionsBot) return 'mention';
-  if (message.isReplyToBot) return 'reply';
-  return null;
+export function containsActivationAlias(body: string, alias: string): boolean {
+  return containsActivationAliasAtStart(body, [alias]);
+}
+
+function localInteractionPeriod(now: Date, timezone: string): { date: string; hour: string } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value ?? '00';
+  const date = `${value('year')}-${value('month')}-${value('day')}`;
+  return { date, hour: `${date}T${value('hour')}` };
 }

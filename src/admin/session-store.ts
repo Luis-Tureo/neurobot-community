@@ -51,6 +51,10 @@ export class SessionStore {
     if (identifier !== undefined) this.sessions.delete(identifier);
   }
 
+  public clearAll(): void {
+    this.sessions.clear();
+  }
+
   public cleanup(now = Date.now()): void {
     for (const [identifier, session] of this.sessions) {
       if (session.expiresAt <= now) this.sessions.delete(identifier);

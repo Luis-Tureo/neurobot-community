@@ -43,6 +43,17 @@ describe('máquina de conexión y reconexión', () => {
     expect(client.initializeCalls).toBe(1);
   });
 
+  it('combina reinicios simultáneos en una sola operación', async () => {
+    const client = new SimulatedMessagingClient();
+    const manager = new ConnectionManager(client, createLogger('silent'), {
+      maxAttempts: 3,
+      maxDelayMs: 100,
+    });
+    await Promise.all([manager.restart(), manager.restart(), manager.restart()]);
+    expect(client.destroyCalls).toBe(1);
+    expect(client.initializeCalls).toBe(1);
+  });
+
   it('programa una sola reconexión ante desconexiones consecutivas', async () => {
     vi.useFakeTimers();
     const client = new SimulatedMessagingClient();
@@ -56,6 +67,7 @@ describe('máquina de conexión y reconexión', () => {
     expect(manager.snapshot().reconnectAttempt).toBe(1);
     await vi.advanceTimersByTimeAsync(10);
     expect(client.initializeCalls).toBe(1);
+    expect(client.destroyCalls).toBe(1);
     vi.useRealTimers();
   });
 });
