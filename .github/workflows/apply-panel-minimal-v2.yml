@@ -29,9 +29,27 @@ jobs:
         run: npm ci
 
       - name: Aplicar rediseño
+        shell: bash
         run: |
           python scripts/apply-panel-minimal-v2.py
           sed -i '1i// PANEL_MINIMAL_V2' public/panel-minimal-v2.js
+          python <<'PY'
+          import re
+          from pathlib import Path
+
+          path = Path('public/multibot-panel.js')
+          content = path.read_text(encoding='utf-8')
+          content, count = re.subn(
+              r"\nasync function transferCommercialConfiguration\(bot\) \{.*?\n\}\n\nasync function sendBotToTrash",
+              "\nasync function sendBotToTrash",
+              content,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit('No se encontró la función comercial obsoleta.')
+          path.write_text(content, encoding='utf-8')
+          PY
 
       - name: Revisar diferencias
         run: |
