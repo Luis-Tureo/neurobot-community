@@ -98,6 +98,7 @@ jobs:
             echo "No hay cambios nuevos que publicar."
           else
             git commit -m "feat: hacer amigable la información del bot"
+            git restore scripts/apply-knowledge-panel-redesign.py
             git fetch origin main
             git rebase origin/main
             git push origin HEAD:main
