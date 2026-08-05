@@ -37,6 +37,22 @@ jobs:
       - name: Simplificar módulo de inteligencia artificial
         run: python scripts/apply-ai-panel-simplification.py
 
+      - name: Mantener compatibilidad con pruebas existentes
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          for file_name in ('public/index.html', 'tests/ai-panel-simplification.test.ts'):
+              path = Path(file_name)
+              content = path.read_text(encoding='utf-8')
+              content = content.replace(
+                  'Capacidad técnica y cola de solicitudes',
+                  'Capacidad y disponibilidad',
+              )
+              path.write_text(content, encoding='utf-8')
+          PY
+
       - name: Revisar diferencias
         run: |
           git diff --check
