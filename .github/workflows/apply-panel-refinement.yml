@@ -1,6 +1,8 @@
 name: Aplicar refinamiento final del panel
 
 on:
+  push:
+    branches: [trigger-panel-refinement-v2]
   pull_request:
     branches: [main]
 
