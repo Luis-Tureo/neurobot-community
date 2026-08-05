@@ -13,7 +13,7 @@ describe('panel amigable y ordenado', () => {
 
   it('ordena los módulos en grupos comprensibles', () => {
     [
-      'Inicio y conexión',
+      'Inicio',
       'Identidad y respuestas',
       'Contenido y atención',
       'Comunidad y automatización',

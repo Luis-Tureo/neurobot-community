@@ -344,10 +344,73 @@ function refineProfile() {
   wrapProfilePreview();
 }
 
+function refineStartPanel() {
+  const status = q('#section-status');
+  const whatsapp = q('#section-whatsapp');
+  if (!status || !whatsapp) return;
+
+  qa('[data-section="whatsapp"]').forEach(conceal);
+  const whatsappOption = q('#section-select option[value="whatsapp"]');
+  if (whatsappOption) {
+    whatsappOption.hidden = true;
+    whatsappOption.disabled = true;
+  }
+
+  conceal(q('.setup-guide', status));
+  conceal(q('.advanced-settings', status));
+  conceal(q('.manual-tests-card', whatsapp));
+  conceal(q('#restart-connection'));
+
+  const statusHeading = q(':scope > .section-heading', status);
+  setTextIfChanged(statusHeading ? q('h2', statusHeading) : null, 'Inicio');
+  const statusEyebrow = statusHeading ? q('.eyebrow', statusHeading) : null;
+  setTextIfChanged(statusEyebrow, 'Estado principal');
+
+  let workspace = q('.refined-start-workspace', status);
+  if (!workspace) {
+    workspace = document.createElement('article');
+    workspace.className = 'card inset refined-start-workspace';
+
+    const heading = document.createElement('div');
+    heading.className = 'section-heading refined-start-heading';
+    const copy = document.createElement('div');
+    const title = document.createElement('h3');
+    title.textContent = 'Estado, conexión y grupos vinculados';
+    const description = document.createElement('p');
+    description.className = 'muted';
+    description.textContent = 'La conexión de WhatsApp y los grupos detectados se administran desde este único lugar.';
+    copy.append(title, description);
+    heading.append(copy);
+
+    const whatsappHeading = q(':scope > .section-heading', whatsapp);
+    const connectionActions = whatsappHeading ? q('.actions', whatsappHeading) : null;
+    if (connectionActions) heading.append(connectionActions);
+    workspace.append(heading);
+    status.append(workspace);
+  }
+
+  const statusCards = q('#status-cards');
+  const whatsappCards = q('#whatsapp-cards');
+  const qrCard = q('#qr-card');
+  const groupsCard = q('#bot-groups-list')?.closest('article.card');
+
+  if (statusCards && statusCards.parentElement !== workspace) workspace.append(statusCards);
+  if (whatsappCards && whatsappCards.parentElement !== workspace) workspace.append(whatsappCards);
+  if (qrCard && qrCard.parentElement !== workspace) workspace.append(qrCard);
+  if (groupsCard && groupsCard.parentElement !== workspace) {
+    groupsCard.classList.add('refined-start-groups');
+    workspace.append(groupsCard);
+  }
+
+  conceal(q(':scope > .section-heading', whatsapp));
+  conceal(whatsapp);
+}
+
 function applyRefinement() {
   removeGuidedMessages();
   removeQuickConfiguration();
   removeKnowledgeModule();
+  refineStartPanel();
   refineQuestionHistory();
   refinePolls();
   refineAI();

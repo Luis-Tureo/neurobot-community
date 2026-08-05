@@ -1,23 +1,21 @@
 const NAV_GROUPS = [
   {
     id: 'start',
-    label: 'Inicio y conexión',
-    description: 'Estado general y WhatsApp',
-    open: true,
+    label: 'Inicio',
+    description: 'Estado, conexión y grupos',
+    open: false,
     items: [
-      { section: 'status', label: 'Inicio y guía', description: 'Resumen y pasos recomendados', icon: '⌂' },
-      { section: 'whatsapp', label: 'Conexión de WhatsApp', description: 'Número, grupos y pruebas', icon: '◉' },
+      { section: 'status', label: 'Inicio', description: 'Estado general, WhatsApp y grupos', icon: '⌂' },
     ],
   },
   {
     id: 'identity',
     label: 'Identidad y respuestas',
-    description: 'Qué sabe y cómo responde',
-    open: true,
+    description: 'Perfil e inteligencia artificial',
+    open: false,
     items: [
       { section: 'profile', label: 'Nombre y perfil', description: 'Identidad, tono y mensajes', icon: '✎' },
-      { section: 'knowledge', label: 'Información del bot', description: 'Contenido oficial para responder', icon: 'i' },
-      { section: 'ai', label: 'Inteligencia artificial', description: 'Activación, límites y conexión', icon: '✦' },
+      { section: 'ai', label: 'Inteligencia artificial', description: 'Activación y nivel de uso', icon: '✦' },
     ],
   },
   {
@@ -189,12 +187,6 @@ function presentNavigationButton(button, item) {
   button.replaceChildren(icon, copy);
 }
 
-function revealActiveNavigation(tabs) {
-  const activeButton = query('button[data-section].active', tabs);
-  const group = activeButton?.closest('details.friendly-nav-group');
-  if (group) group.open = true;
-}
-
 function enhanceDesktopNavigation() {
   const tabs = query('.tabs');
   const more = tabs ? query('.sidebar-more', tabs) : null;
@@ -281,12 +273,7 @@ function enhanceDesktopNavigation() {
     if (group) group.open = true;
   });
 
-  if ('MutationObserver' in window) {
-    const observer = new window.MutationObserver(() => revealActiveNavigation(tabs));
-    observer.observe(tabs, { attributes: true, attributeFilter: ['class'], subtree: true });
-  }
-
-  revealActiveNavigation(tabs);
+  // Los grupos permanecen cerrados hasta que el usuario los despliegue.
 }
 
 function enhanceMobileNavigation() {

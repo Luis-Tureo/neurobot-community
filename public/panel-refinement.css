@@ -213,3 +213,70 @@
     font-size: 0.68rem;
   }
 }
+
+
+/* START_PANEL_CONSOLIDATION_V1 */
+.friendly-nav-group > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1.4rem;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.friendly-nav-group > summary::after {
+  content: '+' !important;
+  float: none !important;
+  grid-column: 2;
+  grid-row: 1;
+  margin: 0 !important;
+  text-align: center;
+}
+
+.friendly-nav-group[open] > summary::after {
+  content: '−' !important;
+}
+
+.refined-start-workspace {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: 1rem;
+}
+
+.refined-start-workspace > .status-grid,
+.refined-start-workspace > .card,
+.refined-start-workspace .refined-start-groups {
+  margin: 0;
+}
+
+.refined-start-heading {
+  margin-bottom: 0;
+  align-items: flex-start;
+}
+
+.refined-start-groups {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  box-shadow: none;
+}
+
+.refined-start-groups .list-item .actions {
+  display: none !important;
+}
+
+@media (max-width: 760px) {
+  .refined-start-workspace {
+    padding: 0.85rem;
+  }
+
+  .refined-start-heading,
+  .refined-start-heading .actions {
+    display: grid;
+    width: 100%;
+  }
+
+  .refined-start-heading .actions button {
+    width: 100%;
+  }
+}

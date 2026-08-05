@@ -1650,12 +1650,17 @@ function empty(message) {
   return paragraph;
 }
 async function loadAll() {
+  let administratorsError = null;
   try {
     await loadAdministrators();
-    window.dispatchEvent(new window.CustomEvent('multibot-panel-load'));
   } catch (error) {
-    showNotice(error.message, true);
+    administratorsError = error;
   }
+
+  // La lista de asistentes no depende de que el módulo de administradores termine correctamente.
+  window.dispatchEvent(new window.CustomEvent('multibot-panel-load'));
+
+  if (administratorsError) showNotice(administratorsError.message, true);
 }
 
 window.addEventListener('bot-services-load', (event) => {

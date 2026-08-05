@@ -111,15 +111,16 @@ function botModeLabel(mode) {
 }
 
 function setSection(name) {
-  const navigationButton = document.querySelector(`button[data-section="${name}"]`);
+  const resolvedName = name === 'whatsapp' ? 'status' : name;
+  const navigationButton = document.querySelector(`button[data-section="${resolvedName}"]`);
   if (navigationButton && !navigationButton.disabled) {
     navigationButton.click();
     return true;
   }
   const selector = document.querySelector('#section-select');
-  const option = selector?.querySelector(`option[value="${name}"]`);
+  const option = selector?.querySelector(`option[value="${resolvedName}"]`);
   if (!selector || !option || option.disabled) return false;
-  selector.value = name;
+  selector.value = resolvedName;
   selector.dispatchEvent(new window.Event('change', { bubbles: true }));
   return true;
 }
@@ -323,8 +324,9 @@ async function selectBot(botId, section) {
   }
   if (maintenanceOption) maintenanceOption.disabled = false;
   await loadSelectedBot();
-  const requestedButton = document.querySelector(`button[data-section="${section}"]`);
-  const requestedSection = requestedButton?.disabled ? 'status' : section;
+  const normalizedSection = section === 'whatsapp' ? 'status' : section;
+  const requestedButton = document.querySelector(`button[data-section="${normalizedSection}"]`);
+  const requestedSection = requestedButton?.disabled ? 'status' : normalizedSection;
   setSection(requestedSection);
   window.history.replaceState(null, '', `#assistants/${encodeURIComponent(botId)}/${requestedSection}`);
   recordPanelEvent(previousBotId && previousBotId !== botId ? 'ASSISTANT_CONTEXT_CHANGED' : 'ASSISTANT_ADMIN_OPENED', botId);
@@ -669,15 +671,8 @@ function renderBotGroups(groups) {
   groups.forEach((group) => {
     const item = createListItem(
       group.name,
-      `ID anónimo: ${group.groupHash} · ${group.active ? 'Activo' : 'Inactivo'} · ${group.blocked ? 'Bloqueado' : 'Disponible'} · ${group.status}`,
+      `${group.active ? 'Activo' : 'Inactivo'} · ${group.status}`,
     );
-    item.append(actionButton(group.blocked ? 'Desbloquear' : 'Bloquear', group.blocked ? 'secondary' : 'danger', async () => {
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/groups/${group.groupHash}/block`, {
-        method: 'POST',
-        body: JSON.stringify({ blocked: !group.blocked }),
-      });
-      await loadWhatsApp();
-    }));
     target.append(item);
   });
 }
@@ -1744,6 +1739,8 @@ function readFileAsBase64(file) {
 }
 
 let configured = false;
+let initializationPromise = null;
+let initializationRetryTimer = null;
 
 async function refreshVisibleBotStatus() {
   if (document.hidden) return;
@@ -1755,35 +1752,59 @@ function startBotStatusRefresh() {
   if (panelState.botRefreshTimer !== null) return;
   panelState.botRefreshTimer = window.setInterval(() => {
     void refreshVisibleBotStatus().catch(() => {
-      // El siguiente ciclo vuelve a intentarlo sin interrumpir la ediciÃ³n del usuario.
+      // El siguiente ciclo vuelve a intentarlo sin interrumpir la edición del usuario.
     });
   }, 5000);
 }
 
-async function initializeMultibotPanel() {
-  try {
-    const session = await panelApi('/api/auth/session');
-    panelState.csrfToken = session.csrfToken;
-    if (!configured) {
-      configureForms();
-      configured = true;
-    }
-    await loadBots();
-    if (!panelState.selectedBotId) {
-      const route = window.location.hash.replace(/^#/u, '').split('/').filter(Boolean);
-      if (route[0] === 'assistants' && route.length >= 2 && panelState.bots.some((bot) => bot.id === route[1])) {
-        await selectBot(route[1], route[2] || 'status');
-      } else {
-        const globalSection = ['trash', 'global-system', 'administrators'].includes(route[0]) ? route[0] : 'bots';
-        setGlobalContext(globalSection);
-        if (globalSection === 'trash') await loadTrash();
-      }
-    }
-    startBotStatusRefresh();
-  } catch {
-    // La vista de acceso sigue activa hasta que exista una sesión válida.
+async function runMultibotInitialization() {
+  const session = await panelApi('/api/auth/session');
+  panelState.csrfToken = session.csrfToken;
+  if (!configured) {
+    configureForms();
+    configured = true;
   }
+  await loadBots();
+  if (!panelState.selectedBotId) {
+    const route = window.location.hash.replace(/^#/u, '').split('/').filter(Boolean);
+    if (route[0] === 'assistants' && route.length >= 2 && panelState.bots.some((bot) => bot.id === route[1])) {
+      await selectBot(route[1], route[2] || 'status');
+    } else {
+      const globalSection = ['trash', 'global-system', 'administrators'].includes(route[0]) ? route[0] : 'bots';
+      setGlobalContext(globalSection);
+      if (globalSection === 'trash') await loadTrash();
+    }
+  }
+  startBotStatusRefresh();
 }
 
-window.addEventListener('multibot-panel-load', () => { void initializeMultibotPanel(); });
-void initializeMultibotPanel();
+function initializeMultibotPanel() {
+  if (initializationPromise !== null) return initializationPromise;
+  initializationPromise = runMultibotInitialization()
+    .catch(() => {
+      // La vista de acceso permanece activa hasta que exista una sesión válida.
+    })
+    .finally(() => {
+      initializationPromise = null;
+    });
+  return initializationPromise;
+}
+
+function requestMultibotInitialization() {
+  void initializeMultibotPanel();
+  if (initializationRetryTimer !== null) window.clearTimeout(initializationRetryTimer);
+  initializationRetryTimer = window.setTimeout(() => {
+    initializationRetryTimer = null;
+    const panelVisible = !document.querySelector('#panel-view')?.classList.contains('hidden');
+    const assistantsEmpty = document.querySelector('#bots-list')?.childElementCount === 0;
+    if (panelVisible && assistantsEmpty) void initializeMultibotPanel();
+  }, 250);
+}
+
+window.addEventListener('multibot-panel-load', requestMultibotInitialization);
+window.addEventListener('pageshow', requestMultibotInitialization);
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', requestMultibotInitialization, { once: true });
+} else {
+  requestMultibotInitialization();
+}

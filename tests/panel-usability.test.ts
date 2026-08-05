@@ -65,7 +65,7 @@ describe('interfaz simplificada del panel', () => {
   it('abre la administración sin mantener visible la tarjeta general ni ejecutar la vista antigua de moderación', () => {
     expect(panel).toContain("classList.toggle('assistant-context-active', available)");
     expect(styles).toContain('#panel-view.assistant-context-active #section-bots');
-    expect(panel).toContain('button[data-section="${name}"]');
+    expect(panel).toContain('button[data-section="${resolvedName}"]');
     expect(panel).toContain("setSection('status');");
     expect(panel).toContain('legacyModerationAvailable');
     expect(panel).toContain('if (!legacyModerationAvailable || data.settings === undefined) return;');
