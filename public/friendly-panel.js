@@ -219,6 +219,7 @@ function enhanceDesktopNavigation() {
   searchInput.autocomplete = 'off';
   searchBox.append(searchInput);
   tabs.insertBefore(searchBox, more);
+  if (!more.classList.contains('hidden')) searchBox.classList.remove('hidden');
 
   const parentSummary = query(':scope > summary', more);
   if (parentSummary) {
@@ -296,15 +297,20 @@ function enhanceMobileNavigation() {
   const select = query('#section-select');
   if (!select || select.dataset.friendlyReady === 'true') return;
 
+  const previousBotGroups = queryAll('optgroup[data-bot-only]', select);
+  const botGroupsAreHidden = previousBotGroups.every(
+    (group) => group.hidden || group.classList.contains('hidden'),
+  );
   const optionMap = new Map(
     queryAll('optgroup[data-bot-only] option', select).map((option) => [option.value, option]),
   );
-  for (const group of queryAll('optgroup[data-bot-only]', select)) group.remove();
+  for (const group of previousBotGroups) group.remove();
 
   for (const groupDefinition of NAV_GROUPS) {
     const optgroup = document.createElement('optgroup');
     optgroup.label = groupDefinition.label;
     optgroup.dataset.botOnly = '';
+    optgroup.hidden = botGroupsAreHidden;
 
     for (const item of groupDefinition.items) {
       const option = optionMap.get(item.section);
