@@ -630,3 +630,4 @@ if (document.readyState === 'loading') {
 } else {
   initializeFriendlyPanel();
 }
+void import('./minimal-community-panel.js');

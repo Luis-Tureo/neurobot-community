@@ -216,7 +216,7 @@ function simplifyQuestionHistory() {
 
   const target = $('#cached-answers-list');
   if (target && 'MutationObserver' in window) {
-    new MutationObserver(simplifyHistoryItems).observe(target, { childList: true });
+    new window.MutationObserver(simplifyHistoryItems).observe(target, { childList: true });
   }
   simplifyHistoryItems();
 }
@@ -273,7 +273,7 @@ function simplifyWelcomeGroups() {
   const process = () => {
     for (const card of $$(':scope > article', target)) simplifyWelcomeGroupCard(card);
   };
-  if ('MutationObserver' in window) new MutationObserver(process).observe(target, { childList: true });
+  if ('MutationObserver' in window) new window.MutationObserver(process).observe(target, { childList: true });
   process();
 }
 
@@ -396,7 +396,7 @@ function hidePollTechnicalSummary() {
       if ($('span', card)?.textContent.trim() === 'Programador') card.remove();
     }
   };
-  if ('MutationObserver' in window) new MutationObserver(process).observe(target, { childList: true });
+  if ('MutationObserver' in window) new window.MutationObserver(process).observe(target, { childList: true });
   process();
 }
 
