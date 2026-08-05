@@ -7,6 +7,10 @@ on:
       - .github/workflows/apply-ai-panel-simplification.yml
       - scripts/apply-ai-panel-simplification.py
       - .github/ai-panel-trigger.txt
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/ai-panel-trigger.txt
 
 permissions:
   contents: write
