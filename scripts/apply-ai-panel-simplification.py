@@ -1,0 +1,412 @@
+from pathlib import Path
+
+INDEX_PATH = Path('public/index.html')
+STYLES_PATH = Path('public/styles.css')
+TEST_PATH = Path('tests/ai-panel-simplification.test.ts')
+
+START_MARKER = '        <section id="section-ai" class="panel-section hidden">'
+END_MARKER = '        <section id="section-administrators" class="panel-section hidden">'
+CSS_MARKER = '/* AI_PANEL_SIMPLIFIED_V1 */'
+
+AI_SECTION = '''        <section id="section-ai" class="panel-section hidden">
+          <div class="section-heading ai-heading">
+            <div>
+              <p class="eyebrow">Configuración simplificada</p>
+              <h2>Inteligencia artificial</h2>
+              <p class="muted">Configura solo lo necesario. Los controles técnicos quedan guardados en opciones avanzadas.</p>
+            </div>
+            <div class="actions">
+              <button id="test-ai-connection" class="secondary" type="button">Probar conexión con Groq</button>
+              <a class="button-link secondary" href="/api/ai/export">Exportar estadísticas</a>
+            </div>
+          </div>
+
+          <div id="ai-status-cards" class="status-grid ai-status-overview"></div>
+          <p class="info-callout"><strong>Uso protegido.</strong> Solo las llamadas reales y exitosas a Groq descuentan el límite de IA. Los valores recomendados funcionan bien para la mayoría de los asistentes.</p>
+
+          <form id="ai-settings-form" class="card inset ai-essential-card">
+            <div>
+              <p class="eyebrow">Lo más importante</p>
+              <h3>Opciones principales</h3>
+              <p class="muted">Activa la IA y define límites sencillos. No necesitas cambiar los ajustes técnicos para usar Neurobot.</p>
+            </div>
+
+            <div class="ai-essential-grid">
+              <label class="toggle ai-primary-toggle"><input name="enabled" type="checkbox" /> IA activada</label>
+              <label>Proveedor<select name="provider"><option value="groq">Groq</option><option value="disabled">Desactivado</option></select></label>
+            </div>
+
+            <div class="ai-simple-group">
+              <h4>Extensión de las respuestas</h4>
+              <div class="ai-essential-grid">
+                <label>Máximo de caracteres<input name="responseMaxChars" type="number" min="1" /></label>
+                <label>Máximo de líneas<input name="responseMaxLines" type="number" min="1" /></label>
+              </div>
+              <p class="muted">Estos dos valores controlan qué tan largas serán las respuestas del asistente.</p>
+            </div>
+
+            <div class="ai-simple-group">
+              <h4>Límites por persona</h4>
+              <div class="ai-essential-grid">
+                <label>Consultas por hora<input name="userHourlyLimit" type="number" min="1" /></label>
+                <label>Consultas por día<input name="userDailyLimit" type="number" min="1" /></label>
+              </div>
+            </div>
+
+            <div class="ai-simple-group">
+              <h4>Límites por grupo</h4>
+              <div class="ai-essential-grid">
+                <label>Consultas por hora<input name="groupHourlyLimit" type="number" min="1" /></label>
+                <label>Consultas por día<input name="groupDailyLimit" type="number" min="1" /></label>
+              </div>
+            </div>
+
+            <div class="ai-simple-group">
+              <h4>Límite total de este asistente</h4>
+              <div class="ai-essential-grid">
+                <label>Consultas diarias<input name="globalDailyLimit" type="number" min="1" /></label>
+                <label>Consultas mensuales<input name="globalMonthlyLimit" type="number" min="1" /></label>
+              </div>
+            </div>
+
+            <div class="actions ai-essential-actions">
+              <button type="submit">Guardar opciones principales</button>
+            </div>
+
+            <details class="advanced-settings ai-advanced-panel">
+              <summary>Configuración avanzada del modelo y los límites</summary>
+              <div class="ai-advanced-content">
+                <p class="muted">Modifica estos valores únicamente cuando conozcas su función. Los valores actuales se mantienen aunque la sección esté cerrada.</p>
+                <div class="form-row">
+                  <label>Temperatura<input name="temperature" type="number" min="0" max="1" step="0.1" /></label>
+                  <label>Espera máxima (ms)<input name="timeoutMs" type="number" min="1000" max="60000" /></label>
+                </div>
+                <h4>Procesamiento por mensaje</h4>
+                <div class="form-row limits-grid">
+                  <label>Pregunta (caracteres)<input name="questionMaxChars" type="number" min="1" /></label>
+                  <label>Contexto (tokens)<input name="contextMaxTokens" type="number" min="1" /></label>
+                  <label>Entrada (tokens)<input name="inputMaxTokens" type="number" min="1" /></label>
+                  <label>Respuesta (tokens)<input name="responseMaxTokens" type="number" min="1" /></label>
+                </div>
+                <h4>Control de interacciones</h4>
+                <div class="form-row limits-grid">
+                  <label>Espera por persona (s)<input name="userCooldownSeconds" type="number" min="0" /></label>
+                  <label>Activaciones por hora<input name="interactionHourlyLimit" type="number" min="1" /></label>
+                  <label>Espera entre mensajes (s)<input name="interactionCooldownSeconds" type="number" min="0" /></label>
+                  <label>Ventana de consulta idéntica (s)<input name="duplicateQueryWindowSeconds" type="number" min="0" /></label>
+                </div>
+                <h4>Presupuesto de tokens</h4>
+                <div class="form-row limits-grid">
+                  <label>Tokens diarios<input name="globalDailyTokenLimit" type="number" min="1" /></label>
+                  <label>Tokens mensuales<input name="globalMonthlyTokenLimit" type="number" min="1" /></label>
+                </div>
+                <label class="toggle"><input name="confirmIncreasedLimits" type="checkbox" /> Confirmo aumentos sobre los máximos seguros iniciales</label>
+                <div class="actions">
+                  <button type="submit">Guardar toda la configuración</button>
+                  <button id="reset-ai-counters" class="danger" type="button">Restablecer contadores de prueba</button>
+                </div>
+              </div>
+            </details>
+          </form>
+
+          <form id="ai-credential-form" class="card inset ai-credential-card">
+            <div>
+              <p class="eyebrow">Conexión</p>
+              <h3>Clave de Groq</h3>
+              <p class="muted">Solo debes cambiarla cuando quieras configurar o reemplazar la clave. Nunca vuelve al navegador después de guardarla.</p>
+            </div>
+            <div class="form-row">
+              <label>Modalidad<select name="mode"><option value="global">Usar clave global de la instalación</option><option value="per_bot">Usar clave exclusiva de este asistente</option></select></label>
+              <label>Nueva clave exclusiva<input name="apiKey" type="password" autocomplete="new-password" minlength="16" maxlength="500" placeholder="Déjalo vacío para conservar la clave actual" /></label>
+            </div>
+            <div class="actions">
+              <button type="submit">Guardar conexión</button>
+              <button id="delete-ai-key" class="danger" type="button">Eliminar clave exclusiva</button>
+            </div>
+          </form>
+
+          <details class="card inset ai-advanced-panel">
+            <summary>Capacidad técnica y cola de solicitudes</summary>
+            <div class="ai-advanced-content">
+              <p class="muted">Estos controles regulan concurrencia, espera y reintentos. Mantén los valores recomendados cuando no necesites una configuración especial.</p>
+              <div id="ai-queue-cards" class="status-grid"></div>
+              <form id="ai-queue-settings-form">
+                <div class="form-row limits-grid">
+                  <label>Llamadas simultáneas<input name="maxConcurrent" type="number" min="1" max="10" required /></label>
+                  <label>Solicitudes esperando<input name="maxQueueSize" type="number" min="1" max="100" required /></label>
+                  <label>Espera máxima en cola (s)<input name="maxQueueWaitSeconds" type="number" min="5" max="300" required /></label>
+                  <label>Timeout de Groq (s)<input name="providerTimeoutSeconds" type="number" min="5" max="60" required /></label>
+                  <label>Reintentos<input name="maxRetries" type="number" min="0" max="5" required /></label>
+                  <label>Espera inicial de reintento (s)<input name="initialRetryDelaySeconds" type="number" min="1" max="30" required /></label>
+                  <label>Espera máxima de reintento (s)<input name="maximumRetryDelaySeconds" type="number" min="1" max="60" required /></label>
+                  <label>Aviso de espera (s)<input name="waitNoticeSeconds" type="number" min="1" max="60" required /></label>
+                  <label>Pausa por persona (s)<input name="userCooldownSeconds" type="number" min="0" max="300" required /></label>
+                  <label>Ventana de duplicados (s)<input name="duplicateWindowSeconds" type="number" min="0" max="300" required /></label>
+                  <label>Ventana single-flight (s)<input name="singleFlightWindowSeconds" type="number" min="1" max="300" required /></label>
+                  <label>Intervalo entre mensajes (ms)<input name="outboundMessageIntervalMs" type="number" min="0" max="10000" required /></label>
+                  <label>Reintento sugerido (s)<input name="suggestedRetrySeconds" type="number" min="5" max="600" required /></label>
+                </div>
+                <div class="actions">
+                  <button type="submit">Guardar capacidad técnica</button>
+                  <button id="restore-ai-queue-recommended" class="secondary" type="button">Restaurar valores recomendados</button>
+                </div>
+              </form>
+              <article id="ai-queue-simulator" class="card inset hidden">
+                <h4>Probar cola de IA</h4>
+                <p class="muted">Simulación local: no llama a Groq ni envía mensajes a WhatsApp.</p>
+                <form id="ai-queue-simulator-form" class="inline-form">
+                  <label>Consultas<input name="requests" type="number" min="1" max="30" value="10" required /></label>
+                  <label>Escenario<select name="scenario"><option value="normal">Normal</option><option value="repeated">Preguntas repetidas</option><option value="rate_limited">Error 429</option><option value="timeout">Timeout</option></select></label>
+                  <button type="submit">Probar cola de IA</button>
+                </form>
+                <div id="ai-queue-simulation-result" class="status-grid"></div>
+              </article>
+            </div>
+          </details>
+
+          <details class="card inset ai-advanced-panel">
+            <summary>Presupuesto global de todos los asistentes</summary>
+            <div class="ai-advanced-content">
+              <form id="global-ai-limits-form">
+                <p class="muted">Este límite protege el presupuesto compartido entre todos los asistentes de la instalación.</p>
+                <div class="form-row limits-grid">
+                  <label>Consultas diarias<input name="dailyRequestLimit" type="number" min="1" required /></label>
+                  <label>Consultas mensuales<input name="monthlyRequestLimit" type="number" min="1" required /></label>
+                  <label>Tokens diarios<input name="dailyTokenLimit" type="number" min="1" required /></label>
+                  <label>Tokens mensuales<input name="monthlyTokenLimit" type="number" min="1" required /></label>
+                </div>
+                <button type="submit">Guardar presupuesto global</button>
+              </form>
+            </div>
+          </details>
+
+          <details class="card inset ai-advanced-panel">
+            <summary>Estadísticas y eventos detallados</summary>
+            <div class="ai-advanced-content">
+              <h3>Actividad operativa</h3>
+              <div id="operational-metrics-cards" class="status-grid"></div>
+              <h3>Eventos recientes de IA</h3>
+              <div id="ai-events" class="list"></div>
+            </div>
+          </details>
+        </section>
+
+'''
+
+CSS_BLOCK = r'''
+
+/* AI_PANEL_SIMPLIFIED_V1 */
+#section-ai {
+  display: grid;
+  gap: 1rem;
+}
+
+#section-ai.hidden {
+  display: none !important;
+}
+
+.ai-heading {
+  align-items: flex-start;
+}
+
+.ai-heading h2,
+.ai-heading p {
+  margin-bottom: 0;
+}
+
+.ai-status-overview {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.ai-essential-card,
+.ai-credential-card {
+  display: grid;
+  gap: 1.25rem;
+  margin: 0;
+}
+
+.ai-essential-card {
+  border: 2px solid color-mix(in srgb, var(--primary) 30%, var(--line));
+  background: color-mix(in srgb, #f8fbfa 92%, var(--primary) 8%);
+}
+
+.ai-essential-card h3,
+.ai-essential-card h4,
+.ai-credential-card h3 {
+  margin-bottom: 0.35rem;
+}
+
+.ai-essential-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.ai-primary-toggle {
+  align-self: end;
+  min-height: 2.8rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  background: white;
+  color: var(--ink);
+}
+
+.ai-simple-group {
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.ai-simple-group > h4,
+.ai-simple-group > p {
+  margin-top: 0;
+}
+
+.ai-essential-actions {
+  padding-top: 0.25rem;
+}
+
+.ai-advanced-panel {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.ai-advanced-panel > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 1rem 1.15rem;
+  color: var(--primary-dark);
+  font-weight: 750;
+  background: #f4f8f7;
+}
+
+.ai-advanced-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-advanced-panel > summary::after {
+  content: 'Mostrar';
+  float: right;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.ai-advanced-panel[open] > summary::after {
+  content: 'Ocultar';
+}
+
+.ai-advanced-content {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem 1.15rem 1.15rem;
+  border-top: 1px solid var(--line);
+}
+
+.ai-advanced-content > h3,
+.ai-advanced-content > h4,
+.ai-advanced-content > p {
+  margin: 0;
+}
+
+#section-ai .button-link {
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .ai-status-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .ai-heading,
+  .ai-essential-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-heading {
+    display: grid;
+  }
+
+  .ai-heading .actions,
+  .ai-heading .actions > * {
+    width: 100%;
+  }
+
+  .ai-status-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-advanced-panel > summary::after {
+    float: none;
+    display: block;
+    margin-top: 0.35rem;
+  }
+}
+'''
+
+TEST_CONTENT = '''import { readFileSync } from 'node:fs';
+
+const html = readFileSync('public/index.html', 'utf8');
+const css = readFileSync('public/styles.css', 'utf8');
+
+describe('módulo simplificado de inteligencia artificial', () => {
+  it('muestra primero las opciones principales y conserva todos los controles funcionales', () => {
+    expect(html).toContain('<h2>Inteligencia artificial</h2>');
+    expect(html).toContain('<h3>Opciones principales</h3>');
+    expect(html.indexOf('Opciones principales')).toBeLessThan(
+      html.indexOf('Configuración avanzada del modelo y los límites'),
+    );
+
+    [
+      'ai-status-cards',
+      'ai-settings-form',
+      'ai-credential-form',
+      'ai-queue-settings-form',
+      'ai-queue-simulator',
+      'global-ai-limits-form',
+      'operational-metrics-cards',
+      'ai-events',
+      'test-ai-connection',
+      'reset-ai-counters',
+    ].forEach((id) => expect(html).toContain(`id="${id}"`));
+  });
+
+  it('mantiene cerradas por defecto las opciones técnicas y ofrece valores recomendados', () => {
+    expect(html).toContain('<summary>Configuración avanzada del modelo y los límites</summary>');
+    expect(html).toContain('<summary>Capacidad técnica y cola de solicitudes</summary>');
+    expect(html).toContain('Restaurar valores recomendados');
+    expect(html).not.toMatch(/<details[^>]*\\sopen(?:\\s|>)/u);
+  });
+
+  it('incluye estilos ordenados y adaptables para escritorio y móvil', () => {
+    expect(css).toContain('AI_PANEL_SIMPLIFIED_V1');
+    expect(css).toContain('.ai-essential-grid');
+    expect(css).toContain('.ai-advanced-panel');
+    expect(css).toContain('@media (max-width: 640px)');
+  });
+});
+'''
+
+
+def main() -> None:
+    html = INDEX_PATH.read_text(encoding='utf-8')
+    start = html.find(START_MARKER)
+    end = html.find(END_MARKER)
+    if start < 0 or end < 0 or end <= start:
+        raise SystemExit('No se encontró la sección de IA esperada en public/index.html')
+
+    INDEX_PATH.write_text(html[:start] + AI_SECTION + html[end:], encoding='utf-8')
+
+    css = STYLES_PATH.read_text(encoding='utf-8')
+    if CSS_MARKER not in css:
+        STYLES_PATH.write_text(css + CSS_BLOCK, encoding='utf-8')
+
+    TEST_PATH.write_text(TEST_CONTENT, encoding='utf-8')
+
+
+if __name__ == '__main__':
+    main()
