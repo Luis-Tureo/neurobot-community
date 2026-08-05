@@ -9,6 +9,10 @@ function fieldLabel(form, name) {
   return form?.elements?.[name]?.closest('label') || null;
 }
 
+function setTextIfChanged(node, value) {
+  if (node && node.textContent !== value) node.textContent = value;
+}
+
 function removeGuidedMessages() {
   qa('.friendly-module-intro').forEach((node) => node.remove());
   qa('.info-callout').forEach((node) => {
@@ -33,9 +37,10 @@ function removeKnowledgeModule() {
 function updateCollapseButton(button) {
   if (!button) return;
   const open = button.getAttribute('aria-expanded') === 'true';
-  button.textContent = open ? '−' : '+';
-  button.title = open ? 'Contraer sección' : 'Desplegar sección';
-  button.setAttribute('aria-label', button.title);
+  setTextIfChanged(button, open ? '−' : '+');
+  const title = open ? 'Contraer sección' : 'Desplegar sección';
+  if (button.title !== title) button.title = title;
+  if (button.getAttribute('aria-label') !== title) button.setAttribute('aria-label', title);
   button.classList.add('refinement-collapse-button');
 }
 
@@ -93,22 +98,18 @@ function refineQuestionHistory() {
   createHistoryWorkspace(section, summary, list);
 }
 
+function stripChileTimezoneText() {
+  qa('#poll-schedule-summary strong, #automatic-deliveries .meta, #poll-history-list .meta').forEach((node) => {
+    const cleaned = node.textContent.replace(/\s*America\/Santiago/gu, '').trim();
+    setTextIfChanged(node, cleaned);
+  });
+}
+
 function hideTimezonePresentation() {
   qa('.timezone-badge').forEach((node) => node.remove());
   const profileForm = q('#profile-form');
   conceal(fieldLabel(profileForm, 'timezone'));
-
-  const strip = () => {
-    qa('#poll-schedule-summary strong, #automatic-deliveries .meta, #poll-history-list .meta').forEach((node) => {
-      node.textContent = node.textContent.replace(/\s*America\/Santiago/gu, '').trim();
-    });
-  };
-  strip();
-  const pollSummary = q('#poll-schedule-summary');
-  if (pollSummary && pollSummary.dataset.timezoneObserver !== 'true' && 'MutationObserver' in window) {
-    pollSummary.dataset.timezoneObserver = 'true';
-    new window.MutationObserver(strip).observe(pollSummary, { childList: true, subtree: true });
-  }
+  stripChileTimezoneText();
 }
 
 function refinePolls() {
@@ -130,12 +131,13 @@ function refinePolls() {
   }
 
   q('#restore-poll-defaults')?.remove();
-  const configurationTitle = configuration ? q('h3', configuration) : null;
-  if (configurationTitle) configurationTitle.textContent = 'Encuestas diarias';
-  const bankTitle = bank ? q('h3', bank) : null;
-  if (bankTitle) bankTitle.textContent = 'Banco de encuestas';
+  setTextIfChanged(configuration ? q('h3', configuration) : null, 'Encuestas diarias');
+  setTextIfChanged(bank ? q('h3', bank) : null, 'Banco de encuestas');
 
-  [configuration, bank, test, history].filter(Boolean).forEach((node) => section.append(node));
+  const ordered = [configuration, bank, test, history].filter(Boolean);
+  const currentOrder = [...section.children].filter((node) => ordered.includes(node));
+  const orderChanged = ordered.some((node, index) => currentOrder[index] !== node);
+  if (orderChanged) ordered.forEach((node) => section.append(node));
   [configuration, bank, test].filter(Boolean).forEach((node) => node.classList.add('refined-poll-card'));
 }
 
@@ -170,10 +172,8 @@ const REFINED_AI_LEVELS = {
 function setAiLevel(level, updateFields = true) {
   const form = q('#ai-settings-form');
   const configuration = REFINED_AI_LEVELS[level] || REFINED_AI_LEVELS[3];
-  const label = q('#ai-level-label');
-  const help = q('#ai-level-help');
-  if (label) label.textContent = configuration.label;
-  if (help) help.textContent = configuration.help;
+  setTextIfChanged(q('#ai-level-label'), configuration.label);
+  setTextIfChanged(q('#ai-level-help'), configuration.help);
   if (!form || !updateFields) return;
   for (const [name, value] of Object.entries(configuration.values)) {
     if (form.elements[name]) form.elements[name].value = String(value);
@@ -210,6 +210,19 @@ function createAiActivationSelect(form) {
   else form.prepend(label);
 }
 
+function synchronizeAiControls() {
+  const form = q('#ai-settings-form');
+  if (!form) return;
+  const enabledSelect = q('#ai-enabled-select');
+  const checkbox = form.elements.enabled;
+  if (enabledSelect && checkbox) enabledSelect.value = checkbox.checked ? 'yes' : 'no';
+  const range = q('#ai-usage-level input[type="range"]');
+  if (range) {
+    range.value = String(inferRefinedAiLevel());
+    setAiLevel(Number(range.value), false);
+  }
+}
+
 function refineAI() {
   const form = q('#ai-settings-form');
   if (!form) return;
@@ -229,23 +242,18 @@ function refineAI() {
     setAiLevel(Number(range.value), false);
   }
   if (scale) {
-    scale.replaceChildren();
-    ['Muy bajo', 'Bajo', 'Normal', 'Alto', 'Máximo'].forEach((text) => {
-      const span = document.createElement('span');
-      span.textContent = text;
-      scale.append(span);
-    });
-  }
-  const enabledSelect = q('#ai-enabled-select');
-  const synchronize = () => {
-    const checkbox = form.elements.enabled;
-    if (enabledSelect && checkbox) enabledSelect.value = checkbox.checked ? 'yes' : 'no';
-    if (range) {
-      range.value = String(inferRefinedAiLevel());
-      setAiLevel(Number(range.value), false);
+    const labels = ['Muy bajo', 'Bajo', 'Normal', 'Alto', 'Máximo'];
+    const current = [...scale.children].map((node) => node.textContent).join('|');
+    if (current !== labels.join('|')) {
+      scale.replaceChildren();
+      labels.forEach((text) => {
+        const span = document.createElement('span');
+        span.textContent = text;
+        scale.append(span);
+      });
     }
-  };
-  window.addEventListener('bot-services-load', () => window.setTimeout(synchronize, 0));
+  }
+  synchronizeAiControls();
 }
 
 function directFormChild(form, name) {
@@ -321,22 +329,22 @@ function refineProfile() {
   const additional = q('[data-friendly-group="profile-messages"]', form);
   const additionalTitle = additional ? q('summary strong', additional) : null;
   const additionalDescription = additional ? q('summary small', additional) : null;
-  if (additionalTitle) additionalTitle.textContent = 'Opciones adicionales';
-  if (additionalDescription) additionalDescription.textContent = 'Temas permitidos, mensajes de respaldo, contacto y horarios.';
+  setTextIfChanged(additionalTitle, 'Opciones adicionales');
+  setTextIfChanged(additionalDescription, 'Temas permitidos, mensajes de respaldo, contacto y horarios.');
 
   const branding = q('[data-friendly-group="profile-branding"]', form);
   const brandingTitle = branding ? q('summary strong', branding) : null;
   const brandingDescription = branding ? q('summary small', branding) : null;
-  if (brandingTitle) brandingTitle.textContent = 'Apariencia';
-  if (brandingDescription) brandingDescription.textContent = 'Logo, colores y nombre visible del panel.';
+  setTextIfChanged(brandingTitle, 'Apariencia');
+  setTextIfChanged(brandingDescription, 'Logo, colores y nombre visible del panel.');
 
   const submit = q(':scope > button[type="submit"]', form);
-  if (submit) submit.textContent = 'Guardar nombre y perfil';
+  setTextIfChanged(submit, 'Guardar nombre y perfil');
   cleanProfileRows(form);
   wrapProfilePreview();
 }
 
-function initializeRefinement() {
+function applyRefinement() {
   removeGuidedMessages();
   removeQuickConfiguration();
   removeKnowledgeModule();
@@ -346,14 +354,40 @@ function initializeRefinement() {
   refineProfile();
   hideTimezonePresentation();
   normalizeCollapseControls();
+}
 
-  if ('MutationObserver' in window && document.body.dataset.refinementObserver !== 'true') {
-    document.body.dataset.refinementObserver = 'true';
-    new window.MutationObserver(() => {
-      normalizeCollapseControls();
-      hideTimezonePresentation();
-    }).observe(document.body, { childList: true, subtree: true });
-  }
+let refinementTimer = null;
+
+function scheduleRefinement(delay = 0) {
+  if (refinementTimer !== null) window.clearTimeout(refinementTimer);
+  refinementTimer = window.setTimeout(() => {
+    refinementTimer = null;
+    applyRefinement();
+  }, delay);
+}
+
+function bindRefinementRefreshes() {
+  if (document.body.dataset.refinementRefreshBound === 'true') return;
+  document.body.dataset.refinementRefreshBound = 'true';
+
+  window.addEventListener('bot-services-load', () => {
+    scheduleRefinement(0);
+    window.setTimeout(() => scheduleRefinement(0), 180);
+  });
+
+  document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('[data-section], .friendly-card-toggle, .minimal-card-toggle, summary')) {
+      scheduleRefinement(0);
+    }
+  });
+
+  q('#section-select')?.addEventListener('change', () => scheduleRefinement(0));
+}
+
+function initializeRefinement() {
+  bindRefinementRefreshes();
+  applyRefinement();
 }
 
 if (document.readyState === 'loading') {
