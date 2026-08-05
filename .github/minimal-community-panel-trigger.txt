@@ -1,2 +1,3 @@
 Activador temporal para validar la simplificación del panel de comunidad.
 Ejecutar revisión completa de historial, automatizaciones, encuestas e inteligencia artificial.
+Segundo intento con observadores del navegador corregidos.
