@@ -1,0 +1,1 @@
+Ejecutar la simplificación del módulo de inteligencia artificial.
