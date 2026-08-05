@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - .github/friendly-panel-trigger.txt
+      - .github/friendly-panel-pr-trigger.txt
   pull_request:
     branches: [main]
     paths:
       - .github/friendly-panel-trigger.txt
+      - .github/friendly-panel-pr-trigger.txt
 
 permissions:
   contents: write
