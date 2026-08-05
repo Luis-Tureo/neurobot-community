@@ -1,0 +1,93 @@
+name: Aplicar refinamiento final del panel
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/panel-refinement-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Activar refinamiento final
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          minimal = Path('public/minimal-community-panel.js')
+          minimal_content = minimal.read_text(encoding='utf-8')
+          import_line = "\nvoid import('./panel-refinement.js');\n"
+          if "panel-refinement.js" not in minimal_content:
+              minimal.write_text(minimal_content.rstrip() + import_line, encoding='utf-8')
+
+          refinement = Path('public/panel-refinement.js')
+          content = refinement.read_text(encoding='utf-8')
+          content = content.replace('new Event(', 'new window.Event(')
+          stylesheet_loader = """
+
+if (!document.querySelector('link[href=\"/panel-refinement.css\"]')) {
+  const stylesheet = document.createElement('link');
+  stylesheet.rel = 'stylesheet';
+  stylesheet.href = '/panel-refinement.css';
+  document.head.append(stylesheet);
+}
+"""
+          if "panel-refinement.css" not in content:
+              content = content.rstrip() + stylesheet_loader
+          refinement.write_text(content, encoding='utf-8')
+          PY
+
+      - name: Revisar diferencias
+        run: |
+          git diff --check
+          git diff --stat
+
+      - name: Comprobar tipos
+        run: npm run typecheck
+
+      - name: Ejecutar lint
+        run: npm run lint
+
+      - name: Ejecutar prueba específica
+        run: npm test -- tests/panel-refinement.test.ts
+
+      - name: Ejecutar todas las pruebas
+        run: npm test
+
+      - name: Compilar
+        run: npm run build
+
+      - name: Publicar cambios validados en main
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/minimal-community-panel.js public/panel-refinement.js public/panel-refinement.css tests/panel-refinement.test.ts
+          if git diff --cached --quiet; then
+            echo "El refinamiento ya estaba aplicado."
+          else
+            git commit -m "feat: simplificar y ordenar el panel de comunidad"
+            git fetch origin main
+            git rebase origin/main
+            git push origin HEAD:main
+          fi
