@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-const script = readFileSync('public/minimal-community-panel.js', 'utf8');
+const script = readFileSync('public/minimal-community-panel-base.js', 'utf8');
 const styles = readFileSync('public/minimal-community-panel.css', 'utf8');
 const friendly = readFileSync('public/friendly-panel.js', 'utf8');
 

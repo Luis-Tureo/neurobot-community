@@ -14,6 +14,7 @@ export default tseslint.config(
         fetch: 'readonly',
         FormData: 'readonly',
         confirm: 'readonly',
+        Event: 'readonly',
       },
     },
   },
