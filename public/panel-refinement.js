@@ -376,7 +376,7 @@ function bindRefinementRefreshes() {
   });
 
   document.addEventListener('click', (event) => {
-    const target = event.target instanceof Element ? event.target : null;
+    const target = event.target && typeof event.target.closest === 'function' ? event.target : null;
     if (target?.closest('[data-section], .friendly-card-toggle, .minimal-card-toggle, summary')) {
       scheduleRefinement(0);
     }
