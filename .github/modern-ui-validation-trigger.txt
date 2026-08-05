@@ -1,1 +1,0 @@
-Validar la modernización visual sin React.
