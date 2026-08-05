@@ -54,6 +54,20 @@ jobs:
       - name: Aplicar rediseño de información del bot
         run: python scripts/apply-knowledge-panel-redesign.py
 
+      - name: Retirar función anterior que ya no se utiliza
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path('public/multibot-panel.js')
+          content = path.read_text(encoding='utf-8')
+          obsolete = "function clearKnowledgeEntry() {\n  closeKnowledgeEntryForm();\n}\n\n"
+          if obsolete not in content:
+              raise SystemExit('No se encontró la función obsoleta clearKnowledgeEntry.')
+          path.write_text(content.replace(obsolete, '', 1), encoding='utf-8')
+          PY
+
       - name: Revisar diferencias
         run: |
           git diff --check
