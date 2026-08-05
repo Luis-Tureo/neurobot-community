@@ -1,1 +1,2 @@
 Activador temporal para validar el refinamiento final del panel.
+Nueva revisión creada después de registrar el flujo en main.
