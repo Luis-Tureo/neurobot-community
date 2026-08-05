@@ -31,6 +31,20 @@ jobs:
       - name: Aplicar consolidación del inicio
         run: python scripts/apply-start-panel-consolidation.py
 
+      - name: Corregir literal de la prueba generada
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/start-panel-consolidation.test.ts')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          for index, line in enumerate(lines):
+              if 'expect(refinement).toContain("qa(' in line:
+                  lines[index] = "    expect(refinement).toContain('data-section=\"whatsapp\"');"
+          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+
       - name: Revisar diferencias
         run: |
           git diff --check
