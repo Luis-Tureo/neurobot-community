@@ -1,1 +1,2 @@
 Ejecutar rediseño minimalista del panel administrativo.
+Validar login, asistentes, restauración, historial y módulos visibles.
