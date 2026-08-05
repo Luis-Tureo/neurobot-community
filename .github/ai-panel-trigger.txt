@@ -1,2 +1,3 @@
 Ejecutar la simplificación del módulo de inteligencia artificial.
 Activación temporal mediante pull request.
+Segundo intento con compatibilidad de pruebas existentes.
