@@ -34,11 +34,16 @@ jobs:
           python <<'PY'
           from pathlib import Path
 
-          path = Path('public/friendly-panel.js')
-          content = path.read_text(encoding='utf-8')
+          friendly = Path('public/friendly-panel.js')
+          content = friendly.read_text(encoding='utf-8')
           import_line = "\nvoid import('./minimal-community-panel.js');\n"
           if "minimal-community-panel.js" not in content:
-              path.write_text(content.rstrip() + import_line, encoding='utf-8')
+              friendly.write_text(content.rstrip() + import_line, encoding='utf-8')
+
+          minimal = Path('public/minimal-community-panel.js')
+          minimal_content = minimal.read_text(encoding='utf-8')
+          minimal_content = minimal_content.replace('new MutationObserver(', 'new window.MutationObserver(')
+          minimal.write_text(minimal_content, encoding='utf-8')
           PY
 
       - name: Revisar diferencias
@@ -66,7 +71,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/friendly-panel.js
+          git add public/friendly-panel.js public/minimal-community-panel.js
           if git diff --cached --quiet; then
             echo "La capa minimalista ya estaba cargada."
           else
