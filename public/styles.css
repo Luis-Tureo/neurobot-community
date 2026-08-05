@@ -899,3 +899,8 @@ legend {
 .welcome-group-setting textarea {
   width: 100%;
 }
+
+/* La lista general nunca se muestra dentro del contexto administrativo de un asistente. */
+#panel-view.assistant-context-active #section-bots {
+  display: none !important;
+}

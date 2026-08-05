@@ -61,4 +61,15 @@ describe('interfaz simplificada del panel', () => {
     expect(panel).not.toContain('detail.bot.maskedNumber');
     expect(panel).not.toMatch(/mostrar n[uú]mero|icono de ojo/iu);
   });
+
+  it('abre la administración sin mantener visible la tarjeta general ni ejecutar la vista antigua de moderación', () => {
+    expect(panel).toContain("classList.toggle('assistant-context-active', available)");
+    expect(styles).toContain('#panel-view.assistant-context-active #section-bots');
+    expect(panel).toContain('button[data-section="${name}"]');
+    expect(panel).toContain("setSection('status');");
+    expect(panel).toContain('legacyModerationAvailable');
+    expect(panel).toContain('if (!legacyModerationAvailable || data.settings === undefined) return;');
+    expect(panel).toContain('notify(friendlyPanelError(error), true)');
+  });
+
 });

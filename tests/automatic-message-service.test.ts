@@ -299,6 +299,122 @@ describe('mensajes automáticos', () => {
       await vi.advanceTimersByTimeAsync(2_000);
       expect(client.sentMessages[0]?.text).toContain('¡Bienvenido/a, María!');
       expect(client.sentMessages[0]?.text).toContain('Texto personalizado conservado.');
+      expect(client.sentMessages[0]?.text?.match(/¡Bienvenido\/a/gu)).toHaveLength(1);
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
+  it('elimina el encabezado genérico antiguo y deja un solo saludo personalizado', async () => {
+    vi.useFakeTimers();
+    const { database, client, service } = createSubject();
+    try {
+      const configuration = database.getAutomaticMessageConfiguration();
+      configuration.welcome.enabled = true;
+      configuration.welcome.template =
+        '¡Bienvenido/a a la Comunidad Neurodivergente! 👋\n\nEste es un espacio de respeto.';
+      database.saveAutomaticMessageConfiguration(configuration);
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['persona@lid'],
+        participants: [{
+          participantId: 'persona@lid',
+          displayName: 'Luis',
+          nameSource: 'PUSHNAME',
+          mentionId: 'persona@lid',
+        }],
+        eventId: 'legacy-heading',
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]?.text).toBe(
+        '¡Bienvenido/a, Luis! 👋\n\nEste es un espacio de respeto.',
+      );
+      expect(client.sentMessages[0]?.text).not.toContain(
+        '¡Bienvenido/a a la Comunidad Neurodivergente!',
+      );
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
+  it('deduplica el mismo ingreso recibido por group_join y reconciliación', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-05T12:00:00Z'));
+    const { database, client, service } = createSubject();
+    try {
+      enableWelcome(database, 1);
+      client.groups = [{
+        id: GROUP_ID,
+        name: 'Grupo autorizado',
+        botIsMember: true,
+        participantIds: ['antiguo@lid'],
+      }];
+      service.start();
+      await service.reconcileWelcomeParticipants();
+
+      client.groups[0] = {
+        id: GROUP_ID,
+        name: 'Grupo autorizado',
+        botIsMember: true,
+        participantIds: ['antiguo@lid', 'nuevo@lid'],
+      };
+      await service.reconcileWelcomeParticipants();
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['nuevo@lid'],
+        eventId: 'real-group-join',
+        source: 'group_join',
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(client.sentMessages).toHaveLength(1);
+      expect(
+        database.getTechnicalEvents().some(
+          (event) => event.event_type === 'WELCOME_DUPLICATE_SUPPRESSED',
+        ),
+      ).toBe(true);
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
+  it('deduplica @lid y teléfono cuando representan al mismo ingreso entre fuentes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-05T12:00:00Z'));
+    const { database, client, service } = createSubject();
+    try {
+      enableWelcome(database, 1);
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['persona@lid'],
+        participants: [{
+          participantId: '56912345678@c.us',
+          displayName: 'Luis',
+          nameSource: 'PUSHNAME',
+          mentionId: 'persona@lid',
+        }],
+        eventId: 'direct-lid',
+        source: 'group_join',
+      });
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['56912345678@s.whatsapp.net'],
+        eventId: 'reconciliation-phone',
+        source: 'reconciliation',
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]?.text).toContain('Luis');
+      expect(
+        database.getTechnicalEvents().some(
+          (event) => event.event_type === 'WELCOME_DUPLICATE_SUPPRESSED',
+        ),
+      ).toBe(true);
     } finally {
       service.stop();
       database.close();
@@ -314,7 +430,7 @@ describe('mensajes automáticos', () => {
       await service.handleGroupJoin({ groupId: GROUP_ID, participantIds, eventId: 'many' });
       await vi.advanceTimersByTimeAsync(2_000);
       expect(client.sentMessages).toHaveLength(1);
-      expect(client.sentMessages[0]?.text).toBe('¡Bienvenidos/as a los nuevos integrantes! 👋');
+      expect(client.sentMessages[0]?.text).toBe('¡Bienvenidos/as a la comunidad! 👋');
       expect(client.sentMessages[0]?.mentionIds).toBeUndefined();
     } finally {
       service.stop();
@@ -362,7 +478,8 @@ describe('mensajes automáticos', () => {
       });
       await service.handleGroupJoin({ groupId: GROUP_ID, participantIds: ['otra@lid'], eventId: 'on' });
       await vi.advanceTimersByTimeAsync(2_000);
-      expect(client.sentMessages[0]?.text).toBe('Hola nuevo/a integrante');
+      expect(client.sentMessages[0]?.text).toBe('¡Bienvenido/a! 👋\n\nHola');
+      expect(client.sentMessages[0]?.text).not.toContain('nuevo/a integrante');
       expect(client.sentMessages[0]?.text).not.toMatch(/\d{6,}/u);
     } finally {
       service.stop();
@@ -412,6 +529,11 @@ describe('mensajes automáticos', () => {
       });
       await vi.advanceTimersByTimeAsync(5_000);
       expect(client.sentMessages).toHaveLength(0);
+      expect(
+        database.getTechnicalEvents().some(
+          (event) => event.event_type === 'WELCOME_SELF_PARTICIPANT_IGNORED',
+        ),
+      ).toBe(true);
     } finally {
       service.stop();
       database.close();
@@ -467,4 +589,62 @@ describe('mensajes automáticos', () => {
       database.close();
     }
   });
+
+  it('no saluda a los miembros existentes cuando el bot descubre un grupo nuevo', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-05T12:00:00Z'));
+    const { database, client, service } = createSubject();
+    const newGroupId = 'grupo-nuevo@g.us';
+    try {
+      enableWelcome(database, 1);
+      client.groups = [{
+        id: GROUP_ID,
+        name: 'Grupo autorizado',
+        botIsMember: true,
+        participantIds: ['miembro-antiguo@lid'],
+      }];
+      service.start();
+      await service.reconcileWelcomeParticipants();
+
+      database.upsertDetectedGroup(newGroupId, 'Grupo nuevo');
+      database.setGroupAuthorized(newGroupId, true);
+      client.groups = [
+        ...client.groups,
+        {
+          id: newGroupId,
+          name: 'Grupo nuevo',
+          botIsMember: true,
+          participantIds: ['existente-uno@lid', 'existente-dos@lid'],
+        },
+      ];
+
+      await service.reconcileWelcomeParticipants();
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(client.sentMessages).toHaveLength(0);
+      const newGroupHash = new Anonymizer('x'.repeat(32)).identifier(newGroupId);
+      expect(database.isWelcomeGroupBaselineInitialized(newGroupHash)).toBe(true);
+      expect(
+        database.getTechnicalEvents().some(
+          (event) => event.event_type === 'WELCOME_GROUP_BASELINE_CREATED',
+        ),
+      ).toBe(true);
+
+      client.groups[1] = {
+        id: newGroupId,
+        name: 'Grupo nuevo',
+        botIsMember: true,
+        participantIds: ['existente-uno@lid', 'existente-dos@lid', 'ingreso-posterior@lid'],
+      };
+      await service.reconcileWelcomeParticipants();
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]?.chatId).toBe(newGroupId);
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
 });

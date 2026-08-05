@@ -9,7 +9,7 @@ import type {
   WelcomeParticipant,
 } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
-import { isSupportedGroupId } from '../messaging/identifiers.js';
+import { normalizeWhatsAppIdentity, isSupportedGroupId } from '../messaging/identifiers.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
@@ -18,6 +18,7 @@ import {
   joinWelcomeNames,
   renderWelcomeTemplate,
   sanitizeWhatsAppDisplayName,
+  stripLeadingWelcomeHeading,
 } from './welcome-personalization.js';
 
 export type LocalDateTime = {
@@ -187,11 +188,25 @@ export class AutomaticMessageService {
       return;
     }
 
+    const providedCanonicalIdentities = new Map<string, string>();
+    for (const participant of event.participants ?? []) {
+      const canonicalId = normalizeWelcomeParticipantIdentity(participant.participantId);
+      providedCanonicalIdentities.set(canonicalId, canonicalId);
+      providedCanonicalIdentities.set(
+        normalizeWelcomeParticipantIdentity(participant.mentionId),
+        canonicalId,
+      );
+    }
+    const canonicalEventParticipants = event.participantIds.map((participantId) => {
+      const normalized = normalizeWelcomeParticipantIdentity(participantId);
+      return providedCanonicalIdentities.get(normalized) ?? normalized;
+    });
+    const normalizedEventParticipants = [...new Set(canonicalEventParticipants)].sort();
     const eventFingerprint = this.anonymizer.fingerprint([
       'group-join',
       event.groupId,
       event.eventId ?? String(event.timestamp ?? ''),
-      ...event.participantIds,
+      ...normalizedEventParticipants,
     ]);
     if (!this.joinEvents.checkAndAdd(eventFingerprint, now.getTime())) {
       this.record(
@@ -206,12 +221,22 @@ export class AutomaticMessageService {
     }
 
     const uniqueParticipants = new Map<string, string>();
+    let ignoredSelfParticipants = 0;
     for (const participantId of event.participantIds) {
-      if (this.client.isOwnIdentifier(participantId)) continue;
+      const normalizedParticipantId = normalizeWelcomeParticipantIdentity(participantId);
+      const canonicalParticipantId =
+        providedCanonicalIdentities.get(normalizedParticipantId) ?? normalizedParticipantId;
+      if (
+        this.client.isOwnIdentifier(participantId) ||
+        this.client.isOwnIdentifier(canonicalParticipantId)
+      ) {
+        ignoredSelfParticipants += 1;
+        continue;
+      }
       const participantHash = this.anonymizer.fingerprint([
         'joined-participant',
         event.groupId,
-        participantId,
+        canonicalParticipantId,
       ]);
       this.database.addWelcomeBaselineParticipant(groupHash, participantHash, this.botId);
       const claimed = this.database.claimWelcomeParticipant(
@@ -221,9 +246,21 @@ export class AutomaticMessageService {
         new Date(now.getTime() + 10 * 60 * 1000),
         this.botId,
       );
-      if (claimed && this.joinedParticipants.checkAndAdd(participantHash, now.getTime())) {
-        uniqueParticipants.set(participantHash, participantId);
+      const memoryDeduplicationKey = `${groupHash}:${participantHash}`;
+      if (claimed && this.joinedParticipants.checkAndAdd(memoryDeduplicationKey, now.getTime())) {
+        uniqueParticipants.set(participantHash, canonicalParticipantId);
       }
+    }
+    if (ignoredSelfParticipants > 0) {
+      this.record(
+        'WELCOME_SELF_PARTICIPANT_IGNORED',
+        'WELCOME',
+        groupHash,
+        'ignored',
+        null,
+        local,
+        ignoredSelfParticipants,
+      );
     }
     if (uniqueParticipants.size === 0) {
       this.record('WELCOME_DUPLICATE_BLOCKED', 'WELCOME', groupHash, 'skipped', 'NO_NEW_PARTICIPANTS', local);
@@ -250,16 +287,21 @@ export class AutomaticMessageService {
       local,
       uniqueParticipants.size,
     );
-    const provided = new Map((event.participants ?? []).map((participant) => [participant.participantId, participant]));
-    const missingIds = [...uniqueParticipants.values()].filter((participantId) => !provided.has(participantId));
+    const provided = new Map<string, WelcomeParticipant>();
+    for (const participant of event.participants ?? []) {
+      indexWelcomeParticipant(provided, participant);
+    }
+    const missingIds = [...uniqueParticipants.values()].filter(
+      (participantId) => !provided.has(normalizeWelcomeParticipantIdentity(participantId)),
+    );
     if (missingIds.length > 0 && this.client.resolveWelcomeParticipants !== undefined) {
       for (const participant of await this.client.resolveWelcomeParticipants(missingIds)) {
-        provided.set(participant.participantId, participant);
+        indexWelcomeParticipant(provided, participant);
       }
     }
     const resolvedParticipants = new Map<string, WelcomeParticipant>();
     for (const [participantHash, participantId] of uniqueParticipants) {
-      const participant = provided.get(participantId) ?? {
+      const participant = provided.get(normalizeWelcomeParticipantIdentity(participantId)) ?? {
         participantId,
         displayName: null,
         nameSource: 'FALLBACK' as const,
@@ -323,6 +365,10 @@ export class AutomaticMessageService {
     for (const group of groups) {
       if (!isSupportedGroupId(group.id) || !this.database.canSendToGroup(group.id)) continue;
       const groupHash = this.hash(group.id);
+      const groupBaselineInitialized = this.database.isWelcomeGroupBaselineInitialized(
+        groupHash,
+        this.botId,
+      );
       const newParticipants: string[] = [];
       for (const participantId of group.participantIds ?? []) {
         if (this.client.isOwnIdentifier(participantId)) continue;
@@ -330,13 +376,31 @@ export class AutomaticMessageService {
         const participantHash = this.anonymizer.fingerprint([
           'joined-participant',
           group.id,
-          participantId,
+          normalizeWelcomeParticipantIdentity(participantId),
         ]);
-        if (runtime.baselineInitialized && !this.database.hasWelcomeBaselineParticipant(groupHash, participantHash, this.botId)) {
+        if (
+          groupBaselineInitialized &&
+          !this.database.hasWelcomeBaselineParticipant(groupHash, participantHash, this.botId)
+        ) {
           newParticipants.push(participantId);
           newCount += 1;
         }
         this.database.addWelcomeBaselineParticipant(groupHash, participantHash, this.botId);
+      }
+      if (!groupBaselineInitialized) {
+        this.database.markWelcomeGroupBaselineInitialized(groupHash, this.botId);
+        this.record(
+          'WELCOME_GROUP_BASELINE_CREATED',
+          'WELCOME',
+          groupHash,
+          'created',
+          null,
+          undefined,
+          (group.participantIds ?? []).filter(
+            (participantId) => !this.client.isOwnIdentifier(participantId),
+          ).length,
+        );
+        continue;
       }
       if (newParticipants.length > 0) {
         await this.handleGroupJoin({
@@ -401,7 +465,7 @@ export class AutomaticMessageService {
   public previewWelcome(fictitiousName: string, groupId?: string): string {
     const configuration = this.database.getAutomaticMessageConfiguration(this.botId);
     const selectedGroupId = groupId;
-    const safeName = sanitizeWhatsAppDisplayName(fictitiousName) ?? configuration.welcome.unknownNameFallback;
+    const safeName = sanitizeWhatsAppDisplayName(fictitiousName);
     const destination = selectedGroupId ?? 'preview@g.us';
     const groupSetting = selectedGroupId === undefined
       ? null
@@ -410,7 +474,10 @@ export class AutomaticMessageService {
       ? groupSetting.customTemplate
       : configuration.welcome.template;
     return this.buildWelcomeMessages(destination, template, [{
-      participantId: '', displayName: safeName, nameSource: 'PUSHNAME', mentionId: '',
+      participantId: '',
+      displayName: safeName,
+      nameSource: safeName === null ? 'FALLBACK' : 'PUSHNAME',
+      mentionId: '',
     }], configuration)[0]?.text ?? '';
   }
 
@@ -564,32 +631,50 @@ export class AutomaticMessageService {
   ): Array<{ text: string; mentionIds: string[]; participantCount: number }> {
     const settings = configuration.welcome;
     if (participants.length > settings.maximumGroupedNames) {
-      return [{ text: '¡Bienvenidos/as a los nuevos integrantes! 👋', mentionIds: [], participantCount: participants.length }];
+      return [{
+        text: '¡Bienvenidos/as a la comunidad! 👋',
+        mentionIds: [],
+        participantCount: participants.length,
+      }];
     }
-    const fallback = sanitizeWhatsAppDisplayName(settings.unknownNameFallback) ?? 'nuevo/a integrante';
-    const effectiveTemplate = settings.includePublicName && !/\{(?:name|mention)\}/u.test(template)
-      ? `¡Bienvenido/a, {name}! 👋\n\n${template}`
-      : template;
+
     const profile = this.database.getBotProfile(this.botId);
     const linkedGroup = this.database.listBotGroups(this.botId, (identifier) => this.hash(identifier))
       .find((group) => group.groupHash === this.hash(groupId));
     const groupName = linkedGroup?.name ?? this.database.getGroupById(groupId)?.name ?? 'este grupo';
+    const templateUsesIdentity = /\{(?:name|mention)\}/u.test(template);
+
     const render = (selected: WelcomeParticipant[]) => {
-      const names = selected.map((participant) =>
-        settings.includePublicName ? participant.displayName ?? fallback : fallback,
-      );
+      const publicNames = selected
+        .map((participant) => sanitizeWhatsAppDisplayName(participant.displayName))
+        .filter((name): name is string => name !== null);
+      const canPersonalize = settings.includePublicName && publicNames.length === selected.length;
+      const names = canPersonalize ? publicNames : [];
       const mentions = names.map((name) => `@${name}`);
-      const text = renderWelcomeTemplate(effectiveTemplate, {
+      const heading = buildWelcomeHeading(selected.length, names);
+      const values = {
         name: joinWelcomeNames(names),
         mention: joinWelcomeNames(mentions),
         communityName: profile.organizationName,
         groupName,
         assistantName: profile.botName,
         botAlias: profile.activationAlias,
-      });
+      };
+
+      let text: string;
+      if (templateUsesIdentity && canPersonalize) {
+        text = renderWelcomeTemplate(template, values);
+      } else {
+        const bodyTemplate = stripLeadingWelcomeHeading(template);
+        const body = bodyTemplate.length === 0 ? '' : renderWelcomeTemplate(bodyTemplate, values).trim();
+        text = body.length === 0 ? heading : `${heading}
+
+${body}`;
+      }
+
       return {
         text,
-        mentionIds: settings.enableRealMention
+        mentionIds: settings.enableRealMention && canPersonalize
           ? selected.map((participant) => participant.mentionId).filter(Boolean)
           : [],
         participantCount: selected.length,
@@ -830,6 +915,30 @@ function requirePart(values: Map<string, string>, key: string, timezone = 'Ameri
   const value = values.get(key);
   if (value === undefined) throw new Error(`No fue posible determinar ${key} en ${timezone}.`);
   return value;
+}
+
+function normalizeWelcomeParticipantIdentity(value: string): string {
+  return normalizeWhatsAppIdentity(value) ?? value.trim().toLowerCase();
+}
+
+function indexWelcomeParticipant(
+  target: Map<string, WelcomeParticipant>,
+  participant: WelcomeParticipant,
+): void {
+  target.set(normalizeWelcomeParticipantIdentity(participant.participantId), participant);
+  if (participant.mentionId.trim() !== '') {
+    target.set(normalizeWelcomeParticipantIdentity(participant.mentionId), participant);
+  }
+}
+
+function buildWelcomeHeading(participantCount: number, names: string[]): string {
+  if (participantCount <= 1) {
+    const name = names[0];
+    return name === undefined ? '¡Bienvenido/a! 👋' : `¡Bienvenido/a, ${name}! 👋`;
+  }
+  return names.length === participantCount
+    ? `¡Bienvenidos/as, ${joinWelcomeNames(names)}! 👋`
+    : '¡Bienvenidos/as a la comunidad! 👋';
 }
 
 function wait(milliseconds: number): Promise<void> {

@@ -309,7 +309,7 @@ describe('adaptador de WhatsApp', () => {
     await expect(adapter.listGroups()).resolves.toMatchObject([
       {
         source: 'GET_CHATS',
-        participantIds: ['persona@lid', 'otra@c.us', '56912345678@c.us'],
+        participantIds: ['56912345678@c.us', 'otra@c.us'],
       },
     ]);
     expect(JSON.stringify(captured.entries)).not.toContain('56912345678');
@@ -590,6 +590,7 @@ describe('adaptador de WhatsApp', () => {
   it('obtiene getRecipients y prioriza pushname sin registrar el nombre', async () => {
     const captured = createCapturedLogger();
     const { adapter, fake, groupJoins } = createSubject({ logger: captured.logger });
+    fake.lidMappings = [{ lid: 'persona@lid', pn: '56912345678@c.us' }];
     await adapter.initialize();
     fake.emit('ready');
     fake.emit('group_join', {
@@ -603,10 +604,39 @@ describe('adaptador de WhatsApp', () => {
     });
     await vi.waitFor(() => expect(groupJoins).toHaveLength(1));
     expect(groupJoins[0]?.participants).toEqual([{
-      participantId: 'persona@lid', displayName: 'María', nameSource: 'PUSHNAME', mentionId: 'persona@lid',
+      participantId: '56912345678@c.us', displayName: 'María', nameSource: 'PUSHNAME', mentionId: 'persona@lid',
     }]);
     expect(JSON.stringify(captured.entries)).not.toContain('María');
     expect(JSON.stringify(captured.entries)).not.toContain('Nombre de agenda');
+  });
+
+  it('unifica @lid y teléfono antes de emitir group_join para impedir dos bienvenidas', async () => {
+    const { adapter, fake, groupJoins } = createSubject();
+    fake.lidMappings = [{ lid: 'persona@lid', pn: '56912345678@s.whatsapp.net' }];
+    await adapter.initialize();
+    fake.emit('ready');
+    fake.emit('group_join', {
+      chatId: 'grupo-normal@g.us',
+      id: { _serialized: 'join-aliases' },
+      recipientIds: ['persona@lid', '56912345678@c.us'],
+      type: 'add',
+      getRecipients: vi.fn(async () => [{
+        id: { _serialized: 'persona@lid' },
+        pushname: 'Luis',
+      }]),
+    });
+
+    await vi.waitFor(() => expect(groupJoins).toHaveLength(1));
+    expect(groupJoins[0]).toMatchObject({
+      groupId: 'grupo-normal@g.us',
+      participantIds: ['56912345678@c.us'],
+      participants: [{
+        participantId: '56912345678@c.us',
+        displayName: 'Luis',
+        nameSource: 'PUSHNAME',
+        mentionId: 'persona@lid',
+      }],
+    });
   });
 
   it('notifica salida del bot y actualizaciones del grupo una sola vez', async () => {

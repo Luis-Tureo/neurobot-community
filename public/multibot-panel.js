@@ -85,11 +85,19 @@ function node(tag, text, className) {
   return element;
 }
 
+function friendlyPanelError(error) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  if (/Cannot read properties|replaceChildren|is not a function|undefined|null/iu.test(message)) {
+    return 'No fue posible abrir esta sección. Actualiza la página y vuelve a intentarlo.';
+  }
+  return message || 'La operación no pudo completarse.';
+}
+
 function actionButton(label, className, handler) {
   const button = node('button', label, className);
   button.type = 'button';
   button.addEventListener('click', () => {
-    void Promise.resolve(handler()).catch((error) => notify(error.message, true));
+    void Promise.resolve(handler()).catch((error) => notify(friendlyPanelError(error), true));
   });
   return button;
 }
@@ -103,10 +111,21 @@ function botModeLabel(mode) {
 }
 
 function setSection(name) {
-  document.querySelector(`[data-section="${name}"]`)?.click();
+  const navigationButton = document.querySelector(`button[data-section="${name}"]`);
+  if (navigationButton && !navigationButton.disabled) {
+    navigationButton.click();
+    return true;
+  }
+  const selector = document.querySelector('#section-select');
+  const option = selector?.querySelector(`option[value="${name}"]`);
+  if (!selector || !option || option.disabled) return false;
+  selector.value = name;
+  selector.dispatchEvent(new window.Event('change', { bubbles: true }));
+  return true;
 }
 
 function setBotNavigationAvailable(available) {
+  document.querySelector('#panel-view')?.classList.toggle('assistant-context-active', available);
   document.querySelectorAll('.bot-only').forEach((element) => {
     element.classList.toggle('hidden', !available);
   });
@@ -196,6 +215,7 @@ function updateSetupState(selector, text, complete) {
 
 function setCardGrid(selector, cards) {
   const target = document.querySelector(selector);
+  if (!target) return;
   target.replaceChildren();
   cards.forEach(([label, value]) => {
     const card = node('div', undefined, 'status-card');
@@ -294,13 +314,17 @@ async function selectBot(botId, section) {
   const previousBotId = panelState.selectedBotId;
   panelState.selectedBotId = botId;
   setBotNavigationAvailable(true);
-  const maintenanceButton = document.querySelector('[data-section="maintenance"]');
+  setSection('status');
+  const maintenanceButton = document.querySelector('button[data-section="maintenance"]');
   const maintenanceOption = document.querySelector('#section-select option[value="maintenance"]');
-  maintenanceButton.disabled = false;
+  if (maintenanceButton) {
+    maintenanceButton.disabled = false;
+    maintenanceButton.title = '';
+  }
   if (maintenanceOption) maintenanceOption.disabled = false;
-  maintenanceButton.title = '';
   await loadSelectedBot();
-  const requestedSection = document.querySelector(`[data-section="${section}"]`)?.disabled ? 'status' : section;
+  const requestedButton = document.querySelector(`button[data-section="${section}"]`);
+  const requestedSection = requestedButton?.disabled ? 'status' : section;
   setSection(requestedSection);
   window.history.replaceState(null, '', `#assistants/${encodeURIComponent(botId)}/${requestedSection}`);
   recordPanelEvent(previousBotId && previousBotId !== botId ? 'ASSISTANT_CONTEXT_CHANGED' : 'ASSISTANT_ADMIN_OPENED', botId);
@@ -332,7 +356,17 @@ async function loadModeration() {
   const data = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation`);
   panelState.moderation = data;
   await renderSimpleModeration(data);
-  if(data.settings===undefined)return;
+  const legacyModerationAvailable = [
+    '#moderation-summary-cards',
+    '#moderation-state-notice',
+    '#moderation-settings-form',
+    '#moderation-warning-form',
+    '#moderation-groups-list',
+    '#moderation-rules-list',
+    '#moderation-terms-list',
+    '#moderation-statistics-cards',
+  ].every((selector) => document.querySelector(selector) !== null);
+  if (!legacyModerationAvailable || data.settings === undefined) return;
   setCardGrid('#moderation-summary-cards', [
     ['Estado', data.settings.enabled ? 'Activada' : 'Desactivada'], ['Grupos protegidos', data.summary.protectedGroups],
     ['Reglas activas', data.summary.activeRules], ['Mensajes analizados hoy', data.metrics.messagesReviewed],

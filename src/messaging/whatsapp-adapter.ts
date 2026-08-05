@@ -23,6 +23,7 @@ import {
   getSerializedId,
   isParticipantId,
   isSupportedGroupId,
+  whatsappIdentityAliases,
 } from './identifiers.js';
 import { describeMessageIdStructure, MessageIdentityResolver } from './message-identity.js';
 import type {
@@ -129,12 +130,41 @@ export class WhatsAppWebAdapter implements MessagingClient {
 
   public async resolveWelcomeParticipants(participantIds: string[]): Promise<WelcomeParticipant[]> {
     const client = this.requireReadyClient();
-    const resolved: WelcomeParticipant[] = [];
-    for (const participantId of [...new Set(participantIds.filter(isParticipantId))]) {
+    const sourceIds = [...new Set(participantIds.filter(isParticipantId))];
+    const canonicalIdentities = await this.resolveCanonicalParticipantIdentities(
+      client,
+      sourceIds,
+    );
+    const resolved = new Map<string, WelcomeParticipant>();
+
+    for (const sourceId of sourceIds) {
       try {
-        const contact = await client.getContactById(participantId);
+        const contact = await client.getContactById(sourceId);
         const participant = resolvePublicWhatsAppName(contact);
-        if (participant !== null) resolved.push(participant);
+        if (participant === null) continue;
+
+        const canonicalId =
+          canonicalIdentities.get(normalizeParticipantId(sourceId)) ??
+          canonicalIdentities.get(normalizeParticipantId(participant.participantId)) ??
+          canonicalPhoneIdentity(participant.participantId) ??
+          normalizeParticipantId(participant.participantId);
+
+        if (
+          this.isOwnIdentifier(sourceId) ||
+          this.isOwnIdentifier(participant.participantId) ||
+          this.isOwnIdentifier(canonicalId)
+        ) {
+          continue;
+        }
+
+        const candidate: WelcomeParticipant = {
+          ...participant,
+          participantId: canonicalId,
+        };
+        const current = resolved.get(canonicalId);
+        if (current === undefined || (current.displayName === null && candidate.displayName !== null)) {
+          resolved.set(canonicalId, candidate);
+        }
       } catch (error) {
         this.logger.warn(
           {
@@ -145,7 +175,8 @@ export class WhatsAppWebAdapter implements MessagingClient {
         );
       }
     }
-    return resolved;
+
+    return [...resolved.values()];
   }
 
   public async sendMedia(chatId: string, absolutePath: string, caption: string): Promise<void> {
@@ -304,8 +335,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
   }
 
   public isOwnIdentifier(identifier: string): boolean {
-    const normalized = getSerializedId(identifier);
-    return normalized !== null && this.botIdentifiers.has(normalized);
+    return whatsappIdentityAliases(identifier).some((alias) => this.botIdentifiers.has(alias));
   }
 
   public getOwnIdentifier(): string | null {
@@ -613,19 +643,36 @@ export class WhatsAppWebAdapter implements MessagingClient {
         );
         return;
       }
-      const fallbackParticipantIds = Array.isArray(notification.recipientIds)
+
+      const rawFallbackParticipantIds = Array.isArray(notification.recipientIds)
         ? notification.recipientIds
             .map((identifier) => getSerializedId(identifier))
             .filter(isParticipantId)
-            .filter((identifier) => !this.isOwnIdentifier(identifier))
         : [];
+      const canonicalFallbackIdentities = await this.resolveCanonicalParticipantIdentities(
+        client,
+        rawFallbackParticipantIds,
+      );
+      const fallbackParticipantIds = [
+        ...new Set(
+          rawFallbackParticipantIds
+            .map(
+              (identifier) =>
+                canonicalFallbackIdentities.get(normalizeParticipantId(identifier)) ??
+                canonicalPhoneIdentity(identifier) ??
+                normalizeParticipantId(identifier),
+            )
+            .filter((identifier) => !this.isOwnIdentifier(identifier)),
+        ),
+      ];
+
       let participants: WelcomeParticipant[] = [];
       try {
         const contacts = await notification.getRecipients();
-        participants = contacts
+        const rawParticipants = contacts
           .map((contact) => resolvePublicWhatsAppName(contact))
-          .filter((participant): participant is WelcomeParticipant => participant !== null)
-          .filter((participant) => !this.isOwnIdentifier(participant.participantId));
+          .filter((participant): participant is WelcomeParticipant => participant !== null);
+        participants = await this.canonicalizeWelcomeParticipants(client, rawParticipants);
       } catch (error) {
         this.logger.warn(
           {
@@ -636,12 +683,18 @@ export class WhatsAppWebAdapter implements MessagingClient {
           'Se utilizará la resolución alternativa de integrantes nuevos',
         );
       }
-      const participantIds = participants.length > 0
-        ? participants.map((participant) => participant.participantId)
-        : fallbackParticipantIds;
+
+      const participantIds = [
+        ...new Set([
+          ...fallbackParticipantIds,
+          ...participants.map((participant) => participant.participantId),
+        ]),
+      ].filter((identifier) => !this.isOwnIdentifier(identifier));
+
       if (participants.length === 0 && participantIds.length > 0) {
         participants = await this.resolveWelcomeParticipants(participantIds);
       }
+
       const subtype = normalizeGroupJoinSubtype(notification.type);
       this.logger.info(
         {
@@ -653,30 +706,35 @@ export class WhatsAppWebAdapter implements MessagingClient {
         },
         'Evento de ingreso al grupo recibido',
       );
-      await this.notifyGroupChanged(groupId, 'JOIN', false, generation);
-      if (participantIds.length === 0 || this.events?.onGroupJoin === undefined) return;
-      const eventId = getSerializedId(notification.id);
-      try {
-        await this.events.onGroupJoin({
-          groupId,
-          participantIds,
-          ...(participants.length === 0 ? {} : { participants }),
-          ...(eventId === null ? {} : { eventId }),
-          ...(Number.isFinite(notification.timestamp) ? { timestamp: notification.timestamp } : {}),
-          source: 'group_join',
-          subtype,
-        });
-      } catch (error) {
-        this.logger.error(
-          {
-            ...serializeError(error, 'GROUP_JOIN_PROCESSING_FAILED', false),
-            operation: 'groupJoinProcessingFailed',
-            groupHash: this.hash(groupId),
-            clientGeneration: generation,
-          },
-          'No fue posible procesar el evento de ingreso al grupo',
-        );
+
+      if (participantIds.length > 0 && this.events?.onGroupJoin !== undefined) {
+        const eventId = getSerializedId(notification.id);
+        try {
+          await this.events.onGroupJoin({
+            groupId,
+            participantIds,
+            ...(participants.length === 0 ? {} : { participants }),
+            ...(eventId === null ? {} : { eventId }),
+            ...(Number.isFinite(notification.timestamp) ? { timestamp: notification.timestamp } : {}),
+            source: 'group_join',
+            subtype,
+          });
+        } catch (error) {
+          this.logger.error(
+            {
+              ...serializeError(error, 'GROUP_JOIN_PROCESSING_FAILED', false),
+              operation: 'groupJoinProcessingFailed',
+              groupHash: this.hash(groupId),
+              clientGeneration: generation,
+            },
+            'No fue posible procesar el evento de ingreso al grupo',
+          );
+        }
       }
+
+      // Actualiza la lista del grupo después de reclamar el ingreso directo.
+      // Así la reconciliación no se adelanta al evento group_join.
+      await this.notifyGroupChanged(groupId, 'JOIN', false, generation);
     });
     client.on('group_leave', async (notification: GroupNotification) => {
       if (!this.isCurrent(client, generation)) return;
@@ -1136,14 +1194,60 @@ export class WhatsAppWebAdapter implements MessagingClient {
     participantIds: string[] | null,
   ): Promise<string[] | null> {
     if (participantIds === null) return null;
-    const resolved = new Set(participantIds.filter((identifier) => isParticipantId(identifier)));
-    const lids = [...resolved].filter((identifier) => classifyWhatsAppId(identifier) === 'lid');
-    if (lids.length === 0) return [...resolved];
+    const canonicalIdentities = await this.resolveCanonicalParticipantIdentities(
+      client,
+      participantIds,
+    );
+    return [...new Set(canonicalIdentities.values())];
+  }
+
+  private async resolveCanonicalParticipantIdentities(
+    client: WhatsAppClient,
+    participantIds: string[],
+  ): Promise<Map<string, string>> {
+    const sourceIds = [
+      ...new Set(
+        participantIds
+          .filter(isParticipantId)
+          .map((identifier) => normalizeParticipantId(identifier)),
+      ),
+    ];
+    const canonicalIdentities = new Map<string, string>();
+
+    for (const identifier of sourceIds) {
+      canonicalIdentities.set(
+        identifier,
+        canonicalPhoneIdentity(identifier) ?? identifier,
+      );
+    }
+
+    const lids = sourceIds.filter((identifier) => classifyWhatsAppId(identifier) === 'lid');
+    if (lids.length === 0) return canonicalIdentities;
+
     try {
       const mappings = await client.getContactLidAndPhone(lids);
+      let collapsedAliases = 0;
       for (const mapping of mappings) {
-        const phone = canonicalPhoneIdentity(mapping.pn);
-        if (phone !== null) resolved.add(phone);
+        const lid = getSerializedId(mapping.lid);
+        const phoneId = getSerializedId(mapping.pn);
+        const phone = phoneId === null ? null : canonicalPhoneIdentity(phoneId);
+        if (lid === null || phone === null || classifyWhatsAppId(lid) !== 'lid') continue;
+
+        const normalizedLid = normalizeParticipantId(lid);
+        if (canonicalIdentities.has(normalizedLid)) {
+          canonicalIdentities.set(normalizedLid, phone);
+          collapsedAliases += 1;
+        }
+      }
+
+      if (collapsedAliases > 0) {
+        this.logger.info(
+          {
+            operation: 'WELCOME_IDENTITY_ALIASES_COLLAPSED',
+            aliasCount: collapsedAliases,
+          },
+          'Se unificaron identidades equivalentes antes de procesar la bienvenida',
+        );
       }
     } catch (error) {
       this.logger.warn(
@@ -1155,7 +1259,52 @@ export class WhatsAppWebAdapter implements MessagingClient {
         'No fue posible resolver algunas identidades LID del grupo',
       );
     }
-    return [...resolved];
+
+    return canonicalIdentities;
+  }
+
+  private async canonicalizeWelcomeParticipants(
+    client: WhatsAppClient,
+    participants: WelcomeParticipant[],
+  ): Promise<WelcomeParticipant[]> {
+    const identityInputs = participants.flatMap((participant) => [
+      participant.participantId,
+      participant.mentionId,
+    ]);
+    const canonicalIdentities = await this.resolveCanonicalParticipantIdentities(
+      client,
+      identityInputs,
+    );
+    const canonicalParticipants = new Map<string, WelcomeParticipant>();
+
+    for (const participant of participants) {
+      const participantId = normalizeParticipantId(participant.participantId);
+      const mentionId = normalizeParticipantId(participant.mentionId);
+      const canonicalId =
+        canonicalIdentities.get(participantId) ??
+        canonicalIdentities.get(mentionId) ??
+        canonicalPhoneIdentity(participantId) ??
+        participantId;
+
+      if (
+        this.isOwnIdentifier(participant.participantId) ||
+        this.isOwnIdentifier(participant.mentionId) ||
+        this.isOwnIdentifier(canonicalId)
+      ) {
+        continue;
+      }
+
+      const candidate: WelcomeParticipant = {
+        ...participant,
+        participantId: canonicalId,
+      };
+      const current = canonicalParticipants.get(canonicalId);
+      if (current === undefined || (current.displayName === null && candidate.displayName !== null)) {
+        canonicalParticipants.set(canonicalId, candidate);
+      }
+    }
+
+    return [...canonicalParticipants.values()];
   }
 
   private async notifyGroupChanged(
@@ -1187,11 +1336,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
     for (const entry of value) {
       const id = getSerializedId(entry);
       if (id === null) continue;
-      if (this.botIdentifiers.has(id)) return { detected: true, token: mentionToken(id) };
-      const phone = canonicalPhoneIdentity(id);
-      if (phone !== null && this.botIdentifiers.has(phone)) {
-        return { detected: true, token: `@${phone}` };
-      }
+      if (this.isOwnIdentifier(id)) return { detected: true, token: mentionToken(id) };
     }
     return { detected: false };
   }
@@ -1222,16 +1367,15 @@ export class WhatsAppWebAdapter implements MessagingClient {
     if (typeof info !== 'object' || info === null) return;
     for (const key of ['wid', 'me']) {
       const id = getSerializedId(readUnknown(info, key));
-      if (id !== null) this.botIdentifiers.add(id);
+      if (id === null) continue;
+      for (const alias of whatsappIdentityAliases(id)) this.botIdentifiers.add(alias);
     }
   }
 
   private resolveBotMembership(participantIds: string[] | null): boolean | null {
     if (participantIds === null || this.botIdentifiers.size === 0) return null;
     for (const participantId of participantIds) {
-      if (this.botIdentifiers.has(participantId)) return true;
-      const participantPhone = canonicalPhoneIdentity(participantId);
-      if (participantPhone !== null && this.botIdentifiers.has(participantPhone)) return true;
+      if (this.isOwnIdentifier(participantId)) return true;
     }
     return false;
   }
@@ -1301,6 +1445,10 @@ function normalizeMenuSelection(value: string): string {
     .toLocaleLowerCase('es')
     .replace(/[^a-z0-9]+/gu, ' ')
     .trim();
+}
+
+function normalizeParticipantId(value: string): string {
+  return getSerializedId(value) ?? value.trim().toLowerCase();
 }
 
 function normalizeGroupJoinSubtype(

@@ -1815,6 +1815,26 @@ export class AppDatabase {
           WHERE recurrence_window_days=30;
         `,
       },
+      {
+        version: 20,
+        sql: `
+          CREATE TABLE bot_welcome_group_runtime (
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            group_hash TEXT NOT NULL,
+            baseline_initialized INTEGER NOT NULL DEFAULT 0
+              CHECK (baseline_initialized IN (0, 1)),
+            initialized_at TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (bot_id, group_hash)
+          );
+          INSERT INTO bot_welcome_group_runtime(
+            bot_id, group_hash, baseline_initialized, initialized_at, updated_at
+          )
+          SELECT bot_id, group_hash, 1, MIN(seen_at), datetime('now')
+          FROM bot_welcome_baseline
+          GROUP BY bot_id, group_hash;
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -2712,6 +2732,33 @@ export class AppDatabase {
       `INSERT OR IGNORE INTO bot_welcome_baseline(bot_id, group_hash, participant_hash, seen_at)
        VALUES (?, ?, ?, ?)`,
     ).run(botId, groupHash, participantHash, new Date().toISOString());
+  }
+
+  public isWelcomeGroupBaselineInitialized(
+    groupHash: string,
+    botId = 'neurobot',
+  ): boolean {
+    const row = this.db.prepare(
+      `SELECT baseline_initialized FROM bot_welcome_group_runtime
+       WHERE bot_id = ? AND group_hash = ?`,
+    ).get(botId, groupHash) as { baseline_initialized: number } | undefined;
+    return row?.baseline_initialized === 1;
+  }
+
+  public markWelcomeGroupBaselineInitialized(
+    groupHash: string,
+    botId = 'neurobot',
+  ): void {
+    const now = new Date().toISOString();
+    this.db.prepare(
+      `INSERT INTO bot_welcome_group_runtime(
+         bot_id, group_hash, baseline_initialized, initialized_at, updated_at
+       ) VALUES (?, ?, 1, ?, ?)
+       ON CONFLICT(bot_id, group_hash) DO UPDATE SET
+         baseline_initialized = 1,
+         initialized_at = COALESCE(bot_welcome_group_runtime.initialized_at, excluded.initialized_at),
+         updated_at = excluded.updated_at`,
+    ).run(botId, groupHash, now, now);
   }
 
   public claimWelcomeParticipant(
