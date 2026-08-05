@@ -31,18 +31,26 @@ jobs:
       - name: Aplicar consolidación del inicio
         run: python scripts/apply-start-panel-consolidation.py
 
-      - name: Corregir literal de la prueba generada
+      - name: Limpiar la transformación generada
         shell: bash
         run: |
           python <<'PY'
           from pathlib import Path
 
-          path = Path('tests/start-panel-consolidation.test.ts')
-          lines = path.read_text(encoding='utf-8').splitlines()
+          test_path = Path('tests/start-panel-consolidation.test.ts')
+          lines = test_path.read_text(encoding='utf-8').splitlines()
           for index, line in enumerate(lines):
               if 'expect(refinement).toContain("qa(' in line:
                   lines[index] = "    expect(refinement).toContain('data-section=\"whatsapp\"');"
-          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          test_path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+
+          friendly_path = Path('public/friendly-panel.js')
+          friendly = friendly_path.read_text(encoding='utf-8')
+          start = friendly.find('function revealActiveNavigation(tabs) {')
+          end = friendly.find('\n\nfunction enhanceDesktopNavigation()', start)
+          if start < 0 or end < 0:
+              raise SystemExit('No se encontró la función revealActiveNavigation.')
+          friendly_path.write_text(friendly[:start] + friendly[end + 2:], encoding='utf-8')
           PY
 
       - name: Revisar diferencias
