@@ -80,11 +80,7 @@ const SECTION_GUIDES = {
   },
   knowledge: {
     eyebrow: 'Información oficial',
-    description: 'Agrega aquí la información que el bot puede usar como fuente confiable para responder.',
-    actions: [
-      { label: 'Agregar información', target: '#knowledge-entry-form [name="title"]' },
-      { label: 'Administrar categorías', target: '[data-friendly-group="knowledge-categories"]' },
-    ],
+    description: 'Guarda datos concretos que Neurobot pueda usar para responder. Las categorías sirven únicamente para mantenerlos ordenados.',
   },
   menus: {
     eyebrow: 'Recorrido del usuario',
@@ -446,12 +442,7 @@ function simplifyProfile() {
 function simplifyKnowledge() {
   const section = query('#section-knowledge');
   if (!section) return;
-  groupChildren(section, [query('#knowledge-category-form'), query('#knowledge-categories')], {
-    id: 'knowledge-categories',
-    title: 'Administrar categorías',
-    description: 'Crea o modifica categorías para ordenar la información.',
-    beforeSelector: '#knowledge-entry-form',
-  });
+  query('#knowledge-category-panel')?.setAttribute('data-friendly-group', 'knowledge-categories');
   query('#knowledge-entry-form')?.classList.add('friendly-primary-card');
 }
 

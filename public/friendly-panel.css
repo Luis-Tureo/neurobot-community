@@ -368,3 +368,113 @@
     display: grid;
   }
 }
+
+
+/* KNOWLEDGE_PANEL_FRIENDLY_V2 */
+#section-knowledge .knowledge-explanation {
+  margin: 0 0 1rem;
+  line-height: 1.55;
+}
+
+#section-knowledge .knowledge-category-panel,
+#section-knowledge .knowledge-saved-section,
+#section-knowledge .knowledge-editor {
+  margin-top: 1rem;
+}
+
+#section-knowledge .knowledge-category-panel.hidden,
+#section-knowledge .knowledge-editor.hidden {
+  display: none !important;
+}
+
+#section-knowledge .knowledge-category-panel > .section-heading,
+#section-knowledge .knowledge-saved-section > .section-heading,
+#section-knowledge .knowledge-editor > .section-heading {
+  align-items: flex-start;
+}
+
+#section-knowledge .knowledge-saved-section {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: #fbfdfc;
+}
+
+#section-knowledge .knowledge-editor {
+  scroll-margin-top: 1rem;
+}
+
+.knowledge-priority-control {
+  display: grid;
+  gap: 0.65rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  background: #f8fbfa;
+}
+
+.knowledge-priority-heading {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.knowledge-priority-heading span {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.knowledge-priority-heading strong {
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  color: var(--primary-dark);
+  background: #e8f2ef;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.knowledge-priority-control input[type='range'] {
+  width: 100%;
+  min-height: 1.75rem;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.knowledge-priority-scale {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.knowledge-priority-scale span:nth-child(2) {
+  text-align: center;
+}
+
+.knowledge-priority-scale span:last-child {
+  text-align: right;
+}
+
+.knowledge-priority-control .muted {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  #section-knowledge > .section-heading,
+  #section-knowledge .knowledge-category-panel > .section-heading,
+  #section-knowledge .knowledge-saved-section > .section-heading,
+  #section-knowledge .knowledge-editor > .section-heading,
+  .knowledge-priority-heading {
+    display: grid;
+  }
+
+  #section-knowledge > .section-heading .actions,
+  #section-knowledge > .section-heading .actions button {
+    width: 100%;
+  }
+
+  .knowledge-priority-heading strong {
+    width: fit-content;
+  }
+}

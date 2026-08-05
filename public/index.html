@@ -336,33 +336,94 @@
         </section>
 
         <section id="section-knowledge" class="panel-section hidden">
-          <div class="section-heading"><div><p class="eyebrow">Información oficial</p><h2>Base de conocimiento</h2></div></div>
-          <form id="knowledge-category-form" class="inline-form">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Información oficial</p>
+              <h2>Información del bot</h2>
+            </div>
+            <div class="actions">
+              <button id="new-knowledge-entry" type="button">Agregar información</button>
+              <button id="toggle-knowledge-categories" class="secondary" type="button">Administrar categorías</button>
+            </div>
+          </div>
+
+          <p class="info-callout knowledge-explanation">
+            <strong>Las categorías solo sirven para ordenar.</strong>
+            La información que Neurobot utilizará para responder se crea con el botón
+            <strong>Agregar información</strong>.
+          </p>
+
+          <article id="knowledge-category-panel" class="card inset knowledge-category-panel hidden" data-friendly-group="knowledge-categories">
+            <div class="section-heading">
+              <div>
+                <h3>Administrar categorías</h3>
+                <p class="muted">Crea carpetas para organizar la información. Renombrar una categoría no modifica su contenido.</p>
+              </div>
+              <button id="new-knowledge-category" class="secondary" type="button">Nueva categoría</button>
+            </div>
+
+            <form id="knowledge-category-form" class="inline-form knowledge-editor hidden">
+              <input name="id" type="hidden" />
+              <label>Nombre de la categoría<input name="name" maxlength="100" required /></label>
+              <label class="toggle"><input name="enabled" type="checkbox" checked /> Categoría activa</label>
+              <div class="actions">
+                <button id="knowledge-category-submit" type="submit">Guardar categoría</button>
+                <button id="cancel-knowledge-category" class="secondary" type="button">Cancelar</button>
+              </div>
+            </form>
+
+            <div id="knowledge-categories" class="list compact-list"></div>
+          </article>
+
+          <section class="knowledge-saved-section" aria-labelledby="knowledge-saved-title">
+            <div class="section-heading">
+              <div>
+                <h3 id="knowledge-saved-title">Información guardada</h3>
+                <p class="muted">Cada tarjeta contiene un dato concreto que Neurobot puede consultar para responder.</p>
+              </div>
+            </div>
+            <div id="knowledge-entries" class="list"></div>
+          </section>
+
+          <form id="knowledge-entry-form" class="card inset knowledge-editor friendly-primary-card hidden">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Contenido para las respuestas</p>
+                <h3 id="knowledge-entry-form-title">Agregar información</h3>
+              </div>
+            </div>
             <input name="id" type="hidden" />
-            <label>Categoría<input name="name" maxlength="100" required /></label>
-            <label class="toggle"><input name="enabled" type="checkbox" checked /> Activa</label>
-            <button type="submit">Guardar categoría</button>
+            <div class="form-row">
+              <label>Título breve<input name="title" maxlength="200" placeholder="Ejemplo: Taller de habilidades sociales" required /></label>
+              <label>¿En qué categoría va?<select name="categoryId" required></select></label>
+            </div>
+            <label>Información que Neurobot debe conocer<textarea name="content" maxlength="8000" rows="7" placeholder="Escribe aquí la información oficial, completa y actualizada." required></textarea></label>
+            <div class="form-row">
+              <label>Palabras que las personas podrían utilizar<textarea name="keywords" rows="4" placeholder="taller&#10;actividades&#10;inscripción"></textarea></label>
+              <label>Otras formas de decir lo mismo<textarea name="synonyms" rows="4" placeholder="curso&#10;jornada&#10;encuentro"></textarea></label>
+            </div>
+
+            <div class="knowledge-priority-control">
+              <div class="knowledge-priority-heading">
+                <span>¿Qué tan importante es esta información?</span>
+                <strong id="knowledge-priority-label">Prioridad normal</strong>
+              </div>
+              <input name="priority" type="range" min="-100" max="100" step="25" value="0" aria-describedby="knowledge-priority-help" />
+              <div class="knowledge-priority-scale" aria-hidden="true">
+                <span>Menor</span>
+                <span>Normal</span>
+                <span>Mayor</span>
+              </div>
+              <p id="knowledge-priority-help" class="muted">Usa una prioridad mayor solo cuando esta información deba preferirse frente a otros datos similares.</p>
+            </div>
+
+            <input name="internalSource" type="hidden" />
+            <label class="toggle"><input name="enabled" type="checkbox" checked /> Información activa</label>
+            <div class="actions">
+              <button type="submit">Guardar información</button>
+              <button id="cancel-knowledge-entry" class="secondary" type="button">Cancelar</button>
+            </div>
           </form>
-          <div id="knowledge-categories" class="list compact-list"></div>
-          <form id="knowledge-entry-form" class="card inset">
-            <input name="id" type="hidden" />
-            <div class="form-row">
-              <label>Título<input name="title" maxlength="200" required /></label>
-              <label>Categoría<select name="categoryId" required></select></label>
-            </div>
-            <label>Contenido oficial<textarea name="content" maxlength="8000" rows="7" required></textarea></label>
-            <div class="form-row">
-              <label>Palabras clave (una por línea)<textarea name="keywords" rows="4"></textarea></label>
-              <label>Sinónimos (uno por línea)<textarea name="synonyms" rows="4"></textarea></label>
-            </div>
-            <div class="form-row">
-              <label>Prioridad<input name="priority" type="number" min="-100" max="100" value="0" /></label>
-              <label>Fuente interna opcional<input name="internalSource" maxlength="300" /></label>
-            </div>
-            <label class="toggle"><input name="enabled" type="checkbox" checked /> Entrada activa</label>
-            <div class="actions"><button type="submit">Guardar entrada</button><button id="cancel-knowledge-entry" class="secondary" type="button">Limpiar</button></div>
-          </form>
-          <div id="knowledge-entries" class="list"></div>
         </section>
 
         <section id="section-menus" class="panel-section hidden">

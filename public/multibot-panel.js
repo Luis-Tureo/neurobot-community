@@ -682,6 +682,82 @@ function renderBotGroups(groups) {
   });
 }
 
+function knowledgePriorityLabel(value) {
+  const priority = Number(value);
+  if (priority <= -75) return 'Prioridad muy baja';
+  if (priority < 0) return 'Prioridad baja';
+  if (priority === 0) return 'Prioridad normal';
+  if (priority < 75) return 'Prioridad alta';
+  return 'Prioridad muy alta';
+}
+
+function updateKnowledgePriorityDisplay(value) {
+  const label = document.querySelector('#knowledge-priority-label');
+  if (label) label.textContent = knowledgePriorityLabel(value);
+}
+
+function setKnowledgeCategoryPanelVisible(visible) {
+  const panel = document.querySelector('#knowledge-category-panel');
+  const button = document.querySelector('#toggle-knowledge-categories');
+  panel?.classList.toggle('hidden', !visible);
+  if (button) button.textContent = visible ? 'Cerrar categorías' : 'Administrar categorías';
+}
+
+function closeKnowledgeCategoryForm() {
+  const form = document.querySelector('#knowledge-category-form');
+  if (!form) return;
+  form.reset();
+  form.elements.id.value = '';
+  form.elements.enabled.checked = true;
+  form.classList.add('hidden');
+  const submit = document.querySelector('#knowledge-category-submit');
+  if (submit) submit.textContent = 'Guardar categoría';
+}
+
+function openKnowledgeCategoryForm(category = null) {
+  const form = document.querySelector('#knowledge-category-form');
+  if (!form) return;
+  setKnowledgeCategoryPanelVisible(true);
+  form.reset();
+  form.elements.id.value = category?.id || '';
+  form.elements.name.value = category?.name || '';
+  form.elements.enabled.checked = category?.enabled ?? true;
+  form.classList.remove('hidden');
+  const submit = document.querySelector('#knowledge-category-submit');
+  if (submit) submit.textContent = category ? 'Guardar nuevo nombre' : 'Crear categoría';
+  form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  window.setTimeout(() => form.elements.name.focus(), 250);
+}
+
+function resetKnowledgeEntryForm() {
+  const form = document.querySelector('#knowledge-entry-form');
+  if (!form) return;
+  form.reset();
+  form.elements.id.value = '';
+  form.elements.priority.value = 0;
+  form.elements.internalSource.value = '';
+  form.elements.enabled.checked = true;
+  updateKnowledgePriorityDisplay(0);
+  const title = document.querySelector('#knowledge-entry-form-title');
+  if (title) title.textContent = 'Agregar información';
+}
+
+function closeKnowledgeEntryForm() {
+  const form = document.querySelector('#knowledge-entry-form');
+  if (!form) return;
+  resetKnowledgeEntryForm();
+  form.classList.add('hidden');
+}
+
+function openNewKnowledgeEntry() {
+  const form = document.querySelector('#knowledge-entry-form');
+  if (!form) return;
+  resetKnowledgeEntryForm();
+  form.classList.remove('hidden');
+  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  window.setTimeout(() => form.elements.title.focus(), 250);
+}
+
 async function loadKnowledge() {
   if (!panelState.selectedBotId) return;
   const result = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/knowledge`);
@@ -689,29 +765,44 @@ async function loadKnowledge() {
   panelState.knowledgeEntries = result.entries;
   const activeEntries = result.entries.filter((entry) => entry.enabled).length;
   updateSetupState('#setup-knowledge-state', activeEntries > 0 ? `${activeEntries} entrada${activeEntries === 1 ? '' : 's'} activa${activeEntries === 1 ? '' : 's'}` : 'Sin contenido activo', activeEntries > 0);
+
+  const addInformationButton = document.querySelector('#new-knowledge-entry');
+  if (addInformationButton) {
+    addInformationButton.disabled = result.categories.length === 0;
+    addInformationButton.title = result.categories.length === 0
+      ? 'Crea primero una categoría para ordenar la información.'
+      : '';
+  }
+
   const categoriesTarget = document.querySelector('#knowledge-categories');
   categoriesTarget.replaceChildren();
+  if (result.categories.length === 0) {
+    categoriesTarget.append(emptyState('Todavía no hay categorías. Crea una para comenzar.'));
+  }
   result.categories.forEach((category) => {
-    const item = createListItem(category.name, category.enabled ? 'Activa' : 'Inactiva');
-    item.append(actionButton('Editar', 'secondary', () => {
-      const form = document.querySelector('#knowledge-category-form');
-      form.elements.id.value = category.id;
-      form.elements.name.value = category.name;
-      form.elements.enabled.checked = category.enabled;
-    }));
+    const entryCount = result.entries.filter((entry) => Number(entry.categoryId) === Number(category.id)).length;
+    const item = createListItem(
+      category.name,
+      `${entryCount} información${entryCount === 1 ? '' : 'es'} guardada${entryCount === 1 ? '' : 's'} · ${category.enabled ? 'Activa' : 'Inactiva'}`,
+    );
+    item.append(actionButton('Renombrar categoría', 'secondary', () => openKnowledgeCategoryForm(category)));
     categoriesTarget.append(item);
   });
+
   replaceSelectOptions(document.querySelector('#knowledge-entry-form').elements.categoryId, result.categories, 'id', 'name');
   const entriesTarget = document.querySelector('#knowledge-entries');
   entriesTarget.replaceChildren();
-  if (result.entries.length === 0) entriesTarget.append(emptyState('No hay entradas oficiales.'));
+  if (result.entries.length === 0) entriesTarget.append(emptyState('Todavía no hay información guardada.'));
   result.entries.forEach((entry) => {
-    const item = createListItem(entry.title, `${entry.categoryName} · prioridad ${entry.priority} · ${entry.enabled ? 'Activa' : 'Inactiva'}`);
+    const item = createListItem(
+      entry.title,
+      `${entry.categoryName} · ${knowledgePriorityLabel(entry.priority)} · ${entry.enabled ? 'Activa' : 'Inactiva'}`,
+    );
     const actions = node('div', undefined, 'actions');
     actions.append(
-      actionButton('Editar', 'secondary', () => fillKnowledgeEntry(entry)),
+      actionButton('Editar información', 'secondary', () => fillKnowledgeEntry(entry)),
       actionButton('Eliminar', 'danger', async () => {
-        if (!window.confirm('¿Eliminar esta entrada oficial?')) return;
+        if (!window.confirm('¿Eliminar esta información oficial?')) return;
         await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/knowledge/entries/${entry.id}`, { method: 'DELETE' });
         await loadKnowledge();
       }),
@@ -791,6 +882,12 @@ function fillKnowledgeEntry(entry) {
   form.elements.synonyms.value = entry.synonyms.join('\n');
   form.elements.internalSource.value = entry.internalSource || '';
   form.elements.enabled.checked = entry.enabled;
+  updateKnowledgePriorityDisplay(entry.priority);
+  const title = document.querySelector('#knowledge-entry-form-title');
+  if (title) title.textContent = 'Editar información';
+  form.classList.remove('hidden');
+  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  window.setTimeout(() => form.elements.title.focus(), 250);
 }
 
 async function loadMenus() {
@@ -1339,14 +1436,26 @@ function configureForms() {
     } catch (error) { notify(error.message, true); }
   });
 
+  document.querySelector('#toggle-knowledge-categories').addEventListener('click', () => {
+    const panel = document.querySelector('#knowledge-category-panel');
+    setKnowledgeCategoryPanelVisible(panel?.classList.contains('hidden') ?? true);
+  });
+  document.querySelector('#new-knowledge-category').addEventListener('click', () => openKnowledgeCategoryForm());
+  document.querySelector('#cancel-knowledge-category').addEventListener('click', closeKnowledgeCategoryForm);
+  document.querySelector('#new-knowledge-entry').addEventListener('click', openNewKnowledgeEntry);
+  document.querySelector('#knowledge-entry-form').elements.priority.addEventListener('input', (event) => {
+    updateKnowledgePriorityDisplay(event.currentTarget.value);
+  });
+
   document.querySelector('#knowledge-category-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const payload = { ...(form.elements.id.value ? { id: Number(form.elements.id.value) } : {}), name: form.elements.name.value, enabled: form.elements.enabled.checked };
     try {
       await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/knowledge/categories`, { method: 'POST', body: JSON.stringify(payload) });
-      form.reset(); form.elements.id.value = ''; form.elements.enabled.checked = true;
-      await loadKnowledge(); notify('Categoría guardada.');
+      closeKnowledgeCategoryForm();
+      await loadKnowledge();
+      notify('Categoría guardada.');
     } catch (error) { notify(error.message, true); }
   });
 
@@ -1362,10 +1471,12 @@ function configureForms() {
     };
     try {
       await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/knowledge/entries`, { method: 'POST', body: JSON.stringify(payload) });
-      clearKnowledgeEntry(); await loadKnowledge(); notify('Entrada oficial guardada.');
+      closeKnowledgeEntryForm();
+      await loadKnowledge();
+      notify('Información guardada.');
     } catch (error) { notify(error.message, true); }
   });
-  document.querySelector('#cancel-knowledge-entry').addEventListener('click', clearKnowledgeEntry);
+  document.querySelector('#cancel-knowledge-entry').addEventListener('click', closeKnowledgeEntryForm);
 
   document.querySelector('#cached-answer-search').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -1611,11 +1722,6 @@ function configureForms() {
       notify('Encuesta de prueba enviada.');
     } catch (error) { notify(error.message, true); }
   });
-}
-
-function clearKnowledgeEntry() {
-  const form = document.querySelector('#knowledge-entry-form');
-  form.reset(); form.elements.id.value = ''; form.elements.priority.value = 0; form.elements.enabled.checked = true;
 }
 
 function clearMenu() {
