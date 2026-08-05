@@ -41,11 +41,18 @@ import {
 } from '../core/profile-presets.js';
 import type { WhatsAppSessionManager } from '../core/whatsapp-session-manager.js';
 import { toLocalDateTime } from '../core/automatic-message-service.js';
+import {
+  sanitizeWhatsAppDisplayName,
+  validateWelcomeTemplate,
+} from '../core/welcome-personalization.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import type { SecretVault } from '../security/secret-vault.js';
 import { hashPassword, verifyPassword } from '../security/password.js';
+import { LocalModerationEngine } from '../moderation/local-moderation-engine.js';
+import { normalizeModerationConfigurationValue } from '../moderation/moderation-service.js';
+import { GroupModerationService } from '../moderation/group-moderation-service.js';
 import {
   assertPlainText,
   maskPhoneNumber,
@@ -359,6 +366,12 @@ const settingsSchema = z
   })
   .strict();
 
+const welcomeTemplateSchema = z.string().trim().min(1).max(2000).superRefine((value, context) => {
+  try { validateWelcomeTemplate(value); } catch (error) {
+    context.addIssue({ code: 'custom', message: error instanceof Error ? error.message : 'Plantilla inválida.' });
+  }
+});
+
 const automaticMessagesSchema = z
   .object({
     timezone: z.string().trim().min(1).max(80),
@@ -368,7 +381,16 @@ const automaticMessagesSchema = z
         batchWindowSeconds: z.number().int().min(5).max(300),
         groupSimultaneous: z.boolean().default(true),
         reconciliationIntervalSeconds: z.number().int().min(60).max(3600).default(120),
-        template: z.string().trim().min(1).max(2000),
+        template: welcomeTemplateSchema,
+        includePublicName: z.boolean().default(true),
+        enableRealMention: z.boolean().default(true),
+        unknownNameFallback: z.string().trim().min(1).max(80).refine(
+          (value) => sanitizeWhatsAppDisplayName(value) !== null,
+          'El texto alternativo no es válido.',
+        ).default('nuevo/a integrante'),
+        multipleJoinMode: z.enum(['INDIVIDUAL', 'GROUPED']).default('GROUPED'),
+        maximumGroupedNames: z.number().int().min(1).max(5).default(5),
+        sendDelaySeconds: z.number().int().min(0).max(60).default(2),
       })
       .strict(),
     dailyGreeting: z
@@ -401,8 +423,21 @@ const automaticManualSendSchema = z
   .object({
     groupKey: z.string().length(20),
     confirmed: z.literal(true),
+    fictitiousName: z.string().trim().min(1).max(80).optional(),
   })
   .strict();
+
+const welcomeGroupSettingSchema = z.object({
+  groupKey: z.string().length(20),
+  enabled: z.boolean(),
+  inheritAssistantTemplate: z.boolean(),
+  customTemplate: welcomeTemplateSchema.nullable(),
+}).strict();
+
+const welcomePreviewSchema = z.object({
+  fictitiousName: z.string().trim().min(1).max(80),
+  groupKey: z.string().length(20).optional(),
+}).strict();
 
 const pollConfigurationSchema = z
   .object({
@@ -443,6 +478,54 @@ const pollManualSendSchema = z
     confirmed: z.literal(true),
   })
   .strict();
+
+const aiQueueSettingsSchema = z.object({
+  maxConcurrent: z.number().int().min(1).max(10),
+  maxQueueSize: z.number().int().min(1).max(100),
+  maxQueueWaitSeconds: z.number().int().min(5).max(300),
+  providerTimeoutSeconds: z.number().int().min(5).max(60),
+  maxRetries: z.number().int().min(0).max(5),
+  initialRetryDelaySeconds: z.number().int().min(1).max(30),
+  maximumRetryDelaySeconds: z.number().int().min(1).max(60),
+  waitNoticeSeconds: z.number().int().min(1).max(60),
+  userCooldownSeconds: z.number().int().min(0).max(300),
+  duplicateWindowSeconds: z.number().int().min(0).max(300),
+  singleFlightWindowSeconds: z.number().int().min(1).max(300),
+  outboundMessageIntervalMs: z.number().int().min(0).max(10_000),
+  suggestedRetrySeconds: z.number().int().min(5).max(600),
+}).strict();
+
+const aiQueueSimulationSchema = z.object({
+  requests: z.number().int().min(1).max(30),
+  scenario: z.enum(['normal', 'repeated', 'rate_limited', 'timeout']),
+}).strict();
+
+const moderationSettingsSchema = z.object({
+  enabled:z.boolean(),defaultGroupMode:z.enum(['INHERIT','ENABLED','DISABLED']),reviewThreshold:z.number().int().min(1).max(20),
+  warningThreshold:z.number().int().min(1).max(20),adminNotificationThreshold:z.number().int().min(1).max(20),
+  recurrenceWindowDays:z.number().int().min(1).max(90),warningCooldownMinutes:z.number().int().min(1).max(1440),
+  publicWarningLimit:z.number().int().min(1).max(20),publicWarningWindowMinutes:z.number().int().min(1).max(1440),
+  temporaryEvidenceEnabled:z.boolean(),temporaryEvidenceHours:z.number().int().min(1).max(168),
+  warningMode:z.enum(['GROUP_GENERAL','GROUP_MENTION','ADMIN_ONLY']),automaticAIReviewEnabled:z.literal(false),manualAIReviewEnabled:z.literal(false),
+  automaticBanEnabled:z.literal(false),automaticDeletionEnabled:z.literal(false),firstWarningMessage:z.string().trim().min(40).max(1000),
+  secondWarningMessage:z.string().trim().min(40).max(1000),repeatedWarningMessage:z.string().trim().min(20).max(1000),
+}).strict().superRefine((value,context)=>{
+  if(value.reviewThreshold>value.warningThreshold) context.addIssue({code:'custom',path:['reviewThreshold'],message:'El umbral de revisión no puede superar al de advertencia.'});
+  const first=value.firstWarningMessage.toLocaleLowerCase('es');
+  for(const phrase of ['advertencia automática','podría incumplir','generada automáticamente','revisada por la administración']) if(!first.includes(phrase)) context.addIssue({code:'custom',path:['firstWarningMessage'],message:`La primera advertencia debe incluir “${phrase}”.`});
+  const second=value.secondWarningMessage.toLocaleLowerCase('es');
+  for(const phrase of ['segunda advertencia automática','administración','generada automáticamente','no implica una expulsión automática']) if(!second.includes(phrase)) context.addIssue({code:'custom',path:['secondWarningMessage'],message:`La segunda advertencia debe incluir “${phrase}”.`});
+});
+const moderationConditionSchema=z.object({id:z.number().int().nonnegative().default(0),conditionType:z.enum(['EXACT_WORD','EXACT_PHRASE','COMBINED_WORDS','TERM_CONTAINS','REPETITION','FREQUENCY','BLOCKED_DOMAIN','ADVERTISING','PERSONAL_INFO','EXCESSIVE_CAPS','SAFE_REGEX']),operator:z.enum(['ALL','ANY','EXCLUDE']),normalizedValue:z.string().trim().max(500),configuration:z.record(z.string(),z.union([z.string(),z.number(),z.boolean(),z.null()])),enabled:z.boolean()}).strict();
+const moderationExceptionSchema=z.object({id:z.number().int().nonnegative().default(0),exceptionType:z.enum(['ADMINISTRATOR','EXACT_PHRASE','EXACT_WORD','ALLOWED_DOMAIN']),normalizedValue:z.string().trim().max(500),enabled:z.boolean()}).strict();
+const moderationRuleSchema=z.object({name:z.string().trim().min(1).max(120),description:z.string().trim().min(1).max(1000),category:z.string().trim().min(1).max(80),severity:z.enum(['INFORMATIVA','LEVE','MEDIA','ALTA','CRITICA']),detectionType:z.string().trim().min(1).max(80),score:z.number().int().min(0).max(20),reviewThreshold:z.number().int().min(1).max(20),warningThreshold:z.number().int().min(1).max(20),adminNotificationThreshold:z.number().int().min(1).max(20),enabled:z.boolean(),appliesToAllGroups:z.boolean(),conditions:z.array(moderationConditionSchema).max(50),exceptions:z.array(moderationExceptionSchema).max(50)}).strict().superRefine((value,context)=>{
+  if(value.enabled&&!value.conditions.some((condition)=>condition.enabled)) context.addIssue({code:'custom',path:['conditions'],message:'Una regla activa requiere al menos una condición.'});
+  const valueOptional=new Set(['REPETITION','FREQUENCY','PERSONAL_INFO','EXCESSIVE_CAPS','ADVERTISING']);
+  for(const [index,condition] of value.conditions.entries()) if(condition.enabled&&!valueOptional.has(condition.conditionType)&&condition.normalizedValue.trim()==='') context.addIssue({code:'custom',path:['conditions',index,'normalizedValue'],message:'Esta condición requiere un valor concreto.'});
+  for(const [index,condition] of value.conditions.entries()) if(condition.conditionType==='SAFE_REGEX'&&!LocalModerationEngine.validateSafePattern(condition.normalizedValue)) context.addIssue({code:'custom',path:['conditions',index,'normalizedValue'],message:'El patrón avanzado no es seguro.'});
+});
+const moderationTermSchema=z.object({ruleId:z.number().int().positive().nullable(),term:z.string().trim().min(1).max(200),category:z.string().trim().min(1).max(80),severity:z.enum(['INFORMATIVA','LEVE','MEDIA','ALTA','CRITICA']),matchMode:z.enum(['WHOLE_WORD','EXACT_PHRASE']),score:z.number().int().min(0).max(20),enabled:z.boolean()}).strict();
+const moderationImportSchema=z.object({rules:z.array(moderationRuleSchema).max(200),terms:z.array(moderationTermSchema).max(1000),settings:moderationSettingsSchema.optional(),confirmed:z.literal(true)}).strict();
 
 const maintenanceBaseSchema = z
   .object({
@@ -504,6 +587,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
   const manualAutomaticSendGate = new Map<string, number>();
   const manualPollSendGate = new Map<string, number>();
   const moduleVisibility = new AssistantModuleVisibilityService();
+  const groupModeration = new GroupModerationService(context.database);
 
   await app.register(cookie);
   await app.register(formbody);
@@ -1103,11 +1187,21 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     const profile = context.database.getBotProfile(botId);
     const provider = context.aiProviderFactory?.forBot(botId);
     const period = localPeriod(new Date(), profile.timezone);
+    const queue = context.multiBotManager?.aiQueue(botId)?.snapshot() ?? {
+      processing: 0,
+      waiting: 0,
+      settings: context.database.getAIQueueSettings(botId),
+      metrics: context.database.getAIQueueMetrics(botId, period.date),
+      providerHealth: context.database.getAIProviderQueueHealth(botId),
+    };
+    if (provider?.isConfigured() !== true) queue.providerHealth = { ...queue.providerHealth, state: 'NOT_CONFIGURED' };
     return {
+      developmentMode: context.developmentMode,
       settings: context.database.getAISettings(profile.id),
       status: context.database.getAIProviderStatus(profile.id, provider?.isConfigured() ?? false, provider?.getModelInformation().model ?? 'disabled'),
       usage: context.database.getAIUsageSummary(profile.id, period.date, period.month),
       operationalMetrics: context.database.getBotOperationalMetrics(botId),
+      queue,
       recentEvents: context.database.listRecentAIUsageEvents(profile.id),
       credential: {
         mode: context.database.getBotEncryptedCredential(botId).mode,
@@ -1115,6 +1209,196 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         encryptionAvailable: context.secretVault?.isConfigured() ?? false,
       },
     };
+  });
+
+  app.patch(
+    '/api/bots/:botId/ai/queue-settings',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request) => {
+      const botId = parseBotId(request.params);
+      const settings = context.database.saveAIQueueSettings(botId, aiQueueSettingsSchema.parse(request.body));
+      audit(context, 'ai_queue_settings_update', botId, 'ok', botId);
+      return { settings };
+    },
+  );
+
+  app.post(
+    '/api/bots/:botId/ai/queue-settings/recommended',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request) => {
+      const botId = parseBotId(request.params);
+      const current = context.database.getAIQueueSettings(botId);
+      const settings = context.database.saveAIQueueSettings(botId, {
+        ...current, maxConcurrent: 3, maxQueueSize: 20, maxQueueWaitSeconds: 60,
+        providerTimeoutSeconds: 25, maxRetries: 2, initialRetryDelaySeconds: 2,
+        maximumRetryDelaySeconds: 15, waitNoticeSeconds: 5, userCooldownSeconds: 10,
+        duplicateWindowSeconds: 15, singleFlightWindowSeconds: 60,
+        outboundMessageIntervalMs: 1000, suggestedRetrySeconds: 60,
+      });
+      audit(context, 'ai_queue_settings_restore_recommended', botId, 'ok', botId);
+      return { settings };
+    },
+  );
+
+  app.post(
+    '/api/bots/:botId/ai/simulate-queue',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request, reply) => {
+      if (!context.developmentMode) return reply.code(404).send({ error: 'Operación no disponible.' });
+      const botId = parseBotId(request.params);
+      const input = aiQueueSimulationSchema.parse(request.body);
+      const settings = context.database.getAIQueueSettings(botId);
+      const unique = input.scenario === 'repeated' ? 1 : input.requests;
+      const processing = Math.min(unique, settings.maxConcurrent);
+      const waiting = Math.min(Math.max(0, unique - processing), settings.maxQueueSize);
+      const rejected = Math.max(0, unique - processing - waiting);
+      return {
+        simulated: true, requests: input.requests, processing, waiting, rejected,
+        coalesced: input.scenario === 'repeated' ? Math.max(0, input.requests - 1) : 0,
+        providerError: input.scenario === 'normal' || input.scenario === 'repeated' ? null
+          : input.scenario === 'timeout' ? 'AI_TIMEOUT' : 'AI_PROVIDER_RATE_LIMITED',
+      };
+    },
+  );
+
+  app.get('/api/bots/:botId/moderation', { preHandler: requireSession(sessions) }, async (request) => {
+    const botId=parseBotId(request.params); const cases=context.database.listModerationCases(botId);
+    const groups=context.database.listBotGroups(botId,(identifier)=>context.anonymizer.identifier(identifier));
+    const profiles=context.database.listGroupModerationProfiles(botId);
+    return {settings:context.database.getModerationSettings(botId),cases,groups:groups.filter((group)=>group.active&&!group.blocked).map((group)=>{const profile=profiles.find((item)=>item.groupHash===group.groupHash)??context.database.getGroupModerationProfile(botId,group.groupHash);return {groupHash:group.groupHash,name:group.name,active:true,enabled:profile.enabled,analysisStatus:profile.analysisStatus,testStatus:profile.testStatus};}),metrics:context.database.getModerationMetrics(botId),
+      summary:{protectedGroups:profiles.filter((profile)=>profile.enabled&&profile.analysisStatus==='ACTIVE').length,pendingCases:cases.filter((item)=>item.status==='PENDING').length,
+        lastEvent:cases[0]?.createdAt??null,aiConsumption:'0 tokens durante la moderación diaria.'},
+      administrators:context.database.listAdministrators().map((identifier)=>({identifier,hash:context.anonymizer.identifier(identifier),label:identifier.replace(/@(?:c|lid)\.us$/u,'')})),
+      safety:{automaticAIReviewEnabled:false,manualAIReviewEnabled:false,automaticBanEnabled:false,automaticDeletionEnabled:false},
+    };
+  });
+
+  app.get('/api/bots/:botId/moderation/groups/:groupHash',{preHandler:requireSession(sessions)},async(request,reply)=>{
+    const botId=parseBotId(request.params);const groupHash=z.object({groupHash:z.string().length(20)}).parse(request.params).groupHash;
+    const group=context.database.listBotGroups(botId,(identifier)=>context.anonymizer.identifier(identifier)).find((item)=>item.groupHash===groupHash&&item.active&&!item.blocked);
+    if(group===undefined)return reply.code(404).send({error:'Grupo no disponible.'});
+    const profile=context.database.getGroupModerationProfile(botId,groupHash);const tests=context.database.listGroupModerationTests(botId,groupHash,profile.rulesHash);
+    return {group:{groupHash,name:group.name},profile:{...profile,compiled:undefined},tests,recipientHashes:context.database.listGroupModerationRecipients(botId,groupHash).map((item)=>item.administratorHash),
+      progress:{rulesSaved:profile.rulesText.length>=20,analyzed:profile.compiled!==null&&!['DRAFT','OUTDATED','ANALYSIS_FAILED'].includes(profile.analysisStatus),automaticTestsPassed:tests.some((item)=>item.testType==='AUTOMATIC')&&tests.filter((item)=>item.testType==='AUTOMATIC').every((item)=>item.passed===1),manualAllowedPassed:tests.some((item)=>item.testType==='MANUAL_ALLOWED'&&item.passed===1),manualWarningPassed:tests.some((item)=>item.testType==='MANUAL_WARNING'&&item.passed===1),ready:profile.testStatus==='APPROVED'}};
+  });
+
+  app.patch('/api/bots/:botId/moderation/groups/:groupHash/draft',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request,reply)=>{
+    const botId=parseBotId(request.params);const groupHash=z.object({groupHash:z.string().length(20)}).parse(request.params).groupHash;
+    const {rulesText}=z.object({rulesText:z.string().trim().min(20).max(20_000)}).strict().parse(request.body);
+    if(!context.database.listBotGroups(botId,(identifier)=>context.anonymizer.identifier(identifier)).some((group)=>group.groupHash===groupHash&&group.active&&!group.blocked))return reply.code(404).send({error:'Grupo no disponible.'});
+    const previous=context.database.getGroupModerationProfile(botId,groupHash);const profile=groupModeration.saveDraft(botId,groupHash,rulesText);context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_RULES_DRAFT_SAVED',groupHash,result:'disabled'});if(previous.rulesHash!==''&&previous.rulesHash!==profile.rulesHash)context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_RULES_OUTDATED',groupHash,result:'disabled'});return {profile:{...profile,compiled:undefined}};
+  });
+
+  app.post('/api/bots/:botId/moderation/groups/:groupHash/analyze',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request,reply)=>{
+    const botId=parseBotId(request.params);const groupHash=z.object({groupHash:z.string().length(20)}).parse(request.params).groupHash;const provider=context.aiProviderFactory?.forBot(botId);
+    if(provider===undefined)return reply.code(503).send({error:'El proveedor de IA no está disponible.',code:'AI_NOT_CONFIGURED'});
+    context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_RULES_ANALYSIS_STARTED',groupHash,result:'started'});
+    try{const result=await groupModeration.analyze(botId,groupHash,provider);context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_RULES_ANALYSIS_COMPLETED',groupHash,result:result.reused?'reused':result.profile.testStatus,itemCount:result.automaticTests.length});return {...result,profile:{...result.profile,compiled:undefined}};}
+    catch(error){context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_RULES_ANALYSIS_FAILED',groupHash,result:'failed',errorCode:provider.classifyProviderError(error)});context.logger.error({operation:'GROUP_MODERATION_RULES_ANALYSIS_FAILED',botId,groupHash,errorCode:provider.classifyProviderError(error)},'No fue posible preparar la moderación del grupo');return reply.code(422).send({error:'No fue posible preparar una configuración segura. Revisa el texto e inténtalo nuevamente.',code:'MODERATION_ANALYSIS_FAILED'});}
+  });
+
+  app.post('/api/bots/:botId/moderation/groups/:groupHash/test',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request)=>{
+    const botId=parseBotId(request.params);const groupHash=z.object({groupHash:z.string().length(20)}).parse(request.params).groupHash;const input=z.object({text:z.string().min(1).max(4000),expected:z.enum(['ALLOW','WARNING'])}).strict().parse(request.body);
+    context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_TEST_STARTED',groupHash,result:'started'});const result=groupModeration.test(botId,groupHash,input.text,input.expected);context.database.recordTechnicalEvent({botId,eventType:result.passed?'GROUP_MODERATION_TEST_PASSED':'GROUP_MODERATION_TEST_FAILED',groupHash,result:result.passed?'passed':'failed'});return {actual:result.actual,passed:result.passed,categories:result.result.categories,profile:{...result.profile,compiled:undefined},notice:'El texto no fue guardado y no se utilizó IA.'};
+  });
+
+  app.patch('/api/bots/:botId/moderation/groups/:groupHash/activation',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request,reply)=>{
+    const botId=parseBotId(request.params);const groupHash=z.object({groupHash:z.string().length(20)}).parse(request.params).groupHash;const enabled=z.object({enabled:z.boolean()}).strict().parse(request.body).enabled;
+    if(enabled&&context.database.listGroupModerationRecipients(botId,groupHash).length===0)return reply.code(409).send({error:'Selecciona al menos un administrador para los avisos privados.',code:'MODERATION_ADMIN_REQUIRED'});
+    try{const profile=context.database.setGroupModerationEnabled(botId,groupHash,enabled);context.database.recordTechnicalEvent({botId,eventType:enabled?'GROUP_MODERATION_ENABLED':'GROUP_MODERATION_DISABLED',groupHash,result:'updated'});return {profile:{...profile,compiled:undefined}};}catch{return reply.code(409).send({error:'Completa y aprueba las pruebas antes de activar la moderación.',code:'MODERATION_TESTS_REQUIRED'});}
+  });
+
+  app.patch('/api/bots/:botId/moderation/groups/:groupHash/administrators',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request,reply)=>{
+    const botId=parseBotId(request.params);const groupHash=z.object({groupHash:z.string().length(20)}).parse(request.params).groupHash;const identifiers=z.object({identifiers:z.array(z.string().min(5).max(100)).max(20)}).strict().parse(request.body).identifiers;
+    if(context.secretVault?.isConfigured()!==true)return reply.code(409).send({error:'El cifrado local no está disponible.'});const available=new Set(context.database.listAdministrators());
+    if(identifiers.some((identifier)=>!available.has(identifier)))return reply.code(400).send({error:'Selecciona solamente administradores configurados.'});
+    const recipients=identifiers.map((identifier)=>{const administratorHash=context.anonymizer.identifier(identifier);return {administratorHash,encryptedIdentifier:context.secretVault?.encrypt(identifier,`moderation-recipient:${botId}:${groupHash}:${administratorHash}`).encrypted as string};});
+    context.database.replaceGroupModerationRecipients(botId,groupHash,recipients);return {saved:true,recipientHashes:recipients.map((item)=>item.administratorHash)};
+  });
+
+  app.patch('/api/bots/:botId/moderation/settings',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request)=>{
+    const botId=parseBotId(request.params); const input=moderationSettingsSchema.parse(request.body);
+    const previous=context.database.getModerationSettings(botId); const settings=context.database.saveModerationSettings(botId,input);
+    context.database.recordTechnicalEvent({botId,eventType:settings.enabled?'MODERATION_ENABLED':'MODERATION_DISABLED',result:'updated'});
+    audit(context,previous.enabled===settings.enabled?'moderation_settings_update':settings.enabled?'moderation_enable':'moderation_disable',botId,'ok',botId);
+    return {settings};
+  });
+
+  app.post('/api/bots/:botId/moderation/rules',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request)=>{
+    const botId=parseBotId(request.params); const input=moderationRuleSchema.parse(request.body);
+    const rule=context.database.createModerationRule(botId,sanitizeModerationRule(input));
+    context.database.recordTechnicalEvent({botId,eventType:'MODERATION_RULE_CREATED',result:rule.enabled?'enabled':'draft',itemCount:rule.conditions.length});
+    audit(context,'moderation_rule_create',String(rule.id),'ok',botId); return {rule};
+  });
+
+  app.put('/api/bots/:botId/moderation/rules/:ruleId',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request)=>{
+    const botId=parseBotId(request.params); const ruleId=z.object({ruleId:z.coerce.number().int().positive()}).parse(request.params).ruleId;
+    const rule=context.database.updateModerationRule(botId,ruleId,sanitizeModerationRule(moderationRuleSchema.parse(request.body)));
+    context.database.recordTechnicalEvent({botId,eventType:rule.enabled?'MODERATION_RULE_UPDATED':'MODERATION_RULE_DISABLED',result:'updated'});
+    audit(context,'moderation_rule_update',String(ruleId),'ok',botId); return {rule};
+  });
+
+  app.delete('/api/bots/:botId/moderation/rules/:ruleId',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request,reply)=>{
+    const botId=parseBotId(request.params); const ruleId=z.object({ruleId:z.coerce.number().int().positive()}).parse(request.params).ruleId;
+    if(!context.database.deleteModerationRule(botId,ruleId)) return reply.code(404).send({error:'Regla no encontrada.'});
+    context.database.recordTechnicalEvent({botId,eventType:'MODERATION_RULE_DELETED',result:'deleted'}); audit(context,'moderation_rule_delete',String(ruleId),'ok',botId); return {deleted:true};
+  });
+
+  app.post('/api/bots/:botId/moderation/terms',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request)=>{
+    const botId=parseBotId(request.params); const input=moderationTermSchema.parse(request.body);
+    const term=context.database.createModerationTerm(botId,{...input,normalizedTerm:normalizeModerationConfigurationValue(input.term)});
+    context.database.recordTechnicalEvent({botId,eventType:'MODERATION_TERM_CREATED',result:'created'}); audit(context,'moderation_term_create',String(term.id),'ok',botId); return {term};
+  });
+
+  app.delete('/api/bots/:botId/moderation/terms/:termId',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request,reply)=>{
+    const botId=parseBotId(request.params); const termId=z.object({termId:z.coerce.number().int().positive()}).parse(request.params).termId;
+    if(!context.database.deleteModerationTerm(botId,termId)) return reply.code(404).send({error:'Término no encontrado.'});
+    context.database.recordTechnicalEvent({botId,eventType:'MODERATION_TERM_REMOVED',result:'deleted'}); return {deleted:true};
+  });
+
+  app.post('/api/bots/:botId/moderation/test',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request)=>{
+    const botId=parseBotId(request.params); const text=z.object({text:z.string().min(1).max(4000)}).strict().parse(request.body).text;
+    const service=context.multiBotManager?.moderationService(botId);
+    const result=service?.test(text)??new LocalModerationEngine().evaluate({assistantId:botId,groupHash:'simulation',participantHash:'simulation',messageHash:randomUUID(),text,isAdministrator:false,simulate:true},
+      context.database.getModerationSettings(botId),context.database.listModerationRules(botId,false),context.database.listModerationTerms(botId).map((item)=>({id:Number(item.id),term:String(item.term),normalizedTerm:String(item.normalizedTerm),category:String(item.category),severity:String(item.severity) as 'INFORMATIVA'|'LEVE'|'MEDIA'|'ALTA'|'CRITICA',matchMode:String(item.matchMode),score:Number(item.score),enabled:item.enabled===1})));
+    context.database.recordTechnicalEvent({botId,eventType:'MODERATION_RULE_TESTED',result:result.action,itemCount:result.matchedRules.length});
+    return {simulation:true,result,notice:'Simulación: el texto no fue guardado, no se enviaron mensajes y no se utilizó IA.'};
+  });
+
+  app.patch('/api/bots/:botId/moderation/cases/:caseId',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request,reply)=>{
+    const botId=parseBotId(request.params); const caseId=z.object({caseId:z.coerce.number().int().positive()}).parse(request.params).caseId;
+    const decision=z.object({decision:z.enum(['CONFIRMED','FALSE_POSITIVE','DISMISSED','RESOLVED'])}).strict().parse(request.body).decision;
+    const existing=context.database.listModerationCases(botId).find((item)=>item.id===caseId);
+    if(existing===undefined||!context.database.reviewModerationCase(botId,caseId,decision)) return reply.code(404).send({error:'Caso no encontrado.'});
+    if(decision==='FALSE_POSITIVE') { context.database.decrementModerationRecurrence(botId,String(existing.groupHash),String(existing.participantHash)); context.database.incrementModerationMetric(botId,'falsePositives'); }
+    if(decision==='CONFIRMED') context.database.incrementModerationMetric(botId,'confirmed');
+    const eventType=decision==='FALSE_POSITIVE'?'MODERATION_FALSE_POSITIVE':decision==='CONFIRMED'?'MODERATION_CASE_CONFIRMED':decision==='DISMISSED'?'MODERATION_CASE_DISMISSED':'MODERATION_CASE_RESOLVED';
+    context.database.recordTechnicalEvent({botId,eventType,result:decision});if(decision==='FALSE_POSITIVE')context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_FALSE_POSITIVE',groupHash:String(existing.groupHash),result:decision});if(decision==='RESOLVED')context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_CASE_RESOLVED',groupHash:String(existing.groupHash),result:decision});audit(context,'moderation_case_review',String(caseId),'ok',botId); return {reviewed:true,decision};
+  });
+
+  app.get('/api/bots/:botId/moderation/cases/:caseId/evidence',{preHandler:requireSession(sessions)},async(request,reply)=>{
+    const botId=parseBotId(request.params);const caseId=z.object({caseId:z.coerce.number().int().positive()}).parse(request.params).caseId;
+    const evidence=context.database.getModerationEvidence(botId,caseId);
+    if(evidence===null)return reply.code(404).send({error:'La evidencia no existe o ya expiró.'});
+    if(context.secretVault?.isConfigured()!==true)return reply.code(409).send({error:'El cifrado local no está disponible.'});
+    const decrypted=context.secretVault.decrypt(evidence.encrypted,`moderation:${botId}:${evidence.messageHash}`);
+    return {temporary:true,expiresAt:evidence.expiresAt,text:decrypted.replace(/^moderation-evidence:/u,'')};
+  });
+
+  app.get('/api/bots/:botId/moderation/export',{preHandler:requireSession(sessions)},async(request)=>{
+    const botId=parseBotId(request.params); context.database.recordTechnicalEvent({botId,eventType:'MODERATION_RULES_EXPORTED',result:'exported'});
+    return {version:1,assistantId:botId,settings:context.database.getModerationSettings(botId),
+      rules:context.database.listModerationRules(botId).map((rule)=>({ ...moderationRuleForTransfer(rule), enabled:false })),
+      terms:context.database.listModerationTerms(botId).map((term)=>({ruleId:null,term:String(term.term),category:String(term.category),severity:String(term.severity),
+        matchMode:String(term.matchMode),score:Number(term.score),enabled:false}))};
+  });
+
+  app.post('/api/bots/:botId/moderation/import',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request)=>{
+    const botId=parseBotId(request.params); const input=moderationImportSchema.parse(request.body); const existingNames=new Set(context.database.listModerationRules(botId).map((rule)=>rule.name.toLocaleLowerCase('es')));
+    let importedRules=0; for(const candidate of input.rules){if(existingNames.has(candidate.name.toLocaleLowerCase('es')))continue;context.database.createModerationRule(botId,sanitizeModerationRule({...candidate,enabled:false}));importedRules+=1;}
+    let importedTerms=0; for(const term of input.terms){try{context.database.createModerationTerm(botId,{...term,ruleId:null,normalizedTerm:normalizeModerationConfigurationValue(term.term),enabled:false});importedTerms+=1;}catch{continue;}}
+    context.database.recordTechnicalEvent({botId,eventType:'MODERATION_RULES_IMPORTED',result:'imported',itemCount:importedRules}); audit(context,'moderation_rules_import',botId,'ok',botId);
+    return {importedRules,importedTerms,activated:false};
   });
 
   app.get('/api/ai/global-limits', { preHandler: requireSession(sessions) }, async () => ({
@@ -2246,6 +2530,9 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
   app.get('/api/automatic-messages', { preHandler: requireSession(sessions) }, async (request) => {
     const botId = parseBotIdQuery(request.query, context);
     const groups = context.database.listBotGroups(botId, (identifier) => context.anonymizer.identifier(identifier));
+    const welcomeGroupSettings = new Map(
+      context.database.listWelcomeGroupSettings(botId).map((setting) => [setting.groupHash, setting]),
+    );
     const groupNames = new Map(groups.map((group) => [group.groupHash, group.name]));
     const seen = new Set<string>();
     const deliveries = context.database.listScheduledDeliveries(200, botId).filter((delivery) => {
@@ -2265,6 +2552,11 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         .map((group) => ({
           key: group.groupHash,
           name: group.name,
+          welcome: welcomeGroupSettings.get(group.groupHash) ?? {
+            enabled: true,
+            customTemplate: null,
+            inheritAssistantTemplate: true,
+          },
         })),
       lastDeliveries: deliveries.map((delivery) => ({
         taskType: delivery.taskType,
@@ -2337,6 +2629,43 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     },
   );
 
+  app.patch(
+    '/api/automatic-messages/welcome/groups',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request, reply) => {
+      const botId = parseBotIdQuery(request.query, context);
+      const input = welcomeGroupSettingSchema.parse(request.body);
+      const groupId = context.database.resolveBotGroupKey(
+        botId, input.groupKey, (identifier) => context.anonymizer.identifier(identifier),
+      );
+      if (groupId === null || !context.database.canBotSendToGroup(botId, groupId)) {
+        return reply.code(404).send({ error: 'El grupo autorizado no existe.' });
+      }
+      context.database.saveWelcomeGroupSetting(input.groupKey, {
+        enabled: input.enabled,
+        inheritAssistantTemplate: input.inheritAssistantTemplate,
+        customTemplate: input.customTemplate === null ? null : validateWelcomeTemplate(input.customTemplate),
+      }, botId);
+      audit(context, input.enabled ? 'GROUP_WELCOME_ENABLED' : 'GROUP_WELCOME_DISABLED', input.groupKey, 'ok', botId);
+      return { updated: true };
+    },
+  );
+
+  app.post(
+    '/api/automatic-messages/welcome/preview',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request, reply) => {
+      const botId = parseBotIdQuery(request.query, context);
+      const input = welcomePreviewSchema.parse(request.body);
+      const service = automaticMessagesFor(context, botId);
+      if (service === null) return reply.code(503).send({ error: 'La bienvenida no está disponible.' });
+      const groupId = input.groupKey === undefined ? undefined : context.database.resolveBotGroupKey(
+        botId, input.groupKey, (identifier) => context.anonymizer.identifier(identifier),
+      ) ?? undefined;
+      return { simulation: true, text: service.previewWelcome(input.fictitiousName, groupId) };
+    },
+  );
+
   app.post(
     '/api/automatic-messages/send/:kind',
     { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
@@ -2378,7 +2707,9 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       manualAutomaticSendGate.set(gateKey, now + 10_000);
       const taskType =
         kind === 'welcome' ? 'WELCOME' : kind === 'greeting' ? 'DAILY_GREETING' : 'DAILY_RULES';
-      const result = await automaticMessages.sendManual(taskType, groupId);
+      const result = taskType === 'WELCOME'
+        ? await automaticMessages.sendWelcomeTest(groupId, input.fictitiousName ?? 'María')
+        : await automaticMessages.sendManual(taskType, groupId);
       if (taskType === 'WELCOME' && result.status === 'SENT') {
         context.database.recordTechnicalEvent({
           botId,
@@ -2416,6 +2747,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       schedulerStarted: scheduler.isStarted(),
       nextScheduledAt: service.nextScheduledDescription(),
       templates,
+      hiddenTemplates: repository.hiddenTemplates(),
       overrides: repository.overrides(),
       authorizedGroups: groups
         .filter((group) => group.active && !group.blocked && group.botIsMember === true)
@@ -2513,13 +2845,98 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const services = pollServicesFor(context, botId);
       if (services === null) return pollServiceUnavailable(reply);
       const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
-      if (!services.repository.deleteTemplate(id)) {
+      const template = services.repository.template(id);
+      if (template === null) {
+        if (services.repository.hiddenTemplates().some((item) => item.id === id)) {
+          return reply.code(409).send({
+            error: 'Esta encuesta ya fue eliminada de este asistente.',
+            code: 'POLL_TEMPLATE_ALREADY_HIDDEN',
+          });
+        }
+        context.database.recordTechnicalEvent({
+          botId,
+          eventType: 'POLL_ASSISTANT_MISMATCH_REJECTED',
+          source: 'poll',
+          templateId: id,
+          result: 'rejected',
+        });
         return reply
           .code(404)
-          .send({ error: 'Plantilla no encontrada.', code: 'POLL_TEMPLATE_NOT_FOUND' });
+          .send({ error: 'No se pudo modificar la encuesta seleccionada.', code: 'POLL_TEMPLATE_NOT_FOUND' });
       }
+      if (template.isDefault) {
+        const session = getSession(request, sessions) as PanelSession;
+        const outcome = services.repository.hideDefaultTemplate(
+          id,
+          context.anonymizer.identifier(session.username),
+        );
+        if (!outcome.hidden) {
+          return reply.code(409).send({
+            error: 'Esta encuesta ya fue eliminada de este asistente.',
+            code: 'POLL_TEMPLATE_ALREADY_HIDDEN',
+          });
+        }
+        context.database.recordTechnicalEvent({
+          botId,
+          eventType: 'POLL_TEMPLATE_HIDDEN_FOR_ASSISTANT',
+          source: 'poll',
+          templateId: id,
+          result: 'hidden',
+        });
+        if (outcome.cancelledOverrides > 0) context.database.recordTechnicalEvent({
+          botId,
+          eventType: 'FUTURE_POLL_SCHEDULE_CANCELLED',
+          source: 'poll',
+          templateId: id,
+          result: 'cancelled',
+        });
+        audit(context, 'poll_template_hidden_for_assistant', String(id), 'ok', botId);
+        return outcome;
+      }
+      if (!services.repository.deleteTemplate(id)) {
+        return reply.code(404).send({
+          error: 'No se pudo modificar la encuesta seleccionada.',
+          code: 'POLL_TEMPLATE_NOT_FOUND',
+        });
+      }
+      context.database.recordTechnicalEvent({
+        botId,
+        eventType: 'CUSTOM_POLL_DELETED',
+        source: 'poll',
+        templateId: id,
+        result: 'deleted',
+      });
       audit(context, 'poll_template_delete', String(id), 'ok', botId);
       return { deleted: true };
+    },
+  );
+
+  app.post(
+    '/api/polls/templates/:id/restore',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request, reply) => {
+      const botId = parseBotIdQuery(request.query, context);
+      const services = pollServicesFor(context, botId);
+      if (services === null) return pollServiceUnavailable(reply);
+      const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
+      const session = getSession(request, sessions) as PanelSession;
+      const restored = services.repository.restoreDefaultTemplate(
+        id,
+        context.anonymizer.identifier(session.username),
+      );
+      if (!restored) return reply.code(409).send({
+        error: 'Esta encuesta ya se encuentra disponible.',
+        code: 'POLL_TEMPLATE_ALREADY_ACTIVE',
+      });
+      context.database.recordTechnicalEvent({
+        botId,
+        eventType: 'POLL_TEMPLATE_RESTORED_FOR_ASSISTANT',
+        source: 'poll',
+        templateId: id,
+        result: 'restored',
+      });
+      audit(context, 'poll_template_restored_for_assistant', String(id), 'ok', botId);
+      return { restored: true };
     },
   );
 
@@ -2530,7 +2947,14 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const botId = parseBotIdQuery(request.query, context);
       const services = pollServicesFor(context, botId);
       if (services === null) return pollServiceUnavailable(reply);
-      const restored = services.repository.restoreDefaults();
+      const session = getSession(request, sessions) as PanelSession;
+      const restored = services.repository.restoreDefaults(context.anonymizer.identifier(session.username));
+      context.database.recordTechnicalEvent({
+        botId,
+        eventType: 'ALL_DEFAULT_POLLS_RESTORED_FOR_ASSISTANT',
+        source: 'poll',
+        result: restored > 0 ? 'restored' : 'unchanged',
+      });
       audit(context, 'poll_templates_restore_defaults', 'default-polls', 'ok', botId);
       return { restored };
     },
@@ -2872,6 +3296,7 @@ function parseBotIdQuery(query: unknown, context: AdminServerContext): string {
 }
 
 function moduleForProtectedRoute(route: string): AssistantModuleKey | null {
+  if (route.includes('/moderation')) return 'moderation';
   if (route.startsWith('/api/polls')) return 'polls';
   if (route.startsWith('/api/automatic-messages')) return 'automatic-messages';
   if (route.includes('/groups')) return 'automatic-messages';
@@ -2881,6 +3306,34 @@ function moduleForProtectedRoute(route: string): AssistantModuleKey | null {
   if (route.includes('/requests')) return 'requests';
   if (route.includes('/menus')) return 'menus';
   return null;
+}
+
+function sanitizeModerationRule(input: z.infer<typeof moderationRuleSchema>): z.infer<typeof moderationRuleSchema> {
+  return {
+    ...input,
+    conditions: input.conditions.map((condition) => ({
+      ...condition,
+      normalizedValue: condition.conditionType === 'SAFE_REGEX'
+        ? condition.normalizedValue.trim()
+        : normalizeModerationConfigurationValue(condition.normalizedValue),
+    })),
+    exceptions: input.exceptions.map((exception) => ({
+      ...exception,
+      normalizedValue: normalizeModerationConfigurationValue(exception.normalizedValue),
+    })),
+  };
+}
+
+function moderationRuleForTransfer(rule: ReturnType<AppDatabase['listModerationRules']>[number]): z.infer<typeof moderationRuleSchema> {
+  return {
+    name:rule.name,description:rule.description,category:rule.category,severity:rule.severity,detectionType:rule.detectionType,
+    score:rule.score,reviewThreshold:rule.reviewThreshold,warningThreshold:rule.warningThreshold,
+    adminNotificationThreshold:rule.adminNotificationThreshold,enabled:false,appliesToAllGroups:rule.appliesToAllGroups,
+    conditions:rule.conditions.map((condition)=>({id:0,conditionType:condition.conditionType as z.infer<typeof moderationConditionSchema>['conditionType'],
+      operator:condition.operator,normalizedValue:condition.normalizedValue,configuration:condition.configuration as Record<string,string|number|boolean|null>,enabled:condition.enabled})),
+    exceptions:rule.exceptions.map((exception)=>({id:0,exceptionType:exception.exceptionType as z.infer<typeof moderationExceptionSchema>['exceptionType'],
+      normalizedValue:exception.normalizedValue,enabled:exception.enabled})),
+  };
 }
 
 function botIdForProtectedRoute(request: FastifyRequest, route: string): string | null {

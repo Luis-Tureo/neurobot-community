@@ -16,10 +16,21 @@ describe('interfaz de encuestas', () => {
       'La prueba manual funciona aunque la programación diaria esté desactivada.',
       'Programación por fecha',
       'Historial de envíos',
+      'Encuestas eliminadas de este asistente',
       'America/Santiago',
     ]) {
       expect(html).toContain(text);
     }
+  });
+
+  it('distingue predeterminadas, personalizadas y permite ocultar o restaurar por asistente', () => {
+    expect(script).toContain("remove.textContent = 'Eliminar'");
+    expect(script).toContain('poll-remove-button');
+    expect(script).toContain('Predeterminada');
+    expect(script).toContain('Personalizada');
+    expect(script).toContain('renderHiddenPollTemplates');
+    expect(script).toContain('/restore');
+    expect(script).toContain('No se eliminará de otros asistentes ni del catálogo general');
   });
 
   it('usa texto seguro, confirmación, POST, CSRF y grupos autorizados', () => {

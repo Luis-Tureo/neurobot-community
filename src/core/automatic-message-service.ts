@@ -6,6 +6,7 @@ import type {
   AutomaticTaskType,
   GroupJoinEvent,
   ScheduledDeliveryStatus,
+  WelcomeParticipant,
 } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import { isSupportedGroupId } from '../messaging/identifiers.js';
@@ -13,6 +14,11 @@ import type { MessagingClient } from '../messaging/messaging-client.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import { ExpiringSet } from './expiring-cache.js';
+import {
+  joinWelcomeNames,
+  renderWelcomeTemplate,
+  sanitizeWhatsAppDisplayName,
+} from './welcome-personalization.js';
 
 export type LocalDateTime = {
   date: string;
@@ -40,7 +46,7 @@ export type AutomaticMessageServiceOptions = {
 
 type WelcomeBatch = {
   id: string;
-  participantCount: number;
+  participants: Map<string, WelcomeParticipant>;
   timer: ReturnType<typeof setTimeout>;
 };
 
@@ -147,6 +153,7 @@ export class AutomaticMessageService {
     const groupHash = this.hash(event.groupId);
     this.database.updateWelcomeRuntime({ lastDetectedAt: now.toISOString() }, this.botId);
     this.record('GROUP_JOIN_EVENT_RECEIVED', 'WELCOME', groupHash, event.source ?? 'group_join', null, local, event.participantIds.length);
+    this.record('WELCOME_EVENT_RECEIVED', 'WELCOME', groupHash, event.source ?? 'group_join', null, local, event.participantIds.length);
     this.record('GROUP_JOIN_SUBTYPE_DETECTED', 'WELCOME', groupHash, event.subtype ?? 'unknown', null, local);
     if (event.subtype === 'linked_group_join') {
       this.record('COMMUNITY_LINKED_JOIN_DETECTED', 'WELCOME', groupHash, 'detected', null, local);
@@ -160,6 +167,11 @@ export class AutomaticMessageService {
     if (!configuration.welcome.enabled) {
       this.record('WELCOME_DISABLED', 'WELCOME', groupHash, 'skipped', 'WELCOME_DISABLED', local);
       this.record('WELCOME_SKIPPED', 'WELCOME', groupHash, 'skipped', 'WELCOME_DISABLED', local);
+      return;
+    }
+    const groupWelcome = this.database.getWelcomeGroupSetting(groupHash, this.botId);
+    if (groupWelcome?.enabled === false) {
+      this.record('WELCOME_SKIPPED', 'WELCOME', groupHash, 'skipped', 'GROUP_WELCOME_DISABLED', local);
       return;
     }
     if (!this.database.canSendToGroup(event.groupId)) {
@@ -193,7 +205,7 @@ export class AutomaticMessageService {
       return;
     }
 
-    const uniqueParticipants = new Set<string>();
+    const uniqueParticipants = new Map<string, string>();
     for (const participantId of event.participantIds) {
       if (this.client.isOwnIdentifier(participantId)) continue;
       const participantHash = this.anonymizer.fingerprint([
@@ -210,11 +222,12 @@ export class AutomaticMessageService {
         this.botId,
       );
       if (claimed && this.joinedParticipants.checkAndAdd(participantHash, now.getTime())) {
-        uniqueParticipants.add(participantHash);
+        uniqueParticipants.set(participantHash, participantId);
       }
     }
     if (uniqueParticipants.size === 0) {
       this.record('WELCOME_DUPLICATE_BLOCKED', 'WELCOME', groupHash, 'skipped', 'NO_NEW_PARTICIPANTS', local);
+      this.record('WELCOME_DUPLICATE_SUPPRESSED', 'WELCOME', groupHash, 'skipped', 'NO_NEW_PARTICIPANTS', local);
       return;
     }
     this.record(
@@ -226,6 +239,7 @@ export class AutomaticMessageService {
       local,
       uniqueParticipants.size,
     );
+    this.record('WELCOME_RECIPIENTS_RESOLVED', 'WELCOME', groupHash, 'resolved', null, local, uniqueParticipants.size);
 
     this.record(
       'GROUP_JOIN_DETECTED',
@@ -236,9 +250,35 @@ export class AutomaticMessageService {
       local,
       uniqueParticipants.size,
     );
+    const provided = new Map((event.participants ?? []).map((participant) => [participant.participantId, participant]));
+    const missingIds = [...uniqueParticipants.values()].filter((participantId) => !provided.has(participantId));
+    if (missingIds.length > 0 && this.client.resolveWelcomeParticipants !== undefined) {
+      for (const participant of await this.client.resolveWelcomeParticipants(missingIds)) {
+        provided.set(participant.participantId, participant);
+      }
+    }
+    const resolvedParticipants = new Map<string, WelcomeParticipant>();
+    for (const [participantHash, participantId] of uniqueParticipants) {
+      const participant = provided.get(participantId) ?? {
+        participantId,
+        displayName: null,
+        nameSource: 'FALLBACK' as const,
+        mentionId: participantId,
+      };
+      resolvedParticipants.set(participantHash, participant);
+      this.record(
+        participant.displayName === null ? 'WELCOME_PUBLIC_NAME_UNAVAILABLE' : 'WELCOME_PUBLIC_NAME_RESOLVED',
+        'WELCOME', groupHash, participant.nameSource.toLowerCase(), null, local,
+      );
+      if (participant.displayName !== null) {
+        this.record('WELCOME_NAME_SANITIZED', 'WELCOME', groupHash, 'sanitized', null, local);
+      }
+    }
     const existing = this.welcomeBatches.get(event.groupId);
     if (existing !== undefined) {
-      existing.participantCount += uniqueParticipants.size;
+      for (const [participantHash, participant] of resolvedParticipants) {
+        existing.participants.set(participantHash, participant);
+      }
       return;
     }
 
@@ -248,11 +288,11 @@ export class AutomaticMessageService {
         const details = serializeError(error, 'WELCOME_BATCH_FAILED', false);
         this.record('SCHEDULED_MESSAGE_FAILED', 'WELCOME', groupHash, 'failed', details.errorCode);
       });
-    }, configuration.welcome.batchWindowSeconds * 1000);
+    }, configuration.welcome.sendDelaySeconds * 1000);
     timer.unref?.();
     this.welcomeBatches.set(event.groupId, {
       id: batchId,
-      participantCount: uniqueParticipants.size,
+      participants: resolvedParticipants,
       timer,
     });
     this.record(
@@ -358,6 +398,38 @@ export class AutomaticMessageService {
     return this.sendAndRecord(deliveryId, taskType, groupId, text, local, now);
   }
 
+  public previewWelcome(fictitiousName: string, groupId?: string): string {
+    const configuration = this.database.getAutomaticMessageConfiguration(this.botId);
+    const selectedGroupId = groupId;
+    const safeName = sanitizeWhatsAppDisplayName(fictitiousName) ?? configuration.welcome.unknownNameFallback;
+    const destination = selectedGroupId ?? 'preview@g.us';
+    const groupSetting = selectedGroupId === undefined
+      ? null
+      : this.database.getWelcomeGroupSetting(this.hash(selectedGroupId), this.botId);
+    const template = groupSetting?.inheritAssistantTemplate === false && groupSetting.customTemplate !== null
+      ? groupSetting.customTemplate
+      : configuration.welcome.template;
+    return this.buildWelcomeMessages(destination, template, [{
+      participantId: '', displayName: safeName, nameSource: 'PUSHNAME', mentionId: '',
+    }], configuration)[0]?.text ?? '';
+  }
+
+  public async sendWelcomeTest(groupId: string, fictitiousName: string): Promise<AutomaticSendResult> {
+    const now = this.now();
+    const rejection = await this.getGroupRejection(groupId, now);
+    if (rejection !== null) return { status: 'SKIPPED', attempts: 0, errorCode: rejection };
+    try {
+      const text = `Mensaje de prueba\n\n${this.previewWelcome(fictitiousName, groupId)}`;
+      await this.client.sendMessage(groupId, text);
+      this.record('WELCOME_TEST_SENT', 'WELCOME', this.hash(groupId), 'sent');
+      return { status: 'SENT', attempts: 1, errorCode: null };
+    } catch (error) {
+      const details = serializeError(error, 'WELCOME_TEST_SEND_FAILED', false);
+      this.record('WELCOME_SEND_FAILED', 'WELCOME', this.hash(groupId), 'failed', details.errorCode);
+      return { status: 'FAILED', attempts: 1, errorCode: details.errorCode };
+    }
+  }
+
   private scheduleNextTick(delay: number): void {
     if (!this.started || this.schedulerTimer !== null) return;
     this.schedulerTimer = setTimeout(() => {
@@ -442,36 +514,89 @@ export class AutomaticMessageService {
     const now = this.now();
     const configuration = this.database.getAutomaticMessageConfiguration(this.botId);
     const local = toLocalDateTime(now, configuration.timezone);
+    const groupHash = this.hash(groupId);
+    const groupWelcome = this.database.getWelcomeGroupSetting(groupHash, this.botId);
     const rejection = configuration.welcome.enabled
-      ? await this.getGroupRejection(groupId, now)
+      ? groupWelcome?.enabled === false
+        ? 'GROUP_WELCOME_DISABLED'
+        : await this.getGroupRejection(groupId, now)
       : 'WELCOME_DISABLED';
     if (rejection !== null) {
       this.record(
         'WELCOME_SKIPPED',
         'WELCOME',
-        this.hash(groupId),
+        groupHash,
         'skipped',
         rejection,
         local,
-        batch.participantCount,
+        batch.participants.size,
       );
       return;
     }
-    const deliveryId = this.database.createWelcomeDelivery(
-      `welcome:${batch.id}`,
-      groupId,
-      local.date,
-      this.botId,
-    );
-    await this.sendAndRecord(
-      deliveryId,
-      'WELCOME',
-      groupId,
-      configuration.welcome.template,
-      local,
-      now,
-      batch.participantCount,
-    );
+    const template = groupWelcome?.inheritAssistantTemplate === false && groupWelcome.customTemplate !== null
+      ? groupWelcome.customTemplate
+      : configuration.welcome.template;
+    const participants = [...batch.participants.values()];
+    const messages = this.buildWelcomeMessages(groupId, template, participants, configuration);
+    this.record('WELCOME_TEMPLATE_RENDERED', 'WELCOME', groupHash, 'rendered', null, local, participants.length);
+    if (configuration.welcome.multipleJoinMode === 'GROUPED' && participants.length > 1) {
+      this.record('WELCOME_MULTIPLE_JOIN_GROUPED', 'WELCOME', groupHash, 'grouped', null, local, participants.length);
+    }
+    for (const [index, message] of messages.entries()) {
+      const deliveryId = this.database.createWelcomeDelivery(
+        `welcome:${batch.id}:${index}`,
+        groupId,
+        local.date,
+        this.botId,
+      );
+      await this.sendAndRecord(
+        deliveryId, 'WELCOME', groupId, message.text, local, now,
+        message.participantCount, message.mentionIds,
+      );
+    }
+  }
+
+  private buildWelcomeMessages(
+    groupId: string,
+    template: string,
+    participants: WelcomeParticipant[],
+    configuration: AutomaticMessageConfiguration,
+  ): Array<{ text: string; mentionIds: string[]; participantCount: number }> {
+    const settings = configuration.welcome;
+    if (participants.length > settings.maximumGroupedNames) {
+      return [{ text: '¡Bienvenidos/as a los nuevos integrantes! 👋', mentionIds: [], participantCount: participants.length }];
+    }
+    const fallback = sanitizeWhatsAppDisplayName(settings.unknownNameFallback) ?? 'nuevo/a integrante';
+    const effectiveTemplate = settings.includePublicName && !/\{(?:name|mention)\}/u.test(template)
+      ? `¡Bienvenido/a, {name}! 👋\n\n${template}`
+      : template;
+    const profile = this.database.getBotProfile(this.botId);
+    const linkedGroup = this.database.listBotGroups(this.botId, (identifier) => this.hash(identifier))
+      .find((group) => group.groupHash === this.hash(groupId));
+    const groupName = linkedGroup?.name ?? this.database.getGroupById(groupId)?.name ?? 'este grupo';
+    const render = (selected: WelcomeParticipant[]) => {
+      const names = selected.map((participant) =>
+        settings.includePublicName ? participant.displayName ?? fallback : fallback,
+      );
+      const mentions = names.map((name) => `@${name}`);
+      const text = renderWelcomeTemplate(effectiveTemplate, {
+        name: joinWelcomeNames(names),
+        mention: joinWelcomeNames(mentions),
+        communityName: profile.organizationName,
+        groupName,
+        assistantName: profile.botName,
+        botAlias: profile.activationAlias,
+      });
+      return {
+        text,
+        mentionIds: settings.enableRealMention
+          ? selected.map((participant) => participant.mentionId).filter(Boolean)
+          : [],
+        participantCount: selected.length,
+      };
+    };
+    if (settings.multipleJoinMode === 'INDIVIDUAL') return participants.map((participant) => render([participant]));
+    return [render(participants)];
   }
 
   private async sendAndRecord(
@@ -482,6 +607,7 @@ export class AutomaticMessageService {
     local: LocalDateTime,
     now: Date,
     itemCount?: number,
+    mentionIds: string[] = [],
   ): Promise<AutomaticSendResult> {
     let attempts = 0;
     let errorCode: string | null = null;
@@ -491,7 +617,18 @@ export class AutomaticMessageService {
         if (taskType === 'WELCOME') {
           this.record('WELCOME_SEND_STARTED', taskType, this.hash(groupId), 'attempted', null, local, itemCount, attempts);
         }
-        await this.client.sendMessage(groupId, text);
+        if (taskType === 'WELCOME' && mentionIds.length > 0 && this.client.sendMessageWithMentions !== undefined) {
+          try {
+            await this.client.sendMessageWithMentions(groupId, text, mentionIds);
+            this.record('WELCOME_REAL_MENTION_CREATED', taskType, this.hash(groupId), 'sent', null, local, mentionIds.length);
+          } catch (mentionError) {
+            const details = serializeError(mentionError, 'WELCOME_REAL_MENTION_FAILED', false);
+            this.record('WELCOME_REAL_MENTION_FAILED', taskType, this.hash(groupId), 'fallback', details.errorCode, local);
+            await this.client.sendMessage(groupId, text);
+          }
+        } else {
+          await this.client.sendMessage(groupId, text);
+        }
         this.database.updateScheduledDelivery(deliveryId, 'SENT', attempts, null);
         this.record(
           `${taskType}_SENT`,

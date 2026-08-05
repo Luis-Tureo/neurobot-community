@@ -21,11 +21,17 @@ export const DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION: AutomaticMessageConfigurat
   timezone: AUTOMATIC_MESSAGE_TIMEZONE,
   welcome: {
     enabled: false,
-    batchWindowSeconds: 30,
+    batchWindowSeconds: 5,
     groupSimultaneous: true,
     reconciliationIntervalSeconds: 120,
     template:
-      '¡Bienvenido/a a la Comunidad Neurodivergente – Autismo y TDAH! 👋\n\nEste es un espacio de respeto, apoyo e inclusión para personas neurodivergentes y quienes deseen aprender y compartir experiencias.\n\nPuedes participar cuando te sientas cómodo/a. Para consultar algo al asistente, escribe @neurobot seguido de tu pregunta.',
+      '¡Bienvenido/a, {name}! 👋\n\nTe damos la bienvenida a {communityName}. Este es un espacio de respeto, apoyo e inclusión.\n\nPuedes participar cuando te sientas cómodo/a. Para consultar al asistente, escribe {botAlias} seguido de tu pregunta.',
+    includePublicName: true,
+    enableRealMention: true,
+    unknownNameFallback: 'nuevo/a integrante',
+    multipleJoinMode: 'GROUPED',
+    maximumGroupedNames: 5,
+    sendDelaySeconds: 2,
   },
   dailyGreeting: {
     enabled: false,

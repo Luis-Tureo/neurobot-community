@@ -6,6 +6,7 @@ import type {
   GroupListSource,
   IncomingMessage,
   NativePoll,
+  WelcomeParticipant,
 } from '../domain/types.js';
 
 export type MessagingClientEvents = {
@@ -32,6 +33,8 @@ export interface MessagingClient {
   initialize(): Promise<void>;
   destroy(): Promise<void>;
   sendMessage(chatId: string, text: string, replyToMessageId?: string): Promise<void>;
+  sendMessageWithMentions?(chatId: string, text: string, mentionIds: string[]): Promise<void>;
+  resolveWelcomeParticipants?(participantIds: string[]): Promise<WelcomeParticipant[]>;
   sendMedia?(chatId: string, absolutePath: string, caption: string): Promise<void>;
   sendInteractiveMenu?(chatId: string, payload: InteractiveMenuPayload): Promise<boolean>;
   sendSelectableMenu?(chatId: string, payload: SelectableMenuPayload): Promise<boolean>;

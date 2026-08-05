@@ -60,10 +60,18 @@ export type GroupChangeEvent = {
 export type GroupJoinEvent = {
   groupId: string;
   participantIds: string[];
+  participants?: WelcomeParticipant[];
   eventId?: string;
   timestamp?: number;
   source?: 'group_join' | 'notification' | 'reconciliation';
   subtype?: 'add' | 'invite' | 'linked_group_join' | 'unknown';
+};
+
+export type WelcomeParticipant = {
+  participantId: string;
+  displayName: string | null;
+  nameSource: 'PUSHNAME' | 'FALLBACK';
+  mentionId: string;
 };
 
 export type AutomaticTaskType = 'DAILY_GREETING' | 'DAILY_RULES';
@@ -79,6 +87,12 @@ export type AutomaticMessageConfiguration = {
     groupSimultaneous: boolean;
     reconciliationIntervalSeconds: number;
     template: string;
+    includePublicName: boolean;
+    enableRealMention: boolean;
+    unknownNameFallback: string;
+    multipleJoinMode: 'INDIVIDUAL' | 'GROUPED';
+    maximumGroupedNames: number;
+    sendDelaySeconds: number;
   };
   dailyGreeting: {
     enabled: boolean;
@@ -203,6 +217,11 @@ export type PollTemplate = NativePoll & {
   updatedAt: string;
   lastUsedAt: string | null;
   disabledUntil: string | null;
+};
+
+export type HiddenPollTemplate = PollTemplate & {
+  hiddenAt: string;
+  removalReason: string | null;
 };
 
 export type PollConfiguration = {
@@ -388,6 +407,114 @@ export type AIUsageSummary = AIUsage & {
   failedRequests: number;
   dailyBudgetPercent: number;
   monthlyBudgetPercent: number;
+};
+
+export type AIQueueSettings = {
+  maxConcurrent: number;
+  maxQueueSize: number;
+  maxQueueWaitSeconds: number;
+  providerTimeoutSeconds: number;
+  maxRetries: number;
+  initialRetryDelaySeconds: number;
+  maximumRetryDelaySeconds: number;
+  waitNoticeSeconds: number;
+  userCooldownSeconds: number;
+  duplicateWindowSeconds: number;
+  singleFlightWindowSeconds: number;
+  outboundMessageIntervalMs: number;
+  suggestedRetrySeconds: number;
+};
+
+export type AIQueueMetrics = {
+  queuedCount: number;
+  processedCount: number;
+  completedCount: number;
+  failedCount: number;
+  expiredCount: number;
+  rejectedCount: number;
+  timeoutCount: number;
+  rateLimitCount: number;
+  retryCount: number;
+  coalescedCount: number;
+  duplicateSuppressedCount: number;
+  cacheBypassCount: number;
+  averageWaitMs: number;
+  maximumWaitMs: number;
+};
+
+export type AIProviderHealthState = 'AVAILABLE' | 'BUSY' | 'RATE_LIMITED' | 'DEGRADED' | 'UNAVAILABLE' | 'NOT_CONFIGURED';
+
+export type ModerationSeverity = 'INFORMATIVA' | 'LEVE' | 'MEDIA' | 'ALTA' | 'CRITICA';
+export type ModerationAction = 'NO_ACTION' | 'ADMIN_REVIEW' | 'WARNING' | 'WARNING_AND_NOTIFY';
+export type ModerationGroupMode = 'INHERIT' | 'ENABLED' | 'DISABLED';
+
+export type ModerationSettings = {
+  enabled: boolean;
+  defaultGroupMode: ModerationGroupMode;
+  reviewThreshold: number;
+  warningThreshold: number;
+  adminNotificationThreshold: number;
+  recurrenceWindowDays: number;
+  warningCooldownMinutes: number;
+  publicWarningLimit: number;
+  publicWarningWindowMinutes: number;
+  temporaryEvidenceEnabled: boolean;
+  temporaryEvidenceHours: number;
+  warningMode: 'GROUP_GENERAL' | 'GROUP_MENTION' | 'ADMIN_ONLY';
+  automaticAIReviewEnabled: false;
+  manualAIReviewEnabled: false;
+  automaticBanEnabled: false;
+  automaticDeletionEnabled: false;
+  firstWarningMessage: string;
+  secondWarningMessage: string;
+  repeatedWarningMessage: string;
+};
+
+export type ModerationCondition = {
+  id: number;
+  conditionType: string;
+  operator: 'ALL' | 'ANY' | 'EXCLUDE';
+  normalizedValue: string;
+  configuration: Record<string, unknown>;
+  enabled: boolean;
+};
+
+export type ModerationException = {
+  id: number;
+  exceptionType: string;
+  normalizedValue: string;
+  enabled: boolean;
+};
+
+export type ModerationRule = {
+  id: number;
+  assistantId: string;
+  name: string;
+  description: string;
+  category: string;
+  severity: ModerationSeverity;
+  detectionType: string;
+  score: number;
+  reviewThreshold: number;
+  warningThreshold: number;
+  adminNotificationThreshold: number;
+  enabled: boolean;
+  appliesToAllGroups: boolean;
+  conditions: ModerationCondition[];
+  exceptions: ModerationException[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ModerationResult = {
+  allowed: boolean;
+  matchedRules: Array<{ id: number; name: string; category: string; severity: ModerationSeverity; score: number }>;
+  categories: string[];
+  totalScore: number;
+  severity: ModerationSeverity;
+  action: ModerationAction;
+  exceptionsApplied: string[];
+  duplicate: boolean;
 };
 
 export type AIProviderStatus = {

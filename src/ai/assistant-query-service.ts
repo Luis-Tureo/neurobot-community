@@ -7,10 +7,15 @@ import {
   containsRestrictedClinicalAcronym,
   hasReviewedAcronymSource,
   isCommunityGreeting,
+  hashNormalizedQuestion,
+  knowledgeVersion,
+  normalizeQuestionForCache,
 } from './answer-cache-service.js';
+import { AIQueueError, AIRequestQueueService } from './ai-request-queue-service.js';
 
 export type AssistantQueryResult = {
   text: string;
+  coalesced?: boolean;
   code:
     | 'MENTION_PROMPT'
     | 'COMMUNITY_GREETING'
@@ -25,6 +30,11 @@ export type AssistantQueryResult = {
     | 'LIMIT_REACHED'
     | 'AI_RESPONSE'
     | 'AI_ERROR'
+    | 'AI_QUEUE_FULL'
+    | 'AI_QUEUE_EXPIRED'
+    | 'AI_QUEUE_WAIT'
+    | 'AI_USER_COOLDOWN'
+    | 'AI_CIRCUIT_OPEN'
     | 'AI_RESPONSE_REJECTED';
 };
 
@@ -36,6 +46,7 @@ export class AssistantQueryService {
     private readonly provider: AIProvider,
     private readonly logger: Logger,
     private readonly botId = 'neurobot',
+    private readonly queue = new AIRequestQueueService(database, logger, botId),
   ) {
     this.answerCache = new AnswerCacheService(database, logger, botId);
   }
@@ -45,10 +56,11 @@ export class AssistantQueryService {
     groupHash: string,
     userHash: string,
     now = new Date(),
+    onWaitNotice?: () => Promise<void>,
   ): Promise<AssistantQueryResult> {
     const profile = this.database.getBotProfile(this.botId);
     const question = extractQuestionAfterMention(message.body, profile.activationAlias, message.botMentionToken);
-    return this.answerQuestion(question, groupHash, userHash, now);
+    return this.answerQuestion(question, groupHash, userHash, now, onWaitNotice);
   }
 
   public async answerQuestion(
@@ -56,6 +68,7 @@ export class AssistantQueryService {
     groupHash: string,
     userHash: string,
     now = new Date(),
+    onWaitNotice?: () => Promise<void>,
   ): Promise<AssistantQueryResult> {
     const profile = this.database.getBotProfile(this.botId);
     const settings = this.database.getAISettings(profile.id);
@@ -70,6 +83,7 @@ export class AssistantQueryService {
     }
     const cached = this.answerCache.find(profile.id, question, now);
     if (cached !== null) {
+      this.database.recordAIQueueMetric(this.botId, now.toISOString().slice(0, 10), 'cacheBypassCount');
       this.log('AI_CALL_NOT_REQUIRED', cached.kind, groupHash, userHash);
       return {
         text: cached.answer.answer,
@@ -127,7 +141,13 @@ export class AssistantQueryService {
       this.log('AI_RESPONSE_REJECTED', 'INPUT_BUDGET_EXCEEDED', groupHash, userHash);
       return { text: profile.noInformationMessage, code: 'AI_RESPONSE_REJECTED' };
     }
-    const flight = await this.answerCache.singleFlight(question, async (): Promise<AssistantQueryResult> => {
+    try {
+      const flight = await this.queue.run({
+        flightKey: `${this.botId}:${knowledgeVersion(fragments)}:community-v1:${hashNormalizedQuestion(normalizeQuestionForCache(question))}`,
+        userKey: `${groupHash}:${userHash}`,
+        classifyError: (error) => this.provider.classifyProviderError(error),
+        ...(onWaitNotice === undefined ? {} : { onWaitNotice }),
+        operation: async (): Promise<AssistantQueryResult> => {
       const period = localPeriod(now, profile.timezone);
       const decision = this.database.reserveAIUsage({
         botId: this.botId,
@@ -154,17 +174,11 @@ export class AssistantQueryService {
           context,
           maximumOutputTokens: settings.responseMaxTokens,
           temperature: settings.temperature,
-          timeoutMs: settings.timeoutMs,
+          timeoutMs: this.database.getAIQueueSettings(this.botId).providerTimeoutSeconds * 1000,
         });
         const validated = validateGeneratedResponse(generated.text, settings);
         if (validated === null) {
-          this.database.completeAIUsageReservation(
-            decision.reservation.id,
-            { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-            'failed',
-            'AI_RESPONSE_REJECTED',
-            period.hour,
-          );
+          this.database.releaseAIUsageReservation(decision.reservation.id);
           this.log('AI_QUOTA_RELEASED', 'AI_RESPONSE_REJECTED', groupHash, userHash);
           this.log('AI_CALL_FAILED', 'AI_RESPONSE_REJECTED', groupHash, userHash);
           return { text: profile.noInformationMessage, code: 'AI_RESPONSE_REJECTED' };
@@ -176,25 +190,51 @@ export class AssistantQueryService {
           null,
           period.hour,
         );
+        this.log('AI_QUOTA_CONFIRMED', 'CONFIRMED', groupHash, userHash);
         this.log('AI_CALL_SUCCESS', 'SUCCESS', groupHash, userHash);
         this.answerCache.saveGenerated(question, validated, fragments);
         return { text: validated, code: 'AI_RESPONSE' };
       } catch (error) {
         const errorCode = this.provider.classifyProviderError(error);
-        this.database.completeAIUsageReservation(
-          decision.reservation.id,
-          { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-          'failed',
-          errorCode,
-          period.hour,
-        );
+        this.database.releaseAIUsageReservation(decision.reservation.id);
         this.log('AI_QUOTA_RELEASED', errorCode, groupHash, userHash);
         this.log('AI_CALL_FAILED', errorCode, groupHash, userHash);
-        return { text: profile.aiErrorMessage, code: 'AI_ERROR' };
+        throw error;
       }
-    });
-    if (flight.coalesced) this.log('AI_CALL_NOT_REQUIRED', 'CONCURRENT_QUERY', groupHash, userHash);
-    return flight.value;
+        },
+      });
+      if (flight.coalesced) {
+        this.log('CONCURRENT_QUERY_COALESCED', 'REUSED_IN_FLIGHT', groupHash, userHash);
+        this.log('AI_CALL_NOT_REQUIRED', 'CONCURRENT_QUERY', groupHash, userHash);
+      }
+      return flight.coalesced ? { ...flight.value, coalesced: true } : flight.value;
+    } catch (error) {
+      if (error instanceof AIQueueError) {
+        const retry = error.retryAfterSeconds;
+        if (error.code === 'AI_QUEUE_FULL') return {
+          text: this.botId === 'neurobot'
+            ? `Hay muchas consultas en este momento. Espera ${retry} segundos y vuelve a llamar a @neurobot.`
+            : `Estamos atendiendo varias consultas. Espera ${retry} segundos y vuelve a intentarlo.`,
+          code: 'AI_QUEUE_FULL',
+        };
+        if (error.code === 'AI_QUEUE_EXPIRED') return {
+          text: `No pude atender tu consulta a tiempo porque hay mucha actividad. Intenta nuevamente en ${retry} segundos.`,
+          code: 'AI_QUEUE_EXPIRED',
+        };
+        if (error.code === 'AI_USER_COOLDOWN') return {
+          text: 'Espera unos segundos antes de enviar otra pregunta nueva.', code: 'AI_USER_COOLDOWN',
+        };
+        if (error.code === 'AI_CIRCUIT_OPEN') return {
+          text: `La inteligencia artificial está temporalmente ocupada. Intenta nuevamente en ${retry} segundos.`,
+          code: 'AI_CIRCUIT_OPEN',
+        };
+      }
+      const providerCode = this.provider.classifyProviderError(error);
+      const text = providerCode === 'AI_PROVIDER_RATE_LIMITED'
+        ? 'Hay mucha actividad en el servicio de inteligencia artificial. Intenta nuevamente en unos minutos.'
+        : 'No pude consultar la inteligencia artificial en este momento. Intenta nuevamente en 1 minuto.';
+      return { text, code: 'AI_ERROR' };
+    }
   }
 
   private log(operation: string, result: string, groupHash: string, userHash: string): void {

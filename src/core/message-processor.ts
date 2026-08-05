@@ -11,6 +11,8 @@ import { normalizeText } from '../utils/text.js';
 import { ExpiringSet } from './expiring-cache.js';
 import { containsActivationAliasAtStart, detectBotActivation } from './bot-activation.js';
 import type { ConversationFlowService } from './conversation-flow-service.js';
+import type { OutboundMessageQueueService } from './outbound-message-queue-service.js';
+import type { ModerationService } from '../moderation/moderation-service.js';
 
 export type MessageProcessorOptions = {
   maxMessageLength: number;
@@ -32,6 +34,7 @@ export type ProcessResult =
 
 export class MessageProcessor {
   private readonly processedMessages = new ExpiringSet(10 * 60 * 1000);
+  private readonly waitNoticeGroups = new ExpiringSet(30_000);
 
   public constructor(
     private readonly database: AppDatabase,
@@ -43,6 +46,8 @@ export class MessageProcessor {
     private readonly options: MessageProcessorOptions,
     private readonly botId = 'neurobot',
     private readonly conversationFlow?: ConversationFlowService,
+    private readonly outboundQueue?: OutboundMessageQueueService,
+    private readonly moderationService?: ModerationService,
   ) {}
 
   public async process(message: IncomingMessage): Promise<ProcessResult> {
@@ -87,6 +92,14 @@ export class MessageProcessor {
       'Se verificó el estado del grupo vinculado',
     );
     if (!groupAuthorized) return 'unauthorized_group';
+
+    if (this.moderationService !== undefined) {
+      const moderation = await this.moderationService.process(message, groupHash, userHash, messageHash);
+      if (moderation.blockNormal) {
+        this.logger.info({ operation:'MODERATION_NORMAL_RESPONSE_SUPPRESSED',reason:'CLEAR_LOCAL_MATCH',...context },'La moderación local evitó una respuesta normal');
+        return moderation.warningSent ? 'responded' : 'ignored';
+      }
+    }
 
     if (!this.processedMessages.checkAndAdd(message.id)) {
       this.logger.info(
@@ -168,7 +181,21 @@ export class MessageProcessor {
         );
         return duplicate ? 'duplicate' : 'rate_limited';
       }
-      const answer = await this.queryService.answerQuestion(activation.question, groupHash, userHash);
+      const answer = await this.queryService.answerQuestion(activation.question, groupHash, userHash, new Date(), async () => {
+        if (!this.waitNoticeGroups.checkAndAdd(groupHash)) return;
+        await this.safeSend(
+          message.chatId,
+          'Estoy atendiendo varias consultas. Las preguntas quedaron en espera; no es necesario repetirlas.',
+          context,
+        );
+      });
+      if (answer.coalesced) {
+        this.database.recordTechnicalEvent({
+          eventType: 'GROUP_DUPLICATE_RESPONSE_COALESCED', botId: this.botId,
+          groupHash, userHash, result: 'coalesced',
+        });
+        return 'responded';
+      }
       const sent = await this.safeSend(message.chatId, answer.text, context);
       this.database.recordTechnicalEvent({
         eventType: 'message_processed',
@@ -300,7 +327,21 @@ export class MessageProcessor {
       { operation: 'commandNotDetected', reason: 'FREE_TEXT_QUERY', ...context },
       'El mensaje continuará como una consulta de texto',
     );
-    const answer = await this.queryService.answer(effectiveMessage, groupHash, userHash);
+    const answer = await this.queryService.answer(effectiveMessage, groupHash, userHash, new Date(), async () => {
+      if (!this.waitNoticeGroups.checkAndAdd(groupHash)) return;
+      await this.safeSend(
+        message.chatId,
+        'Estoy atendiendo varias consultas. Las preguntas quedaron en espera; no es necesario repetirlas.',
+        context,
+      );
+    });
+    if (answer.coalesced) {
+      this.database.recordTechnicalEvent({
+        eventType: 'GROUP_DUPLICATE_RESPONSE_COALESCED', botId: this.botId,
+        groupHash, userHash, result: 'coalesced',
+      });
+      return 'responded';
+    }
     const sent = await this.safeSend(message.chatId, answer.text, context);
     if (sent) {
       this.logger.info({ operation: 'AI_RESPONSE_SENT', result: answer.code, ...context }, 'La respuesta fue enviada al grupo');
@@ -342,7 +383,8 @@ export class MessageProcessor {
   ): Promise<boolean> {
     this.logger.info({ operation: 'responseAttempted', botId: this.botId, target: 'group', ...context }, 'Se intentará enviar una respuesta al grupo');
     try {
-      await this.client.sendMessage(groupId, text);
+      if (this.outboundQueue !== undefined) await this.outboundQueue.send(groupId, text);
+      else await this.client.sendMessage(groupId, text);
       this.logger.info({ operation: 'responseSent', botId: this.botId, target: 'group', ...context }, 'La respuesta fue enviada');
       return true;
     } catch (error) {

@@ -1,5 +1,13 @@
 # Módulos por tipo de asistente
 
+## Moderación y reglas
+
+- `COMMUNITY_GROUPS`: visible dentro de la administración del asistente.
+- `BUSINESS_PRIVATE`: oculto; el canal privado comercial no se modera con reglas grupales.
+- `BUSINESS_MIXED`: visible únicamente como configuración del canal grupal.
+
+La moderación es local, está aislada por asistente, nace desactivada y nunca expulsa ni elimina mensajes automáticamente. Consulte [Moderación local por reglas](MODERACION_LOCAL_POR_REGLAS.md).
+
 | Tipo | Canales | Módulos visibles | Módulos ocultos o no iniciados |
 |---|---|---|---|
 | `COMMUNITY_GROUPS` | Grupos | Resumen, WhatsApp, perfil, conocimiento, respuestas, IA, automatizaciones, encuestas, estadísticas y mantenimiento | Catálogo, imágenes, menú comercial, horarios comerciales y solicitudes humanas |

@@ -25,6 +25,18 @@ export class PollRepository {
     return this.database.listPollTemplates(this.botId);
   }
 
+  public hiddenTemplates() {
+    return this.database.listHiddenPollTemplates(this.botId);
+  }
+
+  public hideDefaultTemplate(id: number, safeActorHash: string, reason: string | null = null) {
+    return this.database.hidePollTemplateForAssistant(this.botId, id, safeActorHash, reason);
+  }
+
+  public restoreDefaultTemplate(id: number, safeActorHash: string): boolean {
+    return this.database.restorePollTemplateForAssistant(this.botId, id, safeActorHash);
+  }
+
   public template(id: number): PollTemplate | null {
     return this.database.getPollTemplate(id, this.botId);
   }
@@ -37,8 +49,8 @@ export class PollRepository {
     return this.database.deletePollTemplate(id, this.botId);
   }
 
-  public restoreDefaults(): number {
-    return this.database.restoreDefaultPollTemplates(this.botId);
+  public restoreDefaults(safeActorHash = 'system'): number {
+    return this.database.restoreDefaultPollTemplates(this.botId, safeActorHash);
   }
 
   public override(localDate: string): PollDateOverride | null {

@@ -7,11 +7,13 @@ import type {
   MessageSendOptions,
 } from 'whatsapp-web.js';
 import { ExpiringSet } from '../core/expiring-cache.js';
+import { resolvePublicWhatsAppName } from '../core/welcome-personalization.js';
 import type {
   DetectedGroup,
   GroupListSource,
   IncomingMessage,
   NativePoll,
+  WelcomeParticipant,
 } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import type { Anonymizer } from '../security/anonymizer.js';
@@ -117,6 +119,33 @@ export class WhatsAppWebAdapter implements MessagingClient {
     const options: MessageSendOptions =
       replyToMessageId === undefined ? {} : { quotedMessageId: replyToMessageId };
     await client.sendMessage(chatId, text, options);
+  }
+
+  public async sendMessageWithMentions(chatId: string, text: string, mentionIds: string[]): Promise<void> {
+    const client = this.requireReadyClient();
+    const mentions = [...new Set(mentionIds.filter(isParticipantId))];
+    await client.sendMessage(chatId, text, { mentions });
+  }
+
+  public async resolveWelcomeParticipants(participantIds: string[]): Promise<WelcomeParticipant[]> {
+    const client = this.requireReadyClient();
+    const resolved: WelcomeParticipant[] = [];
+    for (const participantId of [...new Set(participantIds.filter(isParticipantId))]) {
+      try {
+        const contact = await client.getContactById(participantId);
+        const participant = resolvePublicWhatsAppName(contact);
+        if (participant !== null) resolved.push(participant);
+      } catch (error) {
+        this.logger.warn(
+          {
+            ...serializeError(error, 'WELCOME_PUBLIC_NAME_UNAVAILABLE', false),
+            operation: 'WELCOME_PUBLIC_NAME_UNAVAILABLE',
+          },
+          'No fue posible resolver un nombre público de WhatsApp',
+        );
+      }
+    }
+    return resolved;
   }
 
   public async sendMedia(chatId: string, absolutePath: string, caption: string): Promise<void> {
@@ -584,12 +613,35 @@ export class WhatsAppWebAdapter implements MessagingClient {
         );
         return;
       }
-      const participantIds = Array.isArray(notification.recipientIds)
+      const fallbackParticipantIds = Array.isArray(notification.recipientIds)
         ? notification.recipientIds
             .map((identifier) => getSerializedId(identifier))
             .filter(isParticipantId)
             .filter((identifier) => !this.isOwnIdentifier(identifier))
         : [];
+      let participants: WelcomeParticipant[] = [];
+      try {
+        const contacts = await notification.getRecipients();
+        participants = contacts
+          .map((contact) => resolvePublicWhatsAppName(contact))
+          .filter((participant): participant is WelcomeParticipant => participant !== null)
+          .filter((participant) => !this.isOwnIdentifier(participant.participantId));
+      } catch (error) {
+        this.logger.warn(
+          {
+            ...serializeError(error, 'WELCOME_RECIPIENTS_RESOLUTION_FAILED', false),
+            operation: 'WELCOME_RECIPIENTS_RESOLUTION_FAILED',
+            groupHash: this.hash(groupId),
+          },
+          'Se utilizará la resolución alternativa de integrantes nuevos',
+        );
+      }
+      const participantIds = participants.length > 0
+        ? participants.map((participant) => participant.participantId)
+        : fallbackParticipantIds;
+      if (participants.length === 0 && participantIds.length > 0) {
+        participants = await this.resolveWelcomeParticipants(participantIds);
+      }
       const subtype = normalizeGroupJoinSubtype(notification.type);
       this.logger.info(
         {
@@ -608,6 +660,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
         await this.events.onGroupJoin({
           groupId,
           participantIds,
+          ...(participants.length === 0 ? {} : { participants }),
           ...(eventId === null ? {} : { eventId }),
           ...(Number.isFinite(notification.timestamp) ? { timestamp: notification.timestamp } : {}),
           source: 'group_join',

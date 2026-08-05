@@ -60,6 +60,7 @@
               <option value="ai" data-bot-only>Inteligencia artificial</option>
               <option value="automatic-messages" data-bot-only data-module="automatic-messages">Automatizaciones</option>
               <option value="polls" data-bot-only data-module="polls">Encuestas</option>
+              <option value="moderation" data-bot-only data-module="moderation">Moderación y reglas</option>
               <option value="requests" data-bot-only data-module="requests">Solicitudes humanas</option>
               <option value="statistics" data-bot-only>Estadísticas</option>
               <option value="maintenance" data-bot-only>Mantenimiento</option>
@@ -92,6 +93,7 @@
                 <button data-section="ai" class="bot-only hidden">Inteligencia artificial</button>
                 <button data-section="automatic-messages" data-module="automatic-messages" class="bot-only hidden">Automatizaciones</button>
                 <button data-section="polls" data-module="polls" class="bot-only hidden">Encuestas</button>
+                <button data-section="moderation" data-module="moderation" class="bot-only hidden">Moderación y reglas</button>
                 <button data-section="requests" data-module="requests" class="bot-only hidden">Solicitudes humanas</button>
                 <button data-section="statistics" class="bot-only hidden">Estadísticas</button>
                 <button data-section="maintenance" class="bot-only hidden">Mantenimiento</button>
@@ -553,6 +555,41 @@
           <div id="ai-status-cards" class="status-grid"></div>
           <p class="info-callout">Solo las llamadas reales y exitosas a Groq descuentan el límite de IA.</p>
           <div id="operational-metrics-cards" class="status-grid"></div>
+          <article class="card inset">
+            <h3>Capacidad y disponibilidad</h3>
+            <div id="ai-queue-cards" class="status-grid"></div>
+            <form id="ai-queue-settings-form">
+              <div class="form-row limits-grid">
+                <label>Llamadas simultáneas<input name="maxConcurrent" type="number" min="1" max="10" required /></label>
+                <label>Solicitudes esperando<input name="maxQueueSize" type="number" min="1" max="100" required /></label>
+                <label>Espera máxima en cola (s)<input name="maxQueueWaitSeconds" type="number" min="5" max="300" required /></label>
+                <label>Timeout de Groq (s)<input name="providerTimeoutSeconds" type="number" min="5" max="60" required /></label>
+                <label>Reintentos<input name="maxRetries" type="number" min="0" max="5" required /></label>
+                <label>Espera inicial de reintento (s)<input name="initialRetryDelaySeconds" type="number" min="1" max="30" required /></label>
+                <label>Espera máxima de reintento (s)<input name="maximumRetryDelaySeconds" type="number" min="1" max="60" required /></label>
+                <label>Aviso de espera (s)<input name="waitNoticeSeconds" type="number" min="1" max="60" required /></label>
+                <label>Pausa por persona (s)<input name="userCooldownSeconds" type="number" min="0" max="300" required /></label>
+                <label>Ventana de duplicados (s)<input name="duplicateWindowSeconds" type="number" min="0" max="300" required /></label>
+                <label>Ventana single-flight (s)<input name="singleFlightWindowSeconds" type="number" min="1" max="300" required /></label>
+                <label>Intervalo entre mensajes (ms)<input name="outboundMessageIntervalMs" type="number" min="0" max="10000" required /></label>
+                <label>Reintento sugerido (s)<input name="suggestedRetrySeconds" type="number" min="5" max="600" required /></label>
+              </div>
+              <div class="actions">
+                <button type="submit">Guardar capacidad</button>
+                <button id="restore-ai-queue-recommended" class="secondary" type="button">Restaurar valores recomendados</button>
+              </div>
+            </form>
+          </article>
+          <article id="ai-queue-simulator" class="card inset hidden">
+            <h3>Probar cola de IA</h3>
+            <p class="muted">Simulación local: no llama a Groq ni envía mensajes a WhatsApp.</p>
+            <form id="ai-queue-simulator-form" class="inline-form">
+              <label>Consultas<input name="requests" type="number" min="1" max="30" value="10" required /></label>
+              <label>Escenario<select name="scenario"><option value="normal">Normal</option><option value="repeated">Preguntas repetidas</option><option value="rate_limited">Error 429</option><option value="timeout">Timeout</option></select></label>
+              <button type="submit">Probar cola de IA</button>
+            </form>
+            <div id="ai-queue-simulation-result" class="status-grid"></div>
+          </article>
           <form id="ai-credential-form" class="card inset">
             <h3>Clave de Groq</h3>
             <p class="muted">La clave nunca vuelve al navegador después de guardarla.</p>
@@ -753,6 +790,44 @@
           </form>
         </section>
 
+        <section id="section-moderation" class="panel-section hidden">
+          <div class="section-heading"><div><p class="eyebrow">Protección local por grupo</p><h2>Moderación y reglas</h2></div></div>
+          <p class="info-callout"><strong>Configuración guiada.</strong> La IA solo prepara las reglas cuando lo solicitas. Los mensajes diarios se revisan localmente, sin IA ni consumo de tokens.</p>
+          <div class="card inset moderation-workspace">
+            <label>Grupo que deseas configurar<select id="moderation-group-selector"></select></label>
+            <div id="moderation-progress" class="moderation-progress" aria-label="Progreso de configuración"></div>
+            <div id="moderation-group-status" class="info-callout"></div>
+          </div>
+          <div class="moderation-tabs" role="tablist" aria-label="Secciones de moderación">
+            <button type="button" data-moderation-tab="configuration">Configuración</button>
+            <button type="button" data-moderation-tab="group-rules">Reglas del grupo</button>
+            <button type="button" data-moderation-tab="tests">Pruebas</button>
+            <button type="button" data-moderation-tab="cases">Casos pendientes</button>
+            <button type="button" data-moderation-tab="history">Historial</button>
+          </div>
+          <div data-moderation-pane="configuration" class="card inset">
+            <h3>Configuración del grupo</h3>
+            <div id="moderation-simple-summary" class="status-grid"></div>
+            <label>Administradores que recibirán un aviso privado en una reincidencia<div id="moderation-admin-recipients" class="checkbox-stack"></div></label>
+            <div class="actions"><button id="moderation-save-admins" type="button" class="secondary">Guardar destinatarios</button><button id="moderation-toggle" type="button">Activar moderación</button></div>
+            <p class="muted">La primera detección genera una advertencia en el grupo. Una reincidencia genera otra advertencia, un caso en el panel y un aviso privado. Nunca se expulsa a personas ni se eliminan mensajes automáticamente.</p>
+          </div>
+          <div data-moderation-pane="group-rules" class="card inset hidden">
+            <h3>Reglas de este grupo</h3><p>Copia y pega aquí las normas completas de este grupo. La inteligencia artificial las analizará una sola vez para preparar una moderación local. Los mensajes del grupo no se enviarán posteriormente a la inteligencia artificial.</p>
+            <form id="moderation-rules-text-form"><label>Normas y situaciones que requieren advertencia<textarea name="rulesText" maxlength="20000" rows="14" required placeholder="Ejemplo: Tratar a todas las personas con respeto. No permitir insultos, amenazas, discriminación, publicidad repetida ni compartir datos personales."></textarea></label><div class="actions"><button type="submit">Guardar borrador</button><button id="moderation-discard-rules" type="button" class="secondary">Descartar cambios</button></div></form>
+            <div class="actions spacious-actions"><button id="moderation-analyze" type="button">Analizar y preparar moderación</button></div>
+            <div id="moderation-analysis-summary" class="preview"></div>
+          </div>
+          <div data-moderation-pane="tests" class="card inset hidden">
+            <h3>Pruebas obligatorias</h3><p class="info-callout">Los textos se procesan solo en memoria: no se guardan, no crean casos, no envían mensajes y no usan IA. Para una prueba real en WhatsApp, envía el mensaje desde otra cuenta. Los mensajes enviados por la misma cuenta conectada al bot son ignorados.</p>
+            <form id="moderation-allowed-test"><label>Mensaje que debe permitirse<textarea name="text" maxlength="4000" required></textarea></label><button type="submit">Probar mensaje permitido</button></form>
+            <form id="moderation-warning-test"><label>Mensaje que debe generar advertencia<textarea name="text" maxlength="4000" required></textarea></label><button type="submit">Probar advertencia</button></form>
+            <div id="moderation-test-result" class="preview"></div>
+          </div>
+          <div data-moderation-pane="cases" class="card inset hidden"><h3>Casos pendientes</h3><p class="muted">Toda decisión es humana.</p><div id="moderation-pending-cases" class="stack"></div></div>
+          <div data-moderation-pane="history" class="card inset hidden"><h3>Historial</h3><div id="moderation-history" class="stack"></div></div>
+        </section>
+
         <section id="section-automatic-messages" class="panel-section hidden">
           <div class="section-heading">
             <div>
@@ -766,6 +841,15 @@
             los silencios temporales.
           </p>
           <form id="automatic-messages-form">
+            <div class="card inset automatic-manual-group">
+              <label
+                >Grupo para los envíos manuales<select id="automatic-message-group" required></select>
+              </label>
+              <p class="muted">
+                Los botones solicitan confirmación y nunca permiten elegir chats privados ni grupos no
+                autorizados.
+              </p>
+            </div>
             <article class="card inset automatic-card">
               <div class="section-heading">
                 <div>
@@ -776,17 +860,18 @@
                   ><input name="welcome_enabled" type="checkbox" /> Activar</label
                 >
               </div>
-              <label
-                >Ventana para agrupar ingresos (segundos)<input
-                  name="welcome_batch_window"
-                  type="number"
-                  min="5"
-                  max="300"
-                  required
-                />
-              </label>
+              <input name="welcome_batch_window" type="hidden" value="5" />
               <div class="form-row">
-                <label class="toggle"><input name="welcome_group_simultaneous" type="checkbox" /> Un mensaje si ingresan varias personas</label>
+                <label class="toggle"><input name="welcome_include_public_name" type="checkbox" /> Incluir nombre público de WhatsApp</label>
+                <label class="toggle"><input name="welcome_real_mention" type="checkbox" /> Realizar mención real</label>
+              </div>
+              <div class="form-row">
+                <label>Cuando no exista nombre<input name="welcome_unknown_name" maxlength="80" required /></label>
+                <label>Ingresos múltiples<select name="welcome_multiple_mode"><option value="GROUPED">Un solo mensaje agrupado</option><option value="INDIVIDUAL">Un mensaje por persona</option></select></label>
+                <label>Máximo de nombres<input name="welcome_maximum_names" type="number" min="1" max="5" required /></label>
+                <label>Espera antes de enviar (segundos)<input name="welcome_send_delay" type="number" min="0" max="60" required /></label>
+              </div>
+              <div class="form-row">
                 <label>Comprobar participantes cada (segundos)<input name="welcome_reconciliation_interval" type="number" min="60" max="3600" required /></label>
               </div>
               <div class="status-strip" id="welcome-runtime-status" aria-live="polite"></div>
@@ -798,10 +883,14 @@
                   required
                 ></textarea>
               </label>
+              <p class="muted">Variables: {name}, {mention}, {communityName}, {groupName}, {assistantName}, {botAlias}. En la primera línea se recomienda usar {name} o {mention}, no ambas.</p>
+              <label>Nombre ficticio para la vista previa<input id="welcome-preview-name" maxlength="80" value="María" /></label>
               <div class="preview">
                 <span>Vista previa</span>
                 <p id="welcome-preview"></p>
               </div>
+              <h4>Grupos donde está activa</h4>
+              <div id="welcome-group-settings" class="list"></div>
               <button class="secondary manual-automatic-send" data-kind="welcome" type="button">
                 Enviar bienvenida de prueba
               </button>
@@ -905,13 +994,6 @@
               </button>
             </article>
 
-            <label
-              >Grupo para los envíos manuales<select id="automatic-message-group" required></select>
-            </label>
-            <p class="muted">
-              Los botones solicitan confirmación y nunca permiten elegir chats privados ni grupos no
-              autorizados.
-            </p>
             <button type="submit">Guardar mensajes automáticos</button>
           </form>
           <h3 class="subsection-title">Últimos resultados por grupo</h3>
@@ -1006,6 +1088,16 @@
               </div>
             </form>
             <div id="poll-templates-list" class="list"></div>
+          </article>
+
+          <article class="card inset">
+            <div class="section-heading">
+              <div>
+                <h3>Encuestas eliminadas de este asistente</h3>
+                <p class="muted">Las plantillas permanecen disponibles para los demás asistentes.</p>
+              </div>
+            </div>
+            <div id="hidden-poll-templates-list" class="list"></div>
           </article>
 
           <article class="card inset">

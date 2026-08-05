@@ -62,6 +62,12 @@ button.danger:not(:disabled):hover {
   color: white;
   background: var(--danger);
 }
+.poll-remove-button {
+  width: auto;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.88rem;
+}
 button.danger-primary {
   color: white;
   background: var(--danger);
@@ -289,6 +295,90 @@ h3 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 0.65rem;
+}
+
+.moderation-tabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: .55rem;
+  margin: 1rem 0;
+}
+
+#moderation-summary-cards {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+#moderation-summary-cards .status-card {
+  min-width: 0;
+}
+
+#moderation-state-notice {
+  margin-top: 1rem;
+  margin-bottom: 0;
+}
+
+#moderation-settings-form {
+  margin-bottom: 1.5rem;
+}
+
+#moderation-settings-form + h3 {
+  margin: 0 0 0.85rem;
+}
+
+#moderation-groups-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.moderation-tabs button {
+  min-height: 2.75rem;
+  white-space: normal;
+}
+
+.moderation-tabs button.active {
+  background: var(--primary);
+  color: #fff;
+}
+
+[data-moderation-pane] {
+  margin-top: 1rem;
+}
+.moderation-workspace {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.moderation-progress {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: .65rem;
+}
+.progress-step {
+  min-height: 3.25rem;
+  padding: .75rem;
+  border: 1px solid var(--line);
+  border-radius: .75rem;
+  background: var(--surface-soft);
+  color: var(--muted);
+}
+.progress-step.complete {
+  border-color: var(--primary);
+  color: var(--primary-dark);
+  background: var(--primary-soft);
+  font-weight: 700;
+}
+.checkbox-stack {
+  display: grid;
+  gap: .6rem;
+  margin: .75rem 0 1rem;
+}
+.spacious-actions {
+  margin-top: 1rem;
+}
+#moderation-allowed-test + #moderation-warning-test {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
 }
 .setup-step {
   display: flex;
@@ -749,6 +839,10 @@ legend {
   background: #e5f1ee;
 }
 @media (max-width: 900px) {
+  .moderation-tabs,
+  #moderation-summary-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .panel-layout {
     display: block;
   }
@@ -766,6 +860,10 @@ legend {
   }
 }
 @media (max-width: 640px) {
+  .moderation-tabs,
+  #moderation-summary-cards {
+    grid-template-columns: 1fr;
+  }
   .shell {
     width: min(100% - 1rem, 1380px);
     padding-top: 0.5rem;
@@ -790,4 +888,14 @@ legend {
   .manual-tests-actions {
     grid-template-columns: 1fr;
   }
+}
+
+.welcome-group-setting {
+  display: grid;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.welcome-group-setting textarea {
+  width: 100%;
 }

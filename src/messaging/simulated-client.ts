@@ -4,6 +4,7 @@ import type {
   GroupJoinEvent,
   GroupListSource,
   NativePoll,
+  WelcomeParticipant,
 } from '../domain/types.js';
 import type { MessagingClient, MessagingClientEvents } from './messaging-client.js';
 import type { InteractiveMenuPayload, SelectableMenuPayload } from './messaging-client.js';
@@ -12,6 +13,7 @@ export type SentMessage = {
   chatId: string;
   text: string;
   replyToMessageId?: string;
+  mentionIds?: string[];
 };
 
 export type SentPoll = NativePoll & { chatId: string };
@@ -35,6 +37,7 @@ export class SimulatedMessagingClient implements MessagingClient {
   public groupListSource: GroupListSource = 'SIMULATED';
   public listGroupsFailures: unknown[] = [];
   public readonly ownIdentifiers = new Set<string>();
+  public readonly welcomeParticipants = new Map<string, WelcomeParticipant>();
   private events: MessagingClientEvents | null = null;
 
   public setEvents(events: MessagingClientEvents): void {
@@ -58,6 +61,17 @@ export class SimulatedMessagingClient implements MessagingClient {
       text,
       ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
     });
+  }
+
+  public async sendMessageWithMentions(chatId: string, text: string, mentionIds: string[]): Promise<void> {
+    if (this.failSending) throw new Error('Fallo simulado');
+    this.sentMessages.push({ chatId, text, mentionIds: [...mentionIds] });
+  }
+
+  public async resolveWelcomeParticipants(participantIds: string[]): Promise<WelcomeParticipant[]> {
+    return participantIds
+      .map((participantId) => this.welcomeParticipants.get(participantId))
+      .filter((participant): participant is WelcomeParticipant => participant !== undefined);
   }
 
   public async sendPoll(chatId: string, poll: NativePoll): Promise<void> {

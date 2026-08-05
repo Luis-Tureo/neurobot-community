@@ -160,6 +160,25 @@ describe('API administrativa de encuestas', () => {
     expect(database.getPollTemplate(id)).toBeNull();
   });
 
+  it('oculta y restaura una encuesta predeterminada para el assistantId validado', async () => {
+    const auth = await login(app);
+    const initial = await app.inject({ method: 'GET', url: '/api/polls', headers: { cookie: auth.cookie } });
+    const template = initial.json().templates.find((item: { isDefault: boolean }) => item.isDefault);
+    const hidden = await injectAuthenticated(app, auth, {
+      method: 'DELETE', url: `/api/polls/templates/${template.id}`,
+    });
+    expect(hidden.statusCode).toBe(200);
+    const afterHide = await app.inject({ method: 'GET', url: '/api/polls', headers: { cookie: auth.cookie } });
+    expect(afterHide.json().templates.some((item: { id: number }) => item.id === template.id)).toBe(false);
+    expect(afterHide.json().hiddenTemplates).toMatchObject([{ id: template.id }]);
+    const restored = await injectAuthenticated(app, auth, {
+      method: 'POST', url: `/api/polls/templates/${template.id}/restore`,
+    });
+    expect(restored.statusCode).toBe(200);
+    expect(database.getPollTemplate(template.id)).not.toBeNull();
+    expect(database.listHiddenPollTemplates()).toHaveLength(0);
+  });
+
   it('rechaza HTML, opciones duplicadas y plantillas incompletas', async () => {
     const auth = await login(app);
     const base = {

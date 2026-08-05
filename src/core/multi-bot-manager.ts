@@ -12,6 +12,8 @@ import type { AutomaticMessageService } from './automatic-message-service.js';
 import type { PollRepository } from './poll-repository.js';
 import type { PollScheduler } from './poll-scheduler.js';
 import type { PollService } from './poll-service.js';
+import type { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
+import type { ModerationService } from '../moderation/moderation-service.js';
 
 type ClientFactory = (bot: BotRecord) => MessagingClient;
 
@@ -161,6 +163,10 @@ export class MultiBotManager {
     return bot;
   }
 
+  public moderationService(botId: string): ModerationService | null {
+    return this.instances.get(botId)?.moderationService() ?? null;
+  }
+
   public async restart(botId: string): Promise<void> {
     const instance = this.instances.get(botId);
     if (instance === undefined) return this.start(botId);
@@ -231,6 +237,10 @@ export class MultiBotManager {
 
   public pollScheduler(botId: string): PollScheduler | null {
     return this.instances.get(botId)?.pollTaskScheduler() ?? null;
+  }
+
+  public aiQueue(botId: string): AIRequestQueueService | null {
+    return this.instances.get(botId)?.aiRequestQueue() ?? null;
   }
 
   public resetTransientState(): void {

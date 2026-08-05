@@ -56,6 +56,7 @@ async function main(): Promise<void> {
       maxReconnectAttempts: environment.maxReconnectAttempts,
       maxReconnectDelayMs: environment.maxReconnectDelayMs,
       developmentMode: environment.developmentMode,
+      secretVault: vault,
       mediaRoot: resolve(process.cwd(), 'data', 'media'),
       isPaused: () => maintenance?.isRunning() ?? false,
       ...(environment.chromeExecutablePath === undefined

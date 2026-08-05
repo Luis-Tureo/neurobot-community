@@ -10,6 +10,7 @@ const panelState = {
   cachedAnswers: [],
   menus: [],
   menuOptions: [],
+  moderation: null,
   catalogCategories: [],
   catalogItems: [],
   mediaAssets: [],
@@ -322,7 +323,150 @@ async function loadSelectedBot() {
   if (visible.has('media')) loaders.push(loadMedia());
   if (visible.has('hours')) loaders.push(loadHours());
   if (visible.has('requests')) loaders.push(loadRequests());
+  if (visible.has('moderation')) loaders.push(loadModeration());
   await Promise.all(loaders);
+}
+
+async function loadModeration() {
+  if (!panelState.selectedBotId || !panelState.visibleModules.includes('moderation')) return;
+  const data = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation`);
+  panelState.moderation = data;
+  await renderSimpleModeration(data);
+  if(data.settings===undefined)return;
+  setCardGrid('#moderation-summary-cards', [
+    ['Estado', data.settings.enabled ? 'Activada' : 'Desactivada'], ['Grupos protegidos', data.summary.protectedGroups],
+    ['Reglas activas', data.summary.activeRules], ['Mensajes analizados hoy', data.metrics.messagesReviewed],
+    ['Mensajes permitidos', data.metrics.messagesAllowed], ['Coincidencias', data.metrics.matchesDetected],
+    ['Advertencias', data.metrics.warningsSent], ['Reincidencias', data.metrics.recurrencesDetected],
+    ['Casos pendientes', data.summary.pendingCases], ['Falsos positivos', data.metrics.falsePositives],
+    ['Consumo de IA', `${data.metrics.aiTokens} tokens`], ['Último evento', safeDate(data.summary.lastEvent)],
+  ]);
+  const notice = document.querySelector('#moderation-state-notice');
+  notice.textContent = data.settings.enabled ? 'Moderación local activada para mensajes nuevos.' : 'Moderación desactivada. Las reglas permanecen guardadas.';
+  fillModerationSettings(data.settings);
+  renderModerationGroups(data.groups);
+  renderModerationRules(data.rules);
+  renderModerationTerms(data.terms);
+  renderModerationCases(data.cases, data.groups);
+  setCardGrid('#moderation-statistics-cards', [
+    ['Revisados localmente', data.metrics.messagesReviewed], ['Permitidos', data.metrics.messagesAllowed],
+    ['Coincidencias', data.metrics.matchesDetected], ['Advertencias', data.metrics.warningsSent],
+    ['Casos administrativos', data.metrics.adminCasesCreated], ['Errores locales', data.metrics.localErrors],
+    ['Revisiones con IA', data.metrics.aiReviews], ['Tokens de moderación', data.metrics.aiTokens],
+  ]);
+}
+
+async function renderSimpleModeration(data) {
+  const selector=document.querySelector('#moderation-group-selector');selector.replaceChildren();
+  data.groups.forEach((group)=>{const option=document.createElement('option');option.value=group.groupHash;option.textContent=group.name;selector.add(option);});
+  if(!data.groups.some((group)=>group.groupHash===panelState.moderationGroupHash))panelState.moderationGroupHash=data.groups[0]?.groupHash||'';
+  selector.value=panelState.moderationGroupHash;
+  renderModerationCases(data.cases,data.groups);
+  if(panelState.moderationGroupHash)await loadModerationGroup();else document.querySelector('#moderation-group-status').textContent='No hay grupos activos disponibles.';
+}
+
+async function loadModerationGroup(){
+  const data=await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}`);panelState.moderationGroup=data;
+  const profile=data.profile;document.querySelector('#moderation-rules-text-form').elements.rulesText.value=profile.rulesText;
+  const labels=[['rulesSaved','1. Reglas guardadas'],['analyzed','2. Análisis preparado'],['automaticTestsPassed','3. Pruebas automáticas'],['manualAllowedPassed','4. Mensaje permitido'],['manualWarningPassed','5. Advertencia']];
+  const progress=document.querySelector('#moderation-progress');progress.replaceChildren();labels.forEach(([key,label])=>progress.append(node('span',`${data.progress[key]?'✓':'•'} ${label}`,`progress-step ${data.progress[key]?'complete':''}`)));
+  document.querySelector('#moderation-group-status').textContent=profile.enabled?'Moderación activa. Los mensajes nuevos se analizan localmente.':data.progress.ready&&data.recipientHashes.length>0?'Todo está aprobado. Ya puedes activar la moderación.':data.progress.ready?'Las pruebas están aprobadas. Selecciona al menos un administrador para poder activar.':'Moderación desactivada mientras completas la preparación.';
+  setCardGrid('#moderation-simple-summary',[['Estado',profile.enabled?'Activa':'Desactivada'],['Preparación',moderationStatusLabel(profile.analysisStatus)],['Pruebas',profile.testStatus==='APPROVED'?'Aprobadas':'Pendientes'],['Uso diario de IA','0 tokens'],['Último análisis',safeDate(profile.lastAnalyzedAt)],['Tokens de preparación',profile.inputTokens+profile.outputTokens]]);
+  const values=profile.summary||{};document.querySelector('#moderation-analysis-summary').textContent=profile.summary?`Configuración preparada\nReglas interpretadas: ${values.interpretedRules||0}\nCategorías detectadas: ${values.categoryCount||0}\nCondiciones preparadas: ${values.preparedConditions||0}\nPatrones de spam: ${values.spamPatterns||0}\nPatrones de privacidad: ${values.privacyPatterns||0}\nExcepciones: ${values.exceptionCount||0}\nPruebas preparadas: ${values.generatedTestCount||0}`:'Guarda las reglas y prepara la moderación para ver un resumen.';
+  const toggle=document.querySelector('#moderation-toggle');toggle.textContent=profile.enabled?'Desactivar moderación':'Activar moderación';toggle.classList.toggle('danger',profile.enabled);toggle.disabled=!profile.enabled&&(!data.progress.ready||data.recipientHashes.length===0);
+  renderModerationAdministrators(data.recipientHashes);
+}
+
+function renderModerationAdministrators(selectedHashes){
+  const target=document.querySelector('#moderation-admin-recipients');target.replaceChildren();const administrators=panelState.moderation.administrators||[];
+  if(!administrators.length){target.append(emptyState('No hay administradores de WhatsApp configurados.'));return;}
+  administrators.forEach((administrator)=>{const label=node('label',undefined,'toggle');const input=document.createElement('input');input.type='checkbox';input.value=administrator.identifier;input.checked=selectedHashes.includes(administrator.hash);label.append(input,document.createTextNode(` ${administrator.label}`));target.append(label);});
+}
+
+function moderationStatusLabel(status){return ({DRAFT:'Borrador',OUTDATED:'Requiere nuevo análisis',ANALYZING:'Analizando',ANALYSIS_FAILED:'Análisis fallido',PENDING_TESTS:'Pruebas pendientes',READY:'Lista para activar',ACTIVE:'Activa'})[status]||status;}
+
+function fillModerationSettings(settings) {
+  const form = document.querySelector('#moderation-settings-form');
+  Object.entries(settings).forEach(([name, value]) => {
+    const input = form.elements[name]; if (!input) return;
+    if (input.type === 'checkbox') input.checked = Boolean(value); else input.value = value;
+  });
+  const warnings = document.querySelector('#moderation-warning-form');
+  ['firstWarningMessage', 'secondWarningMessage', 'repeatedWarningMessage'].forEach((name) => { warnings.elements[name].value = settings[name]; });
+}
+
+function renderModerationGroups(groups) {
+  const target = document.querySelector('#moderation-groups-list'); target.replaceChildren();
+  if (!groups.length) { target.append(emptyState('No hay grupos disponibles.')); return; }
+  groups.forEach((group) => {
+    const item = createListItem(group.name, group.active && !group.blocked ? 'Grupo disponible' : 'Grupo inactivo');
+    const select = document.createElement('select');
+    [['INHERIT','Heredar'],['ENABLED','Activada'],['DISABLED','Desactivada']].forEach(([value,label]) => { const option=document.createElement('option'); option.value=value; option.textContent=label; select.add(option); });
+    select.value=group.mode; select.addEventListener('change',async()=>{
+      try { await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(group.groupHash)}`,{method:'PATCH',body:JSON.stringify({mode:select.value})}); await loadModeration(); notify('Moderación del grupo actualizada.'); }
+      catch(error){notify(error.message,true);}
+    }); item.append(select); target.append(item);
+  });
+}
+
+function renderModerationRules(rules) {
+  const target=document.querySelector('#moderation-rules-list'); target.replaceChildren();
+  if(!rules.length){target.append(emptyState('Todavía no hay reglas. Crea una regla y pruébala antes de activarla.'));return;}
+  rules.forEach((rule)=>{
+    const item=createListItem(rule.name,`${rule.category} · ${rule.severity} · ${rule.score} puntos · ${rule.enabled?'Activa':'Borrador'}`);
+    const actions=node('div',undefined,'actions');
+    actions.append(actionButton('Editar','secondary',()=>editModerationRule(rule)),actionButton(rule.enabled?'Desactivar':'Activar','secondary',async()=>{
+      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/rules/${rule.id}`,{method:'PUT',body:JSON.stringify({...moderationRulePayload(rule),enabled:!rule.enabled})}); await loadModeration();
+    }),actionButton('Eliminar','danger',async()=>{if(!window.confirm('¿Eliminar esta regla?'))return;await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/rules/${rule.id}`,{method:'DELETE'});await loadModeration();}));
+    item.append(actions); target.append(item);
+  });
+}
+
+function moderationRulePayload(rule) {
+  return {name:rule.name,description:rule.description,category:rule.category,severity:rule.severity,detectionType:rule.detectionType,score:rule.score,
+    reviewThreshold:rule.reviewThreshold,warningThreshold:rule.warningThreshold,adminNotificationThreshold:rule.adminNotificationThreshold,
+    enabled:rule.enabled,appliesToAllGroups:rule.appliesToAllGroups,conditions:rule.conditions,exceptions:rule.exceptions};
+}
+
+function editModerationRule(rule) {
+  const form=document.querySelector('#moderation-rule-form'); form.elements.ruleId.value=rule.id; form.elements.name.value=rule.name;
+  form.elements.description.value=rule.description;form.elements.category.value=rule.category;form.elements.severity.value=rule.severity;form.elements.score.value=rule.score;
+  form.elements.reviewThreshold.value=rule.reviewThreshold;form.elements.warningThreshold.value=rule.warningThreshold;form.elements.adminNotificationThreshold.value=rule.adminNotificationThreshold;
+  form.elements.enabled.checked=rule.enabled; const condition=rule.conditions[0]; form.elements.conditionType.value=condition?.conditionType||'EXACT_WORD';form.elements.conditionValue.value=condition?.normalizedValue||'';
+  const exception=rule.exceptions[0];form.elements.exceptionType.value=exception?.exceptionType||'';form.elements.exceptionValue.value=exception?.normalizedValue||'';
+  showModerationPane('rules'); form.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function renderModerationTerms(terms) {
+  const target=document.querySelector('#moderation-terms-list');target.replaceChildren();
+  if(!terms.length){target.append(emptyState('No hay términos configurados.'));return;}
+  terms.forEach((term)=>{const item=createListItem(term.term,`${term.category} · ${term.severity} · ${term.matchMode}`);item.append(actionButton('Eliminar','danger',async()=>{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/terms/${term.id}`,{method:'DELETE'});await loadModeration();}));target.append(item);});
+}
+
+function renderModerationCases(cases,groups) {
+  const pending=document.querySelector('#moderation-pending-cases');const history=document.querySelector('#moderation-history');pending.replaceChildren();history.replaceChildren();
+  const render=(target,item)=>{const group=groups.find((candidate)=>candidate.groupHash===item.groupHash);const card=createListItem(`${item.category} · ${item.severity}`,`${group?.name||'Grupo protegido'} · ${item.score} puntos · ${safeDate(item.createdAt)} · ${item.status}`);
+    if(item.status==='PENDING'){const actions=node('div',undefined,'actions');actions.append(actionButton('Ver evidencia temporal','secondary',async()=>{const evidence=await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/cases/${item.id}/evidence`);window.alert(`Evidencia temporal cifrada hasta ${safeDate(evidence.expiresAt)}:\n\n${evidence.text}`);}));[['CONFIRMED','Confirmar incumplimiento'],['FALSE_POSITIVE','Falso positivo'],['DISMISSED','Descartar'],['RESOLVED','Resolver']].forEach(([decision,label])=>actions.append(actionButton(label,decision==='FALSE_POSITIVE'?'secondary':'',async()=>{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/cases/${item.id}`,{method:'PATCH',body:JSON.stringify({decision})});await loadModeration();})));card.append(actions);}target.append(card);};
+  const pendingCases=cases.filter((item)=>item.status==='PENDING');if(!pendingCases.length)pending.append(emptyState('No hay casos pendientes.'));else pendingCases.forEach((item)=>render(pending,item));
+  const historical=cases.filter((item)=>item.status!=='PENDING');if(!historical.length)history.append(emptyState('No hay decisiones históricas.'));else historical.forEach((item)=>render(history,item));
+}
+
+function showModerationPane(name) {
+  document.querySelectorAll('[data-moderation-pane]').forEach((pane)=>pane.classList.toggle('hidden',pane.dataset.moderationPane!==name));
+  document.querySelectorAll('[data-moderation-tab]').forEach((button)=>button.classList.toggle('active',button.dataset.moderationTab===name));
+}
+
+function bindSimpleModeration(){
+  document.querySelectorAll('[data-moderation-tab]').forEach((button)=>button.addEventListener('click',()=>showModerationPane(button.dataset.moderationTab)));
+  showModerationPane('configuration');
+  document.querySelector('#moderation-group-selector').addEventListener('change',async(event)=>{panelState.moderationGroupHash=event.currentTarget.value;try{await loadModerationGroup();}catch(error){notify(error.message,true);}});
+  document.querySelector('#moderation-rules-text-form').addEventListener('submit',async(event)=>{event.preventDefault();const rulesText=event.currentTarget.elements.rulesText.value;try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/draft`,{method:'PATCH',body:JSON.stringify({rulesText})});await loadModerationGroup();notify('Reglas guardadas. La moderación permanece desactivada hasta aprobar las pruebas.');}catch(error){notify(error.message,true);}});
+  document.querySelector('#moderation-discard-rules').addEventListener('click',()=>{document.querySelector('#moderation-rules-text-form').elements.rulesText.value=panelState.moderationGroup?.profile.rulesText||'';notify('Cambios sin guardar descartados.');});
+  document.querySelector('#moderation-analyze').addEventListener('click',async(event)=>{const button=event.currentTarget;button.disabled=true;button.textContent='Preparando…';try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/analyze`,{method:'POST',body:'{}'});await loadModerationGroup();showModerationPane('tests');notify('Moderación preparada. Completa las dos pruebas manuales.');}catch(error){notify(error.message,true);}finally{button.disabled=false;button.textContent='Analizar y preparar moderación';}});
+  const bindTest=(selector,expected)=>document.querySelector(selector).addEventListener('submit',async(event)=>{event.preventDefault();const form=event.currentTarget;try{const response=await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/test`,{method:'POST',body:JSON.stringify({text:form.elements.text.value,expected})});document.querySelector('#moderation-test-result').textContent=`${response.notice}\nResultado: ${response.actual==='ALLOW'?'Permitido':'Advertencia'}\nPrueba: ${response.passed?'Aprobada':'No aprobada'}${response.categories.length?`\nMotivo general: ${response.categories.join(', ')}`:''}`;form.reset();await loadModerationGroup();}catch(error){notify(error.message,true);}});
+  bindTest('#moderation-allowed-test','ALLOW');bindTest('#moderation-warning-test','WARNING');
+  document.querySelector('#moderation-toggle').addEventListener('click',async()=>{const enabled=!panelState.moderationGroup.profile.enabled;try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/activation`,{method:'PATCH',body:JSON.stringify({enabled})});await loadModeration();notify(enabled?'Moderación activada para este grupo.':'Moderación desactivada para este grupo.');}catch(error){notify(error.message,true);}});
+  document.querySelector('#moderation-save-admins').addEventListener('click',async()=>{const identifiers=[...document.querySelectorAll('#moderation-admin-recipients input:checked')].map((input)=>input.value);try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/administrators`,{method:'PATCH',body:JSON.stringify({identifiers})});await loadModerationGroup();notify('Destinatarios guardados de forma cifrada.');}catch(error){notify(error.message,true);}});
 }
 
 async function loadBotSummary(refreshForms = true) {
@@ -834,6 +978,10 @@ async function loadAI() {
     else input.value = value;
   });
   form.elements.confirmIncreasedLimits.checked = false;
+  const queueForm = document.querySelector('#ai-queue-settings-form');
+  Object.entries(result.queue.settings).forEach(([field, value]) => {
+    if (queueForm.elements[field]) queueForm.elements[field].value = value;
+  });
   const globalForm = document.querySelector('#global-ai-limits-form');
   Object.entries(global.limits).forEach(([field, value]) => {
     globalForm.elements[field].value = value;
@@ -867,6 +1015,27 @@ async function loadAI() {
     ['Sin información o fuera de alcance', metrics.noInformation + metrics.outOfScope],
     ['Llamadas evitadas', metrics.avoidedAICalls],
   ]);
+  const queue = result.queue;
+  const queueMetrics = queue.metrics;
+  setCardGrid('#ai-queue-cards', [
+    ['Estado de Groq', queue.providerHealth.state || 'NOT_CONFIGURED'],
+    ['Circuito', queue.providerHealth.circuitState || 'CLOSED'],
+    ['Procesándose', queue.processing],
+    ['Esperando', queue.waiting],
+    ['Capacidad de cola', queue.settings.maxQueueSize],
+    ['Concurrencia', queue.settings.maxConcurrent],
+    ['Espera promedio', `${queueMetrics.averageWaitMs} ms`],
+    ['Espera máxima', `${queueMetrics.maximumWaitMs} ms`],
+    ['Exitosas', queueMetrics.completedCount],
+    ['Fallidas', queueMetrics.failedCount],
+    ['Timeouts', queueMetrics.timeoutCount],
+    ['Errores 429', queueMetrics.rateLimitCount],
+    ['Reintentos', queueMetrics.retryCount],
+    ['Cola llena', queueMetrics.rejectedCount],
+    ['Agrupadas', queueMetrics.coalescedCount],
+    ['Último error', queue.providerHealth.lastSafeErrorCode || 'Ninguno'],
+  ]);
+  document.querySelector('#ai-queue-simulator').classList.toggle('hidden', !result.developmentMode);
   document.querySelector('#section-ai .button-link').href = `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/export`;
   const eventsTarget = document.querySelector('#ai-events');
   const statisticsTarget = document.querySelector('#statistics-events');
@@ -1263,6 +1432,36 @@ function configureForms() {
     });
     try { await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/settings`, { method: 'PATCH', body: JSON.stringify(payload) }); await loadAI(); notify('Límites de IA guardados.'); } catch (error) { notify(error.message, true); }
   });
+  document.querySelector('#ai-queue-settings-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = Object.fromEntries([...form.elements].filter((input) => input.name).map((input) => [input.name, Number(input.value)]));
+    try {
+      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/queue-settings`, { method: 'PATCH', body: JSON.stringify(payload) });
+      await loadAI();
+      notify('Capacidad de IA guardada.');
+    } catch (error) { notify(error.message, true); }
+  });
+  document.querySelector('#restore-ai-queue-recommended').addEventListener('click', async () => {
+    try {
+      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/queue-settings/recommended`, { method: 'POST', body: '{}' });
+      await loadAI();
+      notify('Valores recomendados restaurados.');
+    } catch (error) { notify(error.message, true); }
+  });
+  document.querySelector('#ai-queue-simulator-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try {
+      const result = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/simulate-queue`, {
+        method: 'POST', body: JSON.stringify({ requests: Number(form.elements.requests.value), scenario: form.elements.scenario.value }),
+      });
+      setCardGrid('#ai-queue-simulation-result', [
+        ['Procesándose', result.processing], ['Esperando', result.waiting], ['Rechazadas', result.rejected],
+        ['Agrupadas', result.coalesced], ['Error simulado', result.providerError || 'Ninguno'],
+      ]);
+    } catch (error) { notify(error.message, true); }
+  });
   document.querySelector('#global-ai-limits-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -1297,6 +1496,48 @@ function configureForms() {
       notify('Contadores de prueba restablecidos.');
     } catch (error) { notify(error.message, true); }
   });
+
+  if(document.querySelector('#moderation-settings-form')===null){
+    bindSimpleModeration();
+  }else{
+  document.querySelectorAll('[data-moderation-tab]').forEach((button)=>button.addEventListener('click',()=>showModerationPane(button.dataset.moderationTab)));
+  showModerationPane('summary');
+  document.querySelector('#moderation-settings-form').addEventListener('submit',async(event)=>{
+    event.preventDefault();const form=event.currentTarget;const current=panelState.moderation.settings;
+    const payload={...current,enabled:form.elements.enabled.checked,defaultGroupMode:form.elements.defaultGroupMode.value,
+      warningMode:form.elements.warningMode.value,reviewThreshold:Number(form.elements.reviewThreshold.value),warningThreshold:Number(form.elements.warningThreshold.value),
+      adminNotificationThreshold:Number(form.elements.adminNotificationThreshold.value),recurrenceWindowDays:Number(form.elements.recurrenceWindowDays.value),
+      warningCooldownMinutes:Number(form.elements.warningCooldownMinutes.value),publicWarningLimit:Number(form.elements.publicWarningLimit.value),
+      publicWarningWindowMinutes:Number(form.elements.publicWarningWindowMinutes.value),temporaryEvidenceEnabled:form.elements.temporaryEvidenceEnabled.checked,
+      temporaryEvidenceHours:Number(form.elements.temporaryEvidenceHours.value),automaticAIReviewEnabled:false,manualAIReviewEnabled:false,automaticBanEnabled:false,automaticDeletionEnabled:false};
+    try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/settings`,{method:'PATCH',body:JSON.stringify(payload)});await loadModeration();notify('Configuración de moderación guardada.');}catch(error){notify(error.message,true);}
+  });
+  document.querySelector('#moderation-warning-form').addEventListener('submit',async(event)=>{
+    event.preventDefault();const form=event.currentTarget;const settings={...panelState.moderation.settings,firstWarningMessage:form.elements.firstWarningMessage.value,
+      secondWarningMessage:form.elements.secondWarningMessage.value,repeatedWarningMessage:form.elements.repeatedWarningMessage.value};
+    try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/settings`,{method:'PATCH',body:JSON.stringify(settings)});await loadModeration();notify('Mensajes de advertencia guardados.');}catch(error){notify(error.message,true);}
+  });
+  document.querySelector('#moderation-rule-form').addEventListener('submit',async(event)=>{
+    event.preventDefault();const form=event.currentTarget;const type=form.elements.conditionType.value;const conditionValue=form.elements.conditionValue.value;
+    const configuration=type==='REPETITION'?{count:5,windowSeconds:120}:type==='FREQUENCY'?{count:8,windowSeconds:60}:type==='EXCESSIVE_CAPS'?{minimumLetters:20,ratio:0.75}:{};
+    const payload={name:form.elements.name.value,description:form.elements.description.value,category:form.elements.category.value,severity:form.elements.severity.value,
+      detectionType:type,score:Number(form.elements.score.value),reviewThreshold:Number(form.elements.reviewThreshold.value),warningThreshold:Number(form.elements.warningThreshold.value),
+      adminNotificationThreshold:Number(form.elements.adminNotificationThreshold.value),enabled:form.elements.enabled.checked,appliesToAllGroups:true,
+      conditions:[{id:0,conditionType:type,operator:'ANY',normalizedValue:conditionValue,configuration,enabled:true}],exceptions:form.elements.exceptionType.value?[{id:0,exceptionType:form.elements.exceptionType.value,normalizedValue:form.elements.exceptionValue.value,enabled:true}]:[]};
+    try{const ruleId=form.elements.ruleId.value;await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/rules${ruleId?`/${ruleId}`:''}`,{method:ruleId?'PUT':'POST',body:JSON.stringify(payload)});form.reset();form.elements.ruleId.value='';form.elements.score.value=3;form.elements.reviewThreshold.value=3;form.elements.warningThreshold.value=4;form.elements.adminNotificationThreshold.value=4;await loadModeration();notify('Regla guardada.');}catch(error){notify(error.message,true);}
+  });
+  document.querySelector('#moderation-rule-cancel').addEventListener('click',()=>{const form=document.querySelector('#moderation-rule-form');form.reset();form.elements.ruleId.value='';});
+  document.querySelector('#moderation-term-form').addEventListener('submit',async(event)=>{
+    event.preventDefault();const form=event.currentTarget;const payload={ruleId:null,term:form.elements.term.value,category:form.elements.category.value,severity:form.elements.severity.value,matchMode:form.elements.matchMode.value,score:Number(form.elements.score.value),enabled:true};
+    try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/terms`,{method:'POST',body:JSON.stringify(payload)});form.reset();form.elements.category.value='RESPETO';form.elements.score.value=1;await loadModeration();notify('Término agregado.');}catch(error){notify(error.message,true);}
+  });
+  document.querySelector('#moderation-test-form').addEventListener('submit',async(event)=>{
+    event.preventDefault();const form=event.currentTarget;try{const response=await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/test`,{method:'POST',body:JSON.stringify({text:form.elements.text.value})});
+      document.querySelector('#moderation-test-result').textContent=[response.notice,`Resultado: ${response.result.allowed?'Permitido':'Detectado'}`,`Acción: ${response.result.action}`,`Puntuación: ${response.result.totalScore}`,`Categorías: ${response.result.categories.join(', ')||'Ninguna'}`,`Reglas: ${response.result.matchedRules.map((rule)=>rule.name).join(', ')||'Ninguna'}`].join('\n');form.elements.text.value='';}catch(error){notify(error.message,true);}
+  });
+  document.querySelector('#moderation-export').addEventListener('click',async()=>{try{const data=await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/export`);document.querySelector('#moderation-import-export').value=JSON.stringify(data,null,2);notify('Configuración exportada sin incidentes ni datos personales.');}catch(error){notify(error.message,true);}});
+  document.querySelector('#moderation-import').addEventListener('click',async()=>{try{const parsed=JSON.parse(document.querySelector('#moderation-import-export').value);await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/import`,{method:'POST',body:JSON.stringify({rules:parsed.rules||[],terms:parsed.terms||[],...(parsed.settings?{settings:parsed.settings}:{}),confirmed:true})});await loadModeration();notify('Configuración importada como borrador.');}catch(error){notify(error.message,true);}});
+  }
 
   document.querySelector('#restart-connection').addEventListener('click', () => { void restartBot(); });
   document.querySelector('#bot-restart').addEventListener('click', () => { void restartBot(); });

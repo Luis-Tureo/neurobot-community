@@ -60,7 +60,7 @@ export class GroqAIProvider implements AIProvider {
         }),
       },
       request.timeoutMs,
-      true,
+      false,
     );
     const value: unknown = await response.json().catch(() => null);
     if (!isRecord(value)) throw new AIProviderError('AI_INVALID_RESPONSE', 'Respuesta JSON inválida.');
@@ -118,7 +118,7 @@ export class GroqAIProvider implements AIProvider {
           signal: controller.signal,
         });
         if (response.ok) return response;
-        const providerError = errorFromStatus(response.status);
+        const providerError = errorFromStatus(response.status, parseRetryAfter(response.headers.get('retry-after')));
         if (!providerError.retryable || attempt + 1 >= attempts) throw providerError;
         lastError = providerError;
       } catch (error) {
@@ -140,12 +140,21 @@ export class GroqAIProvider implements AIProvider {
   }
 }
 
-function errorFromStatus(status: number): AIProviderError {
+function errorFromStatus(status: number, retryAfterSeconds: number | null): AIProviderError {
   if (status === 401 || status === 403) return new AIProviderError('AI_INVALID_KEY', 'Acceso rechazado.');
   if (status === 404) return new AIProviderError('AI_MODEL_UNAVAILABLE', 'Modelo no disponible.');
-  if (status === 429) return new AIProviderError('AI_PROVIDER_RATE_LIMITED', 'Cuota del proveedor alcanzada.');
-  if (status >= 500) return new AIProviderError('AI_TEMPORARY_ERROR', 'Error temporal del proveedor.', true);
+  if (status === 429) return new AIProviderError('AI_PROVIDER_RATE_LIMITED', 'Cuota del proveedor alcanzada.', true, retryAfterSeconds);
+  if (status >= 500) return new AIProviderError('AI_TEMPORARY_ERROR', 'Error temporal del proveedor.', true, retryAfterSeconds);
   return new AIProviderError('AI_PERMANENT_ERROR', 'Solicitud rechazada por el proveedor.');
+}
+
+function parseRetryAfter(value: string | null): number | null {
+  if (value === null) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds;
+  const retryAt = Date.parse(value);
+  if (!Number.isFinite(retryAt)) return null;
+  return Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
 }
 
 function safeTokenCount(value: unknown): number {

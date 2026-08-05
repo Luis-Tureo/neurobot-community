@@ -7,6 +7,7 @@ import type { AppDatabase } from '../persistence/database.js';
 import { BusinessHoursService } from './business-hours-service.js';
 import { CatalogService } from './catalog-service.js';
 import { InteractiveMessageAdapter } from './interactive-message-adapter.js';
+import type { OutboundMessageQueueService } from './outbound-message-queue-service.js';
 
 export class ConversationFlowService {
   private readonly interactive: InteractiveMessageAdapter;
@@ -20,6 +21,7 @@ export class ConversationFlowService {
     private readonly botId: string,
     private readonly mediaRoot: string,
     private readonly queryService?: AssistantQueryService,
+    private readonly outboundQueue?: OutboundMessageQueueService,
   ) {
     this.interactive = new InteractiveMessageAdapter(client, logger, botId);
     this.catalog = new CatalogService(database, botId);
@@ -158,8 +160,10 @@ export class ConversationFlowService {
       this.logger.info({ operation: 'HUMAN_ASSISTANCE_REQUESTED', botId: this.botId, chatHash, userHash }, 'Se registró una solicitud sin datos visibles');
     } else if (option.actionType === 'ai' && this.queryService !== undefined) {
       const query = typeof payload.query === 'string' ? payload.query : option.label;
-      const answer = await this.queryService.answerQuestion(query, chatHash, userHash, now);
-      await this.client.sendMessage(chatId, answer.text);
+      const answer = await this.queryService.answerQuestion(query, chatHash, userHash, now, async () => {
+        await this.sendQueued(chatId, 'Estoy atendiendo varias consultas. Tu pregunta quedó en espera; no necesitas repetirla.');
+      });
+      await this.sendQueued(chatId, answer.text);
     } else {
       const query = typeof payload.query === 'string' ? payload.query : option.label;
       const profile = this.database.getBotProfile(this.botId);
@@ -174,6 +178,14 @@ export class ConversationFlowService {
     const menu = state.currentMenuId === null ? null : this.database.getMenu(this.botId, state.currentMenuId);
     if (menu !== null) this.saveState(chatHash, userHash, menu.id, state.previousMenuId, menu.expirationMinutes, now);
     return true;
+  }
+
+  private async sendQueued(chatId: string, text: string): Promise<void> {
+    if (this.outboundQueue !== undefined) {
+      await this.outboundQueue.send(chatId, text);
+      return;
+    }
+    await this.client.sendMessage(chatId, text);
   }
 
   private async goBack(

@@ -10,9 +10,13 @@ describe('interfaz de mensajes automáticos', () => {
     expect(html).toContain('id="section-automatic-messages"');
     expect(html).toContain('America/Santiago');
     expect(html).toContain('name="welcome_template"');
-    expect(html).toContain('name="welcome_group_simultaneous"');
     expect(html).toContain('name="welcome_reconciliation_interval"');
     expect(html).toContain('id="welcome-runtime-status"');
+    expect(html).toContain('name="welcome_include_public_name"');
+    expect(html).toContain('name="welcome_real_mention"');
+    expect(html).toContain('name="welcome_multiple_mode"');
+    expect(html).toContain('id="welcome-preview-name"');
+    expect(html).toContain('id="welcome-group-settings"');
     expect(html).toContain('name="greeting_monday"');
     expect(html).toContain('name="greeting_weekday"');
     expect(html).toContain('name="greeting_friday"');
@@ -20,6 +24,8 @@ describe('interfaz de mensajes automáticos', () => {
     expect(html).toContain('name="rules_template"');
     expect(script).toContain("document.querySelector('#welcome-preview').textContent");
     expect(script).toContain('welcomeStatus.listenerRegistered');
+    expect(script).toContain('renderWelcomeGroupSettings');
+    expect(script).toContain('includePublicName');
     expect(script).toContain("document.querySelector('#rules-preview').textContent");
   });
 

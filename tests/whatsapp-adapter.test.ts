@@ -13,6 +13,7 @@ class FakeWhatsAppClient extends EventEmitter {
   public readonly getState = vi.fn(async () => 'CONNECTED');
   public readonly getChats = vi.fn(async () => this.chats);
   public readonly getChatById = vi.fn(async (chatId: string) => this.chatsById.get(chatId));
+  public readonly getContactById = vi.fn(async (contactId: string) => this.contactsById.get(contactId));
   public readonly getContactLidAndPhone = vi.fn(async () => this.lidMappings);
   public pupPage:
     | {
@@ -21,6 +22,7 @@ class FakeWhatsAppClient extends EventEmitter {
     | undefined;
   public chats: unknown[] = [];
   public chatsById = new Map<string, object>();
+  public contactsById = new Map<string, object>();
   public lidMappings: Array<{ lid: string; pn: string }> = [];
   public info = { wid: { _serialized: '56900000000@c.us' } };
 }
@@ -583,6 +585,28 @@ describe('adaptador de WhatsApp', () => {
       source: 'group_join',
       subtype: 'invite',
     });
+  });
+
+  it('obtiene getRecipients y prioriza pushname sin registrar el nombre', async () => {
+    const captured = createCapturedLogger();
+    const { adapter, fake, groupJoins } = createSubject({ logger: captured.logger });
+    await adapter.initialize();
+    fake.emit('ready');
+    fake.emit('group_join', {
+      chatId: 'grupo-normal@g.us',
+      id: { _serialized: 'join-public-name' },
+      recipientIds: ['persona@lid'],
+      type: 'add',
+      getRecipients: vi.fn(async () => [{
+        id: { _serialized: 'persona@lid' }, pushname: 'María', name: 'Nombre de agenda',
+      }]),
+    });
+    await vi.waitFor(() => expect(groupJoins).toHaveLength(1));
+    expect(groupJoins[0]?.participants).toEqual([{
+      participantId: 'persona@lid', displayName: 'María', nameSource: 'PUSHNAME', mentionId: 'persona@lid',
+    }]);
+    expect(JSON.stringify(captured.entries)).not.toContain('María');
+    expect(JSON.stringify(captured.entries)).not.toContain('Nombre de agenda');
   });
 
   it('notifica salida del bot y actualizaciones del grupo una sola vez', async () => {

@@ -340,6 +340,47 @@ describe('API administrativa', () => {
     expect(sent.body).not.toContain('grupo-manual@g.us');
   });
 
+  it('previsualiza y configura la bienvenida por grupo sin guardar el nombre ficticio', async () => {
+    database.upsertDetectedGroup('grupo-bienvenida@g.us', 'Grupo bienvenida');
+    database.setGroupAuthorized('grupo-bienvenida@g.us', true);
+    const auth = await login(app);
+    const view = await app.inject({
+      method: 'GET', url: '/api/automatic-messages', headers: { cookie: auth.cookie },
+    });
+    const groupKey = view.json().authorizedGroups[0].key;
+    const preview = await injectAuthenticated(app, auth, {
+      method: 'POST',
+      url: '/api/automatic-messages/welcome/preview',
+      payload: { groupKey, fictitiousName: 'María' },
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toMatchObject({ simulation: true });
+    expect(preview.json().text).toContain('María');
+    expect(client.sentMessages).toHaveLength(0);
+
+    const groupUpdate = await injectAuthenticated(app, auth, {
+      method: 'PATCH',
+      url: '/api/automatic-messages/welcome/groups',
+      payload: {
+        groupKey, enabled: true, inheritAssistantTemplate: false, customTemplate: 'Hola {name}',
+      },
+    });
+    expect(groupUpdate.statusCode).toBe(200);
+    expect(database.getWelcomeGroupSetting(groupKey)).toMatchObject({
+      enabled: true, inheritAssistantTemplate: false, customTemplate: 'Hola {name}',
+    });
+    expect(JSON.stringify(database.getTechnicalEvents())).not.toContain('María');
+
+    const invalid = await injectAuthenticated(app, auth, {
+      method: 'PATCH',
+      url: '/api/automatic-messages/welcome/groups',
+      payload: {
+        groupKey, enabled: true, inheritAssistantTemplate: false, customTemplate: 'Hola {desconocida}',
+      },
+    });
+    expect(invalid.statusCode).toBe(400);
+  });
+
   it('filtra estados, publica nombres seguros y exige archivar antes de eliminar', async () => {
     database.upsertDetectedGroup('activo@g.us', 'Nombre interno activo');
     database.setGroupAuthorized('activo@g.us', true);
@@ -507,6 +548,59 @@ describe('API administrativa', () => {
     });
     expect(restored.statusCode).toBe(200);
     expect(database.getBot(bot.id)).toMatchObject({ lifecycleStatus: 'DISABLED', enabled: false });
+  });
+
+  it('administra la capacidad de IA por asistente y protege el simulador', async () => {
+    const auth = await login(app);
+    const view = await app.inject({
+      method: 'GET', url: '/api/bots/neurobot/ai', headers: { cookie: auth.cookie },
+    });
+    expect(view.statusCode).toBe(200);
+    expect(view.json().queue).toMatchObject({
+      processing: 0, waiting: 0, settings: { maxConcurrent: 3, maxQueueSize: 20 },
+    });
+    const settings = { ...view.json().queue.settings, maxConcurrent: 2, maxQueueSize: 12 };
+    const updated = await injectAuthenticated(app, auth, {
+      method: 'PATCH', url: '/api/bots/neurobot/ai/queue-settings', payload: settings,
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(database.getAIQueueSettings('neurobot')).toMatchObject({ maxConcurrent: 2, maxQueueSize: 12 });
+    const invalid = await injectAuthenticated(app, auth, {
+      method: 'PATCH', url: '/api/bots/neurobot/ai/queue-settings',
+      payload: { ...settings, maxConcurrent: -1 },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const simulation = await injectAuthenticated(app, auth, {
+      method: 'POST', url: '/api/bots/neurobot/ai/simulate-queue',
+      payload: { requests: 10, scenario: 'normal' },
+    });
+    expect(simulation.statusCode).toBe(404);
+  });
+
+  it('administra moderación local solo en asistentes con canal grupal', async () => {
+    const auth = await login(app);
+    const initial = await app.inject({ method:'GET',url:'/api/bots/neurobot/moderation',headers:{cookie:auth.cookie} });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toMatchObject({settings:{enabled:false,automaticAIReviewEnabled:false,automaticBanEnabled:false,automaticDeletionEnabled:false},metrics:{aiReviews:0,aiTokens:0}});
+    const rulePayload = {name:'Convivencia',description:'Regla concreta de prueba',category:'RESPETO',severity:'ALTA',detectionType:'EXACT_WORD',score:4,
+      reviewThreshold:3,warningThreshold:4,adminNotificationThreshold:4,enabled:true,appliesToAllGroups:true,
+      conditions:[{id:0,conditionType:'EXACT_WORD',operator:'ANY',normalizedValue:'prohibida',configuration:{},enabled:true}],exceptions:[]};
+    const created = await injectAuthenticated(app,auth,{method:'POST',url:'/api/bots/neurobot/moderation/rules',payload:rulePayload});
+    expect(created.statusCode).toBe(200);
+    const simulation = await injectAuthenticated(app,auth,{method:'POST',url:'/api/bots/neurobot/moderation/test',payload:{text:'palabra prohibida'}});
+    expect(simulation.statusCode).toBe(200);
+    expect(simulation.json()).toMatchObject({simulation:true,result:{action:'WARNING_AND_NOTIFY',totalScore:4}});
+    expect(database.listModerationCases('neurobot')).toHaveLength(0);
+    expect(database.getModerationMetrics('neurobot')).toMatchObject({messagesReviewed:0,aiReviews:0,aiTokens:0});
+    const exported = await app.inject({method:'GET',url:'/api/bots/neurobot/moderation/export',headers:{cookie:auth.cookie}});
+    expect(exported.statusCode).toBe(200);
+    expect(JSON.stringify(exported.json())).not.toContain('participantHash');
+    expect(JSON.stringify(exported.json())).not.toContain('messageHash');
+
+    const privateBot = database.createBot({id:'solo-privado',mode:'business',sessionPath:'data/test-private',profile:createProfileFromPreset({organizationName:'Privado',botName:'Privado',organizationType:'Tienda',timezone:'America/Santiago',preset:'store'})});
+    const mixedBot = database.createBot({id:'canal-mixto',mode:'mixed',sessionPath:'data/test-mixed',profile:createProfileFromPreset({organizationName:'Mixto',botName:'Mixto',organizationType:'Tienda',timezone:'America/Santiago',preset:'store'})});
+    expect((await app.inject({method:'GET',url:`/api/bots/${privateBot.id}/moderation`,headers:{cookie:auth.cookie}})).statusCode).toBe(404);
+    expect((await app.inject({method:'GET',url:`/api/bots/${mixedBot.id}/moderation`,headers:{cookie:auth.cookie}})).statusCode).toBe(200);
   });
 });
 

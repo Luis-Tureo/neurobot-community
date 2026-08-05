@@ -258,11 +258,142 @@ describe('mensajes automáticos', () => {
     }
   });
 
+  it('usa nombres públicos y menciones reales sin guardar el nombre', async () => {
+    vi.useFakeTimers();
+    const { database, client, service } = createSubject();
+    try {
+      enableWelcome(database, 5);
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['persona@lid'],
+        participants: [{
+          participantId: 'persona@lid', displayName: 'María 👋', nameSource: 'PUSHNAME', mentionId: 'persona@lid',
+        }],
+        eventId: 'public-name',
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]).toMatchObject({ chatId: GROUP_ID, mentionIds: ['persona@lid'] });
+      expect(client.sentMessages[0]?.text).toContain('María 👋');
+      expect(JSON.stringify(database.getTechnicalEvents())).not.toContain('María');
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
+  it('conserva una plantilla anterior y agrega el nombre cuando no tenía variable', async () => {
+    vi.useFakeTimers();
+    const { database, client, service } = createSubject();
+    try {
+      const configuration = database.getAutomaticMessageConfiguration();
+      configuration.welcome.enabled = true;
+      configuration.welcome.template = 'Texto personalizado conservado.';
+      database.saveAutomaticMessageConfiguration(configuration);
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['persona@lid'],
+        participants: [{ participantId: 'persona@lid', displayName: 'María', nameSource: 'PUSHNAME', mentionId: 'persona@lid' }],
+        eventId: 'legacy-template',
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(client.sentMessages[0]?.text).toContain('¡Bienvenido/a, María!');
+      expect(client.sentMessages[0]?.text).toContain('Texto personalizado conservado.');
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
+  it('saluda en forma general cuando ingresan más de cinco personas', async () => {
+    vi.useFakeTimers();
+    const { database, client, service } = createSubject();
+    try {
+      enableWelcome(database, 5);
+      const participantIds = Array.from({ length: 6 }, (_, index) => `persona-${index}@lid`);
+      await service.handleGroupJoin({ groupId: GROUP_ID, participantIds, eventId: 'many' });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]?.text).toBe('¡Bienvenidos/as a los nuevos integrantes! 👋');
+      expect(client.sentMessages[0]?.mentionIds).toBeUndefined();
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
+  it('si falla la mención envía la bienvenida sin cancelar el saludo', async () => {
+    vi.useFakeTimers();
+    const { database, client, service } = createSubject();
+    try {
+      enableWelcome(database, 5);
+      vi.spyOn(client, 'sendMessageWithMentions').mockRejectedValueOnce(new Error('mention failed'));
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['persona@lid'],
+        participants: [{ participantId: 'persona@lid', displayName: 'María', nameSource: 'PUSHNAME', mentionId: 'persona@lid' }],
+        eventId: 'mention-fallback',
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]?.text).toContain('María');
+      expect(database.getTechnicalEvents().some((event) => event.event_type === 'WELCOME_REAL_MENTION_FAILED')).toBe(true);
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
+  it('usa texto genérico, limita grupos y respeta la configuración independiente', async () => {
+    vi.useFakeTimers();
+    const { database, client, service } = createSubject();
+    try {
+      enableWelcome(database, 5);
+      const groupHash = new Anonymizer('x'.repeat(32)).identifier(GROUP_ID);
+      database.saveWelcomeGroupSetting(groupHash, {
+        enabled: false, customTemplate: null, inheritAssistantTemplate: true,
+      });
+      await service.handleGroupJoin({ groupId: GROUP_ID, participantIds: ['persona@lid'], eventId: 'off' });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(client.sentMessages).toHaveLength(0);
+
+      database.saveWelcomeGroupSetting(groupHash, {
+        enabled: true, customTemplate: 'Hola {name}', inheritAssistantTemplate: false,
+      });
+      await service.handleGroupJoin({ groupId: GROUP_ID, participantIds: ['otra@lid'], eventId: 'on' });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(client.sentMessages[0]?.text).toBe('Hola nuevo/a integrante');
+      expect(client.sentMessages[0]?.text).not.toMatch(/\d{6,}/u);
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
+  it('la vista previa y la prueba no crean ingresos ni llaman servicios de IA', async () => {
+    const { database, client, service } = createSubject();
+    try {
+      const preview = service.previewWelcome('María');
+      expect(preview).toContain('María');
+      expect(client.sentMessages).toHaveLength(0);
+      expect(database.listScheduledDeliveries()).toHaveLength(0);
+      const result = await service.sendWelcomeTest(GROUP_ID, 'Persona de prueba');
+      expect(result.status).toBe('SENT');
+      expect(client.sentMessages[0]?.text).toContain('Mensaje de prueba');
+      expect(database.listScheduledDeliveries()).toHaveLength(0);
+    } finally {
+      database.close();
+    }
+  });
+
   it('ignora el ingreso del bot, grupos no autorizados y bienvenida desactivada', async () => {
     vi.useFakeTimers();
     const { database, client, service } = createSubject();
     try {
       client.ownIdentifiers.add('56900000000@c.us');
+      const disabledConfiguration = database.getAutomaticMessageConfiguration();
+      disabledConfiguration.welcome.enabled = false;
+      database.saveAutomaticMessageConfiguration(disabledConfiguration);
       await service.handleGroupJoin({
         groupId: GROUP_ID,
         participantIds: ['56911111111@c.us'],

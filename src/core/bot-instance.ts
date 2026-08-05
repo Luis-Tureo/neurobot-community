@@ -1,11 +1,14 @@
 import type { Logger } from 'pino';
 import type { AIProvider } from '../ai/ai-provider.js';
 import { AssistantQueryService } from '../ai/assistant-query-service.js';
+import { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
 import type { BotRecord, ConnectionSnapshot, GroupJoinEvent } from '../domain/types.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import { canonicalPhoneIdentity, normalizeWhatsAppIdentity } from '../messaging/identifiers.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
+import type { SecretVault } from '../security/secret-vault.js';
+import { ModerationService } from '../moderation/moderation-service.js';
 import { AutomaticMessageService } from './automatic-message-service.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ConversationFlowService } from './conversation-flow-service.js';
@@ -16,6 +19,7 @@ import { PollScheduler } from './poll-scheduler.js';
 import { PollSender } from './poll-sender.js';
 import { PollService } from './poll-service.js';
 import { PollTemplateSelector } from './poll-template-selector.js';
+import { OutboundMessageQueueService } from './outbound-message-queue-service.js';
 
 export type BotInstanceOptions = {
   maxMessageLength: number;
@@ -28,6 +32,7 @@ export type BotInstanceOptions = {
   onDuplicateIdentity?: (botId: string) => Promise<void>;
   onGroupJoin?: (botId: string, event: GroupJoinEvent) => Promise<void>;
   isPaused?: () => boolean;
+  secretVault?: SecretVault;
 };
 
 export class BotInstance {
@@ -38,6 +43,9 @@ export class BotInstance {
   private readonly pollRepository: PollRepository;
   private readonly pollService: PollService;
   private readonly pollScheduler: PollScheduler;
+  private readonly aiQueue: AIRequestQueueService;
+  private readonly outboundQueue: OutboundMessageQueueService;
+  private readonly moderation: ModerationService | null;
   private latestQr: string | null = null;
   private adminPhone: string | null = null;
   private readonly communityServicesEnabled: boolean;
@@ -72,10 +80,15 @@ export class BotInstance {
         anonymize: (identifier) => anonymizer.identifier(identifier),
       },
     );
-    const query = new AssistantQueryService(database, provider, logger, bot.id);
+    this.aiQueue = new AIRequestQueueService(database, logger, bot.id);
+    this.outboundQueue = new OutboundMessageQueueService(client, database, logger, bot.id);
+    this.moderation = bot.groupChannelEnabled
+      ? new ModerationService(database, this.outboundQueue, logger, bot.id, options.secretVault)
+      : null;
+    const query = new AssistantQueryService(database, provider, logger, bot.id, this.aiQueue);
     if (bot.capabilities.communitySingleTurnMode) database.clearConversationStates(bot.id);
     const flow = bot.capabilities.conversationContinuationEnabled || bot.capabilities.interactiveMenusEnabled
-      ? new ConversationFlowService(database, client, logger, bot.id, options.mediaRoot, query)
+      ? new ConversationFlowService(database, client, logger, bot.id, options.mediaRoot, query, this.outboundQueue)
       : undefined;
     this.automaticMessages = new AutomaticMessageService(database, client, logger, anonymizer, {
       botId: bot.id,
@@ -109,6 +122,8 @@ export class BotInstance {
       },
       bot.id,
       flow,
+      this.outboundQueue,
+      this.moderation ?? undefined,
     );
     client.setEvents({
       onMessage: async (message) => {
@@ -216,7 +231,12 @@ export class BotInstance {
     }
   }
 
+  public moderationService(): ModerationService | null {
+    return this.moderation;
+  }
+
   public async stop(): Promise<void> {
+    this.aiQueue.shutdown();
     if (this.communityServicesEnabled) this.discovery.stop();
     if (this.communityServicesEnabled) {
       this.automaticMessages.stop();
@@ -260,6 +280,10 @@ export class BotInstance {
 
   public pollTaskScheduler(): PollScheduler {
     return this.pollScheduler;
+  }
+
+  public aiRequestQueue(): AIRequestQueueService {
+    return this.aiQueue;
   }
 
   public snapshot(): { connection: ConnectionSnapshot; discovery: ReturnType<GroupDiscoveryService['snapshot']>; qrAvailable: boolean } {

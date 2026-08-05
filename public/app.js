@@ -686,6 +686,12 @@ async function loadAutomaticMessages() {
       configuration.welcome.reconciliationIntervalSeconds ?? 120;
   }
   automaticMessagesForm.elements.welcome_template.value = configuration.welcome.template;
+  automaticMessagesForm.elements.welcome_include_public_name.checked = configuration.welcome.includePublicName ?? true;
+  automaticMessagesForm.elements.welcome_real_mention.checked = configuration.welcome.enableRealMention ?? true;
+  automaticMessagesForm.elements.welcome_unknown_name.value = configuration.welcome.unknownNameFallback ?? 'nuevo/a integrante';
+  automaticMessagesForm.elements.welcome_multiple_mode.value = configuration.welcome.multipleJoinMode ?? 'GROUPED';
+  automaticMessagesForm.elements.welcome_maximum_names.value = configuration.welcome.maximumGroupedNames ?? 5;
+  automaticMessagesForm.elements.welcome_send_delay.value = configuration.welcome.sendDelaySeconds ?? 2;
   const welcomeStatus = result.welcomeStatus;
   const welcomeRuntimeStatus = document.querySelector('#welcome-runtime-status');
   if (welcomeRuntimeStatus) {
@@ -731,6 +737,7 @@ async function loadAutomaticMessages() {
       groupSelect.value = previousGroup;
     }
   }
+  renderWelcomeGroupSettings(result.authorizedGroups);
 
   const deliveries = document.querySelector('#automatic-deliveries');
   deliveries.replaceChildren();
@@ -767,6 +774,12 @@ automaticMessagesForm.addEventListener('submit', async (event) => {
         form.elements.welcome_reconciliation_interval?.value ?? 120,
       ),
       template: form.elements.welcome_template.value,
+      includePublicName: form.elements.welcome_include_public_name.checked,
+      enableRealMention: form.elements.welcome_real_mention.checked,
+      unknownNameFallback: form.elements.welcome_unknown_name.value,
+      multipleJoinMode: form.elements.welcome_multiple_mode.value,
+      maximumGroupedNames: Number(form.elements.welcome_maximum_names.value),
+      sendDelaySeconds: Number(form.elements.welcome_send_delay.value),
     },
     dailyGreeting: {
       enabled: form.elements.greeting_enabled.checked,
@@ -816,9 +829,12 @@ document.querySelectorAll('.manual-automatic-send').forEach((button) => {
     }
     button.disabled = true;
     try {
+      const fictitiousName = button.dataset.kind === 'welcome'
+        ? document.querySelector('#welcome-preview-name').value.trim()
+        : undefined;
       await api(botScopedPath(`/api/automatic-messages/send/${button.dataset.kind}`), {
         method: 'POST',
-        body: JSON.stringify({ groupKey: groupSelect.value, confirmed: true }),
+        body: JSON.stringify({ groupKey: groupSelect.value, confirmed: true, ...(fictitiousName ? { fictitiousName } : {}) }),
       });
       await loadAutomaticMessages();
       showNotice(`${label} enviado correctamente.`);
@@ -831,8 +847,19 @@ document.querySelectorAll('.manual-automatic-send').forEach((button) => {
 });
 
 function updateAutomaticPreviews() {
-  document.querySelector('#welcome-preview').textContent =
-    automaticMessagesForm.elements.welcome_template.value;
+  const name = document.querySelector('#welcome-preview-name')?.value.trim() || 'nuevo/a integrante';
+  const profile = state.selectedProfile || {};
+  const selectedGroup = document.querySelector('#automatic-message-group')?.selectedOptions[0]?.textContent || 'Grupo de prueba';
+  const values = {
+    name,
+    mention: `@${name.replace(/^@/u, '')}`,
+    communityName: profile.organizationName || 'la comunidad',
+    groupName: selectedGroup,
+    assistantName: profile.botName || state.selectedBot?.botName || 'el asistente',
+    botAlias: profile.activationAlias || '@neurobot',
+  };
+  document.querySelector('#welcome-preview').textContent = automaticMessagesForm.elements.welcome_template.value
+    .replace(/\{(name|mention|communityName|groupName|assistantName|botAlias)\}/gu, (_match, key) => values[key]);
   document.querySelector('#rules-preview').textContent =
     automaticMessagesForm.elements.rules_template.value;
   const weekday = new Intl.DateTimeFormat('en-US', {
@@ -849,6 +876,65 @@ function updateAutomaticPreviews() {
           : 'greeting_weekday';
   document.querySelector('#greeting-preview').textContent =
     automaticMessagesForm.elements[greetingField].value;
+}
+
+function renderWelcomeGroupSettings(groups) {
+  const target = document.querySelector('#welcome-group-settings');
+  target.replaceChildren();
+  if (groups.length === 0) {
+    target.append(empty('No hay grupos activos para configurar.'));
+    return;
+  }
+  groups.forEach((group) => {
+    const card = document.createElement('article');
+    card.className = 'list-item welcome-group-setting';
+    const title = document.createElement('strong');
+    title.textContent = group.name;
+    const enabledLabel = document.createElement('label');
+    enabledLabel.className = 'toggle';
+    const enabled = document.createElement('input');
+    enabled.type = 'checkbox';
+    enabled.checked = group.welcome.enabled;
+    enabledLabel.append(enabled, ' Bienvenida activa');
+    const inheritLabel = document.createElement('label');
+    inheritLabel.className = 'toggle';
+    const inherit = document.createElement('input');
+    inherit.type = 'checkbox';
+    inherit.checked = group.welcome.inheritAssistantTemplate;
+    inheritLabel.append(inherit, ' Usar plantilla del asistente');
+    const custom = document.createElement('textarea');
+    custom.maxLength = 2000;
+    custom.rows = 3;
+    custom.placeholder = 'Plantilla específica para este grupo';
+    custom.value = group.welcome.customTemplate || '';
+    custom.disabled = inherit.checked;
+    inherit.addEventListener('change', () => { custom.disabled = inherit.checked; });
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'secondary';
+    save.textContent = 'Guardar grupo';
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      try {
+        await api(botScopedPath('/api/automatic-messages/welcome/groups'), {
+          method: 'PATCH',
+          body: JSON.stringify({
+            groupKey: group.key,
+            enabled: enabled.checked,
+            inheritAssistantTemplate: inherit.checked,
+            customTemplate: inherit.checked ? null : custom.value,
+          }),
+        });
+        showNotice('Configuración de bienvenida del grupo guardada.');
+      } catch (error) {
+        showNotice(error.message, true);
+      } finally {
+        save.disabled = false;
+      }
+    });
+    card.append(title, enabledLabel, inheritLabel, custom, save);
+    target.append(card);
+  });
 }
 
 function initializeAutomaticTemplateTools() {
@@ -915,6 +1001,7 @@ async function loadPolls() {
   pollConfigurationForm.elements.selectionMode.value = result.configuration.selectionMode;
   renderPollScheduleSummary(result);
   renderPollTemplates(result.templates);
+  renderHiddenPollTemplates(result.hiddenTemplates || []);
   fillPollSelects(result);
   renderPollOverrides(result.overrides);
   renderPollHistory(result.history);
@@ -951,13 +1038,14 @@ function renderPollTemplates(templates) {
   }
   templates.forEach((template) => {
     const status = template.enabled ? 'Activa' : 'Desactivada';
+    const origin = template.isDefault ? 'Predeterminada' : 'Personalizada';
     const multiple = template.allowMultipleAnswers ? 'respuesta múltiple' : 'respuesta única';
     const used = template.lastUsedAt
       ? new Date(template.lastUsedAt).toLocaleString('es-CL')
       : 'Nunca utilizada';
     const item = listItem(
       template.question,
-      `${template.category} · ${template.options.length} opciones · ${multiple} · ${status}${
+      `${origin} · ${template.category} · ${template.options.length} opciones · ${multiple} · ${status}${
         template.favorite ? ' · Favorita' : ''
       }\nÚltimo uso: ${used}`,
     );
@@ -969,17 +1057,44 @@ function renderPollTemplates(templates) {
     edit.textContent = 'Editar';
     edit.addEventListener('click', () => openPollTemplateEditor(template));
     actions.append(edit);
-    if (!template.isDefault) {
+    if (template.isDefault) {
       const remove = document.createElement('button');
       remove.type = 'button';
-      remove.className = 'danger';
+      remove.className = 'danger poll-remove-button';
       remove.textContent = 'Eliminar';
       remove.addEventListener('click', async () => {
-        if (!window.confirm('¿Eliminar esta encuesta personalizada?')) return;
+        const assistantName = state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
+        const automationState = state.pollData?.configuration.enabled ? 'Activa' : 'Desactivada';
+        const nextSchedule = state.pollData?.nextScheduledAt || 'Sin próxima programación';
+        const confirmed = window.confirm(
+          `Eliminar encuesta de este asistente\n\n` +
+          `Encuesta: ${template.question}\nAsistente: ${assistantName}\nCategoría: ${template.category}\n` +
+          `Automatización: ${automationState}\nPróxima programación: ${nextSchedule}\n\n` +
+          'Esta encuesta dejará de aparecer y no se utilizará en las automatizaciones de este asistente. ' +
+          'No se eliminará de otros asistentes ni del catálogo general. ' +
+          'También será retirada de las automatizaciones futuras de este asistente.',
+        );
+        if (!confirmed) return;
         try {
           await api(botScopedPath(`/api/polls/templates/${template.id}`), { method: 'DELETE' });
           await loadPolls();
-          showNotice('Encuesta eliminada.');
+          showNotice('Encuesta eliminada de este asistente.');
+        } catch (error) {
+          showNotice(error.message, true);
+        }
+      });
+      actions.append(remove);
+    } else {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'danger';
+      remove.textContent = 'Eliminar permanentemente';
+      remove.addEventListener('click', async () => {
+        if (!window.confirm('¿Eliminar permanentemente esta encuesta personalizada de este asistente?')) return;
+        try {
+          await api(botScopedPath(`/api/polls/templates/${template.id}`), { method: 'DELETE' });
+          await loadPolls();
+          showNotice('Encuesta personalizada eliminada.');
         } catch (error) {
           showNotice(error.message, true);
         }
@@ -987,6 +1102,40 @@ function renderPollTemplates(templates) {
       actions.append(remove);
     }
     item.append(actions);
+    target.append(item);
+  });
+}
+
+function renderHiddenPollTemplates(templates) {
+  const target = document.querySelector('#hidden-poll-templates-list');
+  target.replaceChildren();
+  if (templates.length === 0) {
+    target.append(empty('No hay encuestas predeterminadas eliminadas de este asistente.'));
+    return;
+  }
+  const assistantName = state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
+  templates.forEach((template) => {
+    const hiddenAt = new Date(template.hiddenAt).toLocaleString('es-CL');
+    const item = listItem(
+      template.question,
+      `Predeterminada · ${template.category} · Eliminada: ${hiddenAt} · Estado: Oculta\n` +
+      `Esta encuesta fue eliminada solamente de ${assistantName}.`,
+    );
+    const restore = document.createElement('button');
+    restore.type = 'button';
+    restore.className = 'secondary';
+    restore.textContent = 'Restaurar';
+    restore.addEventListener('click', async () => {
+      if (!window.confirm('Esta encuesta volverá a estar disponible para este asistente.')) return;
+      try {
+        await api(botScopedPath(`/api/polls/templates/${template.id}/restore`), { method: 'POST' });
+        await loadPolls();
+        showNotice('Encuesta restaurada para este asistente.');
+      } catch (error) {
+        showNotice(error.message, true);
+      }
+    });
+    item.append(restore);
     target.append(item);
   });
 }
@@ -1147,11 +1296,14 @@ pollTemplateForm.addEventListener('submit', async (event) => {
 });
 
 document.querySelector('#restore-poll-defaults').addEventListener('click', async () => {
-  if (!window.confirm('¿Restaurar las 36 encuestas predeterminadas?')) return;
+  const assistantName = state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
+  if (!window.confirm(`¿Restaurar las encuestas predeterminadas eliminadas solamente para ${assistantName}?`)) return;
   try {
-    await api(botScopedPath('/api/polls/templates/restore-defaults'), { method: 'POST' });
+    const result = await api(botScopedPath('/api/polls/templates/restore-defaults'), { method: 'POST' });
     await loadPolls();
-    showNotice('Encuestas predeterminadas restauradas.');
+    showNotice(result.restored > 0
+      ? `Se restauraron ${result.restored} encuestas predeterminadas para ${assistantName}.`
+      : 'No hay encuestas predeterminadas para restaurar en este asistente.');
   } catch (error) {
     showNotice(error.message, true);
   }

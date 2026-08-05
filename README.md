@@ -365,10 +365,18 @@ No actualice directamente en el grupo oficial.
 
 ## Limitaciones conocidas
 
+Las llamadas a IA usan una [cola independiente por asistente](docs/COLA_DE_INTELIGENCIA_ARTIFICIAL.md) con concurrencia, reintentos, single-flight, circuit breaker y salida ordenada por chat.
+
+La administración de plantillas predeterminadas está aislada por asistente. Consulte [Encuestas por asistente](docs/ENCUESTAS_POR_ASISTENTE.md) para ocultarlas, restaurarlas y entender el tratamiento de automatizaciones futuras.
+
+Los asistentes con canal grupal disponen de [moderación simplificada por grupo](docs/MODERACION_SIMPLIFICADA_POR_GRUPO.md): la IA prepara las reglas una sola vez cuando el administrador lo solicita y la revisión diaria es completamente local, sin expulsión ni eliminación automática.
+
+La [bienvenida de integrantes](docs/BIENVENIDA_DE_INTEGRANTES.md) usa localmente el nombre público configurado en WhatsApp, menciones reales cuando son compatibles y un texto genérico sin exponer números.
+
 - Dependencia no oficial de la interfaz de WhatsApp Web.
 - La prueba real necesita un teléfono, número exclusivo y escaneo QR.
-- No administra Comunidades, canales, participantes ni moderación.
-- Neurobot no envía mensajes privados; los perfiles comerciales sí pueden usar menús privados configurados.
+- No modifica automáticamente Comunidades, canales ni participantes; la moderación disponible se limita a advertencias locales y revisión humana.
+- Neurobot no atiende consultas privadas; solo puede enviar avisos privados de reincidencia a administradores seleccionados expresamente en la moderación del grupo.
 - La IA es opcional, acotada al conocimiento oficial y depende de una clave válida y de los límites configurados.
 - Los botones y listas nativos dependen de funciones obsoletas de `whatsapp-web.js`; la alternativa numerada es el modo compatible garantizado.
 - El estado de sesiones activas del panel vive en memoria y se pierde al reiniciar, lo que obliga a iniciar sesión otra vez.

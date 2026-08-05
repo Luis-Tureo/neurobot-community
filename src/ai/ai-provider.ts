@@ -44,6 +44,7 @@ export class AIProviderError extends Error {
     public readonly code: AIProviderErrorCode,
     message: string,
     public readonly retryable = false,
+    public readonly retryAfterSeconds: number | null = null,
   ) {
     super(message);
     this.name = 'AIProviderError';

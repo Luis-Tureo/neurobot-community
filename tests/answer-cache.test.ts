@@ -159,11 +159,14 @@ describe('respuestas locales, caché y consumo real de IA', () => {
       title: 'Convivencia general', content: 'Las controversias internas tienen un protocolo oficial.', keywords: ['convivencia'],
     });
     provider.failure = new Error('fallo simulado');
+    database.saveAIQueueSettings('neurobot', {
+      ...database.getAIQueueSettings('neurobot'), maxRetries: 0,
+    });
     const result = await service.answerQuestion('¿Cuál es el protocolo para controversias internas?', 'group', 'user');
     expect(result.code).toBe('AI_ERROR');
     expect(provider.calls).toBe(1);
     const date = new Date().toISOString().slice(0, 10);
-    expect(database.getAIUsageSummary(profileId, date, date.slice(0, 7))).toMatchObject({ requests: 0, failedRequests: 1 });
+    expect(database.getAIUsageSummary(profileId, date, date.slice(0, 7))).toMatchObject({ requests: 0, failedRequests: 0 });
     database.close();
   });
 

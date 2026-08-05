@@ -28,6 +28,9 @@ import type {
   CachedAnswerStatus,
   AISettings,
   AIProviderStatus,
+  AIProviderHealthState,
+  AIQueueMetrics,
+  AIQueueSettings,
   AIReservationDecision,
   AIUsageSummary,
   AssistantLifecycleStatus,
@@ -45,11 +48,16 @@ import type {
   KnowledgeFragment,
   LinkedGroupRecord,
   HumanAssistanceRequest,
+  HiddenPollTemplate,
   MediaAsset,
   MenuActionType,
   MenuDefinition,
   MenuOption,
   MenuType,
+  ModerationGroupMode,
+  ModerationRule,
+  ModerationSettings,
+  ModerationSeverity,
   OrganizationType,
   PollConfiguration,
   PollDateOverride,
@@ -92,6 +100,29 @@ type GroupRow = {
   last_failure_code: string | null;
   detected_at: string;
   updated_at: string;
+};
+
+export type GroupModerationProfile = {
+  assistantId: string;
+  groupHash: string;
+  enabled: boolean;
+  rulesText: string;
+  rulesHash: string;
+  analysisStatus: 'DRAFT' | 'ANALYZING' | 'ANALYSIS_FAILED' | 'PENDING_TESTS' | 'READY' | 'ACTIVE' | 'OUTDATED';
+  testStatus: 'PENDING' | 'FAILED' | 'APPROVED';
+  compiled: Record<string, unknown> | null;
+  summary: Record<string, unknown> | null;
+  provider: string | null;
+  model: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  firstWarningMessage: string;
+  secondWarningMessage: string;
+  recurrenceWindowDays: number;
+  lastAnalyzedAt: string | null;
+  lastTestedAt: string | null;
+  activatedAt: string | null;
+  updatedAt: string;
 };
 
 type KeywordRow = {
@@ -1439,6 +1470,351 @@ export class AppDatabase {
           );
         `,
       },
+      {
+        version: 14,
+        sql: `
+          CREATE TABLE assistant_poll_template_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            poll_template_id INTEGER NOT NULL REFERENCES bot_poll_templates(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'ACTIVE'
+              CHECK (status IN ('ACTIVE','HIDDEN','DISABLED','ARCHIVED')),
+            hidden_at TEXT,
+            restored_at TEXT,
+            safe_actor_hash TEXT NOT NULL,
+            removal_reason TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(assistant_id, poll_template_id)
+          );
+          CREATE INDEX idx_assistant_poll_template_status
+            ON assistant_poll_template_settings(assistant_id, status, poll_template_id);
+        `,
+      },
+      {
+        version: 15,
+        sql: `
+          CREATE TABLE assistant_ai_queue_settings (
+            assistant_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
+            max_concurrent INTEGER NOT NULL DEFAULT 3 CHECK (max_concurrent BETWEEN 1 AND 10),
+            max_queue_size INTEGER NOT NULL DEFAULT 20 CHECK (max_queue_size BETWEEN 1 AND 100),
+            max_queue_wait_seconds INTEGER NOT NULL DEFAULT 60 CHECK (max_queue_wait_seconds BETWEEN 5 AND 300),
+            provider_timeout_seconds INTEGER NOT NULL DEFAULT 25 CHECK (provider_timeout_seconds BETWEEN 5 AND 60),
+            max_retries INTEGER NOT NULL DEFAULT 2 CHECK (max_retries BETWEEN 0 AND 5),
+            initial_retry_delay_seconds INTEGER NOT NULL DEFAULT 2 CHECK (initial_retry_delay_seconds BETWEEN 1 AND 30),
+            maximum_retry_delay_seconds INTEGER NOT NULL DEFAULT 15 CHECK (maximum_retry_delay_seconds BETWEEN 1 AND 60),
+            wait_notice_seconds INTEGER NOT NULL DEFAULT 5 CHECK (wait_notice_seconds BETWEEN 1 AND 60),
+            user_cooldown_seconds INTEGER NOT NULL DEFAULT 10 CHECK (user_cooldown_seconds BETWEEN 0 AND 300),
+            duplicate_window_seconds INTEGER NOT NULL DEFAULT 15 CHECK (duplicate_window_seconds BETWEEN 0 AND 300),
+            single_flight_window_seconds INTEGER NOT NULL DEFAULT 60 CHECK (single_flight_window_seconds BETWEEN 1 AND 300),
+            outbound_message_interval_ms INTEGER NOT NULL DEFAULT 1000 CHECK (outbound_message_interval_ms BETWEEN 0 AND 10000),
+            suggested_retry_seconds INTEGER NOT NULL DEFAULT 60 CHECK (suggested_retry_seconds BETWEEN 5 AND 600),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE TABLE assistant_ai_queue_metrics (
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            local_date TEXT NOT NULL,
+            queued_count INTEGER NOT NULL DEFAULT 0,
+            processed_count INTEGER NOT NULL DEFAULT 0,
+            completed_count INTEGER NOT NULL DEFAULT 0,
+            failed_count INTEGER NOT NULL DEFAULT 0,
+            expired_count INTEGER NOT NULL DEFAULT 0,
+            rejected_count INTEGER NOT NULL DEFAULT 0,
+            timeout_count INTEGER NOT NULL DEFAULT 0,
+            rate_limit_count INTEGER NOT NULL DEFAULT 0,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            coalesced_count INTEGER NOT NULL DEFAULT 0,
+            duplicate_suppressed_count INTEGER NOT NULL DEFAULT 0,
+            cache_bypass_count INTEGER NOT NULL DEFAULT 0,
+            total_wait_ms INTEGER NOT NULL DEFAULT 0,
+            maximum_wait_ms INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(assistant_id, local_date)
+          );
+          CREATE TABLE assistant_ai_provider_health (
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            provider TEXT NOT NULL,
+            state TEXT NOT NULL DEFAULT 'AVAILABLE'
+              CHECK (state IN ('AVAILABLE','BUSY','RATE_LIMITED','DEGRADED','UNAVAILABLE','NOT_CONFIGURED')),
+            consecutive_failures INTEGER NOT NULL DEFAULT 0,
+            circuit_state TEXT NOT NULL DEFAULT 'CLOSED' CHECK (circuit_state IN ('CLOSED','OPEN','HALF_OPEN')),
+            circuit_opened_at TEXT,
+            circuit_retry_at TEXT,
+            last_success_at TEXT,
+            last_failure_at TEXT,
+            last_safe_error_code TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(assistant_id, provider)
+          );
+          INSERT INTO assistant_ai_queue_settings(assistant_id, created_at, updated_at)
+            SELECT id, datetime('now'), datetime('now') FROM bots;
+          INSERT INTO assistant_ai_provider_health(assistant_id, provider, state, updated_at)
+            SELECT id, 'groq', 'AVAILABLE', datetime('now') FROM bots;
+        `,
+      },
+      {
+        version: 16,
+        sql: `
+          CREATE TABLE assistant_moderation_settings (
+            assistant_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
+            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
+            default_group_mode TEXT NOT NULL DEFAULT 'INHERIT' CHECK (default_group_mode IN ('INHERIT','ENABLED','DISABLED')),
+            review_threshold INTEGER NOT NULL DEFAULT 3 CHECK (review_threshold BETWEEN 1 AND 20),
+            warning_threshold INTEGER NOT NULL DEFAULT 4 CHECK (warning_threshold BETWEEN 1 AND 20),
+            admin_notification_threshold INTEGER NOT NULL DEFAULT 4 CHECK (admin_notification_threshold BETWEEN 1 AND 20),
+            recurrence_window_days INTEGER NOT NULL DEFAULT 7 CHECK (recurrence_window_days BETWEEN 1 AND 90),
+            warning_cooldown_minutes INTEGER NOT NULL DEFAULT 10 CHECK (warning_cooldown_minutes BETWEEN 1 AND 1440),
+            public_warning_limit INTEGER NOT NULL DEFAULT 3 CHECK (public_warning_limit BETWEEN 1 AND 20),
+            public_warning_window_minutes INTEGER NOT NULL DEFAULT 30 CHECK (public_warning_window_minutes BETWEEN 1 AND 1440),
+            temporary_evidence_enabled INTEGER NOT NULL DEFAULT 1 CHECK (temporary_evidence_enabled IN (0,1)),
+            temporary_evidence_hours INTEGER NOT NULL DEFAULT 72 CHECK (temporary_evidence_hours BETWEEN 1 AND 168),
+            warning_mode TEXT NOT NULL DEFAULT 'GROUP_MENTION' CHECK (warning_mode IN ('GROUP_GENERAL','GROUP_MENTION','ADMIN_ONLY')),
+            automatic_ai_review_enabled INTEGER NOT NULL DEFAULT 0 CHECK (automatic_ai_review_enabled = 0),
+            manual_ai_review_enabled INTEGER NOT NULL DEFAULT 0 CHECK (manual_ai_review_enabled = 0),
+            automatic_ban_enabled INTEGER NOT NULL DEFAULT 0 CHECK (automatic_ban_enabled = 0),
+            automatic_deletion_enabled INTEGER NOT NULL DEFAULT 0 CHECK (automatic_deletion_enabled = 0),
+            first_warning_message TEXT NOT NULL DEFAULT '⚠️ Advertencia automática: este mensaje podría incumplir las normas de esta comunidad. Por favor, revisa las reglas y evita repetir este tipo de contenido. Esta advertencia fue generada automáticamente y puede ser revisada por la administración.',
+            second_warning_message TEXT NOT NULL DEFAULT '⚠️ Segunda advertencia automática: se detectó nuevamente un posible incumplimiento de las normas de la comunidad. La administración será informada para revisar la situación. Esta advertencia fue generada automáticamente y no implica una expulsión automática.',
+            repeated_warning_message TEXT NOT NULL DEFAULT '⚠️ Aviso automático: se han detectado posibles incumplimientos reiterados. La situación será revisada por la administración.',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE TABLE assistant_group_moderation_settings (
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            group_hash TEXT NOT NULL,
+            mode TEXT NOT NULL DEFAULT 'INHERIT' CHECK (mode IN ('INHERIT','ENABLED','DISABLED')),
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(assistant_id, group_hash)
+          );
+          CREATE TABLE moderation_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            category TEXT NOT NULL,
+            severity TEXT NOT NULL CHECK (severity IN ('INFORMATIVA','LEVE','MEDIA','ALTA','CRITICA')),
+            detection_type TEXT NOT NULL,
+            score INTEGER NOT NULL DEFAULT 1 CHECK (score BETWEEN 0 AND 20),
+            review_threshold INTEGER NOT NULL DEFAULT 3 CHECK (review_threshold BETWEEN 1 AND 20),
+            warning_threshold INTEGER NOT NULL DEFAULT 4 CHECK (warning_threshold BETWEEN 1 AND 20),
+            admin_notification_threshold INTEGER NOT NULL DEFAULT 4 CHECK (admin_notification_threshold BETWEEN 1 AND 20),
+            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
+            applies_to_all_groups INTEGER NOT NULL DEFAULT 1 CHECK (applies_to_all_groups IN (0,1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX idx_moderation_rules_assistant ON moderation_rules(assistant_id, enabled, category);
+          CREATE TABLE moderation_rule_conditions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rule_id INTEGER NOT NULL REFERENCES moderation_rules(id) ON DELETE CASCADE,
+            condition_type TEXT NOT NULL,
+            operator TEXT NOT NULL DEFAULT 'ANY' CHECK (operator IN ('ALL','ANY','EXCLUDE')),
+            normalized_value TEXT NOT NULL,
+            configuration_json TEXT NOT NULL DEFAULT '{}',
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX idx_moderation_conditions_rule ON moderation_rule_conditions(rule_id, enabled);
+          CREATE TABLE moderation_rule_exceptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            rule_id INTEGER NOT NULL REFERENCES moderation_rules(id) ON DELETE CASCADE,
+            exception_type TEXT NOT NULL,
+            normalized_value TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE INDEX idx_moderation_exceptions_rule ON moderation_rule_exceptions(rule_id, enabled);
+          CREATE TABLE moderation_terms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            rule_id INTEGER REFERENCES moderation_rules(id) ON DELETE SET NULL,
+            term TEXT NOT NULL,
+            normalized_term TEXT NOT NULL,
+            category TEXT NOT NULL,
+            severity TEXT NOT NULL CHECK (severity IN ('INFORMATIVA','LEVE','MEDIA','ALTA','CRITICA')),
+            match_mode TEXT NOT NULL,
+            score INTEGER NOT NULL DEFAULT 1 CHECK (score BETWEEN 0 AND 20),
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(assistant_id, normalized_term, match_mode)
+          );
+          CREATE INDEX idx_moderation_terms_assistant ON moderation_terms(assistant_id, enabled);
+          CREATE TABLE moderation_cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            group_hash TEXT NOT NULL,
+            participant_hash TEXT NOT NULL,
+            message_hash TEXT NOT NULL,
+            category TEXT NOT NULL,
+            matched_rule_ids TEXT NOT NULL,
+            score INTEGER NOT NULL,
+            severity TEXT NOT NULL,
+            warning_number INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','CONFIRMED','FALSE_POSITIVE','DISMISSED','RESOLVED')),
+            warning_sent_at TEXT,
+            admin_notified_at TEXT,
+            reviewed_at TEXT,
+            decision TEXT,
+            encrypted_temporary_evidence TEXT,
+            evidence_expires_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(assistant_id, message_hash)
+          );
+          CREATE INDEX idx_moderation_cases_assistant ON moderation_cases(assistant_id, status, created_at DESC);
+          CREATE INDEX idx_moderation_cases_participant ON moderation_cases(assistant_id, group_hash, participant_hash, created_at DESC);
+          CREATE TABLE moderation_recurrence (
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            group_hash TEXT NOT NULL,
+            participant_hash TEXT NOT NULL,
+            active_count INTEGER NOT NULL DEFAULT 0,
+            window_started_at TEXT NOT NULL,
+            last_warning_at TEXT,
+            expires_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(assistant_id, group_hash, participant_hash)
+          );
+          CREATE TABLE moderation_metrics (
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            local_date TEXT NOT NULL,
+            messages_reviewed INTEGER NOT NULL DEFAULT 0,
+            messages_allowed INTEGER NOT NULL DEFAULT 0,
+            matches_detected INTEGER NOT NULL DEFAULT 0,
+            warnings_sent INTEGER NOT NULL DEFAULT 0,
+            recurrences_detected INTEGER NOT NULL DEFAULT 0,
+            admin_cases_created INTEGER NOT NULL DEFAULT 0,
+            false_positives INTEGER NOT NULL DEFAULT 0,
+            confirmed_cases INTEGER NOT NULL DEFAULT 0,
+            local_errors INTEGER NOT NULL DEFAULT 0,
+            ai_reviews INTEGER NOT NULL DEFAULT 0 CHECK (ai_reviews = 0),
+            ai_tokens INTEGER NOT NULL DEFAULT 0 CHECK (ai_tokens = 0),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(assistant_id, local_date)
+          );
+          INSERT INTO assistant_moderation_settings(assistant_id, created_at, updated_at)
+            SELECT id, datetime('now'), datetime('now') FROM bots;
+        `,
+      },
+      {
+        version: 17,
+        sql: `
+          CREATE TABLE assistant_welcome_settings (
+            assistant_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
+            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
+            template TEXT NOT NULL,
+            include_public_name INTEGER NOT NULL DEFAULT 1 CHECK (include_public_name IN (0,1)),
+            enable_real_mention INTEGER NOT NULL DEFAULT 1 CHECK (enable_real_mention IN (0,1)),
+            unknown_name_fallback TEXT NOT NULL DEFAULT 'nuevo/a integrante',
+            multiple_join_mode TEXT NOT NULL DEFAULT 'GROUPED' CHECK (multiple_join_mode IN ('INDIVIDUAL','GROUPED')),
+            maximum_grouped_names INTEGER NOT NULL DEFAULT 5 CHECK (maximum_grouped_names BETWEEN 1 AND 5),
+            send_delay_seconds INTEGER NOT NULL DEFAULT 2 CHECK (send_delay_seconds BETWEEN 0 AND 60),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE TABLE assistant_group_welcome_settings (
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            group_hash TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+            custom_template TEXT,
+            inherit_assistant_template INTEGER NOT NULL DEFAULT 1 CHECK (inherit_assistant_template IN (0,1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(assistant_id, group_hash)
+          );
+          CREATE INDEX idx_group_welcome_assistant ON assistant_group_welcome_settings(assistant_id, enabled);
+          INSERT INTO assistant_welcome_settings(
+            assistant_id, enabled, template, include_public_name, enable_real_mention,
+            unknown_name_fallback, multiple_join_mode, maximum_grouped_names,
+            send_delay_seconds, created_at, updated_at
+          )
+          SELECT b.id,
+            COALESCE(json_extract(c.configuration_json, '$.welcome.enabled'), 0),
+            CASE WHEN COALESCE(json_extract(c.customized_json, '$.WELCOME'), 0) = 1
+              THEN COALESCE(json_extract(c.configuration_json, '$.welcome.template'),
+                '¡Bienvenido/a, {name}! 👋\n\nTe damos la bienvenida a {communityName}. Este es un espacio de respeto, apoyo e inclusión.\n\nPuedes participar cuando te sientas cómodo/a. Para consultar al asistente, escribe {botAlias} seguido de tu pregunta.')
+              ELSE '¡Bienvenido/a, {name}! 👋\n\nTe damos la bienvenida a {communityName}. Este es un espacio de respeto, apoyo e inclusión.\n\nPuedes participar cuando te sientas cómodo/a. Para consultar al asistente, escribe {botAlias} seguido de tu pregunta.' END,
+            1, 1, 'nuevo/a integrante', 'GROUPED', 5, 2, datetime('now'), datetime('now')
+          FROM bots b LEFT JOIN bot_automatic_configurations c ON c.bot_id=b.id;
+        `,
+      },
+      {
+        version: 18,
+        sql: `
+          CREATE TABLE group_moderation_profiles (
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            group_hash TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
+            rules_text TEXT NOT NULL DEFAULT '',
+            rules_hash TEXT NOT NULL DEFAULT '',
+            analysis_status TEXT NOT NULL DEFAULT 'DRAFT'
+              CHECK (analysis_status IN ('DRAFT','ANALYZING','ANALYSIS_FAILED','PENDING_TESTS','READY','ACTIVE','OUTDATED')),
+            test_status TEXT NOT NULL DEFAULT 'PENDING'
+              CHECK (test_status IN ('PENDING','FAILED','APPROVED')),
+            compiled_json TEXT,
+            compiled_summary_json TEXT,
+            provider TEXT,
+            model TEXT,
+            input_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            first_warning_message TEXT NOT NULL DEFAULT '⚠️ Advertencia automática: este mensaje podría incumplir las reglas de esta comunidad. Por favor, revisa las normas y evita repetir este tipo de contenido. Esta advertencia fue generada automáticamente y puede ser revisada por la administración.',
+            second_warning_message TEXT NOT NULL DEFAULT '⚠️ Segunda advertencia automática: se detectó nuevamente un posible incumplimiento de las reglas. La administración será informada para revisar la situación. Esta advertencia fue generada automáticamente y no implica una expulsión automática.',
+            recurrence_window_days INTEGER NOT NULL DEFAULT 7 CHECK (recurrence_window_days BETWEEN 1 AND 365),
+            last_analyzed_at TEXT,
+            last_tested_at TEXT,
+            activated_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (assistant_id, group_hash)
+          );
+          CREATE INDEX idx_group_moderation_profiles_state
+            ON group_moderation_profiles(assistant_id, enabled, analysis_status);
+          CREATE TABLE group_moderation_tests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            group_hash TEXT NOT NULL,
+            rules_hash TEXT NOT NULL,
+            test_type TEXT NOT NULL CHECK (test_type IN ('AUTOMATIC','MANUAL_ALLOWED','MANUAL_WARNING')),
+            expected_result TEXT NOT NULL CHECK (expected_result IN ('ALLOW','WARNING')),
+            actual_result TEXT NOT NULL CHECK (actual_result IN ('ALLOW','WARNING','ERROR')),
+            category TEXT,
+            passed INTEGER NOT NULL CHECK (passed IN (0,1)),
+            created_at TEXT NOT NULL
+          );
+          CREATE INDEX idx_group_moderation_tests_profile
+            ON group_moderation_tests(assistant_id, group_hash, rules_hash, created_at DESC);
+          CREATE TABLE group_moderation_admin_recipients (
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            group_hash TEXT NOT NULL,
+            administrator_hash TEXT NOT NULL,
+            encrypted_identifier TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (assistant_id, group_hash, administrator_hash)
+          );
+          UPDATE assistant_moderation_settings SET enabled=0, default_group_mode='DISABLED', updated_at=datetime('now');
+          UPDATE assistant_group_moderation_settings SET mode='DISABLED', enabled=0, updated_at=datetime('now');
+        `,
+      },
+      {
+        version: 19,
+        sql: `
+          UPDATE group_moderation_profiles SET
+            recurrence_window_days=7,
+            first_warning_message='⚠️ Advertencia automática: este mensaje podría incumplir las reglas de esta comunidad. Por favor, revisa las normas y evita repetir este tipo de contenido. Esta advertencia fue generada automáticamente y puede ser revisada por la administración.',
+            second_warning_message='⚠️ Segunda advertencia automática: se detectó nuevamente un posible incumplimiento de las reglas. La administración será informada para revisar la situación. Esta advertencia fue generada automáticamente y no implica una expulsión automática.',
+            updated_at=datetime('now')
+          WHERE recurrence_window_days=30;
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -1869,6 +2245,10 @@ export class AppDatabase {
   }
 
   private seedBotPollTemplates(botId: string, timezone: string, now: string): void {
+    this.db.prepare(`INSERT OR IGNORE INTO assistant_ai_queue_settings(assistant_id, created_at, updated_at)
+      VALUES (?, ?, ?)`).run(botId, now, now);
+    this.db.prepare(`INSERT OR IGNORE INTO assistant_ai_provider_health(assistant_id, provider, state, updated_at)
+      VALUES (?, 'groq', 'AVAILABLE', ?)`).run(botId, now);
     this.db
       .prepare(
         `INSERT OR IGNORE INTO bot_poll_configurations(
@@ -2120,18 +2500,22 @@ export class AppDatabase {
     const row = this.db
       .prepare('SELECT configuration_json FROM bot_automatic_configurations WHERE bot_id = ?')
       .get(botId) as { configuration_json: string } | undefined;
-    if (row === undefined) return defaultAutomaticConfiguration(this.getBot(botId)?.timezone ?? 'America/Santiago');
+    if (row === undefined) return this.mergeWelcomeSettings(
+      defaultAutomaticConfiguration(this.getBot(botId)?.timezone ?? 'America/Santiago'), botId,
+    );
     try {
       const stored = JSON.parse(row.configuration_json) as AutomaticMessageConfiguration;
-      return {
+      return this.mergeWelcomeSettings({
         ...stored,
         welcome: {
           ...DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.welcome,
           ...stored.welcome,
         },
-      };
+      }, botId);
     } catch {
-      return defaultAutomaticConfiguration(this.getBot(botId)?.timezone ?? 'America/Santiago');
+      return this.mergeWelcomeSettings(
+        defaultAutomaticConfiguration(this.getBot(botId)?.timezone ?? 'America/Santiago'), botId,
+      );
     }
   }
 
@@ -2150,11 +2534,104 @@ export class AppDatabase {
       )
       .run(botId, JSON.stringify(configuration), JSON.stringify(customized), now);
     if (result.changes !== 1) throw new Error('No fue posible guardar la automatización.');
+    this.saveAssistantWelcomeSettings(configuration.welcome, botId);
     if (botId === 'neurobot') {
       this.db
         .prepare(`UPDATE commands SET response = ?, custom = 1, updated_at = ? WHERE name = 'reglas'`)
         .run(configuration.dailyRules.template, now);
     }
+  }
+
+  public getWelcomeGroupSetting(
+    groupHash: string,
+    botId = 'neurobot',
+  ): { enabled: boolean; customTemplate: string | null; inheritAssistantTemplate: boolean } | null {
+    const row = this.db.prepare(`SELECT enabled, custom_template, inherit_assistant_template
+      FROM assistant_group_welcome_settings WHERE assistant_id=? AND group_hash=?`).get(botId, groupHash) as
+      { enabled: number; custom_template: string | null; inherit_assistant_template: number } | undefined;
+    return row === undefined ? null : {
+      enabled: row.enabled === 1,
+      customTemplate: row.custom_template,
+      inheritAssistantTemplate: row.inherit_assistant_template === 1,
+    };
+  }
+
+  public listWelcomeGroupSettings(botId = 'neurobot'): Array<{
+    groupHash: string;
+    enabled: boolean;
+    customTemplate: string | null;
+    inheritAssistantTemplate: boolean;
+  }> {
+    return (this.db.prepare(`SELECT group_hash, enabled, custom_template, inherit_assistant_template
+      FROM assistant_group_welcome_settings WHERE assistant_id=? ORDER BY group_hash`).all(botId) as Array<{
+      group_hash: string; enabled: number; custom_template: string | null; inherit_assistant_template: number;
+    }>).map((row) => ({
+      groupHash: row.group_hash,
+      enabled: row.enabled === 1,
+      customTemplate: row.custom_template,
+      inheritAssistantTemplate: row.inherit_assistant_template === 1,
+    }));
+  }
+
+  public saveWelcomeGroupSetting(
+    groupHash: string,
+    setting: { enabled: boolean; customTemplate: string | null; inheritAssistantTemplate: boolean },
+    botId = 'neurobot',
+  ): void {
+    const now = new Date().toISOString();
+    this.db.prepare(`INSERT INTO assistant_group_welcome_settings(
+      assistant_id,group_hash,enabled,custom_template,inherit_assistant_template,created_at,updated_at
+    ) VALUES(?,?,?,?,?,?,?) ON CONFLICT(assistant_id,group_hash) DO UPDATE SET
+      enabled=excluded.enabled,custom_template=excluded.custom_template,
+      inherit_assistant_template=excluded.inherit_assistant_template,updated_at=excluded.updated_at`).run(
+      botId, groupHash, setting.enabled ? 1 : 0, setting.customTemplate,
+      setting.inheritAssistantTemplate ? 1 : 0, now, now,
+    );
+  }
+
+  private mergeWelcomeSettings(
+    configuration: AutomaticMessageConfiguration,
+    botId: string,
+  ): AutomaticMessageConfiguration {
+    const row = this.db.prepare(`SELECT enabled, template, include_public_name, enable_real_mention,
+      unknown_name_fallback, multiple_join_mode, maximum_grouped_names, send_delay_seconds
+      FROM assistant_welcome_settings WHERE assistant_id=?`).get(botId) as {
+      enabled: number; template: string; include_public_name: number; enable_real_mention: number;
+      unknown_name_fallback: string; multiple_join_mode: 'INDIVIDUAL' | 'GROUPED';
+      maximum_grouped_names: number; send_delay_seconds: number;
+    } | undefined;
+    if (row === undefined) return configuration;
+    return { ...configuration, welcome: {
+      ...configuration.welcome,
+      enabled: row.enabled === 1,
+      template: row.template,
+      includePublicName: row.include_public_name === 1,
+      enableRealMention: row.enable_real_mention === 1,
+      unknownNameFallback: row.unknown_name_fallback,
+      multipleJoinMode: row.multiple_join_mode,
+      groupSimultaneous: row.multiple_join_mode === 'GROUPED',
+      maximumGroupedNames: row.maximum_grouped_names,
+      sendDelaySeconds: row.send_delay_seconds,
+    } };
+  }
+
+  private saveAssistantWelcomeSettings(
+    welcome: AutomaticMessageConfiguration['welcome'],
+    botId: string,
+  ): void {
+    const now = new Date().toISOString();
+    this.db.prepare(`INSERT INTO assistant_welcome_settings(
+      assistant_id,enabled,template,include_public_name,enable_real_mention,unknown_name_fallback,
+      multiple_join_mode,maximum_grouped_names,send_delay_seconds,created_at,updated_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(assistant_id) DO UPDATE SET
+      enabled=excluded.enabled,template=excluded.template,include_public_name=excluded.include_public_name,
+      enable_real_mention=excluded.enable_real_mention,unknown_name_fallback=excluded.unknown_name_fallback,
+      multiple_join_mode=excluded.multiple_join_mode,maximum_grouped_names=excluded.maximum_grouped_names,
+      send_delay_seconds=excluded.send_delay_seconds,updated_at=excluded.updated_at`).run(
+      botId, welcome.enabled ? 1 : 0, welcome.template, welcome.includePublicName ? 1 : 0,
+      welcome.enableRealMention ? 1 : 0, welcome.unknownNameFallback, welcome.multipleJoinMode,
+      welcome.maximumGroupedNames, welcome.sendDelaySeconds, now, now,
+    );
   }
 
   public getWelcomeRuntime(botId = 'neurobot'): {
@@ -2467,7 +2944,11 @@ export class AppDatabase {
 
   public listPollTemplates(botId = 'neurobot'): PollTemplate[] {
     const rows = this.db
-      .prepare('SELECT * FROM bot_poll_templates WHERE bot_id = ? ORDER BY is_default DESC, id')
+      .prepare(`SELECT templates.* FROM bot_poll_templates templates
+        LEFT JOIN assistant_poll_template_settings settings
+          ON settings.assistant_id = templates.bot_id AND settings.poll_template_id = templates.id
+        WHERE templates.bot_id = ? AND COALESCE(settings.status, 'ACTIVE') != 'HIDDEN'
+        ORDER BY templates.is_default DESC, templates.id`)
       .all(botId) as PollTemplateRow[];
     const optionRows = this.db
       .prepare(`SELECT options.template_id, options.option_text FROM bot_poll_options options
@@ -2481,6 +2962,86 @@ export class AppDatabase {
       options.set(row.template_id, values);
     }
     return rows.map((row) => mapPollTemplate(row, options.get(row.id) ?? []));
+  }
+
+  public listHiddenPollTemplates(botId = 'neurobot'): HiddenPollTemplate[] {
+    const rows = this.db.prepare(`SELECT templates.*, settings.hidden_at, settings.removal_reason
+      FROM bot_poll_templates templates
+      JOIN assistant_poll_template_settings settings
+        ON settings.assistant_id = templates.bot_id AND settings.poll_template_id = templates.id
+      WHERE templates.bot_id = ? AND templates.is_default = 1 AND settings.status = 'HIDDEN'
+      ORDER BY settings.hidden_at DESC`).all(botId) as Array<PollTemplateRow & {
+        hidden_at: string;
+        removal_reason: string | null;
+      }>;
+    const optionRows = this.db.prepare(`SELECT options.template_id, options.option_text
+      FROM bot_poll_options options JOIN bot_poll_templates templates ON templates.id = options.template_id
+      WHERE templates.bot_id = ? ORDER BY options.option_order`).all(botId) as Array<{
+        template_id: number;
+        option_text: string;
+      }>;
+    const options = new Map<number, string[]>();
+    for (const row of optionRows) options.set(row.template_id, [...(options.get(row.template_id) ?? []), row.option_text]);
+    return rows.map((row) => ({
+      ...mapPollTemplate(row, options.get(row.id) ?? []),
+      hiddenAt: row.hidden_at,
+      removalReason: row.removal_reason,
+    }));
+  }
+
+  public hidePollTemplateForAssistant(
+    botId: string,
+    templateId: number,
+    safeActorHash: string,
+    removalReason: string | null = null,
+  ): { hidden: boolean; cancelledOverrides: number; cancelledDeliveries: number } {
+    const template = this.db.prepare(
+      'SELECT id, is_default FROM bot_poll_templates WHERE id = ? AND bot_id = ?',
+    ).get(templateId, botId) as { id: number; is_default: number } | undefined;
+    if (template === undefined || template.is_default !== 1) throw new Error('POLL_ASSISTANT_MISMATCH');
+    const existing = this.db.prepare(`SELECT status FROM assistant_poll_template_settings
+      WHERE assistant_id = ? AND poll_template_id = ?`).get(botId, templateId) as { status: string } | undefined;
+    if (existing?.status === 'HIDDEN') return { hidden: false, cancelledOverrides: 0, cancelledDeliveries: 0 };
+    const now = new Date().toISOString();
+    return this.db.transaction(() => {
+      this.db.prepare(`INSERT INTO assistant_poll_template_settings(
+        assistant_id, poll_template_id, status, hidden_at, restored_at, safe_actor_hash,
+        removal_reason, created_at, updated_at
+      ) VALUES (?, ?, 'HIDDEN', ?, NULL, ?, ?, ?, ?)
+      ON CONFLICT(assistant_id, poll_template_id) DO UPDATE SET status = 'HIDDEN',
+        hidden_at = excluded.hidden_at, restored_at = NULL, safe_actor_hash = excluded.safe_actor_hash,
+        removal_reason = excluded.removal_reason, updated_at = excluded.updated_at`).run(
+        botId, templateId, now, safeActorHash, removalReason, now, now,
+      );
+      const cancelledOverrides = this.db.prepare(
+        'DELETE FROM bot_poll_date_overrides WHERE bot_id = ? AND template_id = ? AND local_date > date(?)',
+      ).run(botId, templateId, now).changes;
+      const cancelledDeliveries = this.db.prepare(`UPDATE bot_poll_send_history
+        SET status = 'SKIPPED', failure_code = 'POLL_TEMPLATE_HIDDEN', attempted_at = ?,
+          attempts = CASE WHEN attempts = 0 THEN 1 ELSE attempts END
+        WHERE bot_id = ? AND template_id = ? AND status = 'PENDING'`).run(now, botId, templateId).changes;
+      return { hidden: true, cancelledOverrides, cancelledDeliveries };
+    })();
+  }
+
+  public restorePollTemplateForAssistant(botId: string, templateId: number, safeActorHash: string): boolean {
+    const now = new Date().toISOString();
+    const result = this.db.prepare(`UPDATE assistant_poll_template_settings
+      SET status = 'ACTIVE', hidden_at = NULL, restored_at = ?, safe_actor_hash = ?, updated_at = ?
+      WHERE assistant_id = ? AND poll_template_id = ? AND status = 'HIDDEN'
+        AND EXISTS (SELECT 1 FROM bot_poll_templates templates
+          WHERE templates.id = poll_template_id AND templates.bot_id = assistant_id AND templates.is_default = 1)`)
+      .run(now, safeActorHash, now, botId, templateId);
+    return result.changes === 1;
+  }
+
+  public restoreAllDefaultPollsForAssistant(botId: string, safeActorHash: string): number {
+    const now = new Date().toISOString();
+    return this.db.prepare(`UPDATE assistant_poll_template_settings
+      SET status = 'ACTIVE', hidden_at = NULL, restored_at = ?, safe_actor_hash = ?, updated_at = ?
+      WHERE assistant_id = ? AND status = 'HIDDEN' AND poll_template_id IN (
+        SELECT id FROM bot_poll_templates WHERE bot_id = ? AND is_default = 1
+      )`).run(now, safeActorHash, now, botId, botId).changes;
   }
 
   public getPollTemplate(id: number, botId = 'neurobot'): PollTemplate | null {
@@ -2564,9 +3125,10 @@ export class AppDatabase {
     return this.db.prepare('DELETE FROM bot_poll_templates WHERE id = ? AND bot_id = ?').run(id, botId).changes === 1;
   }
 
-  public restoreDefaultPollTemplates(botId = 'neurobot'): number {
+  public restoreDefaultPollTemplates(botId = 'neurobot', safeActorHash = 'system'): number {
+    const hiddenRestored = this.restoreAllDefaultPollsForAssistant(botId, safeActorHash);
     const now = new Date().toISOString();
-    let restored = 0;
+    let restored = hiddenRestored;
     const restore = this.db.transaction(() => {
       for (const template of DEFAULT_POLL_TEMPLATES) {
         const existing = this.db
@@ -2594,24 +3156,7 @@ export class AppDatabase {
             );
           id = Number(result.lastInsertRowid);
         } else {
-          id = existing.id;
-          this.db
-            .prepare(
-              `
-              UPDATE bot_poll_templates SET question = ?, category = ?, allow_multiple_answers = ?,
-                enabled = 1, is_default = 1, favorite = 0, disabled_until = NULL,
-                updated_at = ? WHERE id = ? AND bot_id = ?
-            `,
-            )
-            .run(
-              template.question,
-              template.category,
-              template.allowMultipleAnswers ? 1 : 0,
-              now,
-              id,
-              botId,
-            );
-          this.db.prepare('DELETE FROM bot_poll_options WHERE template_id = ?').run(id);
+          continue;
         }
         const insert = this.db.prepare(`
           INSERT INTO bot_poll_options(template_id, option_order, option_text) VALUES (?, ?, ?)
@@ -4937,6 +5482,124 @@ export class AppDatabase {
       .run(profileId, provider, successful ? 'successful' : 'failed', now, errorCode, now);
   }
 
+  public getAIQueueSettings(botId: string): AIQueueSettings {
+    const row = this.db.prepare('SELECT * FROM assistant_ai_queue_settings WHERE assistant_id = ?').get(botId) as Record<string, number> | undefined;
+    if (row === undefined) {
+      const now = new Date().toISOString();
+      this.db.prepare(`INSERT INTO assistant_ai_queue_settings(assistant_id, created_at, updated_at)
+        VALUES (?, ?, ?)`).run(botId, now, now);
+      return this.getAIQueueSettings(botId);
+    }
+    return {
+      maxConcurrent: row.max_concurrent ?? 3,
+      maxQueueSize: row.max_queue_size ?? 20,
+      maxQueueWaitSeconds: row.max_queue_wait_seconds ?? 60,
+      providerTimeoutSeconds: row.provider_timeout_seconds ?? 25,
+      maxRetries: row.max_retries ?? 2,
+      initialRetryDelaySeconds: row.initial_retry_delay_seconds ?? 2,
+      maximumRetryDelaySeconds: row.maximum_retry_delay_seconds ?? 15,
+      waitNoticeSeconds: row.wait_notice_seconds ?? 5,
+      userCooldownSeconds: row.user_cooldown_seconds ?? 10,
+      duplicateWindowSeconds: row.duplicate_window_seconds ?? 15,
+      singleFlightWindowSeconds: row.single_flight_window_seconds ?? 60,
+      outboundMessageIntervalMs: row.outbound_message_interval_ms ?? 1000,
+      suggestedRetrySeconds: row.suggested_retry_seconds ?? 60,
+    };
+  }
+
+  public saveAIQueueSettings(botId: string, settings: AIQueueSettings): AIQueueSettings {
+    const now = new Date().toISOString();
+    const changed = this.db.prepare(`UPDATE assistant_ai_queue_settings SET
+      max_concurrent=?, max_queue_size=?, max_queue_wait_seconds=?, provider_timeout_seconds=?,
+      max_retries=?, initial_retry_delay_seconds=?, maximum_retry_delay_seconds=?, wait_notice_seconds=?,
+      user_cooldown_seconds=?, duplicate_window_seconds=?, single_flight_window_seconds=?,
+      outbound_message_interval_ms=?, suggested_retry_seconds=?, updated_at=? WHERE assistant_id=?`).run(
+      settings.maxConcurrent, settings.maxQueueSize, settings.maxQueueWaitSeconds,
+      settings.providerTimeoutSeconds, settings.maxRetries, settings.initialRetryDelaySeconds,
+      settings.maximumRetryDelaySeconds, settings.waitNoticeSeconds, settings.userCooldownSeconds,
+      settings.duplicateWindowSeconds, settings.singleFlightWindowSeconds,
+      settings.outboundMessageIntervalMs, settings.suggestedRetrySeconds, now, botId,
+    );
+    if (changed.changes !== 1) throw new Error('AI_QUEUE_SETTINGS_NOT_FOUND');
+    return this.getAIQueueSettings(botId);
+  }
+
+  public recordAIQueueMetric(
+    botId: string,
+    localDate: string,
+    field: keyof Omit<AIQueueMetrics, 'averageWaitMs' | 'maximumWaitMs'>,
+    waitMs = 0,
+  ): void {
+    const columns: Record<string, string> = {
+      queuedCount: 'queued_count', processedCount: 'processed_count', completedCount: 'completed_count',
+      failedCount: 'failed_count', expiredCount: 'expired_count', rejectedCount: 'rejected_count',
+      timeoutCount: 'timeout_count', rateLimitCount: 'rate_limit_count', retryCount: 'retry_count',
+      coalescedCount: 'coalesced_count', duplicateSuppressedCount: 'duplicate_suppressed_count',
+      cacheBypassCount: 'cache_bypass_count',
+    };
+    const column = columns[field];
+    if (column === undefined) throw new Error('AI_QUEUE_METRIC_INVALID');
+    const now = new Date().toISOString();
+    this.db.prepare(`INSERT INTO assistant_ai_queue_metrics(
+      assistant_id, local_date, ${column}, total_wait_ms, maximum_wait_ms, created_at, updated_at
+    ) VALUES (?, ?, 1, ?, ?, ?, ?)
+    ON CONFLICT(assistant_id, local_date) DO UPDATE SET ${column}=${column}+1,
+      total_wait_ms=total_wait_ms+excluded.total_wait_ms,
+      maximum_wait_ms=MAX(maximum_wait_ms, excluded.maximum_wait_ms), updated_at=excluded.updated_at`).run(
+      botId, localDate, Math.max(0, Math.trunc(waitMs)), Math.max(0, Math.trunc(waitMs)), now, now,
+    );
+  }
+
+  public getAIQueueMetrics(botId: string, localDate: string): AIQueueMetrics {
+    const row = this.db.prepare('SELECT * FROM assistant_ai_queue_metrics WHERE assistant_id=? AND local_date=?').get(botId, localDate) as Record<string, number> | undefined;
+    const value = (key: string): number => row?.[key] ?? 0;
+    const processed = value('processed_count');
+    return {
+      queuedCount: value('queued_count'), processedCount: processed, completedCount: value('completed_count'),
+      failedCount: value('failed_count'), expiredCount: value('expired_count'), rejectedCount: value('rejected_count'),
+      timeoutCount: value('timeout_count'), rateLimitCount: value('rate_limit_count'), retryCount: value('retry_count'),
+      coalescedCount: value('coalesced_count'), duplicateSuppressedCount: value('duplicate_suppressed_count'),
+      cacheBypassCount: value('cache_bypass_count'),
+      averageWaitMs: processed === 0 ? 0 : Math.round(value('total_wait_ms') / processed),
+      maximumWaitMs: value('maximum_wait_ms'),
+    };
+  }
+
+  public saveAIProviderQueueHealth(input: {
+    botId: string;
+    provider: string;
+    state: AIProviderHealthState;
+    consecutiveFailures: number;
+    circuitState: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+    circuitOpenedAt: string | null;
+    circuitRetryAt: string | null;
+    lastSuccessAt: string | null;
+    lastFailureAt: string | null;
+    lastSafeErrorCode: string | null;
+  }): void {
+    this.db.prepare(`INSERT INTO assistant_ai_provider_health(
+      assistant_id,provider,state,consecutive_failures,circuit_state,circuit_opened_at,circuit_retry_at,
+      last_success_at,last_failure_at,last_safe_error_code,updated_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(assistant_id,provider) DO UPDATE SET
+      state=excluded.state,consecutive_failures=excluded.consecutive_failures,circuit_state=excluded.circuit_state,
+      circuit_opened_at=excluded.circuit_opened_at,circuit_retry_at=excluded.circuit_retry_at,
+      last_success_at=excluded.last_success_at,last_failure_at=excluded.last_failure_at,
+      last_safe_error_code=excluded.last_safe_error_code,updated_at=excluded.updated_at`).run(
+      input.botId,input.provider,input.state,input.consecutiveFailures,input.circuitState,input.circuitOpenedAt,
+      input.circuitRetryAt,input.lastSuccessAt,input.lastFailureAt,input.lastSafeErrorCode,new Date().toISOString(),
+    );
+  }
+
+  public getAIProviderQueueHealth(botId: string): Record<string, unknown> {
+    return (this.db.prepare(`SELECT provider,state,consecutive_failures AS consecutiveFailures,
+      circuit_state AS circuitState,circuit_opened_at AS circuitOpenedAt,circuit_retry_at AS circuitRetryAt,
+      last_success_at AS lastSuccessAt,last_failure_at AS lastFailureAt,last_safe_error_code AS lastSafeErrorCode,
+      updated_at AS updatedAt FROM assistant_ai_provider_health WHERE assistant_id=? AND provider='groq'`).get(botId) as Record<string, unknown> | undefined) ?? {
+      provider: 'groq', state: 'NOT_CONFIGURED', consecutiveFailures: 0, circuitState: 'CLOSED',
+      lastSafeErrorCode: null,
+    };
+  }
+
   public reserveAIUsage(input: {
     botId?: string;
     profileId: number;
@@ -6199,6 +6862,344 @@ export class AppDatabase {
       )
       .run(username, passwordHash, now, now);
   }
+
+  public getGroupModerationProfile(assistantId: string, groupHash: string): GroupModerationProfile {
+    const now = new Date().toISOString();
+    this.db.prepare(`INSERT OR IGNORE INTO group_moderation_profiles(assistant_id,group_hash,created_at,updated_at)
+      VALUES(?,?,?,?)`).run(assistantId, groupHash, now, now);
+    const row = this.db.prepare('SELECT * FROM group_moderation_profiles WHERE assistant_id=? AND group_hash=?')
+      .get(assistantId, groupHash) as Record<string, unknown>;
+    return mapGroupModerationProfile(row);
+  }
+
+  public listGroupModerationProfiles(assistantId: string): GroupModerationProfile[] {
+    return (this.db.prepare('SELECT * FROM group_moderation_profiles WHERE assistant_id=? ORDER BY updated_at DESC').all(assistantId) as Array<Record<string, unknown>>)
+      .map(mapGroupModerationProfile);
+  }
+
+  public saveGroupModerationDraft(assistantId: string, groupHash: string, rulesText: string, rulesHash: string): GroupModerationProfile {
+    const current = this.getGroupModerationProfile(assistantId, groupHash);
+    const changed = current.rulesHash !== rulesHash;
+    const now = new Date().toISOString();
+    this.db.prepare(`UPDATE group_moderation_profiles SET rules_text=?,rules_hash=?,enabled=CASE WHEN ? THEN 0 ELSE enabled END,
+      analysis_status=CASE WHEN ? THEN 'OUTDATED' ELSE analysis_status END,test_status=CASE WHEN ? THEN 'PENDING' ELSE test_status END,
+      activated_at=CASE WHEN ? THEN NULL ELSE activated_at END,updated_at=? WHERE assistant_id=? AND group_hash=?`)
+      .run(rulesText,rulesHash,changed?1:0,changed?1:0,changed?1:0,changed?1:0,now,assistantId,groupHash);
+    return this.getGroupModerationProfile(assistantId, groupHash);
+  }
+
+  public markGroupModerationAnalyzing(assistantId: string, groupHash: string): void {
+    this.getGroupModerationProfile(assistantId, groupHash);
+    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=0,analysis_status='ANALYZING',test_status='PENDING',updated_at=?
+      WHERE assistant_id=? AND group_hash=?`).run(new Date().toISOString(),assistantId,groupHash);
+  }
+
+  public failGroupModerationAnalysis(assistantId: string, groupHash: string): void {
+    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=0,analysis_status='ANALYSIS_FAILED',test_status='FAILED',updated_at=?
+      WHERE assistant_id=? AND group_hash=?`).run(new Date().toISOString(),assistantId,groupHash);
+  }
+
+  public saveCompiledGroupModeration(input: { assistantId:string; groupHash:string; rulesHash:string; compiled:Record<string,unknown>; summary:Record<string,unknown>; provider:string; model:string; inputTokens:number; outputTokens:number }): GroupModerationProfile {
+    const now = new Date().toISOString();
+    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=0,rules_hash=?,compiled_json=?,compiled_summary_json=?,provider=?,model=?,
+      input_tokens=?,output_tokens=?,analysis_status='PENDING_TESTS',test_status='PENDING',last_analyzed_at=?,last_tested_at=NULL,activated_at=NULL,updated_at=?
+      WHERE assistant_id=? AND group_hash=?`).run(input.rulesHash,JSON.stringify(input.compiled),JSON.stringify(input.summary),input.provider,input.model,
+        input.inputTokens,input.outputTokens,now,now,input.assistantId,input.groupHash);
+    this.db.prepare('DELETE FROM group_moderation_tests WHERE assistant_id=? AND group_hash=?').run(input.assistantId,input.groupHash);
+    return this.getGroupModerationProfile(input.assistantId,input.groupHash);
+  }
+
+  public recordGroupModerationTest(input: { assistantId:string; groupHash:string; rulesHash:string; testType:'AUTOMATIC'|'MANUAL_ALLOWED'|'MANUAL_WARNING'; expected:'ALLOW'|'WARNING'; actual:'ALLOW'|'WARNING'|'ERROR'; category?:string|null; passed:boolean }): void {
+    this.db.prepare(`INSERT INTO group_moderation_tests(assistant_id,group_hash,rules_hash,test_type,expected_result,actual_result,category,passed,created_at)
+      VALUES(?,?,?,?,?,?,?,?,?)`).run(input.assistantId,input.groupHash,input.rulesHash,input.testType,input.expected,input.actual,input.category??null,input.passed?1:0,new Date().toISOString());
+  }
+
+  public listGroupModerationTests(assistantId: string, groupHash: string, rulesHash: string): Array<Record<string, unknown>> {
+    return this.db.prepare(`SELECT test_type AS testType,expected_result AS expected,actual_result AS actual,category,passed,created_at AS createdAt
+      FROM group_moderation_tests WHERE assistant_id=? AND group_hash=? AND rules_hash=? ORDER BY id`).all(assistantId,groupHash,rulesHash) as Array<Record<string,unknown>>;
+  }
+
+  public updateGroupModerationTestStatus(assistantId: string, groupHash: string, approved: boolean): GroupModerationProfile {
+    const now=new Date().toISOString();
+    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=0,test_status=?,analysis_status=?,last_tested_at=?,updated_at=?
+      WHERE assistant_id=? AND group_hash=?`).run(approved?'APPROVED':'FAILED',approved?'READY':'PENDING_TESTS',now,now,assistantId,groupHash);
+    return this.getGroupModerationProfile(assistantId,groupHash);
+  }
+
+  public setGroupModerationEnabled(assistantId: string, groupHash: string, enabled: boolean): GroupModerationProfile {
+    const profile=this.getGroupModerationProfile(assistantId,groupHash);
+    if(enabled && (profile.analysisStatus!=='READY' || profile.testStatus!=='APPROVED' || profile.compiled===null)) throw new Error('MODERATION_TESTS_REQUIRED');
+    const now=new Date().toISOString();
+    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=?,analysis_status=?,activated_at=?,updated_at=? WHERE assistant_id=? AND group_hash=?`)
+      .run(enabled?1:0,enabled?'ACTIVE':(profile.compiled===null?'DRAFT':'READY'),enabled?now:null,now,assistantId,groupHash);
+    return this.getGroupModerationProfile(assistantId,groupHash);
+  }
+
+  public replaceGroupModerationRecipients(assistantId:string,groupHash:string,recipients:Array<{administratorHash:string;encryptedIdentifier:string}>): void {
+    const now=new Date().toISOString(); const replace=this.db.transaction(()=>{
+      this.db.prepare('DELETE FROM group_moderation_admin_recipients WHERE assistant_id=? AND group_hash=?').run(assistantId,groupHash);
+      const statement=this.db.prepare(`INSERT INTO group_moderation_admin_recipients(assistant_id,group_hash,administrator_hash,encrypted_identifier,enabled,created_at,updated_at) VALUES(?,?,?,?,1,?,?)`);
+      for(const recipient of recipients)statement.run(assistantId,groupHash,recipient.administratorHash,recipient.encryptedIdentifier,now,now);
+    }); replace();
+  }
+
+  public listGroupModerationRecipients(assistantId:string,groupHash:string): Array<{administratorHash:string;encryptedIdentifier:string}> {
+    return this.db.prepare(`SELECT administrator_hash AS administratorHash,encrypted_identifier AS encryptedIdentifier FROM group_moderation_admin_recipients
+      WHERE assistant_id=? AND group_hash=? AND enabled=1 ORDER BY created_at`).all(assistantId,groupHash) as Array<{administratorHash:string;encryptedIdentifier:string}>;
+  }
+
+  public getModerationSettings(assistantId: string): ModerationSettings {
+    this.ensureModerationSettings(assistantId);
+    const row = this.db.prepare('SELECT * FROM assistant_moderation_settings WHERE assistant_id=?').get(assistantId) as Record<string, unknown>;
+    return {
+      enabled: row.enabled === 1,
+      defaultGroupMode: String(row.default_group_mode) as ModerationGroupMode,
+      reviewThreshold: Number(row.review_threshold), warningThreshold: Number(row.warning_threshold),
+      adminNotificationThreshold: Number(row.admin_notification_threshold), recurrenceWindowDays: Number(row.recurrence_window_days),
+      warningCooldownMinutes: Number(row.warning_cooldown_minutes), publicWarningLimit: Number(row.public_warning_limit),
+      publicWarningWindowMinutes: Number(row.public_warning_window_minutes), temporaryEvidenceEnabled: row.temporary_evidence_enabled === 1,
+      temporaryEvidenceHours: Number(row.temporary_evidence_hours), warningMode: String(row.warning_mode) as ModerationSettings['warningMode'],
+      automaticAIReviewEnabled: false, manualAIReviewEnabled: false, automaticBanEnabled: false, automaticDeletionEnabled: false,
+      firstWarningMessage: String(row.first_warning_message), secondWarningMessage: String(row.second_warning_message),
+      repeatedWarningMessage: String(row.repeated_warning_message),
+    };
+  }
+
+  public saveModerationSettings(assistantId: string, settings: ModerationSettings): ModerationSettings {
+    this.ensureModerationSettings(assistantId);
+    const now = new Date().toISOString();
+    this.db.prepare(`UPDATE assistant_moderation_settings SET enabled=?,default_group_mode=?,review_threshold=?,warning_threshold=?,
+      admin_notification_threshold=?,recurrence_window_days=?,warning_cooldown_minutes=?,public_warning_limit=?,
+      public_warning_window_minutes=?,temporary_evidence_enabled=?,temporary_evidence_hours=?,warning_mode=?,
+      automatic_ai_review_enabled=0,manual_ai_review_enabled=0,automatic_ban_enabled=0,automatic_deletion_enabled=0,
+      first_warning_message=?,second_warning_message=?,repeated_warning_message=?,updated_at=? WHERE assistant_id=?`).run(
+      settings.enabled ? 1 : 0, settings.defaultGroupMode, settings.reviewThreshold, settings.warningThreshold,
+      settings.adminNotificationThreshold, settings.recurrenceWindowDays, settings.warningCooldownMinutes,
+      settings.publicWarningLimit, settings.publicWarningWindowMinutes, settings.temporaryEvidenceEnabled ? 1 : 0,
+      settings.temporaryEvidenceHours, settings.warningMode, settings.firstWarningMessage, settings.secondWarningMessage,
+      settings.repeatedWarningMessage, now, assistantId,
+    );
+    return this.getModerationSettings(assistantId);
+  }
+
+  public listModerationGroupSettings(assistantId: string): Array<{ groupHash: string; mode: ModerationGroupMode; enabled: boolean }> {
+    return (this.db.prepare('SELECT group_hash,mode,enabled FROM assistant_group_moderation_settings WHERE assistant_id=? ORDER BY group_hash').all(assistantId) as Array<Record<string, unknown>>)
+      .map((row) => ({ groupHash: String(row.group_hash), mode: String(row.mode) as ModerationGroupMode, enabled: row.enabled === 1 }));
+  }
+
+  public saveModerationGroupSettings(assistantId: string, groupHash: string, mode: ModerationGroupMode): void {
+    const now = new Date().toISOString();
+    this.db.prepare(`INSERT INTO assistant_group_moderation_settings(assistant_id,group_hash,mode,enabled,created_at,updated_at)
+      VALUES(?,?,?,?,?,?) ON CONFLICT(assistant_id,group_hash) DO UPDATE SET mode=excluded.mode,enabled=excluded.enabled,updated_at=excluded.updated_at`)
+      .run(assistantId, groupHash, mode, mode === 'DISABLED' ? 0 : 1, now, now);
+  }
+
+  public listModerationRules(assistantId: string, includeDisabled = true): ModerationRule[] {
+    const rows = this.db.prepare(`SELECT * FROM moderation_rules WHERE assistant_id=? ${includeDisabled ? '' : 'AND enabled=1'} ORDER BY id`).all(assistantId) as Array<Record<string, unknown>>;
+    return rows.map((row) => this.mapModerationRule(row));
+  }
+
+  public getModerationRule(assistantId: string, ruleId: number): ModerationRule | null {
+    const row = this.db.prepare('SELECT * FROM moderation_rules WHERE assistant_id=? AND id=?').get(assistantId, ruleId) as Record<string, unknown> | undefined;
+    return row === undefined ? null : this.mapModerationRule(row);
+  }
+
+  public createModerationRule(assistantId: string, input: Omit<ModerationRule, 'id' | 'assistantId' | 'createdAt' | 'updatedAt'>): ModerationRule {
+    if (input.enabled && input.conditions.filter((condition) => condition.enabled).length === 0) throw new Error('MODERATION_RULE_REQUIRES_CONDITION');
+    const create = this.db.transaction(() => {
+      const now = new Date().toISOString();
+      const result = this.db.prepare(`INSERT INTO moderation_rules(assistant_id,name,description,category,severity,detection_type,score,
+        review_threshold,warning_threshold,admin_notification_threshold,enabled,applies_to_all_groups,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(assistantId,input.name,input.description,input.category,input.severity,input.detectionType,input.score,
+        input.reviewThreshold,input.warningThreshold,input.adminNotificationThreshold,input.enabled ? 1 : 0,input.appliesToAllGroups ? 1 : 0,now,now);
+      const ruleId = Number(result.lastInsertRowid);
+      this.replaceModerationConditions(ruleId, input.conditions, input.exceptions, now);
+      return ruleId;
+    });
+    return this.getModerationRule(assistantId, create()) as ModerationRule;
+  }
+
+  public updateModerationRule(assistantId: string, ruleId: number, input: Omit<ModerationRule, 'id' | 'assistantId' | 'createdAt' | 'updatedAt'>): ModerationRule {
+    if (this.getModerationRule(assistantId, ruleId) === null) throw new Error('MODERATION_RULE_NOT_FOUND');
+    if (input.enabled && input.conditions.filter((condition) => condition.enabled).length === 0) throw new Error('MODERATION_RULE_REQUIRES_CONDITION');
+    const update = this.db.transaction(() => {
+      const now = new Date().toISOString();
+      this.db.prepare(`UPDATE moderation_rules SET name=?,description=?,category=?,severity=?,detection_type=?,score=?,review_threshold=?,
+        warning_threshold=?,admin_notification_threshold=?,enabled=?,applies_to_all_groups=?,updated_at=? WHERE assistant_id=? AND id=?`).run(
+        input.name,input.description,input.category,input.severity,input.detectionType,input.score,input.reviewThreshold,input.warningThreshold,
+        input.adminNotificationThreshold,input.enabled ? 1 : 0,input.appliesToAllGroups ? 1 : 0,now,assistantId,ruleId);
+      this.db.prepare('DELETE FROM moderation_rule_conditions WHERE rule_id=?').run(ruleId);
+      this.db.prepare('DELETE FROM moderation_rule_exceptions WHERE rule_id=?').run(ruleId);
+      this.replaceModerationConditions(ruleId, input.conditions, input.exceptions, now);
+    });
+    update();
+    return this.getModerationRule(assistantId, ruleId) as ModerationRule;
+  }
+
+  public deleteModerationRule(assistantId: string, ruleId: number): boolean {
+    return this.db.prepare('DELETE FROM moderation_rules WHERE assistant_id=? AND id=?').run(assistantId, ruleId).changes === 1;
+  }
+
+  public listModerationTerms(assistantId: string): Array<Record<string, unknown>> {
+    return this.db.prepare(`SELECT id,rule_id AS ruleId,term,normalized_term AS normalizedTerm,category,severity,match_mode AS matchMode,
+      score,enabled,created_at AS createdAt,updated_at AS updatedAt FROM moderation_terms WHERE assistant_id=? ORDER BY id`).all(assistantId) as Array<Record<string, unknown>>;
+  }
+
+  public createModerationTerm(assistantId: string, input: { ruleId: number | null; term: string; normalizedTerm: string; category: string; severity: ModerationSeverity; matchMode: string; score: number; enabled: boolean }): Record<string, unknown> {
+    const now = new Date().toISOString();
+    const result = this.db.prepare(`INSERT INTO moderation_terms(assistant_id,rule_id,term,normalized_term,category,severity,match_mode,score,enabled,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(assistantId,input.ruleId,input.term,input.normalizedTerm,input.category,input.severity,input.matchMode,input.score,input.enabled ? 1 : 0,now,now);
+    return this.db.prepare('SELECT id,rule_id AS ruleId,term,normalized_term AS normalizedTerm,category,severity,match_mode AS matchMode,score,enabled FROM moderation_terms WHERE id=?').get(result.lastInsertRowid) as Record<string, unknown>;
+  }
+
+  public deleteModerationTerm(assistantId: string, termId: number): boolean {
+    return this.db.prepare('DELETE FROM moderation_terms WHERE assistant_id=? AND id=?').run(assistantId, termId).changes === 1;
+  }
+
+  public createModerationCase(input: { assistantId: string; groupHash: string; participantHash: string; messageHash: string; category: string; matchedRuleIds: number[]; score: number; severity: ModerationSeverity; warningNumber: number; warningSentAt: string | null; adminNotifiedAt: string | null; encryptedEvidence: string | null; evidenceExpiresAt: string | null }): number | null {
+    const now = new Date().toISOString();
+    const result = this.db.prepare(`INSERT OR IGNORE INTO moderation_cases(assistant_id,group_hash,participant_hash,message_hash,category,matched_rule_ids,
+      score,severity,warning_number,status,warning_sent_at,admin_notified_at,encrypted_temporary_evidence,evidence_expires_at,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,'PENDING',?,?,?,?,?,?)`).run(input.assistantId,input.groupHash,input.participantHash,input.messageHash,input.category,
+      JSON.stringify(input.matchedRuleIds),input.score,input.severity,input.warningNumber,input.warningSentAt,input.adminNotifiedAt,input.encryptedEvidence,
+      input.evidenceExpiresAt,now,now);
+    return result.changes === 1 ? Number(result.lastInsertRowid) : null;
+  }
+
+  public listModerationCases(assistantId: string, status?: string): Array<Record<string, unknown>> {
+    this.expireModerationEvidence(assistantId);
+    this.anonymizeExpiredModerationCases(assistantId);
+    const rows = this.db.prepare(`SELECT id,group_hash AS groupHash,participant_hash AS participantHash,message_hash AS messageHash,category,
+      matched_rule_ids AS matchedRuleIds,score,severity,warning_number AS warningNumber,status,warning_sent_at AS warningSentAt,
+      admin_notified_at AS adminNotifiedAt,reviewed_at AS reviewedAt,decision,evidence_expires_at AS evidenceExpiresAt,created_at AS createdAt,
+      updated_at AS updatedAt FROM moderation_cases WHERE assistant_id=? ${status === undefined ? '' : 'AND status=?'} ORDER BY created_at DESC LIMIT 500`)
+      .all(...(status === undefined ? [assistantId] : [assistantId, status])) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({ ...row, matchedRuleIds: parseNumberArray(String(row.matchedRuleIds)) }));
+  }
+
+  public reviewModerationCase(assistantId: string, caseId: number, decision: 'CONFIRMED' | 'FALSE_POSITIVE' | 'DISMISSED' | 'RESOLVED'): boolean {
+    const now = new Date().toISOString();
+    return this.db.prepare(`UPDATE moderation_cases SET status=?,decision=?,reviewed_at=?,updated_at=? WHERE assistant_id=? AND id=?`)
+      .run(decision, decision, now, now, assistantId, caseId).changes === 1;
+  }
+
+  public getModerationEvidence(assistantId: string, caseId: number): { encrypted: string; messageHash: string; expiresAt: string } | null {
+    this.expireModerationEvidence(assistantId);
+    const row=this.db.prepare(`SELECT encrypted_temporary_evidence AS encrypted,message_hash AS messageHash,evidence_expires_at AS expiresAt
+      FROM moderation_cases WHERE assistant_id=? AND id=? AND encrypted_temporary_evidence IS NOT NULL`).get(assistantId,caseId) as {encrypted:string;messageHash:string;expiresAt:string}|undefined;
+    return row??null;
+  }
+
+  public getModerationRecurrence(assistantId: string, groupHash: string, participantHash: string): { activeCount: number; lastWarningAt: string | null; expiresAt: string } | null {
+    const row = this.db.prepare('SELECT active_count,last_warning_at,expires_at FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?')
+      .get(assistantId, groupHash, participantHash) as { active_count: number; last_warning_at: string | null; expires_at: string } | undefined;
+    if (row === undefined) return null;
+    if (Date.parse(row.expires_at) <= Date.now()) {
+      this.db.prepare('DELETE FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?').run(assistantId, groupHash, participantHash);
+      return null;
+    }
+    return { activeCount: row.active_count, lastWarningAt: row.last_warning_at, expiresAt: row.expires_at };
+  }
+
+  public saveModerationRecurrence(assistantId: string, groupHash: string, participantHash: string, activeCount: number, lastWarningAt: string | null, expiresAt: string): void {
+    const now = new Date().toISOString();
+    this.db.prepare(`INSERT INTO moderation_recurrence(assistant_id,group_hash,participant_hash,active_count,window_started_at,last_warning_at,expires_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(assistant_id,group_hash,participant_hash) DO UPDATE SET active_count=excluded.active_count,
+      last_warning_at=excluded.last_warning_at,expires_at=excluded.expires_at,updated_at=excluded.updated_at`)
+      .run(assistantId,groupHash,participantHash,activeCount,now,lastWarningAt,expiresAt,now);
+  }
+
+  public resetModerationRecurrence(assistantId: string, groupHash: string, participantHash: string): void {
+    this.db.prepare('DELETE FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?').run(assistantId,groupHash,participantHash);
+  }
+
+  public decrementModerationRecurrence(assistantId: string, groupHash: string, participantHash: string): void {
+    const recurrence=this.getModerationRecurrence(assistantId,groupHash,participantHash);
+    if(recurrence===null||recurrence.activeCount<=1){this.resetModerationRecurrence(assistantId,groupHash,participantHash);return;}
+    this.db.prepare('UPDATE moderation_recurrence SET active_count=active_count-1,updated_at=? WHERE assistant_id=? AND group_hash=? AND participant_hash=?')
+      .run(new Date().toISOString(),assistantId,groupHash,participantHash);
+  }
+
+  public incrementModerationMetric(assistantId: string, field: string): void {
+    const columns: Record<string,string> = { reviewed:'messages_reviewed',allowed:'messages_allowed',matches:'matches_detected',warnings:'warnings_sent',
+      recurrences:'recurrences_detected',cases:'admin_cases_created',falsePositives:'false_positives',confirmed:'confirmed_cases',errors:'local_errors' };
+    const column = columns[field];
+    if (column === undefined) throw new Error('MODERATION_METRIC_INVALID');
+    const date = new Date().toISOString().slice(0,10); const now = new Date().toISOString();
+    this.db.prepare(`INSERT INTO moderation_metrics(assistant_id,local_date,${column},created_at,updated_at) VALUES(?,?,1,?,?)
+      ON CONFLICT(assistant_id,local_date) DO UPDATE SET ${column}=${column}+1,updated_at=excluded.updated_at`).run(assistantId,date,now,now);
+  }
+
+  public getModerationMetrics(assistantId: string): Record<string, unknown> {
+    const date = new Date().toISOString().slice(0,10);
+    return (this.db.prepare(`SELECT messages_reviewed AS messagesReviewed,messages_allowed AS messagesAllowed,matches_detected AS matchesDetected,
+      warnings_sent AS warningsSent,recurrences_detected AS recurrencesDetected,admin_cases_created AS adminCasesCreated,
+      false_positives AS falsePositives,confirmed_cases AS confirmedCases,local_errors AS localErrors,ai_reviews AS aiReviews,ai_tokens AS aiTokens,
+      updated_at AS updatedAt FROM moderation_metrics WHERE assistant_id=? AND local_date=?`).get(assistantId,date) as Record<string, unknown> | undefined) ?? {
+      messagesReviewed:0,messagesAllowed:0,matchesDetected:0,warningsSent:0,recurrencesDetected:0,adminCasesCreated:0,
+      falsePositives:0,confirmedCases:0,localErrors:0,aiReviews:0,aiTokens:0,updatedAt:null,
+    };
+  }
+
+  public expireModerationEvidence(assistantId: string): number {
+    const now = new Date().toISOString();
+    return this.db.prepare(`UPDATE moderation_cases SET encrypted_temporary_evidence=NULL,evidence_expires_at=NULL,updated_at=?
+      WHERE assistant_id=? AND encrypted_temporary_evidence IS NOT NULL AND evidence_expires_at<=?`).run(now,assistantId,now).changes;
+  }
+
+  public anonymizeExpiredModerationCases(assistantId: string): number {
+    const settings=this.getModerationSettings(assistantId);
+    const cutoff=new Date(Date.now()-settings.recurrenceWindowDays*86_400_000).toISOString();
+    return this.db.prepare(`UPDATE moderation_cases SET participant_hash='expired:'||id,message_hash='expired:'||id,updated_at=?
+      WHERE assistant_id=? AND created_at<=? AND participant_hash NOT LIKE 'expired:%'`).run(new Date().toISOString(),assistantId,cutoff).changes;
+  }
+
+  private ensureModerationSettings(assistantId: string): void {
+    if (this.getBot(assistantId) === null) throw new Error('ASSISTANT_NOT_FOUND');
+    const now = new Date().toISOString();
+    this.db.prepare('INSERT OR IGNORE INTO assistant_moderation_settings(assistant_id,created_at,updated_at) VALUES(?,?,?)').run(assistantId,now,now);
+  }
+
+  private mapModerationRule(row: Record<string, unknown>): ModerationRule {
+    const ruleId = Number(row.id);
+    const conditions = (this.db.prepare('SELECT * FROM moderation_rule_conditions WHERE rule_id=? ORDER BY id').all(ruleId) as Array<Record<string, unknown>>).map((item) => ({
+      id:Number(item.id),conditionType:String(item.condition_type),operator:String(item.operator) as 'ALL'|'ANY'|'EXCLUDE',normalizedValue:String(item.normalized_value),
+      configuration:parseSafeJsonObject(String(item.configuration_json)),enabled:item.enabled===1,
+    }));
+    const exceptions = (this.db.prepare('SELECT * FROM moderation_rule_exceptions WHERE rule_id=? ORDER BY id').all(ruleId) as Array<Record<string, unknown>>).map((item) => ({
+      id:Number(item.id),exceptionType:String(item.exception_type),normalizedValue:String(item.normalized_value),enabled:item.enabled===1,
+    }));
+    return { id:ruleId,assistantId:String(row.assistant_id),name:String(row.name),description:String(row.description),category:String(row.category),
+      severity:String(row.severity) as ModerationSeverity,detectionType:String(row.detection_type),score:Number(row.score),reviewThreshold:Number(row.review_threshold),
+      warningThreshold:Number(row.warning_threshold),adminNotificationThreshold:Number(row.admin_notification_threshold),enabled:row.enabled===1,
+      appliesToAllGroups:row.applies_to_all_groups===1,conditions,exceptions,createdAt:String(row.created_at),updatedAt:String(row.updated_at) };
+  }
+
+  private replaceModerationConditions(ruleId: number, conditions: ModerationRule['conditions'], exceptions: ModerationRule['exceptions'], now: string): void {
+    const conditionStatement = this.db.prepare(`INSERT INTO moderation_rule_conditions(rule_id,condition_type,operator,normalized_value,configuration_json,enabled,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?)`);
+    for (const condition of conditions) conditionStatement.run(ruleId,condition.conditionType,condition.operator,condition.normalizedValue,
+      JSON.stringify(condition.configuration),condition.enabled ? 1 : 0,now,now);
+    const exceptionStatement = this.db.prepare(`INSERT INTO moderation_rule_exceptions(rule_id,exception_type,normalized_value,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?)`);
+    for (const exception of exceptions) exceptionStatement.run(ruleId,exception.exceptionType,exception.normalizedValue,exception.enabled ? 1 : 0,now,now);
+  }
+}
+
+function mapGroupModerationProfile(row: Record<string, unknown>): GroupModerationProfile {
+  return {
+    assistantId:String(row.assistant_id),groupHash:String(row.group_hash),enabled:row.enabled===1,
+    rulesText:String(row.rules_text??''),rulesHash:String(row.rules_hash??''),
+    analysisStatus:String(row.analysis_status) as GroupModerationProfile['analysisStatus'],
+    testStatus:String(row.test_status) as GroupModerationProfile['testStatus'],
+    compiled:row.compiled_json===null||row.compiled_json===undefined?null:parseSafeJsonObject(String(row.compiled_json)),
+    summary:row.compiled_summary_json===null||row.compiled_summary_json===undefined?null:parseSafeJsonObject(String(row.compiled_summary_json)),
+    provider:row.provider===null||row.provider===undefined?null:String(row.provider),model:row.model===null||row.model===undefined?null:String(row.model),
+    inputTokens:Number(row.input_tokens??0),outputTokens:Number(row.output_tokens??0),firstWarningMessage:String(row.first_warning_message),
+    secondWarningMessage:String(row.second_warning_message),recurrenceWindowDays:Number(row.recurrence_window_days),
+    lastAnalyzedAt:row.last_analyzed_at===null||row.last_analyzed_at===undefined?null:String(row.last_analyzed_at),
+    lastTestedAt:row.last_tested_at===null||row.last_tested_at===undefined?null:String(row.last_tested_at),
+    activatedAt:row.activated_at===null||row.activated_at===undefined?null:String(row.activated_at),updatedAt:String(row.updated_at),
+  };
 }
 
 function mapCommand(row: CommandRow): CommandRecord {
@@ -6441,6 +7442,15 @@ function parseSafeObject(value: string): Record<string, string | number | boolea
         entry[1] === null || ['string', 'number', 'boolean'].includes(typeof entry[1]),
       ),
     );
+  } catch {
+    return {};
+  }
+}
+
+function parseSafeJsonObject(value: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
   } catch {
     return {};
   }
@@ -6706,6 +7716,7 @@ function automaticConfigurationFromLegacy(
   return {
     timezone,
     welcome: {
+      ...defaults.welcome,
       enabled: welcome?.enabled === 1,
       batchWindowSeconds: welcome?.batch_window_seconds ?? defaults.welcome.batchWindowSeconds,
       groupSimultaneous: defaults.welcome.groupSimultaneous,
