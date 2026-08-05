@@ -1,0 +1,80 @@
+name: Aplicar panel minimalista v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/panel-minimal-v2-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Aplicar rediseño
+        run: |
+          python scripts/apply-panel-minimal-v2.py
+          sed -i '1i// PANEL_MINIMAL_V2' public/panel-minimal-v2.js
+
+      - name: Revisar diferencias
+        run: |
+          git diff --check
+          git diff --stat
+
+      - name: Comprobar tipos
+        run: npm run typecheck
+
+      - name: Ejecutar lint
+        run: npm run lint
+
+      - name: Ejecutar pruebas principales del panel
+        run: npm test -- tests/panel-minimal-v2.test.ts tests/assistant-platform.test.ts tests/friendly-panel.test.ts tests/panel-refinement.test.ts tests/panel-usability.test.ts tests/admin-server.test.ts
+
+      - name: Ejecutar todas las pruebas
+        run: npm test
+
+      - name: Compilar
+        run: npm run build
+
+      - name: Publicar cambios validados en main
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            public/app.js \
+            public/index.html \
+            public/minimal-community-panel.js \
+            public/multibot-panel.js \
+            public/panel-minimal-v2.js \
+            public/panel-minimal-v2.css \
+            src/admin/server.ts \
+            src/persistence/database.ts \
+            tests/assistant-platform.test.ts \
+            tests/panel-usability.test.ts \
+            tests/panel-minimal-v2.test.ts
+          if git diff --cached --quiet; then
+            echo "No hay cambios nuevos que publicar."
+          else
+            git commit -m "feat: simplificar panel y restauración de asistentes"
+            git fetch origin main
+            git rebase origin/main
+            git push origin HEAD:main
+          fi
