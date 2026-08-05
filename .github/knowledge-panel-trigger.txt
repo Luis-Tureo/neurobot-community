@@ -1,3 +1,3 @@
 Archivo temporal para activar la validación del rediseño de Información del bot.
 Ejecutar revisión completa del formulario guiado.
-Segundo intento con el transformador corregido.
+Tercer intento después de retirar la función obsoleta.
