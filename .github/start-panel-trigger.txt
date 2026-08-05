@@ -1,1 +1,0 @@
-Activador temporal para validar el módulo de inicio consolidado.
