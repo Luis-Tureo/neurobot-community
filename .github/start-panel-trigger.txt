@@ -1,3 +1,3 @@
 Activador temporal para validar el módulo de inicio consolidado.
 Ejecutar validación completa de carga, navegación y grupos vinculados.
-Validación final después de limpiar la navegación obsoleta.
+Validación completa con la prueba de navegación actualizada.
