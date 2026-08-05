@@ -51,6 +51,14 @@ jobs:
           if start < 0 or end < 0:
               raise SystemExit('No se encontró la función revealActiveNavigation.')
           friendly_path.write_text(friendly[:start] + friendly[end + 2:], encoding='utf-8')
+
+          usability_path = Path('tests/panel-usability.test.ts')
+          usability = usability_path.read_text(encoding='utf-8')
+          old = "expect(panel).toContain('button[data-section=\"${name}\"]');"
+          new = "expect(panel).toContain('button[data-section=\"${resolvedName}\"]');"
+          if old not in usability:
+              raise SystemExit('No se encontró la expectativa antigua de navegación.')
+          usability_path.write_text(usability.replace(old, new, 1), encoding='utf-8')
           PY
 
       - name: Revisar diferencias
@@ -65,7 +73,7 @@ jobs:
         run: npm run lint
 
       - name: Ejecutar prueba específica
-        run: npm test -- tests/start-panel-consolidation.test.ts tests/friendly-panel.test.ts tests/panel-refinement.test.ts
+        run: npm test -- tests/start-panel-consolidation.test.ts tests/friendly-panel.test.ts tests/panel-refinement.test.ts tests/panel-usability.test.ts
 
       - name: Ejecutar todas las pruebas
         run: npm test
@@ -78,7 +86,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/app.js public/multibot-panel.js public/friendly-panel.js public/panel-refinement.js public/panel-refinement.css tests/friendly-panel.test.ts tests/start-panel-consolidation.test.ts
+          git add public/app.js public/multibot-panel.js public/friendly-panel.js public/panel-refinement.js public/panel-refinement.css tests/friendly-panel.test.ts tests/start-panel-consolidation.test.ts tests/panel-usability.test.ts
           if git diff --cached --quiet; then
             echo "No hay cambios nuevos que publicar."
           else
