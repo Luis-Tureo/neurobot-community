@@ -21,7 +21,7 @@ describe('refinamiento final del panel de comunidad', () => {
   });
 
   it('usa signos más y menos en todos los controles desplegables', () => {
-    expect(script).toContain("button.textContent = open ? '−' : '+'");
+    expect(script).toContain("setTextIfChanged(button, open ? '−' : '+')");
     expect(styles).toContain("content: '+' !important");
     expect(styles).toContain("content: '−' !important");
   });
