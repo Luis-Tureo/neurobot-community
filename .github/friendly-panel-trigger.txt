@@ -1,0 +1,1 @@
+Ejecutar integración y validación del panel amigable.
