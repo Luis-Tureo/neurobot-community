@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 
 const app = readFileSync('public/app.js', 'utf8');
 const multibot = readFileSync('public/multibot-panel.js', 'utf8');
-const friendly = readFileSync('public/friendly-panel.js', 'utf8');
+const friendly = `${readFileSync('public/friendly-panel-base.js', 'utf8')}\n${readFileSync(
+  'public/friendly-panel.js',
+  'utf8',
+)}`;
 const refinement = readFileSync('public/panel-refinement.js', 'utf8');
 const styles = readFileSync('public/panel-refinement.css', 'utf8');
 
