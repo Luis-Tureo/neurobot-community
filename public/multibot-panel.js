@@ -1520,7 +1520,7 @@ async function loadTrash() {
           body: JSON.stringify({ password, confirmationPhrase }),
         });
         await loadTrash();
-        notify('Asistente eliminado definitivamente.');
+        notify('Asistente eliminado. Se creó un respaldo final de seguridad.');
       }),
     );
     card.append(actions);
