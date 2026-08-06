@@ -8,3 +8,4 @@ if (!document.querySelector(`link[href="${stylesheetHref}"]`)) {
 }
 
 void import('./minimal-community-panel-base.js').then(() => import('./panel-refinement.js'));
+void import('./automation-tests.js');
