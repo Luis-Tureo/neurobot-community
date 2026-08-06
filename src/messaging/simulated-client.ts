@@ -1,10 +1,5 @@
 import type { RecentGroupMessage } from './messaging-client.js';
-import {
-  SimulatedMessagingClient as BaseSimulatedMessagingClient,
-  type SentMedia,
-  type SentMessage,
-  type SentPoll,
-} from './simulated-client-base.js';
+import { SimulatedMessagingClient as BaseSimulatedMessagingClient } from './simulated-client-base.js';
 
 export type { SentMedia, SentMessage, SentPoll } from './simulated-client-base.js';
 
