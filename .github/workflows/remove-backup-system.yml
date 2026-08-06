@@ -29,10 +29,10 @@ jobs:
         run: npm ci
 
       - name: Load verified transformation
-        run: curl --fail --silent --show-error --location https://raw.githubusercontent.com/Luis-Tureo/neurobot-business/c2bffc53e0c8a58aa0f9db2d60f0d5d9ae3c7cee/scripts/remove-backup-system.py --output /tmp/remove-backup-system.py
+        run: curl --fail --silent --show-error --location https://raw.githubusercontent.com/Luis-Tureo/neurobot-business/c2bffc53e0c8a58aa0f9db2d60f0d5d9ae3c7cee/scripts/remove-backup-system.py --output scripts/remove-backup-system.py
 
       - name: Remove backup system
-        run: python /tmp/remove-backup-system.py
+        run: python scripts/remove-backup-system.py
 
       - name: Format changed files
         shell: bash
@@ -44,7 +44,7 @@ jobs:
       - name: Commit refactor
         shell: bash
         run: |
-          rm -f .github/workflows/remove-backup-system.yml
+          rm -f scripts/remove-backup-system.py .github/workflows/remove-backup-system.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
