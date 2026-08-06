@@ -2202,7 +2202,6 @@ export class AppDatabase {
          ) VALUES ('neurobot', 'global', NULL, NULL, ?)`,
       )
       .run(now);
-
   }
 
   private seedBotScopedAutomationPlatform(): void {
