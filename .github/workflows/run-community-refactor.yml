@@ -1,0 +1,136 @@
+name: Run Neurobot Community Refactor
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  refactor:
+    if: github.event.issue.title == '[run-community-refactor]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout refactor branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/refactor-neurobot-community
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Apply community-only refactor
+        id: refactor
+        shell: bash
+        run: |
+          set +e
+          : > community-refactor-report.txt
+          python scripts/refactor-community-only.py >> community-refactor-report.txt 2>&1
+          status=$?
+          echo "refactor_status=$status" >> "$GITHUB_OUTPUT"
+          echo "Refactor exit code: $status" >> community-refactor-report.txt
+
+          if [ "$status" -eq 0 ]; then
+            npm install --package-lock-only --ignore-scripts >> community-refactor-report.txt 2>&1
+            lock_status=$?
+            echo "Lockfile exit code: $lock_status" >> community-refactor-report.txt
+            if [ "$lock_status" -ne 0 ]; then status=$lock_status; fi
+          fi
+
+          if [ "$status" -eq 0 ]; then
+            npx prettier --write \
+              package.json package-lock.json .env.example README.md \
+              src/core/assistant-module-visibility-service.ts \
+              src/core/profile-presets.ts src/core/bot-instance.ts \
+              src/core/multi-bot-manager.ts src/admin/server.ts \
+              src/persistence/database.ts src/index.ts \
+              public/index.html public/multibot-panel.js \
+              public/friendly-panel.js public/styles.css \
+              tests/community-only-boundaries.test.ts \
+              >> community-refactor-report.txt 2>&1
+            prettier_status=$?
+            echo "Prettier exit code: $prettier_status" >> community-refactor-report.txt
+            if [ "$prettier_status" -ne 0 ]; then status=$prettier_status; fi
+          fi
+
+          echo "overall=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Commit transformed sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No source changes were produced." >> community-refactor-report.txt
+          else
+            git commit -m "refactor: make Neurobot community-only"
+            git push origin HEAD:agent/refactor-neurobot-community
+          fi
+
+      - name: Validate transformed project
+        id: validate
+        shell: bash
+        run: |
+          set +e
+          run_step() {
+            name="$1"
+            shift
+            echo >> community-refactor-report.txt
+            echo "## $name" >> community-refactor-report.txt
+            echo '```text' >> community-refactor-report.txt
+            "$@" >> community-refactor-report.txt 2>&1
+            status=$?
+            echo '```' >> community-refactor-report.txt
+            echo "Exit code: $status" >> community-refactor-report.txt
+            return $status
+          }
+
+          overall=${{ steps.refactor.outputs.overall }}
+          if [ "$overall" -eq 0 ]; then run_step "npm ci" npm ci || overall=1; fi
+          if [ "$overall" -eq 0 ]; then run_step "Typecheck" npm run typecheck || overall=1; fi
+          if [ "$overall" -eq 0 ]; then run_step "Lint" npm run lint || overall=1; fi
+          if [ "$overall" -eq 0 ]; then run_step "Tests" npm test || overall=1; fi
+          if [ "$overall" -eq 0 ]; then run_step "Build" npm run build || overall=1; fi
+          echo "overall=$overall" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish report
+        uses: actions/github-script@v7
+        env:
+          RESULT: ${{ steps.validate.outputs.overall }}
+        with:
+          script: |
+            const fs = require('fs');
+            let report = fs.readFileSync('community-refactor-report.txt', 'utf8');
+            if (report.length > 60000) report = `${report.slice(0,60000)}\n\n[Registro truncado]`;
+            const heading = process.env.RESULT === '0'
+              ? '✅ Refactor comunitario validado'
+              : '❌ El refactor requiere correcciones';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `${heading}\n\n${report}`
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed',
+              state_reason: 'completed'
+            });
+
+      - name: Fail when validation failed
+        if: steps.validate.outputs.overall != '0'
+        run: exit 1
