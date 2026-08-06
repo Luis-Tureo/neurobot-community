@@ -57,21 +57,35 @@ El asistente entrega información general. No diagnostica, no recomienda medicam
 - Windows 10 u 11.
 - Node.js 24 o posterior.
 - npm 11 o posterior.
-- Git.
 - Un número exclusivo para el asistente.
 
-## Instalación
+Git solo es necesario para descargar o actualizar el repositorio desde la consola. No se necesita VPS ni una cuenta de Meta para ejecutar esta versión local.
+
+## Uso inmediato en Windows
+
+1. Descarga o actualiza el repositorio.
+2. Ejecuta `Instalar-Neurobot-Community.cmd` una sola vez.
+3. Espera a que termine la instalación, las pruebas y la compilación.
+4. Ejecuta `Iniciar-Neurobot-Community.cmd`.
+5. Guarda la contraseña temporal que aparezca durante el primer inicio.
+6. El panel se abrirá en `http://127.0.0.1:3000`.
+7. Vincula el número desde **WhatsApp > Dispositivos vinculados** escaneando el QR.
+
+La ventana de Neurobot debe permanecer abierta y el computador debe mantenerse encendido y conectado a internet. Para detenerlo, presiona `Ctrl+C` o cierra la ventana.
+
+Los datos se conservan en la carpeta `data`, por lo que reiniciar el programa no debería pedir un QR nuevo mientras la sesión siga siendo válida.
+
+## Instalación por consola
 
 ```powershell
-npm install
+npm ci
 npm run setup
 npm run db:init
-npm run dev
+npm run check
+npm start
 ```
 
-El panel se abre en `http://127.0.0.1:3000` de forma predeterminada.
-
-## Vinculación
+## Vinculación y configuración inicial
 
 1. Inicia la aplicación.
 2. Abre el panel y selecciona el asistente comunitario.
@@ -80,6 +94,7 @@ El panel se abre en `http://127.0.0.1:3000` de forma predeterminada.
 5. Actualiza la lista de grupos.
 6. Autoriza únicamente los grupos aprobados.
 7. Configura administradores, bienvenida, automatizaciones, encuestas y moderación.
+8. Prueba primero con un grupo pequeño antes de usarlo en la comunidad principal.
 
 ## Configuración principal
 
@@ -103,5 +118,7 @@ npm run lint
 npm test
 npm run build
 ```
+
+GitHub Actions ejecuta estas comprobaciones sin modificar ni subir archivos automáticamente.
 
 La prueba final con un número real debe comprobar: vinculación QR, detección de grupos, autorización, activación por mención, bienvenida única, automatizaciones y encuestas.
