@@ -1,0 +1,64 @@
+name: Agent Targeted Inspection
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/agent-targeted-inspection.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Build targeted context
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          targets = {
+            'src/admin/server.ts': ['buildAdminServer','automatic-messages','moderation','polls','maintenance','sendWelcomeTest'],
+            'src/persistence/database.ts': ['migrate()','getAutomaticMessageConfiguration','saveAutomaticMessageConfiguration','moderationAdmin','listAdministrators','technical_events'],
+            'src/core/message-processor.ts': ['moderation','process(message','IncomingMessage'],
+            'src/messaging/whatsapp-adapter.ts': ['fetchMessages','listGroups','sendMessage(','message_create'],
+            'src/messaging/simulated-client.ts': ['listGroups','sendMessage(','messages'],
+            'src/domain/types.ts': ['IncomingMessage','AutomaticMessageConfiguration','AutomaticTaskType','GroupJoinEvent'],
+            'src/index.ts': ['buildAdminServer','MultiBotManager'],
+            'public/index.html': ['Automatizaciones','Encuestas','Moderación','data-module'],
+            'public/app.js': ['automatic','poll','moderation','loadBot'],
+            'public/multibot-panel.js': ['automatic','poll','moderation'],
+          }
+          out=[]
+          for name, needles in targets.items():
+            p=Path(name)
+            if not p.exists(): continue
+            lines=p.read_text(encoding='utf-8').splitlines()
+            out.append(f'\n# {name} ({len(lines)} lines)\n')
+            emitted=[]
+            for needle in needles:
+              matches=[i for i,line in enumerate(lines) if needle.lower() in line.lower()]
+              out.append(f'## {needle}: {matches[:30]}')
+              for i in matches[:12]:
+                a=max(0,i-10); b=min(len(lines),i+18)
+                key=(a,b)
+                if key in emitted: continue
+                emitted.append(key)
+                out.append(f'--- lines {a+1}-{b} ---')
+                out.extend(f'{j+1:05d}: {lines[j]}' for j in range(a,b))
+          Path('agent-audit').mkdir(exist_ok=True)
+          Path('agent-audit/targeted-context.txt').write_text('\n'.join(out),encoding='utf-8')
+          PY
+      - name: Commit context
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add agent-audit/targeted-context.txt
+          git commit -m 'chore: publish temporary targeted inspection'
+          git push origin HEAD:main
