@@ -8887,15 +8887,6 @@ function validateSessionPath(value: string): string {
   return normalized;
 }
 
-function normalizeMenuAlias(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/gu, '')
-    .toLocaleLowerCase('es')
-    .replace(/[^a-z0-9]+/gu, ' ')
-    .trim();
-}
-
 function validateActionPayload(
   actionType: MenuActionType,
   payload: Record<string, string | number | boolean | null>,

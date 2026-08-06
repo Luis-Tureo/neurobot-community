@@ -689,7 +689,7 @@ describe('API administrativa', () => {
         botName: 'Privado',
         organizationType: 'Tienda',
         timezone: 'America/Santiago',
-        preset: 'store',
+        preset: 'community',
       }),
     });
     const mixedBot = database.createBot({
@@ -701,7 +701,7 @@ describe('API administrativa', () => {
         botName: 'Mixto',
         organizationType: 'Tienda',
         timezone: 'America/Santiago',
-        preset: 'store',
+        preset: 'community',
       }),
     });
     expect(

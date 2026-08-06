@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import cookie from '@fastify/cookie';
 import formbody from '@fastify/formbody';
@@ -273,107 +273,6 @@ const activationAliasesSchema = z
       )
       .min(1)
       .max(10),
-  })
-  .strict();
-
-const menuSchema = z
-  .object({
-    id: z.number().int().positive().optional(),
-    parentMenuId: z.number().int().positive().nullable(),
-    title: z.string().trim().min(1).max(120),
-    message: z.string().trim().min(1).max(600),
-    helpText: z.string().trim().max(300),
-    enabled: z.boolean(),
-    isInitial: z.boolean(),
-    expirationMinutes: z.number().int().min(1).max(1440),
-  })
-  .strict();
-
-const menuOptionSchema = z
-  .object({
-    id: z.number().int().positive().optional(),
-    menuId: z.number().int().positive(),
-    label: z.string().trim().min(1).max(100),
-    aliases: z.array(z.string().trim().min(1).max(100)).max(20),
-    order: z.number().int().min(1).max(100),
-    actionType: z.enum([
-      'text',
-      'catalog_item',
-      'catalog_category',
-      'media',
-      'submenu',
-      'knowledge',
-      'ai',
-      'hours',
-      'address',
-      'payments',
-      'shipping',
-      'human_assistance',
-      'reservation_request',
-      'back',
-      'exit',
-    ]),
-    actionPayload: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
-    enabled: z.boolean(),
-  })
-  .strict();
-
-const catalogCategorySchema = z
-  .object({
-    id: z.number().int().positive().optional(),
-    name: z.string().trim().min(1).max(120),
-    description: z.string().trim().max(600),
-    enabled: z.boolean(),
-  })
-  .strict();
-
-const catalogItemSchema = z
-  .object({
-    id: z.number().int().nonnegative().default(0),
-    categoryId: z.number().int().positive().nullable(),
-    name: z.string().trim().min(1).max(160),
-    code: z.string().trim().min(1).max(80),
-    description: z.string().trim().max(1200),
-    priceAmount: z.number().int().min(0).nullable(),
-    offerPriceAmount: z.number().int().min(0).nullable(),
-    currency: z.string().trim().min(3).max(8),
-    presentation: z.string().trim().max(200),
-    size: z.string().trim().max(100),
-    variants: z.array(z.string().trim().min(1).max(180)).max(50),
-    availability: z.string().trim().max(300),
-    informedStock: z.number().int().min(0).nullable(),
-    primaryMediaId: z.number().int().positive().nullable(),
-    authorizedLink: z.string().url().startsWith('https://').nullable(),
-    enabled: z.boolean(),
-  })
-  .strict();
-
-const businessHourSchema = z
-  .object({
-    weekday: z.number().int().min(0).max(6).nullable(),
-    localDate: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/u)
-      .nullable(),
-    openingTime: z
-      .string()
-      .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u)
-      .nullable(),
-    closingTime: z
-      .string()
-      .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u)
-      .nullable(),
-    closed: z.boolean(),
-    label: z.string().trim().max(160),
-  })
-  .strict();
-
-const manualBotTestSchema = z
-  .object({
-    kind: z.enum(['menu', 'catalog_item', 'media']),
-    groupKey: z.string().length(20),
-    resourceId: z.number().int().positive().optional(),
-    confirmed: z.literal(true),
   })
   .strict();
 

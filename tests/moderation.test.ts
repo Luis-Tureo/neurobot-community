@@ -377,7 +377,7 @@ function createBot(database: AppDatabase, id: string, mode: 'community' | 'busin
       botName: 'Bot',
       organizationType: mode === 'community' ? 'Comunidad' : 'Tienda',
       timezone: 'America/Santiago',
-      preset: mode === 'community' ? 'community' : 'store',
+      preset: mode === 'community' ? 'community' : 'community',
     }),
   });
 }

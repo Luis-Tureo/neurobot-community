@@ -254,24 +254,6 @@ export class MessageProcessor {
     }
     const aliasMentioned = containsActivationAlias(message.body, profile.activationAlias);
     if (!message.mentionsBot && !aliasMentioned) {
-      if (
-        bot.capabilities.conversationContinuationEnabled &&
-        this.conversationFlow !== undefined &&
-        (await this.conversationFlow.handle(
-          message.chatId,
-          groupHash,
-          userHash,
-          message.body,
-          new Date(),
-          message.messageType === 'poll_vote',
-        ))
-      ) {
-        this.logger.info(
-          { operation: 'activationCheck', reason: 'ACTIVE_MENU_SELECTION', ...context },
-          'Se procesó una selección del menú comunitario sin exigir una nueva mención',
-        );
-        return 'responded';
-      }
       this.logger.info(
         {
           operation: 'activationCheck',
@@ -312,56 +294,6 @@ export class MessageProcessor {
             mentionsBot: true,
             botMentionToken: profile.activationAlias,
           };
-    const normalizedBody = normalizeText(message.body);
-    if (
-      bot.capabilities.interactiveMenusEnabled &&
-      this.conversationFlow !== undefined &&
-      /\b(?:ayuda|buenas|hola|holi|informacion|opciones|menu)\b/u.test(normalizedBody)
-    ) {
-      this.logger.info(
-        { operation: 'commandDetected', command: 'menu', ...context },
-        'Se detectó una solicitud del menú principal',
-      );
-      this.logger.info(
-        {
-          operation: 'responseAttempted',
-          botId: this.botId,
-          target: 'group',
-          responseType: 'menu',
-          ...context,
-        },
-        'Se intentará enviar el menú al grupo',
-      );
-      try {
-        const startedMenu = await this.conversationFlow.start(message.chatId, groupHash, userHash);
-        if (startedMenu) {
-          this.logger.info(
-            {
-              operation: 'responseSent',
-              botId: this.botId,
-              target: 'group',
-              responseType: 'menu',
-              ...context,
-            },
-            'El menú fue enviado al grupo',
-          );
-          return 'responded';
-        }
-      } catch (error) {
-        this.logger.error(
-          {
-            ...serializeError(error, 'MENU_SEND_FAILED', this.options.developmentMode ?? false),
-            operation: 'responseFailed',
-            botId: this.botId,
-            target: 'group',
-            responseType: 'menu',
-            ...context,
-          },
-          'No fue posible enviar el menú al grupo',
-        );
-        return 'send_failed';
-      }
-    }
     this.logger.info(
       { operation: 'commandNotDetected', reason: 'FREE_TEXT_QUERY', ...context },
       'El mensaje continuará como una consulta de texto',

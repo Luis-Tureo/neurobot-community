@@ -121,7 +121,6 @@ export class BotInstance {
         developmentMode: options.developmentMode,
       },
       bot.id,
-      undefined,
       this.outboundQueue,
       this.moderation ?? undefined,
     );
