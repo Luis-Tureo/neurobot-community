@@ -50,6 +50,15 @@ database = read('src/persistence/database.ts')
 database = re.sub(r"\nfunction normalizeMenuAlias\([\s\S]*?\n\}\n", "\n", database, count=1)
 write('src/persistence/database.ts', database)
 
+panel = read('public/multibot-panel.js')
+panel = re.sub(
+    r"\nasync function loadRequests\(\) \{[\s\S]*?\n\}\n\nasync function loadAI\(\)",
+    "\nasync function loadAI()",
+    panel,
+    count=1,
+)
+write('public/multibot-panel.js', panel)
+
 for relative in ('tests/admin-server.test.ts', 'tests/moderation.test.ts'):
     path = ROOT / relative
     text = path.read_text(encoding='utf-8')
