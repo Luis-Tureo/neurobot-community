@@ -1,33 +1,385 @@
-name: Inspect grouped welcome
+name: Apply fixed grouped welcome
 
 on:
   push:
     branches:
       - agent/grouped-welcome-default
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  inspect:
+  apply:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
-      - name: Checkout
+      - name: Checkout work branch
         uses: actions/checkout@v4
-      - name: Locate welcome configuration and tests
+        with:
+          ref: agent/grouped-welcome-default
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Apply implementation and tests
         shell: bash
         run: |
           set -euo pipefail
-          echo '=== welcome settings references ==='
-          grep -RInE 'sendDelaySeconds|batchWindowSeconds|multipleJoinMode|maximumGroupedNames|includePublicName|enableRealMention' src public tests README.md || true
-          echo '=== welcome form controls ==='
-          grep -nE 'welcome_batch_window|welcome_multiple_mode|welcome_maximum_names|welcome_send_delay|welcome_group_simultaneous' public/index.html public/app.js || true
-          echo '=== automatic messages routes ==='
-          grep -nE "automatic-messages|automaticMessagesSchema|saveAutomaticMessageConfiguration" src/admin/server.ts src/persistence/database.ts || true
-          echo '=== relevant test names ==='
-          grep -nE "agrupa varias personas|bienvenida|multipleJoinMode|sendDelaySeconds|batchWindowSeconds" tests/automatic-message-service.test.ts tests/automatic-messages-ui.test.ts tests/database.test.ts || true
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def read(path: str) -> str:
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path: str, text: str) -> None:
+              Path(path).write_text(text, encoding='utf-8')
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              text = read(path)
+              if old not in text:
+                  raise SystemExit(f'No se encontró el bloque esperado en {path}: {old[:80]!r}')
+              write(path, text.replace(old, new, 1))
+
+          def regex_once(path: str, pattern: str, replacement: str) -> None:
+              text = read(path)
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f'La expresión no coincidió exactamente una vez en {path}: {pattern}')
+              write(path, updated)
+
+          # Fixed runtime constants and defaults.
+          replace_once(
+              'src/core/automatic-message-defaults.ts',
+              "export const AUTOMATIC_MESSAGE_TIMEZONE = 'America/Santiago' as const;\n",
+              "export const AUTOMATIC_MESSAGE_TIMEZONE = 'America/Santiago' as const;\nexport const WELCOME_BATCH_DELAY_SECONDS = 10 as const;\n",
+          )
+          defaults = read('src/core/automatic-message-defaults.ts')
+          defaults = defaults.replace('batchWindowSeconds: 5,', 'batchWindowSeconds: WELCOME_BATCH_DELAY_SECONDS,')
+          defaults = defaults.replace('sendDelaySeconds: 2,', 'sendDelaySeconds: WELCOME_BATCH_DELAY_SECONDS,')
+          write('src/core/automatic-message-defaults.ts', defaults)
+
+          # Runtime service: always wait ten seconds and always group two or more joins.
+          replace_once(
+              'src/core/automatic-message-service.ts',
+              "import { ExpiringSet } from './expiring-cache.js';",
+              "import { WELCOME_BATCH_DELAY_SECONDS } from './automatic-message-defaults.js';\nimport { ExpiringSet } from './expiring-cache.js';",
+          )
+          replace_once(
+              'src/core/automatic-message-service.ts',
+              "type WelcomeBatch = {\n  id: string;\n  participants: Map<string, WelcomeParticipant>;\n  timer: ReturnType<typeof setTimeout>;\n};\n\nexport class AutomaticMessageService {",
+              "type WelcomeBatch = {\n  id: string;\n  participants: Map<string, WelcomeParticipant>;\n  timer: ReturnType<typeof setTimeout>;\n};\n\nconst GROUPED_WELCOME_HEADING = '¡Bienvenidos nuevos integrantes! 👋';\n\nexport class AutomaticMessageService {",
+          )
+          replace_once(
+              'src/core/automatic-message-service.ts',
+              '    }, configuration.welcome.sendDelaySeconds * 1000);',
+              '    }, WELCOME_BATCH_DELAY_SECONDS * 1000);',
+          )
+          replace_once(
+              'src/core/automatic-message-service.ts',
+              "    if (configuration.welcome.multipleJoinMode === 'GROUPED' && participants.length > 1) {",
+              '    if (participants.length > 1) {',
+          )
+          new_builder = r'''  private buildWelcomeMessages(
+              groupId: string,
+              template: string,
+              participants: WelcomeParticipant[],
+              configuration: AutomaticMessageConfiguration,
+            ): Array<{ text: string; mentionIds: string[]; participantCount: number }> {
+              if (participants.length === 0) return [];
+              const settings = configuration.welcome;
+              const profile = this.database.getBotProfile(this.botId);
+              const linkedGroup = this.database
+                .listBotGroups(this.botId, (identifier) => this.hash(identifier))
+                .find((group) => group.groupHash === this.hash(groupId));
+              const groupName =
+                linkedGroup?.name ?? this.database.getGroupById(groupId)?.name ?? 'este grupo';
+              const commonValues = {
+                communityName: profile.organizationName,
+                groupName,
+                assistantName: profile.botName,
+                botAlias: profile.activationAlias,
+              };
+
+              if (participants.length > 1) {
+                const bodyTemplate = stripLeadingWelcomeHeading(template);
+                const body =
+                  bodyTemplate.length === 0
+                    ? ''
+                    : renderWelcomeTemplate(bodyTemplate, {
+                        name: '',
+                        mention: '',
+                        ...commonValues,
+                      }).trim();
+                return [
+                  {
+                    text:
+                      body.length === 0
+                        ? GROUPED_WELCOME_HEADING
+                        : `${GROUPED_WELCOME_HEADING}\n\n${body}`,
+                    mentionIds: [],
+                    participantCount: participants.length,
+                  },
+                ];
+              }
+
+              const templateUsesIdentity = /\{(?:name|mention)\}/u.test(template);
+              const selected = participants;
+              const publicNames = selected
+                .map((participant) => sanitizeWhatsAppDisplayName(participant.displayName))
+                .filter((name): name is string => name !== null);
+              const canPersonalize = settings.includePublicName && publicNames.length === selected.length;
+              const names = canPersonalize ? publicNames : [];
+              const mentions = names.map((name) => `@${name}`);
+              const heading = buildWelcomeHeading(selected.length, names);
+              const values = {
+                name: joinWelcomeNames(names),
+                mention: joinWelcomeNames(mentions),
+                ...commonValues,
+              };
+
+              let text: string;
+              if (templateUsesIdentity && canPersonalize) {
+                text = renderWelcomeTemplate(template, values);
+              } else {
+                const bodyTemplate = stripLeadingWelcomeHeading(template);
+                const body =
+                  bodyTemplate.length === 0 ? '' : renderWelcomeTemplate(bodyTemplate, values).trim();
+                text = body.length === 0 ? heading : `${heading}\n\n${body}`;
+              }
+
+              return [
+                {
+                  text,
+                  mentionIds:
+                    settings.enableRealMention && canPersonalize
+                      ? selected.map((participant) => participant.mentionId).filter(Boolean)
+                      : [],
+                  participantCount: selected.length,
+                },
+              ];
+            }'''
+          regex_once(
+              'src/core/automatic-message-service.ts',
+              r'  private buildWelcomeMessages\([\s\S]*?\n  private async sendAndRecord\(',
+              new_builder + '\n\n  private async sendAndRecord(',
+          )
+
+          # Server and persistence normalize legacy fields to the fixed policy.
+          replace_once(
+              'src/admin/server.ts',
+              '        welcome: { ...input.welcome, template: assertPlainText(input.welcome.template) },',
+              "        welcome: {\n          ...input.welcome,\n          batchWindowSeconds: 10,\n          groupSimultaneous: true,\n          multipleJoinMode: 'GROUPED' as const,\n          maximumGroupedNames: 5,\n          sendDelaySeconds: 10,\n          template: assertPlainText(input.welcome.template),\n        },",
+          )
+          replace_once(
+              'src/persistence/database.ts',
+              "      multipleJoinMode: row.multiple_join_mode,\n      groupSimultaneous: row.multiple_join_mode === 'GROUPED',\n      maximumGroupedNames: row.maximum_grouped_names,\n      sendDelaySeconds: row.send_delay_seconds,",
+              "      multipleJoinMode: 'GROUPED',\n      groupSimultaneous: true,\n      maximumGroupedNames: 5,\n      sendDelaySeconds: 10,",
+          )
+          replace_once(
+              'src/persistence/database.ts',
+              "      welcome.enableRealMention ? 1 : 0, welcome.unknownNameFallback, welcome.multipleJoinMode,\n      welcome.maximumGroupedNames, welcome.sendDelaySeconds, now, now,",
+              "      welcome.enableRealMention ? 1 : 0, welcome.unknownNameFallback, 'GROUPED',\n      5, 10, now, now,",
+          )
+
+          # Remove grouping controls from the panel while keeping single-person personalization controls.
+          replace_once(
+              'public/index.html',
+              '<p class="muted">Agrupa varios ingresos para evitar mensajes repetidos.</p>',
+              '<p class="muted">El bot espera 10 segundos y agrupa automáticamente dos o más ingresos en un solo mensaje.</p>',
+          )
+          replace_once(
+              'public/index.html',
+              '              <input name="welcome_batch_window" type="hidden" value="5" />\n',
+              '',
+          )
+          replace_once(
+              'public/index.html',
+              '''              <div class="form-row">
+                <label>Cuando no exista nombre<input name="welcome_unknown_name" maxlength="80" required /></label>
+                <label>Ingresos múltiples<select name="welcome_multiple_mode"><option value="GROUPED">Un solo mensaje agrupado</option><option value="INDIVIDUAL">Un mensaje por persona</option></select></label>
+                <label>Máximo de nombres<input name="welcome_maximum_names" type="number" min="1" max="5" required /></label>
+                <label>Espera antes de enviar (segundos)<input name="welcome_send_delay" type="number" min="0" max="60" required /></label>
+              </div>
+''',
+              '''              <div class="form-row">
+                <label>Cuando no exista nombre<input name="welcome_unknown_name" maxlength="80" required /></label>
+              </div>
+              <p class="muted">Comportamiento fijo: si ingresan dos o más personas, se envía “¡Bienvenidos nuevos integrantes!” y luego los detalles del mensaje, sin saludos separados.</p>
+''',
+          )
+
+          app = read('public/app.js')
+          app = app.replace(
+              '  automaticMessagesForm.elements.welcome_batch_window.value =\n    configuration.welcome.batchWindowSeconds;\n',
+              '',
+          )
+          app = app.replace(
+              "  automaticMessagesForm.elements.welcome_multiple_mode.value = configuration.welcome.multipleJoinMode ?? 'GROUPED';\n",
+              '',
+          )
+          app = app.replace(
+              '  automaticMessagesForm.elements.welcome_maximum_names.value = configuration.welcome.maximumGroupedNames ?? 5;\n',
+              '',
+          )
+          app = app.replace(
+              '  automaticMessagesForm.elements.welcome_send_delay.value = configuration.welcome.sendDelaySeconds ?? 2;\n',
+              '',
+          )
+          app = app.replace(
+              '      batchWindowSeconds: Number(form.elements.welcome_batch_window.value),',
+              '      batchWindowSeconds: 10,',
+          )
+          app = app.replace(
+              '      groupSimultaneous: form.elements.welcome_group_simultaneous?.checked ?? true,',
+              '      groupSimultaneous: true,',
+          )
+          app = app.replace(
+              '      multipleJoinMode: form.elements.welcome_multiple_mode.value,\n      maximumGroupedNames: Number(form.elements.welcome_maximum_names.value),\n      sendDelaySeconds: Number(form.elements.welcome_send_delay.value),',
+              "      multipleJoinMode: 'GROUPED',\n      maximumGroupedNames: 5,\n      sendDelaySeconds: 10,",
+          )
+          write('public/app.js', app)
+
+          # Service tests: prove the fixed 10-second window and plural message.
+          replace_once(
+              'tests/automatic-message-service.test.ts',
+              '''function enableWelcome(database: AppDatabase, batchWindowSeconds = 30): void {
+  const configuration = database.getAutomaticMessageConfiguration();
+  configuration.welcome.enabled = true;
+  configuration.welcome.batchWindowSeconds = batchWindowSeconds;
+  database.saveAutomaticMessageConfiguration(configuration);
+}
+''',
+              '''function enableWelcome(database: AppDatabase): void {
+  const configuration = database.getAutomaticMessageConfiguration();
+  configuration.welcome.enabled = true;
+  database.saveAutomaticMessageConfiguration(configuration);
+}
+''',
+          )
+          service_tests = read('tests/automatic-message-service.test.ts')
+          service_tests = re.sub(r'enableWelcome\(database, \d+\)', 'enableWelcome(database)', service_tests)
+          service_tests = service_tests.replace(
+              'await vi.advanceTimersByTimeAsync(2_000);',
+              'await vi.advanceTimersByTimeAsync(10_000);',
+          )
+          service_tests = service_tests.replace(
+              'await vi.advanceTimersByTimeAsync(5_000);',
+              'await vi.advanceTimersByTimeAsync(10_000);',
+          )
+          write('tests/automatic-message-service.test.ts', service_tests)
+          grouped_test = r'''  it('deduplica ingresos, espera diez segundos y agrupa varias personas en una sola bienvenida', async () => {
+              vi.useFakeTimers();
+              vi.setSystemTime(new Date('2026-01-05T12:00:00Z'));
+              const { database, client, service } = createSubject();
+              try {
+                enableWelcome(database);
+                await service.handleGroupJoin({
+                  groupId: GROUP_ID,
+                  participantIds: ['56911111111@c.us'],
+                  eventId: 'join-1',
+                });
+                await service.handleGroupJoin({
+                  groupId: GROUP_ID,
+                  participantIds: ['56911111111@c.us'],
+                  eventId: 'join-1',
+                });
+                await vi.advanceTimersByTimeAsync(5_000);
+                await service.handleGroupJoin({
+                  groupId: GROUP_ID,
+                  participantIds: ['56922222222@c.us', '56933333333@c.us'],
+                  eventId: 'join-2',
+                });
+                await vi.advanceTimersByTimeAsync(4_999);
+                expect(client.sentMessages).toHaveLength(0);
+                await vi.advanceTimersByTimeAsync(1);
+                expect(client.sentMessages).toHaveLength(1);
+                expect(client.sentMessages[0]?.text).toContain('¡Bienvenidos nuevos integrantes! 👋');
+                expect(client.sentMessages[0]?.text).toContain(
+                  'Este es un espacio de respeto, apoyo e inclusión.',
+                );
+                expect(client.sentMessages[0]?.text).not.toMatch(/569\d+/u);
+                expect(client.sentMessages[0]?.mentionIds).toBeUndefined();
+                expect(database.listScheduledDeliveries()[0]).toMatchObject({
+                  taskType: 'WELCOME',
+                  status: 'SENT',
+                });
+                expect(
+                  database
+                    .getTechnicalEvents()
+                    .some((event) => event.event_type === 'WELCOME_SENT' && event.item_count === 3),
+                ).toBe(true);
+              } finally {
+                service.stop();
+                database.close();
+              }
+            };
+'''
+          # Correct the terminator after composing the raw block.
+          grouped_test = grouped_test.replace("            };\n", "            });\n")
+          regex_once(
+              'tests/automatic-message-service.test.ts',
+              r"  it\('deduplica ingresos, agrupa varias personas y envía una sola bienvenida',[\s\S]*?\n  it\('usa nombres públicos",
+              grouped_test + "\n  it('usa nombres públicos",
+          )
+          replace_once(
+              'tests/automatic-message-service.test.ts',
+              "      expect(client.sentMessages[0]?.text).toBe('¡Bienvenidos/as a la comunidad! 👋');\n      expect(client.sentMessages[0]?.mentionIds).toBeUndefined();",
+              "      expect(client.sentMessages[0]?.text).toContain('¡Bienvenidos nuevos integrantes! 👋');\n      expect(client.sentMessages[0]?.text).toContain(\n        'Este es un espacio de respeto, apoyo e inclusión.',\n      );\n      expect(client.sentMessages[0]?.mentionIds).toBeUndefined();",
+          )
+
+          # UI and persistence tests reflect the non-configurable policy.
+          replace_once(
+              'tests/automatic-messages-ui.test.ts',
+              '    expect(html).toContain(\'name="welcome_multiple_mode"\');',
+              "    expect(html).not.toContain('name=\"welcome_multiple_mode\"');\n    expect(html).not.toContain('name=\"welcome_maximum_names\"');\n    expect(html).not.toContain('name=\"welcome_send_delay\"');\n    expect(html).toContain('espera 10 segundos');\n    expect(html).toContain('¡Bienvenidos nuevos integrantes!');\n    expect(script).toContain(\"multipleJoinMode: 'GROUPED'\");\n    expect(script).toContain('sendDelaySeconds: 10');",
+          )
+          database_tests = read('tests/database.test.ts')
+          database_tests = database_tests.replace('batchWindowSeconds: 5,', 'batchWindowSeconds: 10,')
+          database_tests = database_tests.replace('sendDelaySeconds: 2,', 'sendDelaySeconds: 10,')
+          write('tests/database.test.ts', database_tests)
+
+          # Document the permanent behavior.
+          replace_once(
+              'README.md',
+              '- Automatizaciones y encuestas independientes por asistente y zona horaria.\n',
+              '- Automatizaciones y encuestas independientes por asistente y zona horaria.\n- La bienvenida espera 10 segundos desde el primer ingreso y, si entran dos o más personas, envía un único saludo “¡Bienvenidos nuevos integrantes!” seguido de los detalles configurados. Esta agrupación es fija y no aparece como opción en el panel.\n',
+          )
+          PY
+
+      - name: Format changed sources
+        run: |
+          npx prettier --write \
+            src/core/automatic-message-defaults.ts \
+            src/core/automatic-message-service.ts \
+            src/admin/server.ts \
+            src/persistence/database.ts \
+            public/index.html \
+            public/app.js \
+            tests/automatic-message-service.test.ts \
+            tests/automatic-messages-ui.test.ts \
+            tests/database.test.ts \
+            README.md
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate repository
+        run: npm run check
+
+      - name: Remove temporary workflow and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/inspect-grouped-welcome.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: group welcome messages within fixed window"
+          git push origin HEAD:agent/grouped-welcome-default
