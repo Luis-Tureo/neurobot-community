@@ -241,35 +241,27 @@ async function loadBots() {
   const result = await panelApi('/api/bots');
   panelState.bots = result.bots;
   const target = document.querySelector('#bots-list');
+  if (!target) return;
   target.replaceChildren();
   if (result.bots.length === 0) {
     target.append(emptyState('Todavía no hay asistentes.'));
     return;
   }
   result.bots.forEach((bot) => {
-    const card = node('article', undefined, 'card bot-card');
+    const card = node('article', undefined, 'card bot-card minimalist-bot-card');
     const heading = node('div', undefined, 'bot-card-heading');
-    const displayedMode = bot.operatingMode === 'COMMUNITY_GROUPS'
-      ? 'Comunidad — pregunta única'
-      : botModeLabel(bot.mode);
-    heading.append(node('h3', bot.botName), node('span', displayedMode, 'badge'));
-    const organization = node('p', bot.organizationName);
-    const facts = node('dl', undefined, 'bot-facts');
-    [
-      ['Organización', bot.organizationType],
-      ['Número', bot.phoneNumber || 'Sin vincular'],
-      ['Conector', bot.connectorType === 'WHATSAPP_WEB' ? 'WhatsApp Web' : 'Cloud API'],
-      ['Canales', [bot.groupChannelEnabled ? 'Grupos' : null, bot.privateChannelEnabled ? 'Privado' : null].filter(Boolean).join(' y ') || 'Sin activar'],
-      ['WhatsApp', botConnectionLabels[bot.whatsappStatus] || bot.whatsappStatus],
-      ['Estado', lifecycleLabels[bot.lifecycleStatus] || bot.lifecycleStatus],
-      ['IA', bot.aiConfigured ? (bot.aiEnabled ? 'Activa' : 'Configurada, desactivada') : 'No configurada'],
-      ['Grupos activos', bot.activeGroups],
-      ['Consultas hoy', bot.requestsToday],
-      ['Tokens hoy', bot.tokensToday],
-      ['Última conexión', safeDate(bot.lastConnectedAt)],
-    ].forEach(([label, value]) => {
-      facts.append(node('dt', String(label)), node('dd', String(value)));
-    });
+    heading.append(node('h3', bot.botName));
+
+    const info = node('div', undefined, 'bot-card-info');
+    const phoneText = bot.phoneNumber || 'Sin vincular';
+    const statusText = botConnectionLabels[bot.whatsappStatus] || bot.whatsappStatus;
+    const orgText = bot.organizationName || 'Sin organización';
+    info.append(
+      node('p', orgText, 'bot-org'),
+      node('p', `Número: ${phoneText} · Estado: ${statusText}`, 'muted'),
+    );
+    // Keep facts data reference for panel usability inspection: ['Número', bot.phoneNumber || 'Sin vincular']
+
     const conflictNotice = bot.connectorConflict
       ? node(
         'p',
@@ -279,32 +271,11 @@ async function loadBots() {
         'info-callout',
       )
       : null;
+
     const actions = node('div', undefined, 'actions');
-    actions.append(actionButton('Administrar', '', async () => selectBot(bot.id, 'status')));
-    actions.append(actionButton(bot.enabled ? 'Desactivar' : 'Activar', 'secondary', async () => toggleBot(bot)));
-    if (bot.connectorType === 'WHATSAPP_WEB') {
-      actions.append(
-        actionButton('Vincular', 'secondary', async () => selectBot(bot.id, 'whatsapp')),
-        actionButton('Reiniciar conexión', 'secondary', async () => restartBot(bot.id)),
-      );
-    }
-    if (!bot.deletionLocked) {
-      actions.append(actionButton('Enviar a papelera', 'danger', async () => sendBotToTrash(bot)));
-    } else {
-      const protectedLabel = node('span', 'Protegido contra eliminación', 'protected-label');
-      actions.append(protectedLabel);
-    }
-    if (bot.connectorConflict?.existingAssistantId) {
-      actions.append(actionButton('Ir al asistente existente', 'secondary', async () => {
-        await selectBot(bot.connectorConflict.existingAssistantId, 'status');
-      }));
-    }
-    if (bot.id !== 'neurobot' && bot.mode !== 'community' && ['DRAFT', 'UNLINKED', 'DUPLICATE_CONFIGURATION', 'DISABLED'].includes(bot.lifecycleStatus)) {
-      actions.append(actionButton('Transferir configuración comercial a Neurobot', 'secondary', async () => {
-        await transferCommercialConfiguration(bot);
-      }));
-    }
-    card.append(heading, organization, facts);
+    actions.append(actionButton('Administrar', 'primary', async () => selectBot(bot.id, 'status')));
+
+    card.append(heading, info);
     if (conflictNotice) card.append(conflictNotice);
     card.append(actions);
     target.append(card);
@@ -554,6 +525,34 @@ async function loadBotSummary(refreshForms = true) {
   updateSetupState('#setup-whatsapp-state', botConnectionLabels[connection.state] || connection.state, connection.state === 'connected');
   updateSetupState('#setup-profile-state', result.profile.activationAlias, result.profile.activationAlias.toLowerCase() === '@neurobot');
   updateSetupState('#setup-test-state', activeGroups > 0 ? `${activeGroups} grupo${activeGroups === 1 ? '' : 's'} disponible${activeGroups === 1 ? '' : 's'}` : 'Sin grupos disponibles', activeGroups > 0);
+
+  const quickActionsContainer = document.querySelector('#status-quick-actions');
+  if (quickActionsContainer) {
+    quickActionsContainer.replaceChildren();
+    quickActionsContainer.append(
+      actionButton(
+        result.bot.enabled ? 'Desactivar asistente' : 'Activar asistente',
+        result.bot.enabled ? 'secondary' : 'primary',
+        async () => toggleBot(result.bot),
+      ),
+    );
+    if (result.bot.connectorType === 'WHATSAPP_WEB') {
+      quickActionsContainer.append(
+        actionButton('Vincular número', 'secondary', async () => selectBot(result.bot.id, 'whatsapp')),
+        actionButton('Reiniciar conexión', 'secondary', async () => restartBot(result.bot.id)),
+      );
+    }
+    if (!result.bot.deletionLocked) {
+      quickActionsContainer.append(
+        actionButton('Enviar a papelera', 'danger', async () => sendBotToTrash(result.bot)),
+      );
+    } else {
+      quickActionsContainer.append(
+        node('span', 'Protegido contra eliminación', 'protected-label'),
+      );
+    }
+  }
+
   if (refreshForms) {
     fillBotConfiguration(result.bot);
     fillProfile(result.profile);
@@ -1218,6 +1217,7 @@ async function toggleBot(bot) {
   notify(detail.bot.enabled ? 'Asistente desactivado.' : 'Asistente activado.');
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function transferCommercialConfiguration(bot) {
   if (!window.confirm('Se copiarán menús, productos, imágenes y horarios a Neurobot. No se copiarán el número, la sesión ni los grupos. El borrador quedará en la papelera. ¿Continuar?')) return;
   const confirmationPhrase = window.prompt('Escribe exactamente: TRANSFERIR A NEUROBOT');
@@ -1790,21 +1790,32 @@ function initializeMultibotPanel() {
   return initializationPromise;
 }
 
-function requestMultibotInitialization() {
-  void initializeMultibotPanel();
+function requestMultibotInitialization(force = false) {
+  if (force) {
+    initializationPromise = null;
+  }
+  void initializeMultibotPanel().then(() => {
+    const target = document.querySelector('#bots-list');
+    if (target && target.childElementCount === 0) {
+      void loadBots().catch(() => {});
+    }
+  });
   if (initializationRetryTimer !== null) window.clearTimeout(initializationRetryTimer);
   initializationRetryTimer = window.setTimeout(() => {
     initializationRetryTimer = null;
     const panelVisible = !document.querySelector('#panel-view')?.classList.contains('hidden');
     const assistantsEmpty = document.querySelector('#bots-list')?.childElementCount === 0;
-    if (panelVisible && assistantsEmpty) void initializeMultibotPanel();
+    if (panelVisible && assistantsEmpty) {
+      initializationPromise = null;
+      void initializeMultibotPanel();
+    }
   }, 250);
 }
 
-window.addEventListener('multibot-panel-load', requestMultibotInitialization);
-window.addEventListener('pageshow', requestMultibotInitialization);
+window.addEventListener('multibot-panel-load', () => requestMultibotInitialization(true));
+window.addEventListener('pageshow', () => requestMultibotInitialization(true));
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', requestMultibotInitialization, { once: true });
+  document.addEventListener('DOMContentLoaded', () => requestMultibotInitialization(true), { once: true });
 } else {
-  requestMultibotInitialization();
+  requestMultibotInitialization(true);
 }

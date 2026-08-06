@@ -44,19 +44,6 @@ function updateCollapseButton(button) {
   button.classList.add('refinement-collapse-button');
 }
 
-function bindCollapseButton(button) {
-  if (!button || button.dataset.refinementBound === 'true') return;
-  button.dataset.refinementBound = 'true';
-  updateCollapseButton(button);
-  if ('MutationObserver' in window) {
-    new window.MutationObserver(() => updateCollapseButton(button)).observe(button, {
-      attributes: true,
-      attributeFilter: ['aria-expanded'],
-    });
-  }
-  button.addEventListener('click', () => window.setTimeout(() => updateCollapseButton(button), 0));
-}
-
 function normalizeCollapseControls() {
   qa('.friendly-card-toggle, .minimal-card-toggle').forEach(bindCollapseButton);
 }
@@ -344,6 +331,78 @@ function refineProfile() {
   wrapProfilePreview();
 }
 
+function bindCollapseButton(button) {
+  if (!button || button.dataset.refinementBound === 'true') return;
+  button.dataset.refinementBound = 'true';
+  updateCollapseButton(button);
+
+  const card = button.closest('.friendly-collapsible-card');
+  const body = card ? q('.collapsible-body', card) || q(':scope > details', card) : null;
+
+  const toggleAction = () => {
+    const isCurrentlyOpen = button.getAttribute('aria-expanded') === 'true';
+    const nextOpen = !isCurrentlyOpen;
+    button.setAttribute('aria-expanded', String(nextOpen));
+    if (card) card.classList.toggle('friendly-collapsed', !nextOpen);
+    if (body) body.classList.toggle('hidden', !nextOpen);
+    updateCollapseButton(button);
+  };
+
+  button.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleAction();
+  });
+
+  const heading = button.closest('.section-heading');
+  if (heading && heading.dataset.headingBound !== 'true') {
+    heading.dataset.headingBound = 'true';
+    heading.addEventListener('click', (e) => {
+      if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
+      toggleAction();
+    });
+  }
+
+  if ('MutationObserver' in window) {
+    new window.MutationObserver(() => updateCollapseButton(button)).observe(button, {
+      attributes: true,
+      attributeFilter: ['aria-expanded'],
+    });
+  }
+}
+
+function createStartCollapsibleCard(id, titleText, descText, defaultOpen = false) {
+  const card = document.createElement('article');
+  card.className = `card inset friendly-collapsible-card start-collapsible-card ${defaultOpen ? '' : 'friendly-collapsed'}`;
+  card.id = id;
+
+  const heading = document.createElement('div');
+  heading.className = 'section-heading minimal-collapse-heading';
+  heading.style.cursor = 'pointer';
+
+  const copy = document.createElement('div');
+  const title = document.createElement('h3');
+  title.textContent = titleText;
+  const desc = document.createElement('p');
+  desc.className = 'muted';
+  desc.textContent = descText;
+  copy.append(title, desc);
+
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.className = 'secondary friendly-card-toggle minimal-card-toggle';
+  toggleBtn.setAttribute('aria-expanded', String(defaultOpen));
+  toggleBtn.textContent = defaultOpen ? '−' : '+';
+
+  heading.append(copy, toggleBtn);
+  card.append(heading);
+
+  const body = document.createElement('div');
+  body.className = `collapsible-body ${defaultOpen ? '' : 'hidden'}`;
+  card.append(body);
+
+  return { card, heading, toggleBtn, body };
+}
+
 function refineStartPanel() {
   const status = q('#section-status');
   const whatsapp = q('#section-whatsapp');
@@ -357,53 +416,88 @@ function refineStartPanel() {
   }
 
   conceal(q('.setup-guide', status));
-  conceal(q('.advanced-settings', status));
+  conceal(q('.refined-start-workspace', status));
   conceal(q('.manual-tests-card', whatsapp));
   conceal(q('#restart-connection'));
 
   const statusHeading = q(':scope > .section-heading', status);
   setTextIfChanged(statusHeading ? q('h2', statusHeading) : null, 'Inicio');
   const statusEyebrow = statusHeading ? q('.eyebrow', statusHeading) : null;
-  setTextIfChanged(statusEyebrow, 'Estado principal');
+  setTextIfChanged(statusEyebrow, 'Estado principal del asistente');
 
-  let workspace = q('.refined-start-workspace', status);
-  if (!workspace) {
-    workspace = document.createElement('article');
-    workspace.className = 'card inset refined-start-workspace';
+  // 1. Desplegable 1: Estado y conexión de WhatsApp (+ / -)
+  let statusCardObj = q('#start-collapsible-status', status);
+  if (!statusCardObj) {
+    const { card, body } = createStartCollapsibleCard(
+      'start-collapsible-status',
+      'Estado y conexión de WhatsApp',
+      'Revisa la conexión, número vinculado y acciones principales del asistente.',
+      true, // Abierto por defecto
+    );
 
-    const heading = document.createElement('div');
-    heading.className = 'section-heading refined-start-heading';
-    const copy = document.createElement('div');
-    const title = document.createElement('h3');
-    title.textContent = 'Estado, conexión y grupos vinculados';
-    const description = document.createElement('p');
-    description.className = 'muted';
-    description.textContent = 'La conexión de WhatsApp y los grupos detectados se administran desde este único lugar.';
-    copy.append(title, description);
-    heading.append(copy);
+    const statusCards = q('#status-cards');
+    const whatsappCards = q('#whatsapp-cards');
+    const qrCard = q('#qr-card');
 
-    const whatsappHeading = q(':scope > .section-heading', whatsapp);
-    const connectionActions = whatsappHeading ? q('.actions', whatsappHeading) : null;
-    if (connectionActions) heading.append(connectionActions);
-    workspace.append(heading);
-    status.append(workspace);
+    if (statusCards) body.append(statusCards);
+    if (whatsappCards) body.append(whatsappCards);
+    if (qrCard) body.append(qrCard);
+
+    let quickActions = q('#status-quick-actions');
+    if (!quickActions) {
+      quickActions = document.createElement('div');
+      quickActions.id = 'status-quick-actions';
+      quickActions.className = 'actions';
+      quickActions.style.marginTop = '1rem';
+    }
+    body.append(quickActions);
+
+    status.append(card);
   }
 
-  const statusCards = q('#status-cards');
-  const whatsappCards = q('#whatsapp-cards');
-  const qrCard = q('#qr-card');
-  const groupsCard = q('#bot-groups-list')?.closest('article.card');
+  // 2. Desplegable 2: Grupos vinculados (+ / -)
+  let groupsCardObj = q('#start-collapsible-groups', status);
+  if (!groupsCardObj) {
+    const { card, body } = createStartCollapsibleCard(
+      'start-collapsible-groups',
+      'Grupos vinculados',
+      'Listado y estado de los grupos donde opera este asistente.',
+      false, // Contraído por defecto
+    );
 
-  if (statusCards && statusCards.parentElement !== workspace) workspace.append(statusCards);
-  if (whatsappCards && whatsappCards.parentElement !== workspace) workspace.append(whatsappCards);
-  if (qrCard && qrCard.parentElement !== workspace) workspace.append(qrCard);
-  if (groupsCard && groupsCard.parentElement !== workspace) {
-    groupsCard.classList.add('refined-start-groups');
-    workspace.append(groupsCard);
+    const groupsCard = q('#bot-groups-list')?.closest('article.card');
+    if (groupsCard) {
+      groupsCard.classList.remove('hidden', 'minimal-hidden', 'refinement-hidden');
+      body.append(groupsCard);
+    }
+
+    status.append(card);
+  }
+
+  // 3. Desplegable 3: Configuración del bot (+ / -)
+  let configCardObj = q('#start-collapsible-config', status);
+  if (!configCardObj) {
+    const { card, body } = createStartCollapsibleCard(
+      'start-collapsible-config',
+      'Configuración del bot y funcionamiento',
+      'Modo de operación (Comunidad/Negocio), canales activados y reglas de mención.',
+      false, // Contraído por defecto
+    );
+
+    const advSettings = q('.advanced-settings', status);
+    if (advSettings) {
+      advSettings.classList.remove('hidden', 'minimal-hidden', 'refinement-hidden');
+      advSettings.style.display = 'block';
+      body.append(advSettings);
+    }
+
+    status.append(card);
   }
 
   conceal(q(':scope > .section-heading', whatsapp));
   conceal(whatsapp);
+
+  normalizeCollapseControls();
 }
 
 function applyRefinement() {

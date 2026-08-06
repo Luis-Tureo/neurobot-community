@@ -23,10 +23,10 @@ describe('inicio consolidado y carga automática de asistentes', () => {
     expect(styles).toContain('grid-template-columns: minmax(0, 1fr) 1.4rem');
   });
 
-  it('combina estado, WhatsApp y grupos y oculta ajustes y pruebas manuales', () => {
+  it('combina estado, WhatsApp, grupos y configuración en secciones colapsables', () => {
     expect(refinement).toContain('function refineStartPanel()');
-    expect(refinement).toContain('refined-start-workspace');
-    expect(refinement).toContain("conceal(q('.advanced-settings', status))");
+    expect(refinement).toContain('start-collapsible-status');
+    expect(refinement).toContain('start-collapsible-config');
     expect(refinement).toContain("conceal(q('.manual-tests-card', whatsapp))");
     expect(refinement).toContain('data-section="whatsapp"');
   });

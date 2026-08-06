@@ -1057,3 +1057,49 @@ legend {
     margin-top: 0.35rem;
   }
 }
+
+.minimalist-bot-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 1.1rem 1.25rem;
+  background: var(--surface, #ffffff);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+.minimalist-bot-card .bot-card-heading h3 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0 0 0.3rem 0;
+}
+
+.minimalist-bot-card .bot-card-info p {
+  margin: 0.15rem 0;
+  font-size: 0.88rem;
+}
+
+.minimalist-bot-card .bot-org {
+  font-weight: 600;
+  color: var(--text-secondary, #4a5568);
+}
+
+.minimalist-bot-card .actions {
+  margin-top: 0.85rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.start-collapsible-card {
+  margin-bottom: 1rem;
+}
+
+.start-collapsible-card .collapsible-body.hidden {
+  display: none !important;
+}
+
+.minimal-collapse-heading {
+  user-select: none;
+}
+
