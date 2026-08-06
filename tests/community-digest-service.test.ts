@@ -22,7 +22,7 @@ function createProvider(): AIProvider {
   };
 }
 
-function createSubject() {
+function createSubject(referenceNow = NOW) {
   const database = new AppDatabase(':memory:');
   database.migrate();
   database.synchronizeBotGroup('neurobot', {
@@ -35,7 +35,7 @@ function createSubject() {
     {
       id: 'message-1',
       body: 'Mi correo es persona@example.com y mi teléfono es +56 9 1234 5678.',
-      timestampMs: NOW.getTime() - 60_000,
+      timestampMs: referenceNow.getTime() - 60_000,
       fromMe: false,
       participantId: '56911111111@c.us',
     },
@@ -74,6 +74,54 @@ describe('resúmenes comunitarios', () => {
       expect(history).not.toContain('persona@example.com');
       expect(history).not.toContain('+56 9 1234 5678');
       expect(history).not.toContain('56911111111@c.us');
+    } finally {
+      database.close();
+    }
+  });
+
+  it('no envía un resumen antes de la hora configurada', async () => {
+    const scheduled = new Date('2026-08-06T19:00:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      service.saveConfiguration(configuration);
+
+      await service.runDueTasks(new Date('2026-08-06T18:59:00.000Z'));
+      expect(client.sentMessages).toHaveLength(0);
+
+      await service.runDueTasks(scheduled);
+      expect(client.sentMessages).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('deduplica una ventana de envío que cruza medianoche', async () => {
+    const afterMidnight = new Date('2026-08-07T00:10:00.000Z');
+    const { database, client, service } = createSubject(afterMidnight);
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.daily = { enabled: true, sendTime: '23:50', toleranceMinutes: 30 };
+      service.saveConfiguration(configuration);
+
+      await service.runDueTasks(afterMidnight);
+      await service.runDueTasks(new Date('2026-08-07T00:15:00.000Z'));
+
+      expect(client.sentMessages).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('rechaza una zona horaria inválida', () => {
+    const { database, service } = createSubject();
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'Mars/Olympus';
+      expect(() => service.saveConfiguration(configuration)).toThrow('INVALID_TIMEZONE');
     } finally {
       database.close();
     }
