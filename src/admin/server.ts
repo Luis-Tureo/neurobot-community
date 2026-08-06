@@ -10,8 +10,12 @@ export type { AdminServerContext } from './server-base.js';
 
 export async function buildAdminServer(context: AdminServerContext) {
   SessionStore.enableSharedSecret(context.sessionSecret);
-  const app = await buildBaseAdminServer(context);
-  registerAutomationLabContextRoute(app, context.sessionSecret);
-  registerCommunityDigestRoutes(app, context);
-  return app;
+  try {
+    const app = await buildBaseAdminServer(context);
+    registerAutomationLabContextRoute(app, context.sessionSecret);
+    registerCommunityDigestRoutes(app, context);
+    return app;
+  } finally {
+    SessionStore.disableSharedSecret(context.sessionSecret);
+  }
 }
