@@ -10,6 +10,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: apply-community-main-refactor
+  cancel-in-progress: true
+
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -41,12 +45,8 @@ jobs:
           end = source.index("\n          PY\n", start)
           lines = source[start:end].splitlines()
           code = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
-          code = code.replace(
-              "const [hours, minutes] = sendTime.split(':').map(Number);",
-              "const [hours = 0, minutes = 0] = sendTime.split(':').map(Number);",
-          )
           Path('/tmp/apply-refactor.py').write_text(code, encoding='utf-8')
-          print(f'Extracted and corrected {len(lines)} Python lines.')
+          print(f'Extracted {len(lines)} Python lines.')
           PY
           extract_status=$?
           echo "extract_status=$extract_status" >> "$report"
@@ -60,35 +60,17 @@ jobs:
           echo "patch_status=$patch_status" >> "$report"
 
           if [ "$patch_status" -eq 0 ]; then
-            cat > .github/workflows/validate-main.yml <<'YAML'
-          name: Validate main
-
-          on:
-            push:
-              branches: [main]
-            pull_request:
-            workflow_dispatch:
-
-          permissions:
-            contents: read
-
-          concurrency:
-            group: validate-main-${{ github.ref }}
-            cancel-in-progress: true
-
-          jobs:
-            validate:
-              runs-on: ubuntu-latest
-              timeout-minutes: 30
-              steps:
-                - uses: actions/checkout@v4
-                - uses: actions/setup-node@v4
-                  with:
-                    node-version: '24'
-                    cache: npm
-                - run: npm ci
-                - run: npm run check
-          YAML
+            python - <<'PY' >> "$report" 2>&1
+          from pathlib import Path
+          path = Path('src/core/community-digest-service.ts')
+          content = path.read_text(encoding='utf-8')
+          content = content.replace(
+              "const [hours, minutes] = sendTime.split(':').map(Number);",
+              "const [hours = 0, minutes = 0] = sendTime.split(':').map(Number);",
+          )
+          path.write_text(content, encoding='utf-8')
+          PY
+            cp .github/validate-main-template.yml .github/workflows/validate-main.yml
             npm ci >> "$report" 2>&1
             install_status=$?
           else
@@ -114,6 +96,7 @@ jobs:
             rm -f .github/workflows/agent-community-audit.yml
             rm -f .github/workflows/audit-community-final.yml
             rm -f .github/workflows/github-cli.yml
+            rm -f .github/validate-main-template.yml
             rm -f refactor-diagnostic.txt
             rm -rf agent-audit agent-transfer
             git config user.name 'github-actions[bot]'
@@ -135,5 +118,3 @@ jobs:
           git push origin HEAD:main
           cat "$report"
           exit 1
-
-# trigger-direct-ref-2
