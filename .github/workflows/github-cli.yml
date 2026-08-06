@@ -2,6 +2,9 @@ name: Verify GitHub CLI
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/github-cli.yml'
   pull_request:
     paths:
       - '.github/workflows/github-cli.yml'
