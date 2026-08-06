@@ -1,0 +1,119 @@
+name: Inspect Deep Community Cleanup
+on:
+  issues:
+    types: [opened, reopened]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  inspect:
+    if: github.event.issue.title == '[inspect-community-deep-cleanup]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/refactor-neurobot-community
+      - name: Inspect residual architecture
+        shell: bash
+        run: |
+          python - <<'PY' > deep-cleanup-report.txt
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+          db = Path('src/persistence/database.ts').read_text(encoding='utf-8')
+          domain = Path('src/domain/types.ts').read_text(encoding='utf-8')
+          panel = Path('public/multibot-panel.js').read_text(encoding='utf-8')
+          html = Path('public/index.html').read_text(encoding='utf-8')
+
+          terms = re.compile(r'menu|catalog|media|business|hour|request|connector|private|conversation|payment|shipping|reservation', re.I)
+
+          print('## Métodos potencialmente comerciales en AppDatabase')
+          method_pattern = re.compile(r'^  public ([A-Za-z0-9_]+)\(', re.M)
+          for name in method_pattern.findall(db):
+              if terms.search(name):
+                  refs = []
+                  for base in ('src', 'tests'):
+                      for path in Path(base).rglob('*.ts'):
+                          if path.as_posix() == 'src/persistence/database.ts':
+                              continue
+                          text = path.read_text(encoding='utf-8')
+                          count = len(re.findall(rf'\b{re.escape(name)}\b', text))
+                          if count:
+                              refs.append(f'{path}:{count}')
+                  print(f'- {name}: ' + (', '.join(refs) if refs else 'SIN REFERENCIAS EXTERNAS'))
+
+          print('\n## Métodos privados potencialmente comerciales')
+          for name in re.findall(r'^  private ([A-Za-z0-9_]+)\(', db, re.M):
+              if terms.search(name):
+                  print(f'- {name}')
+
+          print('\n## Tablas y migraciones comerciales')
+          for number, body in re.findall(r"this\.migration\((\d+),\s*`([\s\S]*?)`\);", db):
+              hits = sorted(set(re.findall(r'\b(?:assistant_menus|assistant_menu_options|catalog_categories|catalog_items|catalog_item_media|assistant_media|business_hours|human_assistance_requests|assistant_connectors|assistant_capabilities|assistant_channel_settings|bot_channel_settings|conversation_states)\b', body)))
+              if hits:
+                  print(f'- migración {number}: {", ".join(hits)}')
+
+          print('\n## Tipos comerciales o mixtos')
+          for pattern in [
+              r'export type BotMode[\s\S]*?;\n',
+              r'export type ConnectorType[\s\S]*?;\n',
+              r'export type BotOperatingMode[\s\S]*?;\n',
+              r'export type BotCapabilities[\s\S]*?\n};',
+              r'export type MenuActionType[\s\S]*?;',
+              r'export type MenuDefinition[\s\S]*?\n};',
+              r'export type MenuOption[\s\S]*?\n};',
+              r'export type CatalogCategory[\s\S]*?\n};',
+              r'export type CatalogItem[\s\S]*?\n};',
+              r'export type MediaAsset[\s\S]*?\n};',
+              r'export type BusinessHour[\s\S]*?\n};',
+              r'export type HumanAssistanceRequest[\s\S]*?\n};',
+          ]:
+              match = re.search(pattern, domain)
+              if match:
+                  print(match.group(0)[:5000])
+
+          print('\n## Importaciones de tipos comerciales')
+          commercial_names = ['MenuDefinition','MenuOption','MenuActionType','CatalogCategory','CatalogItem','MediaAsset','BusinessHour','HumanAssistanceRequest','ConnectorType','BotOperatingMode']
+          for path in Path('src').rglob('*.ts'):
+              text = path.read_text(encoding='utf-8')
+              found = [name for name in commercial_names if re.search(rf'\b{name}\b', text)]
+              if found:
+                  print(f'- {path}: {", ".join(found)}')
+
+          print('\n## Funciones comerciales en multibot-panel.js')
+          for name in re.findall(r'^(?:async )?function ([A-Za-z0-9_]+)\(', panel, re.M):
+              if terms.search(name):
+                  refs = len(re.findall(rf'\b{re.escape(name)}\b', panel)) - 1
+                  print(f'- {name}: referencias internas {refs}')
+
+          print('\n## Estado comercial del panel')
+          state_match = re.search(r'const panelState = \{([\s\S]*?)\n};', panel)
+          if state_match:
+              for line in state_match.group(1).splitlines():
+                  if terms.search(line): print(line)
+
+          print('\n## Secciones comerciales completas en HTML')
+          for section in ['menus','catalog','media','hours','requests']:
+              match = re.search(rf'<section id="section-{section}"[\s\S]*?</section>', html)
+              print(f'- {section}: ' + ('PRESENTE' if match else 'AUSENTE') + (f', caracteres={len(match.group(0))}' if match else ''))
+
+          print('\n## Listeners comerciales del panel')
+          for marker in ['menu-form','menu-option-form','catalog-category-form','catalog-item-form','media-form','hours-form','manual-test-catalog','manual-test-media','connectorType']:
+              print(f'- {marker}: {panel.count(marker)}')
+
+          print('\n## Campos de perfil potencialmente comerciales y uso')
+          for field in ['businessHours','address','contactInformation','supportInformation']:
+              print(f'### {field}')
+              for path in Path('src').rglob('*.ts'):
+                  if field in path.read_text(encoding='utf-8'):
+                      print(f'- {path}')
+          PY
+      - name: Publish report
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs=require('fs'); let report=fs.readFileSync('deep-cleanup-report.txt','utf8'); if(report.length>60000) report=report.slice(0,60000)+'\n\n[Informe truncado]';
+            await github.rest.issues.createComment({owner:context.repo.owner,repo:context.repo.repo,issue_number:context.issue.number,body:report});
+            await github.rest.issues.update({owner:context.repo.owner,repo:context.repo.repo,issue_number:context.issue.number,state:'closed',state_reason:'completed'});
