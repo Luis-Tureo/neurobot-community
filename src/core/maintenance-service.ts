@@ -1,7 +1,7 @@
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { lstatSync } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { mkdir, readdir, rm } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { Logger } from 'pino';
 import { serializeError } from '../infrastructure/safe-error.js';
 import type { AppDatabase } from '../persistence/database.js';
@@ -10,19 +10,17 @@ import type { ConnectionManager } from './connection-manager.js';
 import type { GroupDiscoveryService } from './group-discovery-service.js';
 
 export type MaintenanceOperation = 'factory_reset' | 'unlink_whatsapp';
-export type MaintenanceResult = 'running' | 'completed' | 'failed' | 'rolled_back';
+export type MaintenanceResult = 'running' | 'completed' | 'failed';
 export type MaintenanceStage =
   | 'idle'
   | 'verifying_authorization'
   | 'stopping_whatsapp'
   | 'closing_database'
-  | 'creating_backup'
   | 'deleting_previous_state'
   | 'creating_database'
   | 'restoring_defaults'
   | 'restarting_services'
   | 'waiting_qr'
-  | 'restoring_backup'
   | 'finished';
 
 export type MaintenanceSnapshot = {
@@ -31,8 +29,6 @@ export type MaintenanceSnapshot = {
   result: MaintenanceResult | 'idle';
   stage: MaintenanceStage;
   code: string | null;
-  backupCreated: boolean;
-  backupName: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   logoutRequired: boolean;
@@ -42,10 +38,7 @@ export type MaintenanceServiceOptions = {
   projectRoot: string;
   databasePath: string;
   sessionPath: string;
-  encryptionSecret: string;
-  backupRoot?: string;
   cachePath?: string;
-  retainedBackups?: number;
   now?: () => Date;
   beforeStage?: (stage: MaintenanceStage) => void | Promise<void>;
   resetTransientState?: () => void;
@@ -60,19 +53,7 @@ type UnlinkInput = {
   administratorHash: string;
 };
 
-type BackupSummary = {
-  authorizedGroups: number;
-  administrators: number;
-  commands: number;
-  settings: number;
-  authorizedGroupHashes: string[];
-  administratorHashes: string[];
-  commandNames: string[];
-};
-
 const DATABASE_PATTERN = /\.(?:db|sqlite|sqlite3)(?:-(?:wal|shm))?$/iu;
-const ENCRYPTED_FILE_SUFFIX = '.enc';
-const SESSION_BACKUP_MAGIC = Buffer.from('WWS1');
 
 export class MaintenanceAlreadyRunningError extends Error {
   public readonly code = 'RESET_ALREADY_RUNNING';
@@ -97,12 +78,9 @@ export class MaintenanceService {
   private readonly dataRoot: string;
   private readonly databasePath: string;
   private readonly sessionPath: string;
-  private readonly backupRoot: string;
   private readonly cachePath: string;
   private readonly temporaryRoots: string[];
-  private readonly retainedBackups: number;
   private readonly now: () => Date;
-  private readonly encryptionKey: Buffer;
   private current: MaintenanceSnapshot = emptySnapshot();
   private activeOperation: Promise<void> | null = null;
 
@@ -110,28 +88,22 @@ export class MaintenanceService {
     private readonly database: AppDatabase,
     private readonly connectionManager: ConnectionManager,
     private readonly groupDiscovery: GroupDiscoveryService,
-    private readonly anonymizer: Anonymizer,
+    anonymizer: Anonymizer,
     private readonly logger: Logger,
     private readonly options: MaintenanceServiceOptions,
   ) {
+    void anonymizer;
     this.projectRoot = resolve(options.projectRoot);
     this.dataRoot = resolve(this.projectRoot, 'data');
     this.databasePath = resolve(options.databasePath);
     this.sessionPath = resolve(options.sessionPath);
-    this.backupRoot = resolve(options.backupRoot ?? join(this.projectRoot, 'backups'));
     this.cachePath = resolve(options.cachePath ?? join(this.projectRoot, '.wwebjs_cache'));
     this.temporaryRoots = [
       resolve(this.projectRoot, 'logs'),
       resolve(this.projectRoot, 'tmp'),
       resolve(this.projectRoot, 'temp'),
     ];
-    this.retainedBackups = options.retainedBackups ?? 5;
     this.now = options.now ?? (() => new Date());
-    this.encryptionKey = scryptSync(
-      options.encryptionSecret,
-      'asistente-maintenance-backup-v1',
-      32,
-    );
     this.validateConfiguredPaths();
   }
 
@@ -147,7 +119,7 @@ export class MaintenanceService {
     this.assertAvailable();
     const operationId = randomBytes(12).toString('hex');
     this.current = this.startedSnapshot(operationId, 'factory_reset', true);
-    this.recordAudit('factory_reset', 'started', input.administratorHash, 0, false);
+    this.recordAudit('factory_reset', 'started', input.administratorHash, 0);
     this.activeOperation = this.runFactoryReset(input).finally(() => {
       this.activeOperation = null;
     });
@@ -158,7 +130,7 @@ export class MaintenanceService {
     this.assertAvailable();
     const operationId = randomBytes(12).toString('hex');
     this.current = this.startedSnapshot(operationId, 'unlink_whatsapp', false);
-    this.recordAudit('whatsapp_unlink', 'started', input.administratorHash, 0, false);
+    this.recordAudit('whatsapp_unlink', 'started', input.administratorHash, 0);
     this.activeOperation = this.runWhatsAppUnlink(input).finally(() => {
       this.activeOperation = null;
     });
@@ -172,10 +144,7 @@ export class MaintenanceService {
 
   private async runFactoryReset(input: FactoryResetInput): Promise<void> {
     const startedAt = Date.now();
-    let backupDirectory: string | null = null;
     let databaseClosed = false;
-    let deletionStarted = false;
-    const summary = this.collectBackupSummary();
 
     try {
       await this.changeStage('stopping_whatsapp', 'FACTORY_RESET_STARTED');
@@ -189,16 +158,7 @@ export class MaintenanceService {
       this.database.close();
       databaseClosed = true;
 
-      await this.changeStage('creating_backup', 'FACTORY_RESET_STARTED');
-      backupDirectory = await this.createBackup(summary);
-      this.current = {
-        ...this.current,
-        backupCreated: true,
-        backupName: basename(backupDirectory),
-      };
-
       await this.changeStage('deleting_previous_state', 'FACTORY_RESET_STARTED');
-      deletionStarted = true;
       await this.deleteFactoryResetTargets();
 
       await this.changeStage('creating_database', 'FACTORY_RESET_STARTED');
@@ -222,43 +182,17 @@ export class MaintenanceService {
         'completed',
         input.administratorHash,
         Date.now() - startedAt,
-        true,
       );
     } catch (error) {
       const failureCode = factoryFailureCode(this.current.stage, error);
       this.logFailure(error, failureCode);
-      if (backupDirectory !== null && deletionStarted) {
-        try {
-          await this.changeStage('restoring_backup', failureCode);
-          await this.connectionManager.stop();
-          if (!databaseClosed && this.database.isOpen()) this.database.close();
-          await this.restoreBackup(backupDirectory);
-          databaseClosed = false;
-          await this.restartWhatsAppAfterMaintenance();
-          this.finish('rolled_back', 'FACTORY_RESET_ROLLED_BACK');
-          this.recordAudit(
-            'factory_reset',
-            'rolled_back',
-            input.administratorHash,
-            Date.now() - startedAt,
-            true,
-            failureCode,
-          );
-          return;
-        } catch (rollbackError) {
-          this.logFailure(rollbackError, 'FACTORY_RESET_ROLLBACK_FAILED');
-          await this.recoverStoppedServices(!this.database.isOpen());
-        }
-      } else {
-        await this.recoverStoppedServices(databaseClosed);
-      }
+      await this.recoverStoppedServices(databaseClosed);
       this.finish('failed', failureCode);
       this.recordAudit(
         'factory_reset',
         'failed',
         input.administratorHash,
         Date.now() - startedAt,
-        backupDirectory !== null,
         failureCode,
       );
     }
@@ -287,7 +221,6 @@ export class MaintenanceService {
         'completed',
         input.administratorHash,
         Date.now() - startedAt,
-        false,
       );
     } catch (error) {
       const code = 'WHATSAPP_UNLINK_FAILED';
@@ -299,75 +232,8 @@ export class MaintenanceService {
         'failed',
         input.administratorHash,
         Date.now() - startedAt,
-        false,
         code,
       );
-    }
-  }
-
-  private collectBackupSummary(): BackupSummary {
-    const groups = this.database.listGroups();
-    const administrators = this.database.listAdministrators();
-    const commands = this.database.listCommands();
-    return {
-      authorizedGroups: groups.filter((group) => group.authorized).length,
-      administrators: administrators.length,
-      commands: commands.length,
-      settings: Object.keys(this.database.listSettings()).length,
-      authorizedGroupHashes: groups
-        .filter((group) => group.authorized)
-        .map((group) => this.anonymizer.identifier(group.id)),
-      administratorHashes: administrators.map((id) => this.anonymizer.identifier(id)),
-      commandNames: commands.map((command) => command.name),
-    };
-  }
-
-  private async createBackup(summary: BackupSummary): Promise<string> {
-    await mkdir(this.backupRoot, { recursive: true });
-    const name = await this.nextBackupName();
-    const temporaryDirectory = resolve(this.backupRoot, `.incomplete-${name}`);
-    const finalDirectory = resolve(this.backupRoot, name);
-    assertAllowedMaintenancePath(this.projectRoot, temporaryDirectory, this.backupRoot);
-    assertAllowedMaintenancePath(this.projectRoot, finalDirectory, this.backupRoot);
-    try {
-      const databaseBackupRoot = join(temporaryDirectory, 'database');
-      const sessionBackupRoot = join(temporaryDirectory, 'whatsapp-session-encrypted');
-      await mkdir(databaseBackupRoot, { recursive: true });
-      const databaseFiles = await this.listDatabaseFiles();
-      for (const source of databaseFiles) {
-        const destination = join(databaseBackupRoot, relative(this.dataRoot, source));
-        await mkdir(dirname(destination), { recursive: true });
-        await copyFile(source, destination);
-      }
-      const sessionFiles = await listFiles(this.sessionPath, () => true);
-      for (const source of sessionFiles) {
-        const destination = `${join(sessionBackupRoot, relative(this.sessionPath, source))}${ENCRYPTED_FILE_SUFFIX}`;
-        await mkdir(dirname(destination), { recursive: true });
-        await writeFile(destination, this.encrypt(await readFile(source)));
-      }
-      await writeFile(
-        join(temporaryDirectory, 'manifest.json'),
-        `${JSON.stringify(
-          {
-            formatVersion: 1,
-            createdAt: this.now().toISOString(),
-            databaseFiles: databaseFiles.map((path) => relative(this.dataRoot, path)),
-            whatsappSessionEncrypted: sessionFiles.length > 0,
-            sessionFileCount: sessionFiles.length,
-            summary,
-            excludes: ['.env', 'source', 'node_modules', 'git'],
-          },
-          null,
-          2,
-        )}\n`,
-        'utf8',
-      );
-      await rename(temporaryDirectory, finalDirectory);
-      await this.retainNewestBackups();
-      return finalDirectory;
-    } catch (error) {
-      await rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
-      throw error;
     }
   }
 
@@ -393,37 +259,6 @@ export class MaintenanceService {
     await rm(this.cachePath, { recursive: true, force: true });
     await mkdir(this.sessionPath, { recursive: true });
     await mkdir(this.cachePath, { recursive: true });
-  }
-
-  private async restoreBackup(backupDirectory: string): Promise<void> {
-    assertAllowedMaintenancePath(this.projectRoot, backupDirectory, this.backupRoot);
-    const currentDatabaseFiles = await this.listDatabaseFiles();
-    for (const path of currentDatabaseFiles) await rm(path, { force: true });
-    const databaseBackupRoot = join(backupDirectory, 'database');
-    const backedUpDatabaseFiles = await listFiles(databaseBackupRoot, () => true);
-    for (const source of backedUpDatabaseFiles) {
-      const destination = join(this.dataRoot, relative(databaseBackupRoot, source));
-      assertAllowedMaintenancePath(this.projectRoot, destination, this.dataRoot);
-      await mkdir(dirname(destination), { recursive: true });
-      await copyFile(source, destination);
-    }
-
-    await rm(this.sessionPath, { recursive: true, force: true });
-    await mkdir(this.sessionPath, { recursive: true });
-    const sessionBackupRoot = join(backupDirectory, 'whatsapp-session-encrypted');
-    const encryptedFiles = await listFiles(sessionBackupRoot, (path) =>
-      path.endsWith(ENCRYPTED_FILE_SUFFIX),
-    );
-    for (const source of encryptedFiles) {
-      const relativeEncryptedPath = relative(sessionBackupRoot, source);
-      const relativeOriginalPath = relativeEncryptedPath.slice(0, -ENCRYPTED_FILE_SUFFIX.length);
-      const destination = join(this.sessionPath, relativeOriginalPath);
-      assertAllowedMaintenancePath(this.projectRoot, destination, this.sessionPath);
-      await mkdir(dirname(destination), { recursive: true });
-      await writeFile(destination, this.decrypt(await readFile(source)));
-    }
-    this.database.reopen();
-    this.database.migrate();
   }
 
   private async restartWhatsAppAfterMaintenance(): Promise<void> {
@@ -481,67 +316,15 @@ export class MaintenanceService {
     assertAllowedMaintenancePath(this.projectRoot, this.sessionPath, this.dataRoot);
     assertAllowedMaintenancePath(
       this.projectRoot,
-      this.backupRoot,
-      resolve(this.projectRoot, 'backups'),
-    );
-    assertAllowedMaintenancePath(
-      this.projectRoot,
       this.cachePath,
       resolve(this.projectRoot, '.wwebjs_cache'),
     );
     assertNoSymbolicLinks(this.projectRoot, this.databasePath);
     assertNoSymbolicLinks(this.projectRoot, this.sessionPath);
-    assertNoSymbolicLinks(this.projectRoot, this.backupRoot);
     assertNoSymbolicLinks(this.projectRoot, this.cachePath);
     for (const root of this.temporaryRoots) {
       assertAllowedMaintenancePath(this.projectRoot, root, this.projectRoot);
     }
-  }
-
-  private async nextBackupName(): Promise<string> {
-    const base = `reset-${formatTimestamp(this.now())}`;
-    const existing = new Set(await safeDirectoryNames(this.backupRoot));
-    if (!existing.has(base)) return base;
-    for (let index = 1; index <= 99; index += 1) {
-      const candidate = `${base}-${String(index).padStart(2, '0')}`;
-      if (!existing.has(candidate)) return candidate;
-    }
-    throw new Error('No fue posible asignar un nombre seguro a la copia de seguridad.');
-  }
-
-  private async retainNewestBackups(): Promise<void> {
-    const names = (await safeDirectoryNames(this.backupRoot))
-      .filter((name) => /^reset-\d{8}-\d{6}(?:-\d{2})?$/u.test(name))
-      .sort();
-    const obsolete = names.slice(0, Math.max(0, names.length - this.retainedBackups));
-    for (const name of obsolete) {
-      const path = resolve(this.backupRoot, name);
-      assertAllowedMaintenancePath(this.projectRoot, path, this.backupRoot);
-      await rm(path, { recursive: true, force: true });
-    }
-  }
-
-  private encrypt(content: Buffer): Buffer {
-    const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.encryptionKey, iv);
-    const encrypted = Buffer.concat([cipher.update(content), cipher.final()]);
-    return Buffer.concat([SESSION_BACKUP_MAGIC, iv, cipher.getAuthTag(), encrypted]);
-  }
-
-  private decrypt(content: Buffer): Buffer {
-    if (content.subarray(0, SESSION_BACKUP_MAGIC.length).compare(SESSION_BACKUP_MAGIC) !== 0) {
-      throw new Error('La copia cifrada de WhatsApp no tiene un formato válido.');
-    }
-    const ivStart = SESSION_BACKUP_MAGIC.length;
-    const tagStart = ivStart + 12;
-    const payloadStart = tagStart + 16;
-    const decipher = createDecipheriv(
-      'aes-256-gcm',
-      this.encryptionKey,
-      content.subarray(ivStart, tagStart),
-    );
-    decipher.setAuthTag(content.subarray(tagStart, payloadStart));
-    return Buffer.concat([decipher.update(content.subarray(payloadStart)), decipher.final()]);
   }
 
   private assertAvailable(): void {
@@ -559,8 +342,6 @@ export class MaintenanceService {
       result: 'running',
       stage: 'verifying_authorization',
       code: operation === 'factory_reset' ? 'FACTORY_RESET_STARTED' : 'WHATSAPP_UNLINK_STARTED',
-      backupCreated: false,
-      backupName: null,
       startedAt: this.now().toISOString(),
       finishedAt: null,
       logoutRequired,
@@ -597,7 +378,6 @@ export class MaintenanceService {
     result: string,
     administratorHash: string,
     durationMs: number,
-    backupCreated: boolean,
     errorCode?: string,
   ): void {
     try {
@@ -608,7 +388,6 @@ export class MaintenanceService {
         result,
         administratorHash,
         durationMs,
-        backupCreated,
         ...(errorCode === undefined ? {} : { errorCode }),
       });
     } catch (error) {
@@ -690,17 +469,6 @@ async function listFiles(root: string, predicate: (path: string) => boolean): Pr
   return files.sort();
 }
 
-async function safeDirectoryNames(root: string): Promise<string[]> {
-  try {
-    return (await readdir(root, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name);
-  } catch (error) {
-    if (isMissingPathError(error)) return [];
-    throw error;
-  }
-}
-
 function isMissingPathError(error: unknown): boolean {
   return (
     typeof error === 'object' &&
@@ -710,24 +478,11 @@ function isMissingPathError(error: unknown): boolean {
   );
 }
 
-function formatTimestamp(value: Date): string {
-  const parts = [
-    value.getFullYear(),
-    value.getMonth() + 1,
-    value.getDate(),
-    value.getHours(),
-    value.getMinutes(),
-    value.getSeconds(),
-  ].map((part) => String(part).padStart(2, '0'));
-  return `${parts[0]}${parts[1]}${parts[2]}-${parts[3]}${parts[4]}${parts[5]}`;
-}
-
 function factoryFailureCode(stage: MaintenanceStage, error: unknown): string {
   if (error instanceof UnsafeMaintenancePathError) return error.code;
   const byStage: Partial<Record<MaintenanceStage, string>> = {
     stopping_whatsapp: 'RESET_WHATSAPP_STOP_FAILED',
     closing_database: 'RESET_DATABASE_CLOSE_FAILED',
-    creating_backup: 'RESET_BACKUP_FAILED',
     deleting_previous_state: 'RESET_SESSION_DELETE_FAILED',
     creating_database: 'RESET_DATABASE_CREATE_FAILED',
     restoring_defaults: 'RESET_DATABASE_CREATE_FAILED',
@@ -744,8 +499,6 @@ function emptySnapshot(): MaintenanceSnapshot {
     result: 'idle',
     stage: 'idle',
     code: null,
-    backupCreated: false,
-    backupName: null,
     startedAt: null,
     finishedAt: null,
     logoutRequired: false,

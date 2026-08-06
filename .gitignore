@@ -9,7 +9,6 @@ data/
 *.db-*
 *.sqlite
 *.sqlite-*
-backups/
 logs/
 *.log
 .wwebjs_auth/

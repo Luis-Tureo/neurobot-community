@@ -60,7 +60,8 @@ function createHistoryWorkspace(section, summary, list) {
     title.textContent = 'Preguntas respondidas';
     const description = document.createElement('p');
     description.className = 'muted';
-    description.textContent = 'El historial se ordena automáticamente desde las preguntas más consultadas.';
+    description.textContent =
+      'El historial se ordena automáticamente desde las preguntas más consultadas.';
     copy.append(title, description);
     heading.append(copy);
     workspace.append(heading);
@@ -86,7 +87,9 @@ function refineQuestionHistory() {
 }
 
 function stripChileTimezoneText() {
-  qa('#poll-schedule-summary strong, #automatic-deliveries .meta, #poll-history-list .meta').forEach((node) => {
+  qa(
+    '#poll-schedule-summary strong, #automatic-deliveries .meta, #poll-history-list .meta',
+  ).forEach((node) => {
     const cleaned = node.textContent.replace(/\s*America\/Santiago/gu, '').trim();
     setTextIfChanged(node, cleaned);
   });
@@ -125,34 +128,81 @@ function refinePolls() {
   const currentOrder = [...section.children].filter((node) => ordered.includes(node));
   const orderChanged = ordered.some((node, index) => currentOrder[index] !== node);
   if (orderChanged) ordered.forEach((node) => section.append(node));
-  [configuration, bank, test].filter(Boolean).forEach((node) => node.classList.add('refined-poll-card'));
+  [configuration, bank, test]
+    .filter(Boolean)
+    .forEach((node) => node.classList.add('refined-poll-card'));
 }
 
 const REFINED_AI_LEVELS = {
   1: {
     label: 'Muy bajo',
     help: 'Para pruebas o una comunidad con muy pocas consultas.',
-    values: { responseMaxChars: 350, responseMaxLines: 3, userHourlyLimit: 5, userDailyLimit: 15, groupHourlyLimit: 40, groupDailyLimit: 120, globalDailyLimit: 150, globalMonthlyLimit: 3000 },
+    values: {
+      responseMaxChars: 350,
+      responseMaxLines: 3,
+      userHourlyLimit: 5,
+      userDailyLimit: 15,
+      groupHourlyLimit: 40,
+      groupDailyLimit: 120,
+      globalDailyLimit: 150,
+      globalMonthlyLimit: 3000,
+    },
   },
   2: {
     label: 'Bajo',
     help: 'Para una comunidad pequeña con actividad ocasional.',
-    values: { responseMaxChars: 450, responseMaxLines: 4, userHourlyLimit: 10, userDailyLimit: 25, groupHourlyLimit: 75, groupDailyLimit: 250, globalDailyLimit: 300, globalMonthlyLimit: 6000 },
+    values: {
+      responseMaxChars: 450,
+      responseMaxLines: 4,
+      userHourlyLimit: 10,
+      userDailyLimit: 25,
+      groupHourlyLimit: 75,
+      groupDailyLimit: 250,
+      globalDailyLimit: 300,
+      globalMonthlyLimit: 6000,
+    },
   },
   3: {
     label: 'Normal',
     help: 'Recomendado para el uso cotidiano de Neurobot.',
-    values: { responseMaxChars: 600, responseMaxLines: 5, userHourlyLimit: 20, userDailyLimit: 50, groupHourlyLimit: 150, groupDailyLimit: 500, globalDailyLimit: 500, globalMonthlyLimit: 10000 },
+    values: {
+      responseMaxChars: 600,
+      responseMaxLines: 5,
+      userHourlyLimit: 20,
+      userDailyLimit: 50,
+      groupHourlyLimit: 150,
+      groupDailyLimit: 500,
+      globalDailyLimit: 500,
+      globalMonthlyLimit: 10000,
+    },
   },
   4: {
     label: 'Alto',
     help: 'Para varios grupos con actividad frecuente.',
-    values: { responseMaxChars: 700, responseMaxLines: 6, userHourlyLimit: 25, userDailyLimit: 70, groupHourlyLimit: 220, groupDailyLimit: 700, globalDailyLimit: 750, globalMonthlyLimit: 15000 },
+    values: {
+      responseMaxChars: 700,
+      responseMaxLines: 6,
+      userHourlyLimit: 25,
+      userDailyLimit: 70,
+      groupHourlyLimit: 220,
+      groupDailyLimit: 700,
+      globalDailyLimit: 750,
+      globalMonthlyLimit: 15000,
+    },
   },
   5: {
     label: 'Máximo',
     help: 'Para varios grupos activos y una cantidad alta de consultas.',
-    values: { responseMaxChars: 800, responseMaxLines: 6, userHourlyLimit: 30, userDailyLimit: 80, groupHourlyLimit: 250, groupDailyLimit: 800, globalDailyLimit: 1000, globalMonthlyLimit: 20000 },
+    values: {
+      responseMaxChars: 800,
+      responseMaxLines: 6,
+      userHourlyLimit: 30,
+      userDailyLimit: 80,
+      groupHourlyLimit: 250,
+      groupDailyLimit: 800,
+      globalDailyLimit: 1000,
+      globalMonthlyLimit: 20000,
+    },
   },
 };
 
@@ -253,7 +303,9 @@ function directFormChild(form, name) {
 
 function cleanProfileRows(form) {
   qa('.form-row', form).forEach((row) => {
-    const visible = [...row.children].some((child) => !child.classList.contains('refinement-hidden'));
+    const visible = [...row.children].some(
+      (child) => !child.classList.contains('refinement-hidden'),
+    );
     if (!visible) conceal(row);
   });
 }
@@ -272,7 +324,14 @@ function wrapProfilePreview() {
 function refineProfile() {
   const form = q('#profile-form');
   if (!form) return;
-  ['internalName', 'activationAlias', 'organizationType', 'industry', 'timezone', 'address'].forEach((name) => conceal(fieldLabel(form, name)));
+  [
+    'internalName',
+    'activationAlias',
+    'organizationType',
+    'industry',
+    'timezone',
+    'address',
+  ].forEach((name) => conceal(fieldLabel(form, name)));
   conceal(q('#activation-aliases-card'));
   conceal(q('#neurobot-alias-help'));
 
@@ -287,7 +346,8 @@ function refineProfile() {
     title.textContent = 'Datos principales';
     const description = document.createElement('p');
     description.className = 'muted';
-    description.textContent = 'Solo necesitas completar estos datos para definir la identidad de Neurobot.';
+    description.textContent =
+      'Solo necesitas completar estos datos para definir la identidad de Neurobot.';
     copy.append(title, description);
     heading.append(copy);
     const grid = document.createElement('div');
@@ -317,7 +377,10 @@ function refineProfile() {
   const additionalTitle = additional ? q('summary strong', additional) : null;
   const additionalDescription = additional ? q('summary small', additional) : null;
   setTextIfChanged(additionalTitle, 'Opciones adicionales');
-  setTextIfChanged(additionalDescription, 'Temas permitidos, mensajes de respaldo, contacto y horarios.');
+  setTextIfChanged(
+    additionalDescription,
+    'Temas permitidos, mensajes de respaldo, contacto y horarios.',
+  );
 
   const branding = q('[data-friendly-group="profile-branding"]', form);
   const brandingTitle = branding ? q('summary strong', branding) : null;
@@ -548,7 +611,9 @@ function initializeRefinement() {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => window.setTimeout(initializeRefinement, 80), { once: true });
+  document.addEventListener('DOMContentLoaded', () => window.setTimeout(initializeRefinement, 80), {
+    once: true,
+  });
 } else {
   window.setTimeout(initializeRefinement, 80);
 }

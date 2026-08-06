@@ -277,7 +277,6 @@ async function createApiSubject(beforeStage?: (stage: MaintenanceStage) => void 
     databasePath,
     sessionPath,
     cachePath,
-    encryptionSecret: 'e'.repeat(32),
     ...(beforeStage === undefined ? {} : { beforeStage }),
   });
   const app = await buildAdminServer({

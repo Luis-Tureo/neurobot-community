@@ -89,7 +89,9 @@ function renameHistoryNavigation() {
   const heading = $('#section-cached-answers h2');
   if (heading) heading.textContent = 'Historial de preguntas';
   const intro = $('#section-cached-answers .friendly-module-description');
-  if (intro) intro.textContent = 'Revisa lo que Neurobot respondió y detecta rápidamente las preguntas que se repiten.';
+  if (intro)
+    intro.textContent =
+      'Revisa lo que Neurobot respondió y detecta rápidamente las preguntas que se repiten.';
   for (const button of $$('#section-cached-answers .friendly-module-actions button')) {
     if (/agregar/iu.test(button.textContent)) button.remove();
   }
@@ -137,10 +139,14 @@ function simplifyHistoryItems() {
     const technical = paragraphs[0];
     if (technical) {
       const category = technical.textContent.split('·')[0]?.trim() || 'General';
-      const updated = technical.textContent.match(/actualizado\s+(.+?)(?:\s+·\s+neurobot|$)/iu)?.[1]?.trim();
+      const updated = technical.textContent
+        .match(/actualizado\s+(.+?)(?:\s+·\s+neurobot|$)/iu)?.[1]
+        ?.trim();
       technical.textContent = `${category} · ${usage} ${usage === 1 ? 'consulta' : 'consultas'}${updated ? ` · actualizado ${updated}` : ''}`;
     }
-    const sourceParagraph = paragraphs.find((paragraph) => /fuentes oficiales|sin fuentes/iu.test(paragraph.textContent));
+    const sourceParagraph = paragraphs.find((paragraph) =>
+      /fuentes oficiales|sin fuentes/iu.test(paragraph.textContent),
+    );
     hide(sourceParagraph);
 
     for (const button of $$('.actions button', item)) {
@@ -159,7 +165,9 @@ function simplifyHistoryItems() {
     }
   }
 
-  const sorted = [...items].sort((left, right) => Number(right.dataset.usageCount) - Number(left.dataset.usageCount));
+  const sorted = [...items].sort(
+    (left, right) => Number(right.dataset.usageCount) - Number(left.dataset.usageCount),
+  );
   const orderChanged = sorted.some((item, index) => item !== items[index]);
   if (orderChanged) {
     const fragment = document.createDocumentFragment();
@@ -230,7 +238,9 @@ function moveLinkedGroupsToStart() {
     const heading = $('h3', article);
     const description = $('.muted', article);
     if (heading) heading.textContent = 'Grupos vinculados';
-    if (description) description.textContent = 'Los grupos se agregan automáticamente cuando el bot ingresa. Aquí puedes revisarlos, bloquearlos o desbloquearlos.';
+    if (description)
+      description.textContent =
+        'Los grupos se agregan automáticamente cuando el bot ingresa. Aquí puedes revisarlos, bloquearlos o desbloquearlos.';
     const guide = $('.setup-guide', status);
     if (guide) guide.insertAdjacentElement('afterend', article);
     else status.append(article);
@@ -273,7 +283,8 @@ function simplifyWelcomeGroups() {
   const process = () => {
     for (const card of $$(':scope > article', target)) simplifyWelcomeGroupCard(card);
   };
-  if ('MutationObserver' in window) new window.MutationObserver(process).observe(target, { childList: true });
+  if ('MutationObserver' in window)
+    new window.MutationObserver(process).observe(target, { childList: true });
   process();
 }
 
@@ -281,7 +292,15 @@ function addAutomationCardActions(card, kind, testDetails) {
   if (!card || card.dataset.minimalActions === 'true') return;
   const actions = element('div', 'actions minimal-automation-actions');
   const save = element('button', '', 'Guardar cambios');
-  const test = element('button', 'secondary', kind === 'welcome' ? 'Probar bienvenida' : kind === 'greeting' ? 'Probar saludo' : 'Probar reglas');
+  const test = element(
+    'button',
+    'secondary',
+    kind === 'welcome'
+      ? 'Probar bienvenida'
+      : kind === 'greeting'
+        ? 'Probar saludo'
+        : 'Probar reglas',
+  );
   save.type = test.type = 'button';
   save.addEventListener('click', () => $('#automatic-messages-form')?.requestSubmit());
   test.addEventListener('click', () => {
@@ -304,7 +323,9 @@ function simplifyAutomations() {
   const heading = $('h2', section);
   if (heading) heading.textContent = 'Automatizaciones';
   const intro = $('.friendly-module-description', section);
-  if (intro) intro.textContent = 'Abre solamente la automatización que quieras configurar. Las opciones poco usadas permanecen ocultas.';
+  if (intro)
+    intro.textContent =
+      'Abre solamente la automatización que quieras configurar. Las opciones poco usadas permanecen ocultas.';
 
   const manualGroup = $('.automatic-manual-group', form);
   let testDetails = $('[data-minimal-automation-tests]', form);
@@ -342,7 +363,9 @@ function simplifyAutomations() {
   configureCollapsibleCard(rulesCard, 'Configurar reglas diarias', 'Ocultar reglas diarias');
 
   const welcomeDescription = $('.section-heading .muted', welcomeCard);
-  if (welcomeDescription) welcomeDescription.textContent = 'Saluda automáticamente a cada persona cuando ingresa al grupo.';
+  if (welcomeDescription)
+    welcomeDescription.textContent =
+      'Saluda automáticamente a cada persona cuando ingresa al grupo.';
   setToggleText(form.elements.welcome_enabled, 'Enviar bienvenida automáticamente');
   setToggleText(form.elements.greeting_enabled, 'Enviar saludo diario');
   setToggleText(form.elements.rules_enabled, 'Enviar reglas diariamente');
@@ -364,18 +387,24 @@ function simplifyAutomations() {
     ],
     'minimal-welcome-advanced',
   );
-  if (welcomeCard && multipleDetails && !$('.minimal-welcome-multiple', welcomeCard)) welcomeCard.append(multipleDetails);
-  if (welcomeCard && advancedDetails && !$('.minimal-welcome-advanced', welcomeCard)) welcomeCard.append(advancedDetails);
+  if (welcomeCard && multipleDetails && !$('.minimal-welcome-multiple', welcomeCard))
+    welcomeCard.append(multipleDetails);
+  if (welcomeCard && advancedDetails && !$('.minimal-welcome-advanced', welcomeCard))
+    welcomeCard.append(advancedDetails);
 
   const groupSettings = $('#welcome-group-settings');
-  const groupTitle = groupSettings?.previousElementSibling?.tagName === 'H4' ? groupSettings.previousElementSibling : null;
+  const groupTitle =
+    groupSettings?.previousElementSibling?.tagName === 'H4'
+      ? groupSettings.previousElementSibling
+      : null;
   const groupDetails = createInnerDetails(
     'Desactivar bienvenida en grupos específicos',
     'La bienvenida se activa automáticamente. Abre esta opción solo para excluir algún grupo.',
     [groupTitle, groupSettings],
     'minimal-welcome-groups',
   );
-  if (welcomeCard && groupDetails && !$('.minimal-welcome-groups', welcomeCard)) welcomeCard.append(groupDetails);
+  if (welcomeCard && groupDetails && !$('.minimal-welcome-groups', welcomeCard))
+    welcomeCard.append(groupDetails);
 
   hide(labelForField(form, 'greeting_tolerance'));
   hide(labelForField(form, 'rules_tolerance'));
@@ -396,7 +425,8 @@ function hidePollTechnicalSummary() {
       if ($('span', card)?.textContent.trim() === 'Programador') card.remove();
     }
   };
-  if ('MutationObserver' in window) new window.MutationObserver(process).observe(target, { childList: true });
+  if ('MutationObserver' in window)
+    new window.MutationObserver(process).observe(target, { childList: true });
   process();
 }
 
@@ -404,7 +434,9 @@ function simplifyPolls() {
   const section = $('#section-polls');
   if (!section) return;
   const intro = $('.friendly-module-description', section);
-  if (intro) intro.textContent = 'Configura la encuesta diaria, abre el banco solamente cuando necesites editarlo y usa las pruebas de forma separada.';
+  if (intro)
+    intro.textContent =
+      'Configura la encuesta diaria, abre el banco solamente cuando necesites editarlo y usa las pruebas de forma separada.';
 
   const configurationArticle = $('#poll-configuration-form')?.closest('article.card');
   const bankArticle = $('#poll-template-form')?.closest('article.card');
@@ -412,7 +444,11 @@ function simplifyPolls() {
   const overrideArticle = $('#poll-override-form')?.closest('article.card');
   const hiddenArticle = $('#hidden-poll-templates-list')?.closest('article.card');
 
-  configureCollapsibleCard(configurationArticle, 'Configurar encuestas diarias', 'Ocultar configuración');
+  configureCollapsibleCard(
+    configurationArticle,
+    'Configurar encuestas diarias',
+    'Ocultar configuración',
+  );
   configureCollapsibleCard(bankArticle, 'Ver banco de encuestas', 'Ocultar banco');
   configureCollapsibleCard(testArticle, 'Probar encuesta', 'Ocultar prueba');
   hide(overrideArticle);
@@ -430,17 +466,44 @@ const AI_LEVELS = {
   1: {
     label: 'Uso bajo',
     help: 'Para una comunidad pequeña o pocas consultas durante el día.',
-    values: { responseMaxChars: 450, responseMaxLines: 4, userHourlyLimit: 10, userDailyLimit: 25, groupHourlyLimit: 75, groupDailyLimit: 250, globalDailyLimit: 300, globalMonthlyLimit: 6000 },
+    values: {
+      responseMaxChars: 450,
+      responseMaxLines: 4,
+      userHourlyLimit: 10,
+      userDailyLimit: 25,
+      groupHourlyLimit: 75,
+      groupDailyLimit: 250,
+      globalDailyLimit: 300,
+      globalMonthlyLimit: 6000,
+    },
   },
   2: {
     label: 'Uso normal',
     help: 'Recomendado para el funcionamiento habitual de Neurobot.',
-    values: { responseMaxChars: 600, responseMaxLines: 5, userHourlyLimit: 20, userDailyLimit: 50, groupHourlyLimit: 150, groupDailyLimit: 500, globalDailyLimit: 500, globalMonthlyLimit: 10000 },
+    values: {
+      responseMaxChars: 600,
+      responseMaxLines: 5,
+      userHourlyLimit: 20,
+      userDailyLimit: 50,
+      groupHourlyLimit: 150,
+      groupDailyLimit: 500,
+      globalDailyLimit: 500,
+      globalMonthlyLimit: 10000,
+    },
   },
   3: {
     label: 'Uso alto',
     help: 'Para varios grupos activos y una mayor cantidad de consultas.',
-    values: { responseMaxChars: 800, responseMaxLines: 6, userHourlyLimit: 30, userDailyLimit: 80, groupHourlyLimit: 250, groupDailyLimit: 800, globalDailyLimit: 1000, globalMonthlyLimit: 20000 },
+    values: {
+      responseMaxChars: 800,
+      responseMaxLines: 6,
+      userHourlyLimit: 30,
+      userDailyLimit: 80,
+      groupHourlyLimit: 250,
+      groupDailyLimit: 800,
+      globalDailyLimit: 1000,
+      globalMonthlyLimit: 20000,
+    },
   },
 };
 
@@ -465,7 +528,8 @@ function inferAiLevel() {
 }
 
 function wrapInMinimalDetails(node, title, description, className) {
-  if (!node || node.parentElement?.classList.contains(className)) return node?.parentElement || null;
+  if (!node || node.parentElement?.classList.contains(className))
+    return node?.parentElement || null;
   const details = element('details', `card inset minimal-section-details ${className}`);
   const summary = element('summary');
   const copy = element('span', 'minimal-details-copy');
@@ -481,7 +545,9 @@ function simplifyAI() {
   const form = $('#ai-settings-form');
   if (!section || !form) return;
   const intro = $('.friendly-module-description', section);
-  if (intro) intro.textContent = 'Activa la inteligencia artificial y elige un nivel de uso. Los límites técnicos se ajustan automáticamente.';
+  if (intro)
+    intro.textContent =
+      'Activa la inteligencia artificial y elige un nivel de uso. Los límites técnicos se ajustan automáticamente.';
   hide($('.button-link[href="/api/ai/export"]', section));
   hide(labelForField(form, 'provider'));
   for (const group of $$('.ai-simple-group, .ai-advanced-panel', form)) hide(group);
@@ -500,7 +566,11 @@ function simplifyAI() {
     range.value = '2';
     range.setAttribute('aria-label', 'Nivel de uso de inteligencia artificial');
     const scale = element('div', 'ai-level-scale');
-    scale.append(element('span', '', 'Bajo'), element('span', '', 'Normal'), element('span', '', 'Alto'));
+    scale.append(
+      element('span', '', 'Bajo'),
+      element('span', '', 'Normal'),
+      element('span', '', 'Alto'),
+    );
     const help = element('p', 'muted', AI_LEVELS[2].help);
     help.id = 'ai-level-help';
     range.addEventListener('input', () => applyAiLevel(Number(range.value), true));
@@ -520,7 +590,12 @@ function simplifyAI() {
 
   for (const details of $$('details', section)) {
     const summary = $(':scope > summary', details)?.textContent || '';
-    if (/capacidad y disponibilidad|configuración avanzada del modelo|presupuesto global/iu.test(summary)) hide(details);
+    if (
+      /capacidad y disponibilidad|configuración avanzada del modelo|presupuesto global/iu.test(
+        summary,
+      )
+    )
+      hide(details);
   }
   hide($('#ai-queue-settings-form')?.closest('details, article, section'));
   hide($('#ai-queue-simulator-form')?.closest('details, article, section'));
@@ -555,7 +630,11 @@ function initializeMinimalCommunityPanel() {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => window.setTimeout(initializeMinimalCommunityPanel, 0), { once: true });
+  document.addEventListener(
+    'DOMContentLoaded',
+    () => window.setTimeout(initializeMinimalCommunityPanel, 0),
+    { once: true },
+  );
 } else {
   window.setTimeout(initializeMinimalCommunityPanel, 0);
 }

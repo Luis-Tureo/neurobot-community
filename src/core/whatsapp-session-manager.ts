@@ -1,12 +1,9 @@
-import { mkdir, rename } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { mkdir, rm } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import type { BotRecord } from '../domain/types.js';
 
 export class WhatsAppSessionManager {
-  public constructor(
-    private readonly sessionsRoot: string,
-    private readonly backupsRoot: string,
-  ) {}
+  public constructor(private readonly sessionsRoot: string) {}
 
   public async pathFor(bot: BotRecord): Promise<string> {
     const path = resolve(bot.sessionPath);
@@ -19,15 +16,9 @@ export class WhatsAppSessionManager {
     return resolve(this.sessionsRoot, botId);
   }
 
-  public async archive(bot: BotRecord): Promise<string> {
-    const source = resolve(bot.sessionPath);
-    const destination = resolve(
-      this.backupsRoot,
-      `whatsapp-${bot.id}-${new Date().toISOString().replace(/[:.]/gu, '-')}`,
-    );
-    await mkdir(dirname(destination), { recursive: true });
-    await rename(source, destination);
-    await mkdir(source, { recursive: true });
-    return destination;
+  public async clear(bot: BotRecord): Promise<void> {
+    const path = resolve(bot.sessionPath);
+    await rm(path, { recursive: true, force: true });
+    await mkdir(path, { recursive: true });
   }
 }

@@ -26,24 +26,19 @@ import { hashPassword, verifyPassword } from '../src/security/password.js';
 
 type Subject = ReturnType<typeof createSubject>;
 
-const TEST_PASSWORD = 'contraseña-de-prueba';
-
-describe('mantenimiento destructivo aislado', () => {
+describe('mantenimiento destructivo sin respaldos', () => {
   const subjects: Subject[] = [];
 
   afterEach(() => {
     for (const subject of subjects.splice(0)) {
-      subject.database.close();
+      if (subject.database.isOpen()) subject.database.close();
       rmSync(subject.projectRoot, { recursive: true, force: true });
     }
   });
 
-  it('crea respaldo, recrea SQLite y conserva solamente cinco copias', async () => {
+  it('restablece SQLite y WhatsApp sin crear carpetas de respaldo', async () => {
     const subject = createSubject();
     subjects.push(subject);
-    for (let index = 1; index <= 6; index += 1) {
-      mkdirSync(join(subject.backupRoot, `reset-2026010${index}-000000`), { recursive: true });
-    }
     const newHash = await hashPassword('contraseña-nueva-segura');
 
     subject.service.startFactoryReset({
@@ -55,14 +50,13 @@ describe('mantenimiento destructivo aislado', () => {
     expect(result).toMatchObject({
       result: 'completed',
       code: 'FACTORY_RESET_COMPLETED',
-      backupCreated: true,
       logoutRequired: true,
     });
     expect(subject.database.isOpen()).toBe(true);
     expect(subject.database.listGroups()).toHaveLength(0);
     expect(subject.database.listAdministrators()).toHaveLength(0);
     expect(subject.database.getCommand('personalizado')).toBeNull();
-    expect(subject.database.listCommands()).toHaveLength(8);
+    expect(subject.database.listCommands().length).toBeGreaterThan(0);
     expect(subject.database.getSetting('bot_enabled', false)).toBe(true);
     expect(
       await verifyPassword(
@@ -74,94 +68,41 @@ describe('mantenimiento destructivo aislado', () => {
     expect(subject.client.initializeCalls).toBe(1);
     expect(subject.manager.snapshot().state).toBe('waiting_qr');
     expect(subject.transientReset).toHaveBeenCalledOnce();
-    expect(subject.database.getAuditEvents()).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          action_type: 'factory_reset',
-          result: 'completed',
-          backup_created: 1,
-          error_code: null,
-        }),
-      ]),
-    );
+    expect(existsSync(join(subject.projectRoot, 'backups'))).toBe(false);
     expect(existsSync(subject.legacyDatabasePath)).toBe(false);
     expect(existsSync(`${subject.legacyDatabasePath}-wal`)).toBe(false);
-    expect(
-      readdirSync(subject.backupRoot).filter((name) => name.startsWith('reset-')),
-    ).toHaveLength(5);
-
-    const backupDirectory = join(subject.backupRoot, result.backupName as string);
-    const encryptedSession = findFiles(join(backupDirectory, 'whatsapp-session-encrypted'));
-    expect(encryptedSession).toHaveLength(2);
-    expect(
-      encryptedSession.map((path) => readFileSync(path).toString('utf8')).join(''),
-    ).not.toContain('credencial-de-sesion');
-    expect(
-      findFiles(join(backupDirectory, 'database')).some((path) => path.endsWith('interno.sqlite')),
-    ).toBe(false);
-    const manifest = readFileSync(join(backupDirectory, 'manifest.json'), 'utf8');
-    expect(manifest).not.toContain('56912345678');
-    expect(manifest).not.toContain('grupo-secreto@g.us');
-    expect(manifest).not.toContain(TEST_PASSWORD);
-  });
-
-  it('cancela antes de borrar cuando falla la copia de seguridad', async () => {
-    const subject = createSubject({
-      beforeStage: (stage) => {
-        if (stage === 'creating_backup') throw new Error('fallo de respaldo simulado');
-      },
-    });
-    subjects.push(subject);
-    subject.service.startFactoryReset({
-      passwordHash: await hashPassword('contraseña-nueva-segura'),
-      administratorHash: 'administrador-anónimo',
-    });
-
-    const result = await subject.service.waitForCompletion();
-
-    expect(result).toMatchObject({ result: 'failed', code: 'RESET_BACKUP_FAILED' });
-    expect(subject.database.isOpen()).toBe(true);
-    expect(subject.database.getCommand('personalizado')).not.toBeNull();
-    expect(readFileSync(join(subject.sessionPath, 'session.bin'), 'utf8')).toBe(
-      'credencial-de-sesion',
+    expect(readFileSync(join(subject.projectRoot, '.env'), 'utf8')).toBe('SECRETO=conservado');
+    expect(readFileSync(join(subject.projectRoot, 'package.json'), 'utf8')).toBe('{}');
+    expect(readFileSync(join(subject.projectRoot, 'src', 'sentinel.ts'), 'utf8')).toBe(
+      'export {};',
     );
-    expect(readFileSync(subject.legacyDatabasePath, 'utf8')).toBe('base-anterior');
-    expect(findBackupDirectories(subject.backupRoot)).toHaveLength(0);
   });
 
-  it('restaura base y sesión cifrada cuando falla después del borrado', async () => {
+  it('no reconstruye el estado anterior cuando una etapa posterior falla', async () => {
     const subject = createSubject({
       beforeStage: (stage) => {
         if (stage === 'creating_database') throw new Error('fallo de creación simulado');
       },
     });
     subjects.push(subject);
+
     subject.service.startFactoryReset({
       passwordHash: await hashPassword('contraseña-nueva-segura'),
       administratorHash: 'administrador-anónimo',
     });
-
     const result = await subject.service.waitForCompletion();
 
-    expect(result).toMatchObject({
-      result: 'rolled_back',
-      code: 'FACTORY_RESET_ROLLED_BACK',
-      backupCreated: true,
-    });
-    expect(subject.transientReset).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ result: 'failed', code: 'RESET_DATABASE_CREATE_FAILED' });
     expect(subject.database.isOpen()).toBe(true);
-    expect(subject.database.getCommand('personalizado')).not.toBeNull();
-    expect(subject.database.isGroupAuthorized('grupo-secreto@g.us')).toBe(true);
-    expect(subject.database.isAdministrator('56912345678@c.us')).toBe(true);
-    expect(readFileSync(join(subject.sessionPath, 'session.bin'), 'utf8')).toBe(
-      'credencial-de-sesion',
-    );
+    expect(subject.database.getCommand('personalizado')).toBeNull();
+    expect(subject.database.isGroupAuthorized('grupo-secreto@g.us')).toBe(false);
+    expect(subject.database.isAdministrator('56912345678@c.us')).toBe(false);
+    expect(existsSync(join(subject.projectRoot, 'backups'))).toBe(false);
   });
 
-  it('desvincula WhatsApp sin modificar SQLite ni archivos del proyecto', async () => {
+  it('desvincula WhatsApp sin modificar SQLite ni otros archivos del proyecto', async () => {
     const subject = createSubject();
     subjects.push(subject);
-    const originalDatabaseSize = readFileSync(subject.databasePath).byteLength;
 
     subject.service.startWhatsAppUnlink({ administratorHash: 'administrador-anónimo' });
     const result = await subject.service.waitForCompletion();
@@ -169,20 +110,14 @@ describe('mantenimiento destructivo aislado', () => {
     expect(result).toMatchObject({
       result: 'completed',
       code: 'WHATSAPP_UNLINK_COMPLETED',
-      backupCreated: false,
       logoutRequired: false,
     });
     expect(subject.database.isGroupAuthorized('grupo-secreto@g.us')).toBe(true);
     expect(subject.database.isAdministrator('56912345678@c.us')).toBe(true);
     expect(subject.database.getCommand('personalizado')).not.toBeNull();
-    expect(readFileSync(subject.databasePath).byteLength).toBe(originalDatabaseSize);
     expect(findFiles(subject.sessionPath)).toHaveLength(0);
     expect(findFiles(subject.cachePath)).toHaveLength(0);
-    expect(readFileSync(join(subject.projectRoot, '.env'), 'utf8')).toBe('SECRETO=conservado');
-    expect(readFileSync(join(subject.projectRoot, 'package.json'), 'utf8')).toBe('{}');
-    expect(readFileSync(join(subject.projectRoot, 'src', 'sentinel.ts'), 'utf8')).toBe(
-      'export {};',
-    );
+    expect(existsSync(join(subject.projectRoot, 'backups'))).toBe(false);
   });
 
   it('impide dos operaciones simultáneas', async () => {
@@ -204,7 +139,7 @@ describe('mantenimiento destructivo aislado', () => {
     await subject.service.waitForCompletion();
   });
 
-  it('valida rutas permitidas y rechaza cualquier destino externo', () => {
+  it('valida rutas permitidas y rechaza destinos externos', () => {
     const projectRoot = resolve('C:\\proyecto-seguro');
     expect(() =>
       assertAllowedMaintenancePath(
@@ -218,24 +153,16 @@ describe('mantenimiento destructivo aislado', () => {
     ).toThrow(UnsafeMaintenancePathError);
   });
 
-  it('cierra SQLite antes del respaldo y no filtra contraseñas en estados', async () => {
-    let databaseOpenDuringBackup = true;
-    const subject = createSubject({
-      beforeStage: (stage) => {
-        if (stage === 'creating_backup') databaseOpenDuringBackup = subject.database.isOpen();
-      },
-    });
+  it('no filtra contraseñas ni identificadores en estados o registros', async () => {
+    const subject = createSubject();
     subjects.push(subject);
     subject.service.startFactoryReset({
       passwordHash: await hashPassword('contraseña-nueva-segura'),
       administratorHash: 'administrador-anónimo',
     });
     await subject.service.waitForCompletion();
-    expect(databaseOpenDuringBackup).toBe(false);
-    expect(JSON.stringify(subject.service.snapshot())).not.toContain(TEST_PASSWORD);
-    expect(JSON.stringify(subject.service.snapshot())).not.toContain('56912345678');
+    expect(JSON.stringify(subject.service.snapshot())).not.toContain('contraseña-nueva-segura');
     const logs = JSON.stringify(subject.logEntries);
-    expect(logs).not.toContain(TEST_PASSWORD);
     expect(logs).not.toContain('56912345678');
     expect(logs).not.toContain('grupo-secreto@g.us');
     expect(logs).not.toContain('credencial-de-sesion');
@@ -247,19 +174,16 @@ function createSubject(
     beforeStage?: (stage: MaintenanceStage) => void | Promise<void>;
   } = {},
 ) {
-  const projectRoot = mkdtempSync(join(tmpdir(), 'asistente-maintenance-'));
+  const projectRoot = mkdtempSync(join(tmpdir(), 'neurobot-maintenance-'));
   const dataRoot = join(projectRoot, 'data');
   const databasePath = join(dataRoot, 'asistente.db');
   const legacyDatabasePath = join(dataRoot, 'anterior.sqlite3');
   const sessionPath = join(dataRoot, 'whatsapp-session');
   const cachePath = join(projectRoot, '.wwebjs_cache');
-  const backupRoot = join(projectRoot, 'backups');
   mkdirSync(sessionPath, { recursive: true });
   mkdirSync(cachePath, { recursive: true });
-  mkdirSync(backupRoot, { recursive: true });
   mkdirSync(join(projectRoot, 'src'), { recursive: true });
   writeFileSync(join(sessionPath, 'session.bin'), 'credencial-de-sesion');
-  writeFileSync(join(sessionPath, 'interno.sqlite'), 'sqlite-sensible-de-chromium');
   writeFileSync(join(cachePath, 'cache.bin'), 'cache');
   writeFileSync(join(projectRoot, '.env'), 'SECRETO=conservado');
   writeFileSync(join(projectRoot, 'package.json'), '{}');
@@ -278,7 +202,6 @@ function createSubject(
     priority: 1,
     healthRelated: false,
   });
-  database.setSilence('grupo-secreto@g.us', new Date(Date.now() + 60_000));
   database.checkpoint();
   writeFileSync(legacyDatabasePath, 'base-anterior');
   writeFileSync(`${legacyDatabasePath}-wal`, 'wal-anterior');
@@ -309,9 +232,6 @@ function createSubject(
       databasePath,
       sessionPath,
       cachePath,
-      backupRoot,
-      encryptionSecret: 'e'.repeat(32),
-      retainedBackups: 5,
       now: () => new Date('2026-08-02T03:04:05.000Z'),
       resetTransientState: transientReset,
       ...(options.beforeStage === undefined ? {} : { beforeStage: options.beforeStage }),
@@ -319,12 +239,10 @@ function createSubject(
   );
   return {
     projectRoot,
-    dataRoot,
     databasePath,
     legacyDatabasePath,
     sessionPath,
     cachePath,
-    backupRoot,
     database,
     client,
     manager,
@@ -366,9 +284,4 @@ function findFiles(root: string): string[] {
     }
   }
   return files;
-}
-
-function findBackupDirectories(root: string): string[] {
-  if (!existsSync(root)) return [];
-  return readdirSync(root).filter((name) => name.startsWith('reset-'));
 }

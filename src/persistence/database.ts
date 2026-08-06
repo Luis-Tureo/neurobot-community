@@ -251,7 +251,6 @@ export type AuditEvent = {
   result: string;
   administratorHash: string;
   durationMs?: number;
-  backupCreated?: boolean;
   errorCode?: string;
 };
 
@@ -1839,6 +1838,12 @@ export class AppDatabase {
           DROP TABLE IF EXISTS assistant_modules;
         `,
       },
+      {
+        version: 22,
+        sql: `
+          DROP TABLE IF EXISTS assistant_profile_backups;
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -2493,6 +2498,25 @@ export class AppDatabase {
       );
     });
     seed();
+  }
+
+  public recordAudit(event: AuditEvent): void {
+    this.db
+      .prepare(
+        `INSERT INTO audit_events
+          (created_at, action_type, resource, result, administrator_hash, duration_ms, error_code, bot_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        new Date().toISOString(),
+        event.actionType,
+        event.resource,
+        event.result,
+        event.administratorHash,
+        event.durationMs ?? null,
+        event.errorCode ?? null,
+        event.botId ?? null,
+      );
   }
 
   public close(): void {
@@ -3875,7 +3899,7 @@ export class AppDatabase {
     return this.getBot(botId) as BotRecord;
   }
 
-  public permanentlyDeleteBot(botId: string, actorHash: string, backupReference: string): void {
+  public permanentlyDeleteBot(botId: string, actorHash: string): void {
     const bot = this.getBot(botId);
     if (bot === null || bot.lifecycleStatus !== 'ARCHIVED')
       throw new Error('ASSISTANT_NOT_ARCHIVED');
@@ -3887,14 +3911,10 @@ export class AppDatabase {
           `INSERT INTO assistant_deletion_audit(assistant_id,action,created_at,safe_actor_hash,backup_reference,result)
          VALUES (?, 'ASSISTANT_PERMANENTLY_DELETED', ?, ?, ?, 'ok')`,
         )
-        .run(botId, now, actorHash, backupReference);
+        .run(botId, now, actorHash, null);
       this.db.prepare('DELETE FROM bots WHERE id=?').run(botId);
     });
     operation();
-  }
-
-  public async backupTo(destination: string): Promise<void> {
-    await this.db.backup(destination);
   }
 
   public listBotActivationAliases(botId: string): string[] {
@@ -4345,23 +4365,6 @@ export class AppDatabase {
     });
     activate();
     return this.getAssistantProfile(id) as AssistantProfile;
-  }
-
-  public backupAssistantProfile(id: number, reason: string): number {
-    const profile = this.getAssistantProfile(id);
-    if (profile === null) throw new Error('El perfil no existe.');
-    const result = this.db
-      .prepare(
-        `INSERT INTO assistant_profile_backups(profile_id, snapshot_json, reason, created_at)
-         VALUES (?, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        JSON.stringify(profile),
-        validatePlainText(reason, 'motivo', 120),
-        new Date().toISOString(),
-      );
-    return Number(result.lastInsertRowid);
   }
 
   public listKnowledgeCategories(profileId: number): KnowledgeCategory[] {
@@ -6615,26 +6618,6 @@ export class AppDatabase {
         event.localDate ?? null,
         event.localTime ?? null,
         event.attempt ?? null,
-        event.botId ?? null,
-      );
-  }
-
-  public recordAudit(event: AuditEvent): void {
-    this.db
-      .prepare(
-        `INSERT INTO audit_events
-          (created_at, action_type, resource, result, administrator_hash, duration_ms, backup_created, error_code, bot_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        new Date().toISOString(),
-        event.actionType,
-        event.resource,
-        event.result,
-        event.administratorHash,
-        event.durationMs ?? null,
-        event.backupCreated === undefined ? null : event.backupCreated ? 1 : 0,
-        event.errorCode ?? null,
         event.botId ?? null,
       );
   }

@@ -116,9 +116,7 @@ function activatePanelSection(name, scrollOnMobile = false) {
   document
     .querySelectorAll('[data-section]')
     .forEach((item) => item.classList.toggle('active', item === button));
-  document
-    .querySelectorAll('.panel-section')
-    .forEach((item) => item.classList.add('hidden'));
+  document.querySelectorAll('.panel-section').forEach((item) => item.classList.add('hidden'));
   section.classList.remove('hidden');
   const advancedNavigation = button.closest('.sidebar-more');
   if (advancedNavigation) advancedNavigation.open = true;
@@ -149,17 +147,31 @@ async function loadStatus() {
   const result = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}`);
   state.selectedBot = result.bot;
   state.selectedProfile = result.profile;
-  const connection = result.runtime?.connection || { state: result.bot.whatsappStatus, lastConnectedAt: result.bot.lastConnectedAt };
+  const connection = result.runtime?.connection || {
+    state: result.bot.whatsappStatus,
+    lastConnectedAt: result.bot.lastConnectedAt,
+  };
   document.title = result.profile.applicationName;
   document.querySelector('#application-title').textContent = result.profile.headerText;
-  document.querySelector('#application-subtitle').textContent = `${result.profile.organizationName} · ${result.profile.botName}`;
+  document.querySelector('#application-subtitle').textContent =
+    `${result.profile.organizationName} · ${result.profile.botName}`;
   document.documentElement.style.setProperty('--primary', result.profile.primaryColor);
   document.documentElement.style.setProperty('--accent', result.profile.secondaryColor);
   const cards = [
     ['WhatsApp', connectionLabels[connection.state] || connection.state],
-    ['IA', result.ai.configured ? (result.ai.enabled ? 'Configurada y activa' : 'Configurada e inactiva') : 'No configurada'],
+    [
+      'IA',
+      result.ai.configured
+        ? result.ai.enabled
+          ? 'Configurada y activa'
+          : 'Configurada e inactiva'
+        : 'No configurada',
+    ],
     ['Modo', modeLabel(result.bot.mode)],
-    ['Grupos activos', String(result.groups.filter((group) => group.active && !group.blocked).length)],
+    [
+      'Grupos activos',
+      String(result.groups.filter((group) => group.active && !group.blocked).length),
+    ],
     ['Chats privados', result.bot.privateMessagesEnabled ? 'Activados' : 'Desactivados'],
     ['Consultas hoy', String(result.usage.requests)],
     ['Tokens hoy', String(result.usage.totalTokens)],
@@ -686,12 +698,18 @@ async function loadAutomaticMessages() {
       configuration.welcome.reconciliationIntervalSeconds ?? 120;
   }
   automaticMessagesForm.elements.welcome_template.value = configuration.welcome.template;
-  automaticMessagesForm.elements.welcome_include_public_name.checked = configuration.welcome.includePublicName ?? true;
-  automaticMessagesForm.elements.welcome_real_mention.checked = configuration.welcome.enableRealMention ?? true;
-  automaticMessagesForm.elements.welcome_unknown_name.value = configuration.welcome.unknownNameFallback ?? 'nuevo/a integrante';
-  automaticMessagesForm.elements.welcome_multiple_mode.value = configuration.welcome.multipleJoinMode ?? 'GROUPED';
-  automaticMessagesForm.elements.welcome_maximum_names.value = configuration.welcome.maximumGroupedNames ?? 5;
-  automaticMessagesForm.elements.welcome_send_delay.value = configuration.welcome.sendDelaySeconds ?? 2;
+  automaticMessagesForm.elements.welcome_include_public_name.checked =
+    configuration.welcome.includePublicName ?? true;
+  automaticMessagesForm.elements.welcome_real_mention.checked =
+    configuration.welcome.enableRealMention ?? true;
+  automaticMessagesForm.elements.welcome_unknown_name.value =
+    configuration.welcome.unknownNameFallback ?? 'nuevo/a integrante';
+  automaticMessagesForm.elements.welcome_multiple_mode.value =
+    configuration.welcome.multipleJoinMode ?? 'GROUPED';
+  automaticMessagesForm.elements.welcome_maximum_names.value =
+    configuration.welcome.maximumGroupedNames ?? 5;
+  automaticMessagesForm.elements.welcome_send_delay.value =
+    configuration.welcome.sendDelaySeconds ?? 2;
   const welcomeStatus = result.welcomeStatus;
   const welcomeRuntimeStatus = document.querySelector('#welcome-runtime-status');
   if (welcomeRuntimeStatus) {
@@ -800,7 +818,10 @@ automaticMessagesForm.addEventListener('submit', async (event) => {
     },
   };
   try {
-    await api(botScopedPath('/api/automatic-messages'), { method: 'PATCH', body: JSON.stringify(payload) });
+    await api(botScopedPath('/api/automatic-messages'), {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
     await loadAutomaticMessages();
     showNotice('Configuración de mensajes automáticos guardada.');
   } catch (error) {
@@ -829,12 +850,17 @@ document.querySelectorAll('.manual-automatic-send').forEach((button) => {
     }
     button.disabled = true;
     try {
-      const fictitiousName = button.dataset.kind === 'welcome'
-        ? document.querySelector('#welcome-preview-name').value.trim()
-        : undefined;
+      const fictitiousName =
+        button.dataset.kind === 'welcome'
+          ? document.querySelector('#welcome-preview-name').value.trim()
+          : undefined;
       await api(botScopedPath(`/api/automatic-messages/send/${button.dataset.kind}`), {
         method: 'POST',
-        body: JSON.stringify({ groupKey: groupSelect.value, confirmed: true, ...(fictitiousName ? { fictitiousName } : {}) }),
+        body: JSON.stringify({
+          groupKey: groupSelect.value,
+          confirmed: true,
+          ...(fictitiousName ? { fictitiousName } : {}),
+        }),
       });
       await loadAutomaticMessages();
       showNotice(`${label} enviado correctamente.`);
@@ -847,9 +873,12 @@ document.querySelectorAll('.manual-automatic-send').forEach((button) => {
 });
 
 function updateAutomaticPreviews() {
-  const name = document.querySelector('#welcome-preview-name')?.value.trim() || 'nuevo/a integrante';
+  const name =
+    document.querySelector('#welcome-preview-name')?.value.trim() || 'nuevo/a integrante';
   const profile = state.selectedProfile || {};
-  const selectedGroup = document.querySelector('#automatic-message-group')?.selectedOptions[0]?.textContent || 'Grupo de prueba';
+  const selectedGroup =
+    document.querySelector('#automatic-message-group')?.selectedOptions[0]?.textContent ||
+    'Grupo de prueba';
   const values = {
     name,
     mention: `@${name.replace(/^@/u, '')}`,
@@ -858,8 +887,11 @@ function updateAutomaticPreviews() {
     assistantName: profile.botName || state.selectedBot?.botName || 'el asistente',
     botAlias: profile.activationAlias || '@neurobot',
   };
-  document.querySelector('#welcome-preview').textContent = automaticMessagesForm.elements.welcome_template.value
-    .replace(/\{(name|mention|communityName|groupName|assistantName|botAlias)\}/gu, (_match, key) => values[key]);
+  document.querySelector('#welcome-preview').textContent =
+    automaticMessagesForm.elements.welcome_template.value.replace(
+      /\{(name|mention|communityName|groupName|assistantName|botAlias)\}/gu,
+      (_match, key) => values[key],
+    );
   document.querySelector('#rules-preview').textContent =
     automaticMessagesForm.elements.rules_template.value;
   const weekday = new Intl.DateTimeFormat('en-US', {
@@ -908,7 +940,9 @@ function renderWelcomeGroupSettings(groups) {
     custom.placeholder = 'Plantilla específica para este grupo';
     custom.value = group.welcome.customTemplate || '';
     custom.disabled = inherit.checked;
-    inherit.addEventListener('change', () => { custom.disabled = inherit.checked; });
+    inherit.addEventListener('change', () => {
+      custom.disabled = inherit.checked;
+    });
     const save = document.createElement('button');
     save.type = 'button';
     save.className = 'secondary';
@@ -1063,16 +1097,17 @@ function renderPollTemplates(templates) {
       remove.className = 'danger poll-remove-button';
       remove.textContent = 'Eliminar';
       remove.addEventListener('click', async () => {
-        const assistantName = state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
+        const assistantName =
+          state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
         const automationState = state.pollData?.configuration.enabled ? 'Activa' : 'Desactivada';
         const nextSchedule = state.pollData?.nextScheduledAt || 'Sin próxima programación';
         const confirmed = window.confirm(
           `Eliminar encuesta de este asistente\n\n` +
-          `Encuesta: ${template.question}\nAsistente: ${assistantName}\nCategoría: ${template.category}\n` +
-          `Automatización: ${automationState}\nPróxima programación: ${nextSchedule}\n\n` +
-          'Esta encuesta dejará de aparecer y no se utilizará en las automatizaciones de este asistente. ' +
-          'No se eliminará de otros asistentes ni del catálogo general. ' +
-          'También será retirada de las automatizaciones futuras de este asistente.',
+            `Encuesta: ${template.question}\nAsistente: ${assistantName}\nCategoría: ${template.category}\n` +
+            `Automatización: ${automationState}\nPróxima programación: ${nextSchedule}\n\n` +
+            'Esta encuesta dejará de aparecer y no se utilizará en las automatizaciones de este asistente. ' +
+            'No se eliminará de otros asistentes ni del catálogo general. ' +
+            'También será retirada de las automatizaciones futuras de este asistente.',
         );
         if (!confirmed) return;
         try {
@@ -1090,7 +1125,12 @@ function renderPollTemplates(templates) {
       remove.className = 'danger';
       remove.textContent = 'Eliminar permanentemente';
       remove.addEventListener('click', async () => {
-        if (!window.confirm('¿Eliminar permanentemente esta encuesta personalizada de este asistente?')) return;
+        if (
+          !window.confirm(
+            '¿Eliminar permanentemente esta encuesta personalizada de este asistente?',
+          )
+        )
+          return;
         try {
           await api(botScopedPath(`/api/polls/templates/${template.id}`), { method: 'DELETE' });
           await loadPolls();
@@ -1113,13 +1153,14 @@ function renderHiddenPollTemplates(templates) {
     target.append(empty('No hay encuestas predeterminadas eliminadas de este asistente.'));
     return;
   }
-  const assistantName = state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
+  const assistantName =
+    state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
   templates.forEach((template) => {
     const hiddenAt = new Date(template.hiddenAt).toLocaleString('es-CL');
     const item = listItem(
       template.question,
       `Predeterminada · ${template.category} · Eliminada: ${hiddenAt} · Estado: Oculta\n` +
-      `Esta encuesta fue eliminada solamente de ${assistantName}.`,
+        `Esta encuesta fue eliminada solamente de ${assistantName}.`,
     );
     const restore = document.createElement('button');
     restore.type = 'button';
@@ -1191,7 +1232,9 @@ function renderPollOverrides(overrides) {
     remove.textContent = 'Quitar';
     remove.addEventListener('click', async () => {
       try {
-        await api(botScopedPath(`/api/polls/overrides/${override.localDate}`), { method: 'DELETE' });
+        await api(botScopedPath(`/api/polls/overrides/${override.localDate}`), {
+          method: 'DELETE',
+        });
         await loadPolls();
         showNotice('Programación eliminada.');
       } catch (error) {
@@ -1286,7 +1329,10 @@ pollTemplateForm.addEventListener('submit', async (event) => {
     disabledUntil,
   };
   try {
-    await api(botScopedPath('/api/polls/templates'), { method: 'POST', body: JSON.stringify(payload) });
+    await api(botScopedPath('/api/polls/templates'), {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
     pollTemplateForm.classList.add('hidden');
     await loadPolls();
     showNotice('Plantilla de encuesta guardada.');
@@ -1296,14 +1342,24 @@ pollTemplateForm.addEventListener('submit', async (event) => {
 });
 
 document.querySelector('#restore-poll-defaults').addEventListener('click', async () => {
-  const assistantName = state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
-  if (!window.confirm(`¿Restaurar las encuestas predeterminadas eliminadas solamente para ${assistantName}?`)) return;
+  const assistantName =
+    state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
+  if (
+    !window.confirm(
+      `¿Restaurar las encuestas predeterminadas eliminadas solamente para ${assistantName}?`,
+    )
+  )
+    return;
   try {
-    const result = await api(botScopedPath('/api/polls/templates/restore-defaults'), { method: 'POST' });
+    const result = await api(botScopedPath('/api/polls/templates/restore-defaults'), {
+      method: 'POST',
+    });
     await loadPolls();
-    showNotice(result.restored > 0
-      ? `Se restauraron ${result.restored} encuestas predeterminadas para ${assistantName}.`
-      : 'No hay encuestas predeterminadas para restaurar en este asistente.');
+    showNotice(
+      result.restored > 0
+        ? `Se restauraron ${result.restored} encuestas predeterminadas para ${assistantName}.`
+        : 'No hay encuestas predeterminadas para restaurar en este asistente.',
+    );
   } catch (error) {
     showNotice(error.message, true);
   }

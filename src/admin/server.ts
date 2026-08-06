@@ -995,33 +995,13 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           .send({ error: 'La contraseña actual no es válida.', code: 'INVALID_PASSWORD' });
       }
       await context.multiBotManager?.stop(botId);
-      const backupRoot = join(
-        dirname(context.database.getPath()),
-        'backups',
-        'assistant-deletions',
-      );
-      await mkdir(backupRoot, { recursive: true });
-      const stamp = new Date().toISOString().replace(/[:.]/gu, '-');
-      const databaseBackup = join(backupRoot, `${bot.id}-${stamp}.db`);
-      await context.database.backupTo(databaseBackup);
-      let sessionBackup: string | null = null;
       if (context.sessionManager !== undefined) {
-        sessionBackup = await context.sessionManager.archive(bot);
+        await context.sessionManager.clear(bot);
       }
-      const backupReference = [
-        basename(databaseBackup),
-        sessionBackup === null ? null : basename(sessionBackup),
-      ]
-        .filter((value): value is string => value !== null)
-        .join(',');
-      context.database.permanentlyDeleteBot(
-        botId,
-        context.anonymizer.identifier(session.username),
-        backupReference,
-      );
+      context.database.permanentlyDeleteBot(botId, context.anonymizer.identifier(session.username));
       context.multiBotManager?.forgetAdminPhoneNumber(botId);
       audit(context, 'assistant_permanently_deleted', botId, 'ok', botId);
-      return { deleted: true, backupCreated: true };
+      return { deleted: true };
     },
   );
 
@@ -2225,11 +2205,11 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const bot = context.database.getBot(botId);
       if (bot === null) return reply.code(404).send({ error: 'Asistente no encontrado.' });
       await context.multiBotManager.stop(botId);
-      const backupPath = await context.sessionManager.archive(bot);
+      await context.sessionManager.clear(bot);
       context.database.updateBotWhatsAppStatus(botId, 'disconnected');
       await context.multiBotManager.start(botId);
       audit(context, 'bot_unlink', botId, 'ok', botId);
-      return { unlinked: true, backupCreated: true, backupName: basename(backupPath) };
+      return { unlinked: true };
     },
   );
 
@@ -2395,12 +2375,11 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         .parse(request.body);
       const existing = context.database.getAssistantProfile(id);
       if (existing === null) return reply.code(404).send({ error: 'Perfil no encontrado.' });
-      const backupId = context.database.backupAssistantProfile(id, `Plantilla ${input.preset}`);
       const profile = context.database.saveAssistantProfile(
         applyProfilePreset(existing, input.preset),
       );
       audit(context, 'profile_template_apply', String(id), 'ok');
-      return { profile, backupCreated: true, backupId };
+      return { profile };
     },
   );
 
