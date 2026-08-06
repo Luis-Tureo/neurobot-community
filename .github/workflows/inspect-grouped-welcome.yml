@@ -1,0 +1,26 @@
+name: Inspect grouped welcome
+
+on:
+  push:
+    branches:
+      - agent/grouped-welcome-default
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Locate welcome configuration and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== welcome settings references ==='
+          grep -RInE 'sendDelaySeconds|batchWindowSeconds|multipleJoinMode|maximumGroupedNames|includePublicName|enableRealMention' src public tests README.md || true
+          echo '=== welcome service methods ==='
+          grep -nE 'flushWelcome|buildWelcomeMessages|WELCOME_MULTIPLE_JOIN_GROUPED|setTimeout' src/core/automatic-message-service.ts || true
