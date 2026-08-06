@@ -69,7 +69,7 @@ describe('history moderation alerts', () => {
       ]),
       recordTechnicalEvent: vi.fn(),
     } as unknown as AppDatabase;
-    const send = vi.fn(async () => undefined);
+    const send = vi.fn(async (_recipient: string, _text: string): Promise<void> => undefined);
     const outbound = { send } as unknown as OutboundMessageQueueService;
     const logger = {
       info: vi.fn(),
