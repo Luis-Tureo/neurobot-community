@@ -7,7 +7,6 @@ import { serializeError } from '../infrastructure/safe-error.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
-import { normalizeText } from '../utils/text.js';
 import { ExpiringSet } from './expiring-cache.js';
 import { containsActivationAliasAtStart, detectBotActivation } from './bot-activation.js';
 import type { OutboundMessageQueueService } from './outbound-message-queue-service.js';

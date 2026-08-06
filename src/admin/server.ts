@@ -2345,41 +2345,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
   );
 
   app.post(
-    '/api/bots/:botId/menu-options',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const input = menuOptionSchema.parse(request.body);
-      const option = context.database.saveMenuOption({
-        ...(input.id === undefined ? {} : { id: input.id }),
-        botId,
-        menuId: input.menuId,
-        label: input.label,
-        aliases: input.aliases,
-        order: input.order,
-        actionType: input.actionType,
-        actionPayload: input.actionPayload,
-        enabled: input.enabled,
-      });
-      audit(context, 'menu_option_save', String(option.id), 'ok', botId);
-      return reply.code(input.id === undefined ? 201 : 200).send({ option });
-    },
-  );
-
-  app.delete(
-    '/api/bots/:botId/menu-options/:id',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      if (!context.database.deleteMenuOption(botId, id))
-        return reply.code(404).send({ error: 'Opción no encontrada.' });
-      audit(context, 'menu_option_delete', String(id), 'ok', botId);
-      return { deleted: true };
-    },
-  );
-
-  app.post(
     '/api/auth/logout',
     { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
     async (request, reply) => {
