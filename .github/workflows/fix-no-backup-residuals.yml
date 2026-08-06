@@ -12,12 +12,21 @@ jobs:
   fix:
     if: github.head_ref == 'agent/refactor-neurobot-community' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout community branch
         uses: actions/checkout@v4
         with:
           ref: agent/refactor-neurobot-community
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Remove remaining backup calls
         shell: bash
@@ -28,49 +37,31 @@ jobs:
           server = Path('src/admin/server.ts')
           server_text = server.read_text(encoding='utf-8')
           old_import = "import { basename, dirname, join, resolve } from 'node:path';"
+          new_import = "import { basename, join, resolve } from 'node:path';"
           if old_import not in server_text:
               raise SystemExit('No se encontró el import de dirname esperado.')
-          server.write_text(
-              server_text.replace(old_import, "import { basename, join, resolve } from 'node:path';", 1),
-              encoding='utf-8',
-          )
+          server.write_text(server_text.replace(old_import, new_import, 1), encoding='utf-8')
 
           manager = Path('src/core/multi-bot-manager.ts')
           manager_text = manager.read_text(encoding='utf-8')
-          old_block = """          const backupPath = await this.sessions.archive(duplicateBot);
-          this.instances.delete(duplicateBotId);
-          this.started.delete(duplicateBotId);
-          this.database.recordTechnicalEvent({
-            botId: duplicateBotId,
-            eventType: 'TEMPORARY_SESSION_CLEANED',
-            result: 'archived',
-          });
-          this.logger.warn(
-            {
-              operation: 'TEMPORARY_SESSION_CLEANED',
-              botId: duplicateBotId,
-              backupCreated: Boolean(backupPath),
-            },
-            'La sesión temporal duplicada fue aislada sin afectar al asistente existente',
-          );"""
-          new_block = """          await this.sessions.clear(duplicateBot);
-          this.instances.delete(duplicateBotId);
-          this.started.delete(duplicateBotId);
-          this.database.recordTechnicalEvent({
-            botId: duplicateBotId,
-            eventType: 'TEMPORARY_SESSION_CLEANED',
-            result: 'cleared',
-          });
-          this.logger.warn(
-            {
-              operation: 'TEMPORARY_SESSION_CLEANED',
-              botId: duplicateBotId,
-            },
-            'La sesión temporal duplicada fue eliminada sin afectar al asistente existente',
-          );"""
-          if old_block not in manager_text:
-              raise SystemExit('No se encontró el bloque de archivado duplicado esperado.')
-          manager.write_text(manager_text.replace(old_block, new_block, 1), encoding='utf-8')
+          replacements = [
+              (
+                  '          const backupPath = await this.sessions.archive(duplicateBot);',
+                  '          await this.sessions.clear(duplicateBot);',
+              ),
+              ("            result: 'archived',", "            result: 'cleared',"),
+              ('              backupCreated: Boolean(backupPath),\n', ''),
+              (
+                  "            'La sesión temporal duplicada fue aislada sin afectar al asistente existente',",
+                  "            'La sesión temporal duplicada fue eliminada sin afectar al asistente existente',",
+              ),
+          ]
+          for old, new in replacements:
+              count = manager_text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Reemplazo residual inválido: {old!r}; coincidencias={count}')
+              manager_text = manager_text.replace(old, new, 1)
+          manager.write_text(manager_text, encoding='utf-8')
           PY
 
       - name: Format and commit
@@ -85,7 +76,7 @@ jobs:
           git push origin HEAD:agent/refactor-neurobot-community
 
       - name: Typecheck
-        run: npm ci && npm run typecheck
+        run: npm run typecheck
 
       - name: Lint
         run: npm run lint
