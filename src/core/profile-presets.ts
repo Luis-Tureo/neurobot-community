@@ -101,7 +101,6 @@ export function createProfileFromPreset(input: {
     mentionPromptMessage: `Escribe tu pregunta después de llamar a ${input.botName}.`,
     communityGreetingMessage: `¡Hola! Soy ${input.botName}, el asistente informativo de ${input.organizationName}. Escríbeme usando @${aliasName} seguido de tu pregunta. Respondo una consulta a la vez.`,
     contactInformation: '',
-    businessHours: '',
     address: null,
     logoPath: null,
     primaryColor: '#176b61',

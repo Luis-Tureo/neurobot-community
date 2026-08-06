@@ -89,7 +89,6 @@ export class BotInstance {
       options.secretVault,
     );
     const query = new AssistantQueryService(database, provider, logger, bot.id, this.aiQueue);
-    database.clearConversationStates(bot.id);
     this.automaticMessages = new AutomaticMessageService(database, client, logger, anonymizer, {
       botId: bot.id,
       ...(options.isPaused === undefined ? {} : { isPaused: options.isPaused }),

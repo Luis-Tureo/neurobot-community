@@ -15,7 +15,6 @@ describe('persistencia SQLite', () => {
       communityGreetingMessage: expect.stringContaining('Soy Neurobot'),
     });
     expect(database.getBot('neurobot')).toMatchObject({
-      connectorType: 'WHATSAPP_WEB',
       operatingMode: 'COMMUNITY_GROUPS',
       connectorMigrationLocked: true,
       lifecycleStatus: 'CONNECTED',

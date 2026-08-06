@@ -38,14 +38,10 @@ describe('plataforma comunitaria', () => {
   it('crea asistentes adicionales siempre en modo comunidad y WhatsApp Web', () => {
     const bot = database.createBot({
       id: 'comunidad-prueba',
-      mode: 'business',
-      connectorType: 'WHATSAPP_CLOUD_API',
       sessionPath: 'data/sessions/comunidad-prueba',
       profile: communityProfile('Comunidad de prueba'),
     });
     expect(bot).toMatchObject({
-      mode: 'community',
-      connectorType: 'WHATSAPP_WEB',
       operatingMode: 'COMMUNITY_GROUPS',
       groupsEnabled: true,
       privateMessagesEnabled: false,
@@ -63,8 +59,6 @@ describe('plataforma comunitaria', () => {
     ).toEqual({ accepted: true });
     const draft = database.createBot({
       id: 'comunidad-duplicada',
-      mode: 'community',
-      connectorType: 'WHATSAPP_WEB',
       sessionPath: 'data/sessions/comunidad-duplicada',
       profile: communityProfile('Comunidad duplicada'),
     });

@@ -525,8 +525,6 @@ describe('API administrativa', () => {
   it('normaliza asistentes a comunidad y protege la papelera', async () => {
     const bot = database.createBot({
       id: 'comunidad-aislada',
-      mode: 'business',
-      connectorType: 'WHATSAPP_CLOUD_API',
       sessionPath: 'data/sessions/comunidad-aislada',
       profile: createProfileFromPreset({
         organizationName: 'Comunidad aislada',
@@ -537,8 +535,6 @@ describe('API administrativa', () => {
       }),
     });
     expect(bot).toMatchObject({
-      mode: 'community',
-      connectorType: 'WHATSAPP_WEB',
       groupsEnabled: true,
       privateMessagesEnabled: false,
     });
@@ -681,7 +677,6 @@ describe('API administrativa', () => {
 
     const privateBot = database.createBot({
       id: 'solo-privado',
-      mode: 'business',
       sessionPath: 'data/test-private',
       profile: createProfileFromPreset({
         organizationName: 'Privado',
@@ -693,7 +688,6 @@ describe('API administrativa', () => {
     });
     const mixedBot = database.createBot({
       id: 'canal-mixto',
-      mode: 'mixed',
       sessionPath: 'data/test-mixed',
       profile: createProfileFromPreset({
         organizationName: 'Mixto',

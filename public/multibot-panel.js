@@ -8,12 +8,7 @@ const panelState = {
   knowledgeCategories: [],
   knowledgeEntries: [],
   cachedAnswers: [],
-  menus: [],
-  menuOptions: [],
   moderation: null,
-  catalogCategories: [],
-  catalogItems: [],
-  mediaAssets: [],
   qrTimer: null,
   botRefreshTimer: null,
 };
@@ -144,20 +139,6 @@ function setBotNavigationAvailable(available) {
   document.querySelector('#assistant-context')?.classList.toggle('hidden', !available);
 }
 
-function applyBotCapabilities(capabilities) {
-  document.querySelectorAll('[data-capability]').forEach((element) => {
-    const available = Boolean(capabilities?.[element.dataset.capability]);
-    element.classList.toggle('hidden', !available);
-    if ('disabled' in element) element.disabled = !available;
-  });
-  const activeSection = document
-    .querySelector('.panel-section:not(.hidden)')
-    ?.id?.replace('section-', '');
-  const activeNavigation = activeSection
-    ? document.querySelector(`[data-section="${activeSection}"][data-capability]`)
-    : null;
-  if (activeNavigation?.classList.contains('hidden')) setSection('status');
-}
 
 function applyBotModules(modules = []) {
   const allowed = new Set([
@@ -219,11 +200,8 @@ function updateAssistantContext() {
     panelState.bot.phoneNumber || 'Sin número vinculado',
   ].join(' · ');
   const warning = document.querySelector('#assistant-context-warning');
-  const mixedMode = panelState.bot.operatingMode === 'BUSINESS_MIXED';
-  warning.textContent = mixedMode
-    ? 'Este asistente utiliza un mismo número con reglas diferentes para grupos y chats privados.'
-    : '';
-  warning.classList.toggle('hidden', !mixedMode);
+  warning.textContent = '';
+  warning.classList.add('hidden');
 }
 
 function updateSetupState(selector, text, complete) {
@@ -840,7 +818,6 @@ async function loadBotSummary(refreshForms = true) {
   panelState.bot = result.bot;
   panelState.profile = result.profile;
   applyBotModules(result.visibleModules || []);
-  applyBotCapabilities(result.bot.capabilities);
   const connection = result.runtime?.connection || {
     state: result.bot.whatsappStatus,
     lastConnectedAt: result.bot.lastConnectedAt,
@@ -884,10 +861,6 @@ async function loadBotSummary(refreshForms = true) {
     ['Consultas hoy', result.usage.requests],
     ['Tokens hoy', result.usage.totalTokens],
   ];
-  if (result.bot.capabilities.conversationContinuationEnabled)
-    cards.push(['Conversaciones activas', result.activeConversations]);
-  if (result.bot.capabilities.humanAssistanceEnabled)
-    cards.push(['Solicitudes pendientes', result.pendingRequests]);
   setCardGrid('#status-cards', cards);
   setCardGrid('#statistics-cards', [
     ['Consultas hoy', result.usage.requests],
@@ -1352,277 +1325,19 @@ function fillKnowledgeEntry(entry) {
   window.setTimeout(() => form.elements.title.focus(), 250);
 }
 
-async function loadMenus() {
-  if (!panelState.selectedBotId) return;
-  const result = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/menus`);
-  panelState.menus = result.menus;
-  panelState.menuOptions = result.options;
-  const initialMenu = result.menus.find((menu) => menu.isInitial && menu.enabled);
-  const activeOptions =
-    initialMenu === undefined
-      ? 0
-      : result.options.filter((option) => option.menuId === initialMenu.id && option.enabled)
-          .length;
-  updateSetupState(
-    '#setup-menu-state',
-    initialMenu === undefined
-      ? 'Falta el menÃº principal'
-      : `${activeOptions} opci${activeOptions === 1 ? 'ón' : 'ones'} activa${activeOptions === 1 ? '' : 's'}`,
-    initialMenu !== undefined && activeOptions > 0,
-  );
-  replaceSelectOptions(
-    document.querySelector('#menu-form').elements.parentMenuId,
-    result.menus,
-    'id',
-    'title',
-    'Sin menú padre',
-  );
-  replaceSelectOptions(
-    document.querySelector('#menu-option-form').elements.menuId,
-    result.menus,
-    'id',
-    'title',
-  );
-  const menusTarget = document.querySelector('#menus-list');
-  menusTarget.replaceChildren();
-  result.menus.forEach((menu) => {
-    const item = createListItem(
-      menu.title,
-      `${menu.isInitial ? 'Menú inicial · ' : ''}${menu.enabled ? 'Activo' : 'Inactivo'} · expira en ${menu.expirationMinutes} min`,
-    );
-    const actions = node('div', undefined, 'actions');
-    actions.append(actionButton('Editar', 'secondary', () => fillMenu(menu)));
-    if (!menu.isInitial)
-      actions.append(
-        actionButton('Eliminar', 'danger', async () => {
-          if (!window.confirm('¿Eliminar este menú y sus opciones?')) return;
-          await panelApi(
-            `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/menus/${menu.id}`,
-            { method: 'DELETE' },
-          );
-          await loadMenus();
-        }),
-      );
-    item.append(actions);
-    menusTarget.append(item);
-  });
-  const optionsTarget = document.querySelector('#menu-options-list');
-  optionsTarget.replaceChildren();
-  result.options.forEach((option) => {
-    const menu = result.menus.find((candidate) => candidate.id === option.menuId);
-    const item = createListItem(
-      `${option.order}. ${option.label}`,
-      `${menu?.title || 'Menú no disponible'} · ${option.actionType} · ${option.enabled ? 'Activa' : 'Inactiva'}`,
-    );
-    const actions = node('div', undefined, 'actions');
-    actions.append(
-      actionButton('Editar', 'secondary', () => fillMenuOption(option)),
-      actionButton('Eliminar', 'danger', async () => {
-        if (!window.confirm('¿Eliminar esta opción?')) return;
-        await panelApi(
-          `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/menu-options/${option.id}`,
-          { method: 'DELETE' },
-        );
-        await loadMenus();
-      }),
-    );
-    item.append(actions);
-    optionsTarget.append(item);
-  });
-}
 
-function fillMenu(menu) {
-  const form = document.querySelector('#menu-form');
-  ['id', 'title', 'message', 'helpText', 'expirationMinutes'].forEach((field) => {
-    form.elements[field].value = menu[field];
-  });
-  form.elements.parentMenuId.value = menu.parentMenuId || '';
-  form.elements.enabled.checked = menu.enabled;
-  form.elements.isInitial.checked = menu.isInitial;
-}
 
-function fillMenuOption(option) {
-  const form = document.querySelector('#menu-option-form');
-  ['id', 'menuId', 'label', 'order', 'actionType'].forEach((field) => {
-    form.elements[field].value = option[field];
-  });
-  form.elements.aliases.value = option.aliases.join('\n');
-  form.elements.actionPayload.value = JSON.stringify(option.actionPayload, null, 2);
-  form.elements.enabled.checked = option.enabled;
-}
 
-async function loadCatalog() {
-  if (!panelState.selectedBotId) return;
-  const result = await panelApi(
-    `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/catalog`,
-  );
-  panelState.catalogCategories = result.categories;
-  panelState.catalogItems = result.items;
-  const categoriesTarget = document.querySelector('#catalog-categories');
-  categoriesTarget.replaceChildren();
-  result.categories.forEach((category) => {
-    const item = createListItem(
-      category.name,
-      `${category.description || 'Sin descripción'} · ${category.enabled ? 'Activa' : 'Inactiva'}`,
-    );
-    item.append(actionButton('Editar', 'secondary', () => fillCatalogCategory(category)));
-    categoriesTarget.append(item);
-  });
-  replaceSelectOptions(
-    document.querySelector('#catalog-item-form').elements.categoryId,
-    result.categories,
-    'id',
-    'name',
-    'Sin categoría',
-  );
-  replaceSelectOptions(
-    document.querySelector('#catalog-item-form').elements.primaryMediaId,
-    panelState.mediaAssets,
-    'id',
-    'caption',
-    'Sin imagen',
-    (asset) => asset.caption || `Imagen ${asset.id}`,
-  );
-  const itemsTarget = document.querySelector('#catalog-items');
-  itemsTarget.replaceChildren();
-  if (result.items.length === 0) itemsTarget.append(emptyState('No hay productos o servicios.'));
-  result.items.forEach((itemData) => {
-    const price =
-      itemData.priceAmount === null
-        ? 'Precio no informado'
-        : `${formatMoney(itemData.priceAmount, itemData.currency)}`;
-    const item = createListItem(
-      itemData.name,
-      `${itemData.code} · ${price} · ${itemData.availability || 'Disponibilidad no informada'} · ${itemData.enabled ? 'Activo' : 'Inactivo'}`,
-    );
-    const actions = node('div', undefined, 'actions');
-    actions.append(
-      actionButton('Editar', 'secondary', () => fillCatalogItem(itemData)),
-      actionButton('Eliminar', 'danger', async () => {
-        if (!window.confirm('¿Eliminar este producto o servicio?')) return;
-        await panelApi(
-          `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/catalog/items/${itemData.id}`,
-          { method: 'DELETE' },
-        );
-        await loadCatalog();
-      }),
-    );
-    item.append(actions);
-    itemsTarget.append(item);
-  });
-  replaceSelectOptions(
-    document.querySelector('#manual-test-catalog'),
-    result.items.filter((item) => item.enabled),
-    'id',
-    'name',
-  );
-}
 
 function formatMoney(amount, currency) {
   return new Intl.NumberFormat('es-CL', { style: 'currency', currency }).format(amount / 100);
 }
 
-function fillCatalogCategory(category) {
-  const form = document.querySelector('#catalog-category-form');
-  form.elements.id.value = category.id;
-  form.elements.name.value = category.name;
-  form.elements.description.value = category.description;
-  form.elements.enabled.checked = category.enabled;
-}
 
-function fillCatalogItem(item) {
-  const form = document.querySelector('#catalog-item-form');
-  ['id', 'name', 'code', 'description', 'currency', 'presentation', 'size', 'availability'].forEach(
-    (field) => {
-      form.elements[field].value = item[field] ?? '';
-    },
-  );
-  ['priceAmount', 'offerPriceAmount', 'informedStock'].forEach((field) => {
-    form.elements[field].value = item[field] ?? '';
-  });
-  form.elements.categoryId.value = item.categoryId || '';
-  form.elements.primaryMediaId.value = item.primaryMediaId || '';
-  form.elements.variants.value = item.variants.join('\n');
-  form.elements.authorizedLink.value = item.authorizedLink || '';
-  form.elements.enabled.checked = item.enabled;
-}
 
-async function loadMedia() {
-  if (!panelState.selectedBotId) return;
-  const result = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/media`);
-  panelState.mediaAssets = result.assets;
-  replaceSelectOptions(
-    document.querySelector('#catalog-item-form').elements.primaryMediaId,
-    result.assets,
-    'id',
-    'caption',
-    'Sin imagen',
-    (asset) => asset.caption || `Imagen ${asset.id}`,
-  );
-  const target = document.querySelector('#media-list');
-  target.replaceChildren();
-  if (result.assets.length === 0) target.append(emptyState('No hay imágenes oficiales.'));
-  result.assets.forEach((asset) => {
-    const card = node('article', undefined, 'card media-card');
-    const image = document.createElement('img');
-    image.src = `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/media/${asset.id}/file`;
-    image.alt = asset.caption || 'Imagen oficial';
-    image.loading = 'lazy';
-    card.append(
-      image,
-      node('p', asset.caption || 'Sin texto', 'muted'),
-      node('small', `${Math.round(asset.byteSize / 1024)} KB`),
-    );
-    card.append(
-      actionButton('Eliminar', 'danger', async () => {
-        if (!window.confirm('¿Mover esta imagen a la papelera recuperable?')) return;
-        await panelApi(
-          `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/media/${asset.id}`,
-          { method: 'DELETE' },
-        );
-        await Promise.all([loadMedia(), loadCatalog()]);
-      }),
-    );
-    target.append(card);
-  });
-  replaceSelectOptions(
-    document.querySelector('#manual-test-media'),
-    result.assets.filter((asset) => asset.enabled),
-    'id',
-    'caption',
-    undefined,
-    (asset) => asset.caption || `Imagen ${asset.id}`,
-  );
-}
 
-async function loadHours() {
-  if (!panelState.selectedBotId) return;
-  const result = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/hours`);
-  const target = document.querySelector('#hours-editor');
-  target.replaceChildren();
-  result.hours.forEach((hour) => addHourRow(hour));
-  if (result.hours.length === 0) {
-    for (let weekday = 1; weekday <= 5; weekday += 1)
-      addHourRow({
-        weekday,
-        localDate: null,
-        openingTime: '09:00',
-        closingTime: '18:00',
-        closed: false,
-        label: '',
-      });
-  }
-}
 
-function addHourRow(
-  hour = {
-    weekday: 1,
-    localDate: null,
-    openingTime: '09:00',
-    closingTime: '18:00',
-    closed: false,
-    label: '',
-  },
+,
 ) {
   const row = node('article', undefined, 'list-item hour-row');
   const fields = node('div', undefined, 'hour-fields');
@@ -1800,13 +1515,7 @@ async function toggleBot(bot) {
   await panelApi(`/api/bots/${encodeURIComponent(bot.id)}/configuration`, {
     method: 'PATCH',
     body: JSON.stringify({
-      mode: 'community',
       enabled: !detail.bot.enabled,
-      groupsEnabled: true,
-      privateMessagesEnabled: false,
-      realMentionRequired: true,
-      continuedConversationsEnabled: false,
-      menuType: 'automatic',
     }),
   });
   await loadBots();
@@ -1905,9 +1614,6 @@ async function loadTrash() {
   });
 }
 
-function numberOrNull(value) {
-  return value === '' ? null : Number(value);
-}
 
 function lines(value) {
   return value
@@ -1990,11 +1696,6 @@ function configureForms() {
       createBotForm.elements.id.value = normalizeBotIdentifier(event.currentTarget.value);
     }
   });
-  createBotForm.elements.mode.addEventListener('change', (event) => {
-    const form = event.currentTarget.form;
-    form.elements.connectorType.value =
-      event.currentTarget.value === 'business' ? 'WHATSAPP_CLOUD_API' : 'WHATSAPP_WEB';
-  });
   createBotForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -2002,10 +1703,7 @@ function configureForms() {
       const payload = Object.fromEntries(new FormData(form));
       delete payload.exclusiveNumberConfirmed;
       payload.id = normalizeBotIdentifier(payload.id);
-      payload.mode = 'community';
-      payload.connectorType = 'WHATSAPP_WEB';
       payload.preset = payload.preset === 'empty' ? 'empty' : 'community';
-      payload.menuType = 'automatic';
       if (payload.id.length < 3) {
         notify('El identificador interno debe tener al menos 3 caracteres.', true);
         form.elements.id.focus();
@@ -2026,13 +1724,7 @@ function configureForms() {
     event.preventDefault();
     const form = event.currentTarget;
     const payload = {
-      mode: 'community',
-      menuType: 'automatic',
       enabled: form.elements.enabled.checked,
-      groupsEnabled: true,
-      privateMessagesEnabled: false,
-      realMentionRequired: true,
-      continuedConversationsEnabled: false,
     };
     try {
       await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/configuration`, {
@@ -2192,167 +1884,6 @@ function configureForms() {
       form.elements.category.value = 'General';
       await loadCachedAnswers();
       notify('Respuesta guardada.');
-    } catch (error) {
-      notify(error.message, true);
-    }
-  });
-
-  document.querySelector('#menu-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const payload = {
-      ...(form.elements.id.value ? { id: Number(form.elements.id.value) } : {}),
-      parentMenuId: numberOrNull(form.elements.parentMenuId.value),
-      title: form.elements.title.value,
-      message: form.elements.message.value,
-      helpText: form.elements.helpText.value,
-      enabled: form.elements.enabled.checked,
-      isInitial: form.elements.isInitial.checked,
-      expirationMinutes: Number(form.elements.expirationMinutes.value),
-    };
-    try {
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/menus`, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      clearMenu();
-      await loadMenus();
-      notify('Menú guardado.');
-    } catch (error) {
-      notify(error.message, true);
-    }
-  });
-  document.querySelector('#clear-menu').addEventListener('click', clearMenu);
-  document.querySelector('#new-menu').addEventListener('click', clearMenu);
-  document.querySelector('#menu-option-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    try {
-      const payload = {
-        ...(form.elements.id.value ? { id: Number(form.elements.id.value) } : {}),
-        menuId: Number(form.elements.menuId.value),
-        label: form.elements.label.value,
-        aliases: lines(form.elements.aliases.value),
-        order: Number(form.elements.order.value),
-        actionType: form.elements.actionType.value,
-        actionPayload: JSON.parse(form.elements.actionPayload.value || '{}'),
-        enabled: form.elements.enabled.checked,
-      };
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/menu-options`, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      clearForm(form, { actionPayload: '{}', order: 1 });
-      form.elements.id.value = '';
-      form.elements.enabled.checked = true;
-      await loadMenus();
-      notify('Opción guardada.');
-    } catch (error) {
-      notify(error.message, true);
-    }
-  });
-
-  document.querySelector('#catalog-category-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const payload = {
-      ...(form.elements.id.value ? { id: Number(form.elements.id.value) } : {}),
-      name: form.elements.name.value,
-      description: form.elements.description.value,
-      enabled: form.elements.enabled.checked,
-    };
-    try {
-      await panelApi(
-        `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/catalog/categories`,
-        { method: 'POST', body: JSON.stringify(payload) },
-      );
-      form.reset();
-      form.elements.id.value = '';
-      form.elements.enabled.checked = true;
-      await loadCatalog();
-      notify('Categoría guardada.');
-    } catch (error) {
-      notify(error.message, true);
-    }
-  });
-  document.querySelector('#catalog-item-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const payload = {
-      id: Number(form.elements.id.value || 0),
-      categoryId: numberOrNull(form.elements.categoryId.value),
-      name: form.elements.name.value,
-      code: form.elements.code.value,
-      description: form.elements.description.value,
-      priceAmount: numberOrNull(form.elements.priceAmount.value),
-      offerPriceAmount: numberOrNull(form.elements.offerPriceAmount.value),
-      currency: form.elements.currency.value,
-      presentation: form.elements.presentation.value,
-      size: form.elements.size.value,
-      variants: lines(form.elements.variants.value),
-      availability: form.elements.availability.value,
-      informedStock: numberOrNull(form.elements.informedStock.value),
-      primaryMediaId: numberOrNull(form.elements.primaryMediaId.value),
-      authorizedLink: form.elements.authorizedLink.value.trim() || null,
-      enabled: form.elements.enabled.checked,
-    };
-    try {
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/catalog/items`, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      clearCatalogItem();
-      await loadCatalog();
-      notify('Producto o servicio guardado.');
-    } catch (error) {
-      notify(error.message, true);
-    }
-  });
-  document.querySelector('#clear-catalog-item').addEventListener('click', clearCatalogItem);
-
-  document.querySelector('#media-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const file = form.elements.file.files[0];
-    if (!file) return;
-    try {
-      const data = await readFileAsBase64(file);
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/media`, {
-        method: 'POST',
-        body: JSON.stringify({ mimeType: file.type, data, caption: form.elements.caption.value }),
-      });
-      form.reset();
-      await Promise.all([loadMedia(), loadCatalog()]);
-      notify('Imagen oficial guardada.');
-    } catch (error) {
-      notify(error.message, true);
-    }
-  });
-
-  document.querySelector('#add-hour').addEventListener('click', () => addHourRow());
-  document.querySelector('#hours-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const hours = [...document.querySelectorAll('.hour-row')].map((row) => ({
-      weekday: row.querySelector('[data-field="localDate"]').value
-        ? null
-        : Number(row.querySelector('[data-field="weekday"]').value),
-      localDate: row.querySelector('[data-field="localDate"]').value || null,
-      openingTime: row.querySelector('[data-field="closed"]').checked
-        ? null
-        : row.querySelector('[data-field="openingTime"]').value || null,
-      closingTime: row.querySelector('[data-field="closed"]').checked
-        ? null
-        : row.querySelector('[data-field="closingTime"]').value || null,
-      closed: row.querySelector('[data-field="closed"]').checked,
-      label: row.querySelector('[data-field="label"]').value.trim(),
-    }));
-    try {
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/hours`, {
-        method: 'PUT',
-        body: JSON.stringify({ hours }),
-      });
-      await loadHours();
-      notify('Horarios guardados.');
     } catch (error) {
       notify(error.message, true);
     }
@@ -2765,37 +2296,6 @@ function configureForms() {
   document.querySelector('#refresh-bot-groups').addEventListener('click', () => {
     void loadWhatsApp().catch((error) => notify(error.message, true));
   });
-  document.querySelectorAll('.manual-bot-test').forEach((button) => {
-    button.addEventListener('click', async () => {
-      const groupKey = document.querySelector('#manual-test-group').value;
-      const kind = button.dataset.kind;
-      const resourceId =
-        kind === 'catalog_item'
-          ? Number(document.querySelector('#manual-test-catalog').value)
-          : kind === 'media'
-            ? Number(document.querySelector('#manual-test-media').value)
-            : undefined;
-      if (!groupKey || ((kind === 'catalog_item' || kind === 'media') && !resourceId)) {
-        notify('Selecciona un grupo y el recurso que deseas probar.', true);
-        return;
-      }
-      if (!window.confirm('¿Enviar esta prueba al grupo seleccionado?')) return;
-      try {
-        await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/manual-test`, {
-          method: 'POST',
-          body: JSON.stringify({
-            kind,
-            groupKey,
-            ...(resourceId ? { resourceId } : {}),
-            confirmed: true,
-          }),
-        });
-        notify('Prueba enviada al grupo seleccionado.');
-      } catch (error) {
-        notify(error.message, true);
-      }
-    });
-  });
   document.querySelector('#manual-poll-test').addEventListener('click', async () => {
     const groupKey = document.querySelector('#manual-test-group').value;
     const templateId = Number(document.querySelector('#manual-test-poll').value);
@@ -2816,30 +2316,8 @@ function configureForms() {
   });
 }
 
-function clearMenu() {
-  const form = document.querySelector('#menu-form');
-  form.reset();
-  form.elements.id.value = '';
-  form.elements.expirationMinutes.value = 15;
-  form.elements.enabled.checked = true;
-}
 
-function clearCatalogItem() {
-  const form = document.querySelector('#catalog-item-form');
-  form.reset();
-  form.elements.id.value = '';
-  form.elements.currency.value = 'CLP';
-  form.elements.enabled.checked = true;
-}
 
-function readFileAsBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new window.FileReader();
-    reader.addEventListener('load', () => resolve(String(reader.result).split(',')[1] || ''));
-    reader.addEventListener('error', () => reject(new Error('No fue posible leer el archivo.')));
-    reader.readAsDataURL(file);
-  });
-}
 
 let configured = false;
 let initializationPromise = null;

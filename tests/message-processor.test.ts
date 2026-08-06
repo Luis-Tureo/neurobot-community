@@ -177,7 +177,6 @@ describe('procesamiento por mención real y por modo', () => {
     ).resolves.toBe('responded');
     expect(client.sentMessages[0]?.text).toBe('Escribe tu pregunta después de llamar a Neurobot.');
     expect(provider.calls).toBe(0);
-    expect(database.countActiveConversationStates('neurobot')).toBe(0);
   });
 
   it('suprime dos mensajes distintos con la misma consulta durante la ventana de duplicados', async () => {

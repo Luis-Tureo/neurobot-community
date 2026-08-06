@@ -1,12 +1,4 @@
-import type { Logger } from 'pino';
-import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
-import type {
-  AssistantProfile,
-  BotMode,
-  BotRecord,
-  ConnectorType,
-  MenuType,
-} from '../domain/types.js';
+import type { AssistantProfile, BotRecord } from '../domain/types.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import { WhatsAppWebAdapter } from '../messaging/whatsapp-adapter.js';
 import type { AppDatabase } from '../persistence/database.js';
@@ -133,16 +125,11 @@ export class MultiBotManager {
 
   public async create(input: {
     id: string;
-    mode: BotMode;
-    connectorType: ConnectorType;
-    menuType: MenuType;
     profile: Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>;
   }): Promise<BotRecord> {
     const bot = this.database.createBot({
-      ...input,
-      mode: 'community',
-      connectorType: 'WHATSAPP_WEB',
-      menuType: 'automatic',
+      id: input.id,
+      profile: input.profile,
       sessionPath: this.sessions.newBotPath(input.id),
     });
     this.database.recordTechnicalEvent({

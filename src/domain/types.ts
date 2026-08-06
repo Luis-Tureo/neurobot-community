@@ -254,15 +254,7 @@ export type PollDateOverride = {
   updatedAt: string;
 };
 
-export type OrganizationType =
-  | 'Comunidad'
-  | 'Tienda'
-  | 'Restaurante'
-  | 'Distribuidora'
-  | 'Servicio profesional'
-  | 'Organización social'
-  | 'Institución educativa'
-  | 'Otro';
+export type OrganizationType = 'Comunidad' | 'Organización social' | 'Institución educativa' | 'Otro';
 
 export type AssistantProfile = {
   id: number;
@@ -285,7 +277,6 @@ export type AssistantProfile = {
   mentionPromptMessage: string;
   communityGreetingMessage: string;
   contactInformation: string;
-  businessHours: string;
   address: string | null;
   logoPath: string | null;
   primaryColor: string;
@@ -559,10 +550,9 @@ export type LinkedGroupRecord = {
   lastVerifiedAt: string;
 };
 
-export type BotMode = 'community' | 'business' | 'mixed';
-export type MenuType = 'automatic' | 'native_buttons' | 'native_list' | 'numbered';
-export type ConnectorType = 'WHATSAPP_WEB' | 'WHATSAPP_CLOUD_API';
-export type BotOperatingMode = 'COMMUNITY_GROUPS' | 'BUSINESS_PRIVATE' | 'BUSINESS_MIXED';
+export type BotMode = 'community';
+export type ConnectorType = 'WHATSAPP_WEB';
+export type BotOperatingMode = 'COMMUNITY_GROUPS';
 export type AssistantLifecycleStatus =
   | 'DRAFT'
   | 'UNLINKED'
@@ -575,15 +565,8 @@ export type AssistantLifecycleStatus =
   | 'DELETED';
 
 export type BotCapabilities = {
-  communitySingleTurnMode: boolean;
-  privateChatsEnabled: boolean;
-  conversationContinuationEnabled: boolean;
-  interactiveMenusEnabled: boolean;
-  numericMenuRepliesEnabled: boolean;
-  pollsAsMenusEnabled: boolean;
-  pollsForCommunityEngagementEnabled: boolean;
-  catalogEnabled: boolean;
-  humanAssistanceEnabled: boolean;
+  communitySingleTurnMode: true;
+  pollsForCommunityEngagementEnabled: true;
 };
 
 export type BotRecord = {
@@ -598,10 +581,7 @@ export type BotRecord = {
   deletedAt: string | null;
   scheduledPermanentDeletionAt: string | null;
   groupChannelEnabled: boolean;
-  privateChannelEnabled: boolean;
-  privateBusinessModeEnabled: boolean;
   activeConnectorId: number | null;
-  connectorMigrationLocked: boolean;
   capabilities: BotCapabilities;
   enabled: boolean;
   profileId: number;
@@ -614,141 +594,9 @@ export type BotRecord = {
   maskedNumber: string | null;
   lastConnectedAt: string | null;
   groupsEnabled: boolean;
-  privateMessagesEnabled: boolean;
   realMentionRequired: boolean;
-  continuedConversationsEnabled: boolean;
-  menuType: MenuType;
   aiCredentialMode: 'global' | 'per_bot';
   perBotAIKeyConfigured: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type MenuDefinition = {
-  id: number;
-  botId: string;
-  parentMenuId: number | null;
-  title: string;
-  message: string;
-  helpText: string;
-  enabled: boolean;
-  isInitial: boolean;
-  expirationMinutes: number;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type MenuActionType =
-  | 'text'
-  | 'catalog_item'
-  | 'catalog_category'
-  | 'media'
-  | 'submenu'
-  | 'knowledge'
-  | 'ai'
-  | 'hours'
-  | 'address'
-  | 'payments'
-  | 'shipping'
-  | 'human_assistance'
-  | 'reservation_request'
-  | 'back'
-  | 'exit';
-
-export type MenuOption = {
-  id: number;
-  botId: string;
-  menuId: number;
-  label: string;
-  aliases: string[];
-  order: number;
-  actionType: MenuActionType;
-  actionPayload: Record<string, string | number | boolean | null>;
-  enabled: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type ConversationState = {
-  botId: string;
-  chatHash: string;
-  userHash: string;
-  activeFlow: string;
-  currentMenuId: number | null;
-  previousMenuId: number | null;
-  currentStep: string;
-  expiresAt: string;
-  updatedAt: string;
-};
-
-export type CatalogCategory = {
-  id: number;
-  botId: string;
-  name: string;
-  description: string;
-  enabled: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type CatalogItem = {
-  id: number;
-  botId: string;
-  categoryId: number | null;
-  name: string;
-  code: string;
-  description: string;
-  priceAmount: number | null;
-  offerPriceAmount: number | null;
-  currency: string;
-  presentation: string;
-  size: string;
-  variants: string[];
-  availability: string;
-  informedStock: number | null;
-  primaryMediaId: number | null;
-  authorizedLink: string | null;
-  enabled: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type MediaAsset = {
-  id: number;
-  botId: string;
-  internalName: string;
-  relativePath: string;
-  mimeType: 'image/png' | 'image/jpeg' | 'image/webp';
-  byteSize: number;
-  sha256: string;
-  caption: string;
-  enabled: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type BusinessHour = {
-  id: number;
-  botId: string;
-  weekday: number | null;
-  localDate: string | null;
-  openingTime: string | null;
-  closingTime: string | null;
-  closed: boolean;
-  label: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type HumanAssistanceRequest = {
-  id: number;
-  botId: string;
-  chatHash: string;
-  userHash: string;
-  requestedInterval: string;
-  localDate: string;
-  status: 'pending' | 'confirmed' | 'rejected' | 'attended' | 'cancelled';
-  note: string;
   createdAt: string;
   updatedAt: string;
 };

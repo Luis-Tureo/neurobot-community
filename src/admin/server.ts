@@ -63,10 +63,6 @@ const COOKIE_NAME = 'panel_session';
 
 const organizationTypeSchema = z.enum([
   'Comunidad',
-  'Tienda',
-  'Restaurante',
-  'Distribuidora',
-  'Servicio profesional',
   'Organización social',
   'Institución educativa',
   'Otro',
@@ -93,7 +89,6 @@ const profileFieldsSchema = z
     mentionPromptMessage: z.string().trim().min(1).max(600),
     communityGreetingMessage: z.string().trim().min(1).max(1200),
     contactInformation: z.string().trim().max(1000),
-    businessHours: z.string().trim().max(1000),
     address: z.string().trim().max(500).nullable(),
     logoPath: z.string().trim().max(200).nullable(),
     primaryColor: z.string().regex(/^#[0-9a-f]{6}$/iu),
@@ -234,33 +229,18 @@ const botCreateSchema = z
   .object({
     id: z.preprocess(
       (value) => (typeof value === 'string' ? normalizeBotIdentifier(value) : value),
-      z
-        .string()
-        .regex(/^[a-z][a-z0-9-]{2,39}$/u, 'Escribe un identificador de al menos 3 caracteres.'),
+      z.string().regex(/^[a-z][a-z0-9-]{2,39}$/u, 'Escribe un identificador de al menos 3 caracteres.'),
     ),
     organizationName: z.string().trim().min(1).max(160),
     botName: z.string().trim().min(1).max(80),
     organizationType: organizationTypeSchema,
     timezone: z.string().trim().min(1).max(80),
-    mode: z.literal('community').default('community'),
-    connectorType: z.literal('WHATSAPP_WEB').default('WHATSAPP_WEB'),
     provider: z.enum(['groq', 'disabled']),
     preset: z.enum(['community', 'empty']),
-    menuType: z.literal('automatic').default('automatic'),
   })
   .strict();
 
-const botConfigurationSchema = z
-  .object({
-    mode: z.literal('community').default('community'),
-    enabled: z.boolean(),
-    groupsEnabled: z.literal(true).default(true),
-    privateMessagesEnabled: z.literal(false).default(false),
-    realMentionRequired: z.literal(true).default(true),
-    continuedConversationsEnabled: z.literal(false).default(false),
-    menuType: z.literal('automatic').default('automatic'),
-  })
-  .strict();
+const botConfigurationSchema = z.object({ enabled: z.boolean() }).strict();
 
 const activationAliasesSchema = z
   .object({
@@ -748,24 +728,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     });
   });
 
-  app.addHook('preHandler', async (request, reply) => {
-    if (!request.url.startsWith('/api/')) return;
-    const route = request.routeOptions.url ?? request.url.split('?')[0] ?? '';
-    const removedCommunityRoute =
-      route.includes('/menus') ||
-      route.includes('/catalog') ||
-      route.includes('/media') ||
-      route.includes('/hours') ||
-      route.includes('/requests') ||
-      route.includes('/connectors') ||
-      route.includes('/webhook') ||
-      route.includes('/transfer-commercial');
-    if (!removedCommunityRoute) return;
-    await reply.code(404).send({
-      error: 'Esta función no forma parte de Neurobot Community.',
-      code: 'COMMUNITY_ONLY_ROUTE',
-    });
-  });
 
   app.addHook('preHandler', async (request, reply) => {
     if (!request.url.startsWith('/api/')) return;
@@ -896,7 +858,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           lifecycleStatus: bot.lifecycleStatus,
           deletionLocked: bot.deletionLocked,
           groupChannelEnabled: bot.groupChannelEnabled,
-          privateChannelEnabled: bot.privateChannelEnabled,
           connectorConflict: safeConnectorConflict(context, bot),
           visibleModules: moduleVisibility.visibleModules(bot),
         };
@@ -1073,9 +1034,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const profile = createProfileFromPreset(input);
       const bot = await context.multiBotManager.create({
         id: input.id,
-        mode: 'community',
-        connectorType: 'WHATSAPP_WEB',
-        menuType: 'automatic',
         profile,
       });
       const aiSettings = context.database.getAISettings(bot.profileId);
@@ -1111,8 +1069,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         context.anonymizer.identifier(identifier),
       ),
       activationAliases: context.database.listBotActivationAliases(botId),
-      activeConversations: 0,
-      pendingRequests: 0,
     };
   });
 
@@ -1137,26 +1093,12 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
     async (request) => {
       const botId = parseBotId(request.params);
-      const parsed = botConfigurationSchema.parse(request.body);
-      const input = {
-        ...parsed,
-        mode: 'community' as const,
-        groupsEnabled: true,
-        privateMessagesEnabled: false,
-        realMentionRequired: true,
-        continuedConversationsEnabled: false,
-        menuType: 'automatic' as const,
-      };
+      const input = botConfigurationSchema.parse(request.body);
       const previous = context.database.getBot(botId);
-      const bot = context.database.updateBotConfiguration({ botId, ...input });
-      if (context.multiBotManager !== undefined && bot.connectorType === 'WHATSAPP_WEB') {
-        const connectionSettingsChanged =
-          previous !== null &&
-          (previous.privateMessagesEnabled !== bot.privateMessagesEnabled ||
-            previous.groupsEnabled !== bot.groupsEnabled ||
-            previous.enabled !== bot.enabled);
+      const bot = context.database.updateBotConfiguration({ botId, enabled: input.enabled });
+      if (context.multiBotManager !== undefined) {
         if (!bot.enabled) await context.multiBotManager.stop(botId);
-        else if (connectionSettingsChanged) {
+        else if (previous !== null && previous.enabled !== bot.enabled) {
           await context.multiBotManager.stop(botId);
           await context.multiBotManager.start(botId);
         }

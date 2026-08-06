@@ -20,9 +20,6 @@ import type {
   BotMode,
   BotOperatingMode,
   BotRecord,
-  BusinessHour,
-  CatalogCategory,
-  CatalogItem,
   CachedAnswer,
   CachedAnswerSourceType,
   CachedAnswerStatus,
@@ -36,7 +33,6 @@ import type {
   AssistantLifecycleStatus,
   AssistantProfile,
   CommandRecord,
-  ConversationState,
   ConnectorType,
   DeliverySource,
   DetectedGroup,
@@ -47,13 +43,7 @@ import type {
   KnowledgeEntry,
   KnowledgeFragment,
   LinkedGroupRecord,
-  HumanAssistanceRequest,
   HiddenPollTemplate,
-  MediaAsset,
-  MenuActionType,
-  MenuDefinition,
-  MenuOption,
-  MenuType,
   ModerationGroupMode,
   ModerationRule,
   ModerationSettings,
@@ -1836,6 +1826,23 @@ export class AppDatabase {
           GROUP BY bot_id, group_hash;
         `,
       },
+
+      {
+        version: 21,
+        sql: `
+          DROP TABLE IF EXISTS catalog_item_media;
+          DROP TABLE IF EXISTS catalog_items;
+          DROP TABLE IF EXISTS catalog_categories;
+          DROP TABLE IF EXISTS media_assets;
+          DROP TABLE IF EXISTS business_hours;
+          DROP TABLE IF EXISTS human_assistance_requests;
+          DROP TABLE IF EXISTS conversation_states;
+          DROP TABLE IF EXISTS menu_options;
+          DROP TABLE IF EXISTS menu_definitions;
+          DROP TABLE IF EXISTS assistant_capability_assignments;
+          DROP TABLE IF EXISTS assistant_modules;
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -3605,19 +3612,18 @@ export class AppDatabase {
     return (
       this.db
         .prepare(
-          `SELECT bots.*, profiles.id AS profile_id, profiles.organization_name,
-             profiles.bot_name, profiles.organization_type, profiles.timezone,
+          `SELECT bots.id, bots.internal_identifier, bots.client_id, bots.lifecycle_status,
+             bots.deletion_locked, bots.deleted_at, bots.scheduled_permanent_deletion_at,
+             bots.group_channel_enabled, bots.active_connector_id, bots.enabled,
+             bots.created_at, bots.updated_at,
+             profiles.id AS profile_id, profiles.organization_name, profiles.bot_name,
+             profiles.organization_type, profiles.timezone,
              sessions.session_path, sessions.status AS whatsapp_status,
              sessions.masked_number, sessions.last_connected_at,
-             channels.groups_enabled, channels.private_messages_enabled,
-             channels.real_mention_required, channels.continued_conversations_enabled,
-             channels.menu_type, credentials.credential_mode,
-             capabilities.community_single_turn_mode, capabilities.private_chats_enabled,
-             capabilities.conversation_continuation_enabled,
-             capabilities.interactive_menus_enabled, capabilities.numeric_menu_replies_enabled,
-             capabilities.polls_as_menus_enabled,
+             channels.groups_enabled, channels.real_mention_required,
+             credentials.credential_mode,
+             capabilities.community_single_turn_mode,
              capabilities.polls_for_community_engagement_enabled,
-             capabilities.catalog_enabled, capabilities.human_assistance_enabled,
              CASE WHEN credentials.encrypted_api_key IS NULL THEN 0 ELSE 1 END AS key_configured
            FROM bots
            JOIN bot_profiles mapping ON mapping.bot_id = bots.id
@@ -3632,18 +3638,12 @@ export class AppDatabase {
         id: string;
         internal_identifier: string;
         client_id: string;
-        mode: BotMode;
-        connector_type: ConnectorType;
-        operating_mode: BotOperatingMode;
         lifecycle_status: AssistantLifecycleStatus;
         deletion_locked: number;
         deleted_at: string | null;
         scheduled_permanent_deletion_at: string | null;
         group_channel_enabled: number;
-        private_channel_enabled: number;
-        private_business_mode_enabled: number;
         active_connector_id: number | null;
-        connector_migration_locked: number;
         enabled: number;
         profile_id: number;
         organization_name: string;
@@ -3655,21 +3655,11 @@ export class AppDatabase {
         masked_number: string | null;
         last_connected_at: string | null;
         groups_enabled: number;
-        private_messages_enabled: number;
         real_mention_required: number;
-        continued_conversations_enabled: number;
-        menu_type: MenuType;
         credential_mode: 'global' | 'per_bot';
         key_configured: number;
         community_single_turn_mode: number;
-        private_chats_enabled: number;
-        conversation_continuation_enabled: number;
-        interactive_menus_enabled: number;
-        numeric_menu_replies_enabled: number;
-        polls_as_menus_enabled: number;
         polls_for_community_engagement_enabled: number;
-        catalog_enabled: number;
-        human_assistance_enabled: number;
         created_at: string;
         updated_at: string;
       }>
@@ -3685,20 +3675,10 @@ export class AppDatabase {
       deletedAt: row.deleted_at,
       scheduledPermanentDeletionAt: row.scheduled_permanent_deletion_at,
       groupChannelEnabled: true,
-      privateChannelEnabled: false,
-      privateBusinessModeEnabled: false,
       activeConnectorId: row.active_connector_id,
-      connectorMigrationLocked: row.connector_migration_locked === 1,
       capabilities: {
-        communitySingleTurnMode: row.community_single_turn_mode === 1,
-        privateChatsEnabled: false,
-        conversationContinuationEnabled: false,
-        interactiveMenusEnabled: false,
-        numericMenuRepliesEnabled: false,
-        pollsAsMenusEnabled: false,
-        pollsForCommunityEngagementEnabled: row.polls_for_community_engagement_enabled === 1,
-        catalogEnabled: false,
-        humanAssistanceEnabled: false,
+        communitySingleTurnMode: true,
+        pollsForCommunityEngagementEnabled: true,
       },
       enabled: row.enabled === 1,
       profileId: row.profile_id,
@@ -3711,10 +3691,7 @@ export class AppDatabase {
       maskedNumber: row.masked_number,
       lastConnectedAt: row.last_connected_at,
       groupsEnabled: true,
-      privateMessagesEnabled: false,
       realMentionRequired: true,
-      continuedConversationsEnabled: false,
-      menuType: 'automatic',
       aiCredentialMode: row.credential_mode,
       perBotAIKeyConfigured: row.key_configured === 1,
       createdAt: row.created_at,
@@ -3961,20 +3938,13 @@ export class AppDatabase {
 
   public createBot(input: {
     id: string;
-    mode: BotMode;
-    connectorType?: ConnectorType;
     sessionPath: string;
     profile: Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>;
-    menuType?: MenuType;
   }): BotRecord {
     const botId = validateBotIdentifier(input.id);
     if (this.getBot(botId) !== null)
       throw new Error('Ya existe un asistente con ese identificador.');
     const now = new Date().toISOString();
-    const mode: BotMode = 'community';
-    const connectorType: ConnectorType = 'WHATSAPP_WEB';
-    const operatingMode: BotOperatingMode = 'COMMUNITY_GROUPS';
-    const capabilities = capabilitiesFor('community');
     const create = this.db.transaction(() => {
       this.db
         .prepare(
@@ -3983,23 +3953,10 @@ export class AppDatabase {
              assistant_type, lifecycle_status, deletion_locked, group_channel_enabled,
              private_channel_enabled, private_business_mode_enabled,
              connector_migration_locked, enabled, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, 1, ?, ?)`,
+           ) VALUES (?, ?, ?, 'community', 'WHATSAPP_WEB', 'COMMUNITY_GROUPS',
+             'COMMUNITY_GROUPS', 'LINKING', 0, 1, 0, 0, 0, 1, ?, ?)`,
         )
-        .run(
-          botId,
-          botId,
-          botId,
-          mode,
-          connectorType,
-          operatingMode,
-          operatingMode,
-          connectorType === 'WHATSAPP_WEB' ? 'LINKING' : 'DRAFT',
-          1,
-          0,
-          0,
-          now,
-          now,
-        );
+        .run(botId, botId, botId, now, now);
       const profile = this.createAssistantProfile(input.profile, botId);
       this.activateAssistantProfile(profile.id);
       this.db
@@ -4014,38 +3971,20 @@ export class AppDatabase {
           `INSERT INTO assistant_connectors(
              assistant_id,connector_type,whatsapp_web_client_id,local_auth_session_key,
              local_auth_session_path,connector_status,created_at,updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, 'WHATSAPP_WEB', ?, ?, ?, 'LINKING', ?, ?)`,
         )
-        .run(
-          botId,
-          connectorType,
-          botId,
-          botId,
-          validateSessionPath(input.sessionPath),
-          connectorType === 'WHATSAPP_WEB' ? 'LINKING' : 'UNLINKED',
-          now,
-          now,
-        );
+        .run(botId, botId, botId, validateSessionPath(input.sessionPath), now, now);
       this.db
         .prepare('UPDATE bots SET active_connector_id = ? WHERE id = ?')
         .run(Number(connector.lastInsertRowid), botId);
-      const privateMessages = 0;
-      const groupsEnabled = 1;
       this.db
         .prepare(
           `INSERT INTO bot_channel_settings(
              bot_id, groups_enabled, private_messages_enabled, real_mention_required,
              continued_conversations_enabled, private_initial_menu_id, menu_type, updated_at
-           ) VALUES (?, ?, ?, 1, ?, NULL, ?, ?)`,
+           ) VALUES (?, 1, 0, 1, 0, NULL, 'automatic', ?)`,
         )
-        .run(
-          botId,
-          groupsEnabled,
-          privateMessages,
-          capabilities.conversationContinuationEnabled ? 1 : 0,
-          'automatic',
-          now,
-        );
+        .run(botId, now);
       this.db
         .prepare(
           `INSERT INTO bot_capabilities(
@@ -4054,21 +3993,9 @@ export class AppDatabase {
              numeric_menu_replies_enabled, polls_as_menus_enabled,
              polls_for_community_engagement_enabled, catalog_enabled,
              human_assistance_enabled, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, 1, 0, 0, 0, 0, 0, 1, 0, 0, ?)`,
         )
-        .run(
-          botId,
-          capabilities.communitySingleTurnMode ? 1 : 0,
-          capabilities.privateChatsEnabled ? 1 : 0,
-          capabilities.conversationContinuationEnabled ? 1 : 0,
-          capabilities.interactiveMenusEnabled ? 1 : 0,
-          capabilities.numericMenuRepliesEnabled ? 1 : 0,
-          capabilities.pollsAsMenusEnabled ? 1 : 0,
-          capabilities.pollsForCommunityEngagementEnabled ? 1 : 0,
-          capabilities.catalogEnabled ? 1 : 0,
-          capabilities.humanAssistanceEnabled ? 1 : 0,
-          now,
-        );
+        .run(botId, now);
       this.db
         .prepare(
           `INSERT INTO bot_ai_credentials(
@@ -4076,7 +4003,7 @@ export class AppDatabase {
            ) VALUES (?, 'global', NULL, NULL, ?)`,
         )
         .run(botId, now);
-      this.seedBotKnowledgeCategories(botId, profile.id, 'community', now);
+      this.seedBotKnowledgeCategories(botId, profile.id, now);
       this.seedBotAutomation(botId, defaultAutomaticConfiguration(input.profile.timezone), now);
       this.seedBotPollTemplates(botId, input.profile.timezone, now);
       this.replaceBotActivationAliases(botId, [input.profile.activationAlias], now);
@@ -4086,13 +4013,8 @@ export class AppDatabase {
     return this.getBot(botId) as BotRecord;
   }
 
-  private seedBotKnowledgeCategories(
-    botId: string,
-    profileId: number,
-    mode: BotMode,
-    now: string,
-  ): void {
-    const community = [
+  private seedBotKnowledgeCategories(botId: string, profileId: number, now: string): void {
+    const categories = [
       'Presentación',
       'Normas',
       'Grupos',
@@ -4102,21 +4024,6 @@ export class AppDatabase {
       'Seguridad',
       'Preguntas frecuentes',
     ];
-    const business = [
-      'Productos',
-      'Servicios',
-      'Precios',
-      'Horarios',
-      'Dirección',
-      'Pagos',
-      'Despachos',
-      'Cambios',
-      'Garantías',
-      'Promociones',
-      'Contacto',
-      'Preguntas frecuentes',
-    ];
-    const categories = mode === 'community' ? community : business;
     const insert = this.db.prepare(
       `INSERT OR IGNORE INTO knowledge_categories(
          profile_id, bot_id, name, enabled, created_at, updated_at
@@ -4125,67 +4032,40 @@ export class AppDatabase {
     for (const category of categories) insert.run(profileId, botId, category, now, now);
   }
 
-  public updateBotConfiguration(input: {
-    botId: string;
-    mode: BotMode;
-    enabled: boolean;
-    groupsEnabled: boolean;
-    privateMessagesEnabled: boolean;
-    realMentionRequired: boolean;
-    continuedConversationsEnabled: boolean;
-    menuType: MenuType;
-  }): BotRecord {
+  public updateBotConfiguration(input: { botId: string; enabled: boolean }): BotRecord {
     const existing = this.getBot(input.botId);
     if (existing === null) throw new Error('El asistente no existe.');
-    const mode: BotMode = 'community';
-    const capabilities = capabilitiesFor('community');
     const now = new Date().toISOString();
     const update = this.db.transaction(() => {
       const changed = this.db
         .prepare(
-          'UPDATE bots SET mode = ?, operating_mode = ?, enabled = ?, updated_at = ? WHERE id = ?',
+          `UPDATE bots SET mode='community', connector_type='WHATSAPP_WEB',
+             operating_mode='COMMUNITY_GROUPS', assistant_type='COMMUNITY_GROUPS',
+             group_channel_enabled=1, private_channel_enabled=0,
+             private_business_mode_enabled=0, enabled=?, lifecycle_status=CASE
+               WHEN ?=0 THEN 'DISABLED'
+               WHEN lifecycle_status='DISABLED' THEN 'UNLINKED'
+               ELSE lifecycle_status END,
+             updated_at=? WHERE id=?`,
         )
-        .run(mode, operatingModeFor(mode), input.enabled ? 1 : 0, now, input.botId);
+        .run(input.enabled ? 1 : 0, input.enabled ? 1 : 0, now, input.botId);
       if (changed.changes !== 1) throw new Error('El asistente no existe.');
       this.db
         .prepare(
-          `UPDATE bots SET assistant_type=?, group_channel_enabled=?, private_channel_enabled=?,
-             private_business_mode_enabled=?, lifecycle_status=CASE
-               WHEN ?=0 THEN 'DISABLED'
-               WHEN lifecycle_status='DISABLED' THEN 'UNLINKED'
-               ELSE lifecycle_status END
-           WHERE id=?`,
+          `UPDATE bot_channel_settings SET groups_enabled=1, private_messages_enabled=0,
+             real_mention_required=1, continued_conversations_enabled=0,
+             private_initial_menu_id=NULL, menu_type='automatic', updated_at=? WHERE bot_id=?`,
         )
-        .run(operatingModeFor(mode), 1, 0, 0, input.enabled ? 1 : 0, input.botId);
+        .run(now, input.botId);
       this.db
         .prepare(
-          `UPDATE bot_channel_settings SET groups_enabled = ?, private_messages_enabled = ?,
-             real_mention_required = ?, continued_conversations_enabled = ?, menu_type = ?,
-             updated_at = ? WHERE bot_id = ?`,
+          `UPDATE bot_capabilities SET community_single_turn_mode=1, private_chats_enabled=0,
+             conversation_continuation_enabled=0, interactive_menus_enabled=0,
+             numeric_menu_replies_enabled=0, polls_as_menus_enabled=0,
+             polls_for_community_engagement_enabled=1, catalog_enabled=0,
+             human_assistance_enabled=0, updated_at=? WHERE bot_id=?`,
         )
-        .run(1, 0, 1, 0, 'automatic', now, input.botId);
-      this.db
-        .prepare(
-          `UPDATE bot_capabilities SET community_single_turn_mode = ?,
-             private_chats_enabled = ?, conversation_continuation_enabled = ?,
-             interactive_menus_enabled = ?, numeric_menu_replies_enabled = ?,
-             polls_as_menus_enabled = ?, polls_for_community_engagement_enabled = ?,
-             catalog_enabled = ?, human_assistance_enabled = ?, updated_at = ?
-           WHERE bot_id = ?`,
-        )
-        .run(
-          capabilities.communitySingleTurnMode ? 1 : 0,
-          0,
-          0,
-          capabilities.interactiveMenusEnabled ? 1 : 0,
-          capabilities.numericMenuRepliesEnabled ? 1 : 0,
-          capabilities.pollsAsMenusEnabled ? 1 : 0,
-          capabilities.pollsForCommunityEngagementEnabled ? 1 : 0,
-          capabilities.catalogEnabled ? 1 : 0,
-          capabilities.humanAssistanceEnabled ? 1 : 0,
-          now,
-          input.botId,
-        );
+        .run(now, input.botId);
     });
     update();
     return this.getBot(input.botId) as BotRecord;
@@ -4246,745 +4126,6 @@ export class AppDatabase {
       { credential_mode: 'global' | 'per_bot'; encrypted_api_key: string | null } | undefined;
     if (row === undefined) throw new Error('La configuración de credenciales no existe.');
     return { mode: row.credential_mode, encryptedApiKey: row.encrypted_api_key };
-  }
-
-  public listMenus(botId: string): MenuDefinition[] {
-    return (
-      this.db
-        .prepare(
-          'SELECT * FROM menu_definitions WHERE bot_id = ? ORDER BY is_initial DESC, title COLLATE NOCASE',
-        )
-        .all(botId) as Array<{
-        id: number;
-        bot_id: string;
-        parent_menu_id: number | null;
-        title: string;
-        message: string;
-        help_text: string;
-        enabled: number;
-        is_initial: number;
-        expiration_minutes: number;
-        created_at: string;
-        updated_at: string;
-      }>
-    ).map((row) => ({
-      id: row.id,
-      botId: row.bot_id,
-      parentMenuId: row.parent_menu_id,
-      title: row.title,
-      message: row.message,
-      helpText: row.help_text,
-      enabled: row.enabled === 1,
-      isInitial: row.is_initial === 1,
-      expirationMinutes: row.expiration_minutes,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
-  }
-
-  public getMenu(botId: string, id: number): MenuDefinition | null {
-    return this.listMenus(botId).find((menu) => menu.id === id) ?? null;
-  }
-
-  public saveMenu(input: {
-    id?: number;
-    botId: string;
-    parentMenuId: number | null;
-    title: string;
-    message: string;
-    helpText: string;
-    enabled: boolean;
-    isInitial: boolean;
-    expirationMinutes: number;
-  }): MenuDefinition {
-    const now = new Date().toISOString();
-    const title = validatePlainText(input.title, 'título del menú', 120);
-    const message = validatePlainText(input.message, 'mensaje del menú', 600);
-    const helpText = validatePlainText(input.helpText, 'ayuda del menú', 300, true);
-    if (
-      !Number.isInteger(input.expirationMinutes) ||
-      input.expirationMinutes < 1 ||
-      input.expirationMinutes > 1440
-    ) {
-      throw new Error('La expiración del menú no es válida.');
-    }
-    const save = this.db.transaction(() => {
-      if (input.isInitial) {
-        this.db
-          .prepare('UPDATE menu_definitions SET is_initial = 0 WHERE bot_id = ?')
-          .run(input.botId);
-      }
-      if (input.id === undefined) {
-        return Number(
-          this.db
-            .prepare(
-              `INSERT INTO menu_definitions(
-                 bot_id, parent_menu_id, title, message, help_text, enabled, is_initial,
-                 expiration_minutes, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            )
-            .run(
-              input.botId,
-              input.parentMenuId,
-              title,
-              message,
-              helpText,
-              input.enabled ? 1 : 0,
-              input.isInitial ? 1 : 0,
-              input.expirationMinutes,
-              now,
-              now,
-            ).lastInsertRowid,
-        );
-      }
-      const changed = this.db
-        .prepare(
-          `UPDATE menu_definitions SET parent_menu_id = ?, title = ?, message = ?, help_text = ?,
-             enabled = ?, is_initial = ?, expiration_minutes = ?, updated_at = ?
-           WHERE id = ? AND bot_id = ?`,
-        )
-        .run(
-          input.parentMenuId,
-          title,
-          message,
-          helpText,
-          input.enabled ? 1 : 0,
-          input.isInitial ? 1 : 0,
-          input.expirationMinutes,
-          now,
-          input.id,
-          input.botId,
-        );
-      if (changed.changes !== 1) throw new Error('El menú no existe.');
-      return input.id;
-    });
-    const id = save();
-    return this.getMenu(input.botId, id) as MenuDefinition;
-  }
-
-  public deleteMenu(botId: string, id: number): boolean {
-    const menu = this.getMenu(botId, id);
-    if (menu?.isInitial === true) throw new Error('El menú inicial no se puede eliminar.');
-    return (
-      this.db.prepare('DELETE FROM menu_definitions WHERE id = ? AND bot_id = ?').run(id, botId)
-        .changes === 1
-    );
-  }
-
-  public listMenuOptions(botId: string, menuId?: number): MenuOption[] {
-    const rows = (
-      menuId === undefined
-        ? this.db
-            .prepare('SELECT * FROM menu_options WHERE bot_id = ? ORDER BY menu_id, option_order')
-            .all(botId)
-        : this.db
-            .prepare(
-              'SELECT * FROM menu_options WHERE bot_id = ? AND menu_id = ? ORDER BY option_order',
-            )
-            .all(botId, menuId)
-    ) as Array<{
-      id: number;
-      bot_id: string;
-      menu_id: number;
-      label: string;
-      aliases: string;
-      option_order: number;
-      action_type: MenuActionType;
-      action_payload: string;
-      enabled: number;
-      created_at: string;
-      updated_at: string;
-    }>;
-    return rows.map((row) => ({
-      id: row.id,
-      botId: row.bot_id,
-      menuId: row.menu_id,
-      label: row.label,
-      aliases: parseStringArray(row.aliases),
-      order: row.option_order,
-      actionType: row.action_type,
-      actionPayload: parseSafeObject(row.action_payload),
-      enabled: row.enabled === 1,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
-  }
-
-  public saveMenuOption(input: {
-    id?: number;
-    botId: string;
-    menuId: number;
-    label: string;
-    aliases: string[];
-    order: number;
-    actionType: MenuActionType;
-    actionPayload: Record<string, string | number | boolean | null>;
-    enabled: boolean;
-  }): MenuOption {
-    if (this.getMenu(input.botId, input.menuId) === null) throw new Error('El menú no existe.');
-    const label = validatePlainText(input.label, 'opción', 100);
-    const aliases = validateTextArray(input.aliases, 'alias de opción', 20);
-    if (!Number.isInteger(input.order) || input.order < 1 || input.order > 100)
-      throw new Error('El orden no es válido.');
-    validateActionPayload(input.actionType, input.actionPayload);
-    const now = new Date().toISOString();
-    let id = input.id;
-    if (id === undefined) {
-      id = Number(
-        this.db
-          .prepare(
-            `INSERT INTO menu_options(
-               bot_id, menu_id, label, aliases, option_order, action_type, action_payload,
-               enabled, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            input.botId,
-            input.menuId,
-            label,
-            JSON.stringify(aliases),
-            input.order,
-            input.actionType,
-            JSON.stringify(input.actionPayload),
-            input.enabled ? 1 : 0,
-            now,
-            now,
-          ).lastInsertRowid,
-      );
-    } else {
-      const changed = this.db
-        .prepare(
-          `UPDATE menu_options SET menu_id = ?, label = ?, aliases = ?, option_order = ?,
-             action_type = ?, action_payload = ?, enabled = ?, updated_at = ?
-           WHERE id = ? AND bot_id = ?`,
-        )
-        .run(
-          input.menuId,
-          label,
-          JSON.stringify(aliases),
-          input.order,
-          input.actionType,
-          JSON.stringify(input.actionPayload),
-          input.enabled ? 1 : 0,
-          now,
-          id,
-          input.botId,
-        );
-      if (changed.changes !== 1) throw new Error('La opción no existe.');
-    }
-    return this.listMenuOptions(input.botId).find((option) => option.id === id) as MenuOption;
-  }
-
-  public deleteMenuOption(botId: string, id: number): boolean {
-    return (
-      this.db.prepare('DELETE FROM menu_options WHERE id = ? AND bot_id = ?').run(id, botId)
-        .changes === 1
-    );
-  }
-
-  public getConversationState(
-    botId: string,
-    chatHash: string,
-    userHash: string,
-  ): ConversationState | null {
-    const row = this.db
-      .prepare(
-        'SELECT * FROM conversation_states WHERE bot_id = ? AND chat_hash = ? AND user_hash = ?',
-      )
-      .get(botId, chatHash, userHash) as
-      | {
-          bot_id: string;
-          chat_hash: string;
-          user_hash: string;
-          active_flow: string;
-          current_menu_id: number | null;
-          previous_menu_id: number | null;
-          current_step: string;
-          expires_at: string;
-          updated_at: string;
-        }
-      | undefined;
-    return row === undefined
-      ? null
-      : {
-          botId: row.bot_id,
-          chatHash: row.chat_hash,
-          userHash: row.user_hash,
-          activeFlow: row.active_flow,
-          currentMenuId: row.current_menu_id,
-          previousMenuId: row.previous_menu_id,
-          currentStep: row.current_step,
-          expiresAt: row.expires_at,
-          updatedAt: row.updated_at,
-        };
-  }
-
-  public saveConversationState(state: ConversationState): void {
-    this.db
-      .prepare(
-        `INSERT INTO conversation_states(
-           bot_id, chat_hash, user_hash, active_flow, current_menu_id, previous_menu_id,
-           current_step, expires_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(bot_id, chat_hash, user_hash) DO UPDATE SET
-           active_flow = excluded.active_flow, current_menu_id = excluded.current_menu_id,
-           previous_menu_id = excluded.previous_menu_id, current_step = excluded.current_step,
-           expires_at = excluded.expires_at, updated_at = excluded.updated_at`,
-      )
-      .run(
-        state.botId,
-        state.chatHash,
-        state.userHash,
-        state.activeFlow,
-        state.currentMenuId,
-        state.previousMenuId,
-        state.currentStep,
-        state.expiresAt,
-        state.updatedAt,
-      );
-  }
-
-  public deleteConversationState(botId: string, chatHash: string, userHash: string): void {
-    this.db
-      .prepare(
-        'DELETE FROM conversation_states WHERE bot_id = ? AND chat_hash = ? AND user_hash = ?',
-      )
-      .run(botId, chatHash, userHash);
-  }
-
-  public clearConversationStates(botId: string): number {
-    return this.db.prepare('DELETE FROM conversation_states WHERE bot_id = ?').run(botId).changes;
-  }
-
-  public deleteExpiredConversationStates(now = new Date()): number {
-    return this.db
-      .prepare('DELETE FROM conversation_states WHERE expires_at <= ?')
-      .run(now.toISOString()).changes;
-  }
-
-  public countActiveConversationStates(botId: string, now = new Date()): number {
-    const row = this.db
-      .prepare(
-        'SELECT COUNT(*) AS total FROM conversation_states WHERE bot_id = ? AND expires_at > ?',
-      )
-      .get(botId, now.toISOString()) as { total: number };
-    return row.total;
-  }
-
-  public listCatalogCategories(botId: string): CatalogCategory[] {
-    return (
-      this.db
-        .prepare('SELECT * FROM catalog_categories WHERE bot_id = ? ORDER BY name COLLATE NOCASE')
-        .all(botId) as Array<{
-        id: number;
-        bot_id: string;
-        name: string;
-        description: string;
-        enabled: number;
-        created_at: string;
-        updated_at: string;
-      }>
-    ).map((row) => ({
-      id: row.id,
-      botId: row.bot_id,
-      name: row.name,
-      description: row.description,
-      enabled: row.enabled === 1,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
-  }
-
-  public saveCatalogCategory(input: {
-    id?: number;
-    botId: string;
-    name: string;
-    description: string;
-    enabled: boolean;
-  }): CatalogCategory {
-    const name = validatePlainText(input.name, 'categoría del catálogo', 120);
-    const description = validatePlainText(input.description, 'descripción', 600, true);
-    const now = new Date().toISOString();
-    let id = input.id;
-    if (id === undefined) {
-      id = Number(
-        this.db
-          .prepare(
-            'INSERT INTO catalog_categories(bot_id, name, description, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-          )
-          .run(input.botId, name, description, input.enabled ? 1 : 0, now, now).lastInsertRowid,
-      );
-    } else {
-      const changed = this.db
-        .prepare(
-          'UPDATE catalog_categories SET name = ?, description = ?, enabled = ?, updated_at = ? WHERE id = ? AND bot_id = ?',
-        )
-        .run(name, description, input.enabled ? 1 : 0, now, id, input.botId);
-      if (changed.changes !== 1) throw new Error('La categoría no existe.');
-    }
-    return this.listCatalogCategories(input.botId).find(
-      (category) => category.id === id,
-    ) as CatalogCategory;
-  }
-
-  public listCatalogItems(botId: string): CatalogItem[] {
-    return (
-      this.db
-        .prepare('SELECT * FROM catalog_items WHERE bot_id = ? ORDER BY name COLLATE NOCASE')
-        .all(botId) as Array<{
-        id: number;
-        bot_id: string;
-        category_id: number | null;
-        name: string;
-        code: string;
-        description: string;
-        price_amount: number | null;
-        offer_price_amount: number | null;
-        currency: string;
-        presentation: string;
-        size: string;
-        variants: string;
-        availability: string;
-        informed_stock: number | null;
-        primary_media_id: number | null;
-        authorized_link: string | null;
-        enabled: number;
-        created_at: string;
-        updated_at: string;
-      }>
-    ).map((row) => ({
-      id: row.id,
-      botId: row.bot_id,
-      categoryId: row.category_id,
-      name: row.name,
-      code: row.code,
-      description: row.description,
-      priceAmount: row.price_amount,
-      offerPriceAmount: row.offer_price_amount,
-      currency: row.currency,
-      presentation: row.presentation,
-      size: row.size,
-      variants: parseStringArray(row.variants),
-      availability: row.availability,
-      informedStock: row.informed_stock,
-      primaryMediaId: row.primary_media_id,
-      authorizedLink: row.authorized_link,
-      enabled: row.enabled === 1,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
-  }
-
-  public saveCatalogItem(input: Omit<CatalogItem, 'createdAt' | 'updatedAt'>): CatalogItem {
-    const name = validatePlainText(input.name, 'producto o servicio', 160);
-    const code = validatePlainText(input.code, 'código', 80);
-    const description = validatePlainText(input.description, 'descripción', 1200, true);
-    const currency = validatePlainText(input.currency, 'moneda', 8).toUpperCase();
-    validateMoney(input.priceAmount);
-    validateMoney(input.offerPriceAmount);
-    if (
-      input.informedStock !== null &&
-      (!Number.isInteger(input.informedStock) || input.informedStock < 0)
-    )
-      throw new Error('El stock informado no es válido.');
-    if (input.authorizedLink !== null && !/^https:\/\//u.test(input.authorizedLink))
-      throw new Error('El enlace autorizado debe utilizar HTTPS.');
-    const now = new Date().toISOString();
-    let id = input.id;
-    if (id <= 0) {
-      id = Number(
-        this.db
-          .prepare(
-            `INSERT INTO catalog_items(
-           bot_id, category_id, name, code, description, price_amount, offer_price_amount, currency,
-           presentation, size, variants, availability, informed_stock, primary_media_id,
-           authorized_link, enabled, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            input.botId,
-            input.categoryId,
-            name,
-            code,
-            description,
-            input.priceAmount,
-            input.offerPriceAmount,
-            currency,
-            validatePlainText(input.presentation, 'presentación', 200, true),
-            validatePlainText(input.size, 'tamaño', 100, true),
-            JSON.stringify(validateTextArray(input.variants, 'variantes', 50)),
-            validatePlainText(input.availability, 'disponibilidad', 300, true),
-            input.informedStock,
-            input.primaryMediaId,
-            input.authorizedLink,
-            input.enabled ? 1 : 0,
-            now,
-            now,
-          ).lastInsertRowid,
-      );
-    } else {
-      const changed = this.db
-        .prepare(
-          `UPDATE catalog_items SET category_id = ?, name = ?, code = ?, description = ?, price_amount = ?,
-           offer_price_amount = ?, currency = ?, presentation = ?, size = ?, variants = ?, availability = ?,
-           informed_stock = ?, primary_media_id = ?, authorized_link = ?, enabled = ?, updated_at = ?
-         WHERE id = ? AND bot_id = ?`,
-        )
-        .run(
-          input.categoryId,
-          name,
-          code,
-          description,
-          input.priceAmount,
-          input.offerPriceAmount,
-          currency,
-          validatePlainText(input.presentation, 'presentación', 200, true),
-          validatePlainText(input.size, 'tamaño', 100, true),
-          JSON.stringify(validateTextArray(input.variants, 'variantes', 50)),
-          validatePlainText(input.availability, 'disponibilidad', 300, true),
-          input.informedStock,
-          input.primaryMediaId,
-          input.authorizedLink,
-          input.enabled ? 1 : 0,
-          now,
-          id,
-          input.botId,
-        );
-      if (changed.changes !== 1) throw new Error('El producto o servicio no existe.');
-    }
-    return this.listCatalogItems(input.botId).find((item) => item.id === id) as CatalogItem;
-  }
-
-  public deleteCatalogItem(botId: string, id: number): boolean {
-    return (
-      this.db.prepare('DELETE FROM catalog_items WHERE id = ? AND bot_id = ?').run(id, botId)
-        .changes === 1
-    );
-  }
-
-  public listMediaAssets(botId: string): MediaAsset[] {
-    return (
-      this.db
-        .prepare('SELECT * FROM media_assets WHERE bot_id = ? ORDER BY created_at DESC')
-        .all(botId) as Array<{
-        id: number;
-        bot_id: string;
-        internal_name: string;
-        relative_path: string;
-        mime_type: 'image/png' | 'image/jpeg' | 'image/webp';
-        byte_size: number;
-        sha256: string;
-        caption: string;
-        enabled: number;
-        created_at: string;
-        updated_at: string;
-      }>
-    ).map((row) => ({
-      id: row.id,
-      botId: row.bot_id,
-      internalName: row.internal_name,
-      relativePath: row.relative_path,
-      mimeType: row.mime_type,
-      byteSize: row.byte_size,
-      sha256: row.sha256,
-      caption: row.caption,
-      enabled: row.enabled === 1,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
-  }
-
-  public createMediaAsset(input: {
-    botId: string;
-    internalName: string;
-    relativePath: string;
-    mimeType: MediaAsset['mimeType'];
-    byteSize: number;
-    sha256: string;
-    caption: string;
-  }): MediaAsset {
-    const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        `INSERT INTO media_assets(
-         bot_id, internal_name, relative_path, mime_type, byte_size, sha256, caption, enabled, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-      )
-      .run(
-        input.botId,
-        input.internalName,
-        input.relativePath,
-        input.mimeType,
-        input.byteSize,
-        input.sha256,
-        validatePlainText(input.caption, 'texto de imagen', 300, true),
-        now,
-        now,
-      );
-    return this.listMediaAssets(input.botId).find(
-      (asset) => asset.id === Number(result.lastInsertRowid),
-    ) as MediaAsset;
-  }
-
-  public deleteMediaAsset(botId: string, id: number): MediaAsset | null {
-    const asset = this.listMediaAssets(botId).find((item) => item.id === id) ?? null;
-    if (asset === null) return null;
-    const remove = this.db.transaction(() => {
-      this.db
-        .prepare(
-          'UPDATE catalog_items SET primary_media_id = NULL WHERE bot_id = ? AND primary_media_id = ?',
-        )
-        .run(botId, id);
-      this.db
-        .prepare('DELETE FROM catalog_item_media WHERE bot_id = ? AND media_id = ?')
-        .run(botId, id);
-      this.db.prepare('DELETE FROM media_assets WHERE bot_id = ? AND id = ?').run(botId, id);
-    });
-    remove();
-    return asset;
-  }
-
-  public listBusinessHours(botId: string): BusinessHour[] {
-    return (
-      this.db
-        .prepare(
-          'SELECT * FROM business_hours WHERE bot_id = ? ORDER BY local_date, weekday, opening_time',
-        )
-        .all(botId) as Array<{
-        id: number;
-        bot_id: string;
-        weekday: number | null;
-        local_date: string | null;
-        opening_time: string | null;
-        closing_time: string | null;
-        closed: number;
-        label: string;
-        created_at: string;
-        updated_at: string;
-      }>
-    ).map((row) => ({
-      id: row.id,
-      botId: row.bot_id,
-      weekday: row.weekday,
-      localDate: row.local_date,
-      openingTime: row.opening_time,
-      closingTime: row.closing_time,
-      closed: row.closed === 1,
-      label: row.label,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
-  }
-
-  public replaceBusinessHours(
-    botId: string,
-    hours: Array<Omit<BusinessHour, 'id' | 'botId' | 'createdAt' | 'updatedAt'>>,
-  ): BusinessHour[] {
-    if (hours.length > 100) throw new Error('Se excedió la cantidad máxima de horarios.');
-    const now = new Date().toISOString();
-    const replace = this.db.transaction(() => {
-      this.db.prepare('DELETE FROM business_hours WHERE bot_id = ?').run(botId);
-      const insert = this.db.prepare(
-        `INSERT INTO business_hours(
-           bot_id, weekday, local_date, opening_time, closing_time, closed, label, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
-      for (const hour of hours) {
-        validateBusinessHour(hour);
-        insert.run(
-          botId,
-          hour.weekday,
-          hour.localDate,
-          hour.openingTime,
-          hour.closingTime,
-          hour.closed ? 1 : 0,
-          validatePlainText(hour.label, 'etiqueta de horario', 160, true),
-          now,
-          now,
-        );
-      }
-    });
-    replace();
-    return this.listBusinessHours(botId);
-  }
-
-  public createHumanAssistanceRequest(input: {
-    botId: string;
-    chatHash: string;
-    userHash: string;
-    requestedInterval: string;
-    localDate: string;
-    note?: string;
-  }): HumanAssistanceRequest {
-    const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        `INSERT INTO human_assistance_requests(
-         bot_id, chat_hash, user_hash, requested_interval, local_date, status, note, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
-      )
-      .run(
-        input.botId,
-        input.chatHash,
-        input.userHash,
-        validatePlainText(input.requestedInterval, 'intervalo', 120, true),
-        validateDate(input.localDate),
-        validatePlainText(input.note ?? '', 'nota', 300, true),
-        now,
-        now,
-      );
-    return this.listHumanAssistanceRequests(input.botId).find(
-      (item) => item.id === Number(result.lastInsertRowid),
-    ) as HumanAssistanceRequest;
-  }
-
-  public listHumanAssistanceRequests(botId: string): HumanAssistanceRequest[] {
-    return (
-      this.db
-        .prepare(
-          'SELECT * FROM human_assistance_requests WHERE bot_id = ? ORDER BY created_at DESC',
-        )
-        .all(botId) as Array<{
-        id: number;
-        bot_id: string;
-        chat_hash: string;
-        user_hash: string;
-        requested_interval: string;
-        local_date: string;
-        status: HumanAssistanceRequest['status'];
-        note: string;
-        created_at: string;
-        updated_at: string;
-      }>
-    ).map((row) => ({
-      id: row.id,
-      botId: row.bot_id,
-      chatHash: row.chat_hash,
-      userHash: row.user_hash,
-      requestedInterval: row.requested_interval,
-      localDate: row.local_date,
-      status: row.status,
-      note: row.note,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
-  }
-
-  public updateHumanAssistanceRequest(
-    botId: string,
-    id: number,
-    status: HumanAssistanceRequest['status'],
-    note: string,
-  ): HumanAssistanceRequest {
-    const changed = this.db
-      .prepare(
-        'UPDATE human_assistance_requests SET status = ?, note = ?, updated_at = ? WHERE bot_id = ? AND id = ?',
-      )
-      .run(status, validatePlainText(note, 'nota', 300, true), new Date().toISOString(), botId, id);
-    if (changed.changes !== 1) throw new Error('La solicitud no existe.');
-    return this.listHumanAssistanceRequests(botId).find(
-      (request) => request.id === id,
-    ) as HumanAssistanceRequest;
   }
 
   public listAssistantProfiles(): AssistantProfile[] {
@@ -8522,7 +7663,6 @@ function mapAssistantProfile(row: AssistantProfileRow): AssistantProfile {
     mentionPromptMessage: row.mention_prompt_message,
     communityGreetingMessage: row.community_greeting_message,
     contactInformation: row.contact_information,
-    businessHours: row.business_hours,
     address: row.address,
     logoPath: row.logo_path,
     primaryColor: row.primary_color ?? '#176b61',
@@ -8633,20 +7773,6 @@ function parseStringArray(value: string): string[] {
   }
 }
 
-function parseSafeObject(value: string): Record<string, string | number | boolean | null> {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, string | number | boolean | null] =>
-          entry[1] === null || ['string', 'number', 'boolean'].includes(typeof entry[1]),
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
 
 function parseSafeJsonObject(value: string): Record<string, unknown> {
   try {
@@ -8664,10 +7790,6 @@ function validateAssistantProfile<
 >(input: T): T {
   const organizationTypes: OrganizationType[] = [
     'Comunidad',
-    'Tienda',
-    'Restaurante',
-    'Distribuidora',
-    'Servicio profesional',
     'Organización social',
     'Institución educativa',
     'Otro',
@@ -8706,7 +7828,6 @@ function validateAssistantProfile<
       1200,
     ),
     contactInformation: validatePlainText(input.contactInformation, 'contacto', 1000, true),
-    businessHours: validatePlainText(input.businessHours, 'horarios', 1000, true),
     address:
       input.address === null ? null : validatePlainText(input.address, 'dirección', 500, true),
     logoPath,
