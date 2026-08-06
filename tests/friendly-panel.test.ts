@@ -1,14 +1,18 @@
 import { readFileSync } from 'node:fs';
 
 const html = readFileSync('public/index.html', 'utf8');
-const script = readFileSync('public/friendly-panel.js', 'utf8');
-const styles = readFileSync('public/friendly-panel.css', 'utf8');
+const loader = readFileSync('public/friendly-panel.js', 'utf8');
+const script = `${readFileSync('public/friendly-panel-base.js', 'utf8')}\n${loader}`;
+const styleLoader = readFileSync('public/friendly-panel.css', 'utf8');
+const styles = `${readFileSync('public/friendly-panel-base.css', 'utf8')}\n${styleLoader}`;
 
 describe('panel amigable y ordenado', () => {
   it('carga la capa de navegación y simplificación después del panel principal', () => {
     expect(html).toContain('<link rel="stylesheet" href="/friendly-panel.css" />');
     expect(html).toContain('<script type="module" src="/friendly-panel.js"></script>');
     expect(html.indexOf('/friendly-panel.js')).toBeGreaterThan(html.indexOf('/multibot-panel.js'));
+    expect(loader).toContain('/friendly-panel-base.js');
+    expect(loader).toContain('/automation-lab.js');
   });
 
   it('ordena los módulos en grupos comprensibles', () => {
