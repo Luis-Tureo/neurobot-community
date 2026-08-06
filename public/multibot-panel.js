@@ -1660,53 +1660,6 @@ function addHourRow(
   document.querySelector('#hours-editor').append(row);
 }
 
-async function loadRequests() {
-  if (!panelState.selectedBotId) return;
-  const result = await panelApi(
-    `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/requests`,
-  );
-  const target = document.querySelector('#requests-list');
-  target.replaceChildren();
-  if (result.requests.length === 0) target.append(emptyState('No hay solicitudes de atención.'));
-  result.requests.forEach((request) => {
-    const item = createListItem(
-      `Solicitud ${request.id}`,
-      `${request.localDate} · ${request.requestedInterval || 'Intervalo no indicado'} · chat ${request.chatHash} · usuario ${request.userHash}`,
-    );
-    const controls = node('div', undefined, 'request-controls');
-    const status = document.createElement('select');
-    [
-      ['pending', 'Pendiente'],
-      ['confirmed', 'Confirmada'],
-      ['rejected', 'Rechazada'],
-      ['attended', 'Atendida'],
-      ['cancelled', 'Cancelada'],
-    ].forEach(([value, label]) => status.add(new window.Option(label, value)));
-    status.value = request.status;
-    const note = document.createElement('input');
-    note.maxLength = 300;
-    note.placeholder = 'Nota breve opcional';
-    note.value = request.note;
-    controls.append(
-      status,
-      note,
-      actionButton('Guardar', '', async () => {
-        await panelApi(
-          `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/requests/${request.id}`,
-          {
-            method: 'PATCH',
-            body: JSON.stringify({ status: status.value, note: note.value.trim() }),
-          },
-        );
-        await loadRequests();
-        notify('Solicitud actualizada.');
-      }),
-    );
-    item.append(controls);
-    target.append(item);
-  });
-}
-
 async function loadAI() {
   if (!panelState.selectedBotId) return;
   const [result, global] = await Promise.all([
