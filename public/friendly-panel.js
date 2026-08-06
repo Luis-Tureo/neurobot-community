@@ -5,7 +5,12 @@ const NAV_GROUPS = [
     description: 'Estado, conexión y grupos',
     open: false,
     items: [
-      { section: 'status', label: 'Inicio', description: 'Estado general, WhatsApp y grupos', icon: '⌂' },
+      {
+        section: 'status',
+        label: 'Inicio',
+        description: 'Estado general, WhatsApp y grupos',
+        icon: '⌂',
+      },
     ],
   },
   {
@@ -14,8 +19,18 @@ const NAV_GROUPS = [
     description: 'Perfil e inteligencia artificial',
     open: false,
     items: [
-      { section: 'profile', label: 'Nombre y perfil', description: 'Identidad, tono y mensajes', icon: '✎' },
-      { section: 'ai', label: 'Inteligencia artificial', description: 'Activación y nivel de uso', icon: '✦' },
+      {
+        section: 'profile',
+        label: 'Nombre y perfil',
+        description: 'Identidad, tono y mensajes',
+        icon: '✎',
+      },
+      {
+        section: 'ai',
+        label: 'Inteligencia artificial',
+        description: 'Activación y nivel de uso',
+        icon: '✦',
+      },
     ],
   },
   {
@@ -24,11 +39,26 @@ const NAV_GROUPS = [
     description: 'Menús, productos y datos útiles',
     open: false,
     items: [
-      { section: 'menus', label: 'Menú de respuestas', description: 'Opciones que verá el usuario', icon: '☷' },
-      { section: 'catalog', label: 'Productos y servicios', description: 'Catálogo y disponibilidad', icon: '▦' },
-      { section: 'hours', label: 'Horarios', description: 'Días y horas de atención', icon: '◷' },
-      { section: 'media', label: 'Imágenes', description: 'Archivos para respuestas', icon: '▧' },
-      { section: 'cached-answers', label: 'Preguntas frecuentes', description: 'Respuestas aprobadas y reutilizables', icon: '?' },
+      {
+        section: 'menus',
+        label: 'Menú de respuestas',
+        description: 'Opciones que verá el usuario',
+        icon: '☷',
+      },
+      {
+        section: 'catalog',
+        label: 'Productos y servicios',
+        description: ' y disponibilidad',
+        icon: '▦',
+      },
+      { section: 'hours', label: '', description: 'Días y horas de atención', icon: '◷' },
+      { section: 'media', label: '', description: 'Archivos para respuestas', icon: '▧' },
+      {
+        section: 'cached-answers',
+        label: 'Preguntas frecuentes',
+        description: 'Respuestas aprobadas y reutilizables',
+        icon: '?',
+      },
     ],
   },
   {
@@ -37,20 +67,50 @@ const NAV_GROUPS = [
     description: 'Mensajes, encuestas y convivencia',
     open: false,
     items: [
-      { section: 'automatic-messages', label: 'Mensajes automáticos', description: 'Bienvenida, saludos y reglas', icon: '↻' },
-      { section: 'polls', label: 'Encuestas', description: 'Participación y programación', icon: '▥' },
-      { section: 'moderation', label: 'Moderación y reglas', description: 'Protección y revisión humana', icon: '◇' },
+      {
+        section: 'automatic-messages',
+        label: 'Mensajes automáticos',
+        description: 'Bienvenida, saludos y reglas',
+        icon: '↻',
+      },
+      {
+        section: 'polls',
+        label: 'Encuestas',
+        description: 'Participación y programación',
+        icon: '▥',
+      },
+      {
+        section: 'moderation',
+        label: 'Moderación y reglas',
+        description: 'Protección y revisión humana',
+        icon: '◇',
+      },
     ],
   },
   {
     id: 'management',
     label: 'Seguimiento y administración',
-    description: 'Solicitudes, métricas y mantenimiento',
+    description: ', métricas y mantenimiento',
     open: false,
     items: [
-      { section: 'requests', label: 'Solicitudes humanas', description: 'Casos derivados para atención', icon: '◎' },
-      { section: 'statistics', label: 'Estadísticas', description: 'Actividad y resultados generales', icon: '▤' },
-      { section: 'maintenance', label: 'Mantenimiento', description: 'Diagnóstico y acciones delicadas', icon: '⚙' },
+      {
+        section: 'requests',
+        label: ' humanas',
+        description: 'Casos derivados para atención',
+        icon: '◎',
+      },
+      {
+        section: 'statistics',
+        label: 'Estadísticas',
+        description: 'Actividad y resultados generales',
+        icon: '▤',
+      },
+      {
+        section: 'maintenance',
+        label: 'Mantenimiento',
+        description: 'Diagnóstico y acciones delicadas',
+        icon: '⚙',
+      },
     ],
   },
 ];
@@ -70,7 +130,8 @@ const SECTION_GUIDES = {
   },
   profile: {
     eyebrow: 'Identidad del asistente',
-    description: 'Define primero el nombre, la organización, el objetivo y el tono. Los mensajes especiales y la marca visual quedan en opciones adicionales.',
+    description:
+      'Define primero el nombre, la organización, el objetivo y el tono. Los mensajes especiales y la marca visual quedan en opciones adicionales.',
     actions: [
       { label: 'Editar identidad', target: '[name="organizationName"]' },
       { label: 'Ver mensajes especiales', target: '[data-friendly-group="profile-messages"]' },
@@ -78,11 +139,13 @@ const SECTION_GUIDES = {
   },
   knowledge: {
     eyebrow: 'Información oficial',
-    description: 'Guarda datos concretos que Neurobot pueda usar para responder. Las categorías sirven únicamente para mantenerlos ordenados.',
+    description:
+      'Guarda datos concretos que Neurobot pueda usar para responder. Las categorías sirven únicamente para mantenerlos ordenados.',
   },
   menus: {
     eyebrow: 'Recorrido del usuario',
-    description: 'Crea primero el menú principal y después agrega las opciones que abrirán respuestas o funciones.',
+    description:
+      'Crea primero el menú principal y después agrega las opciones que abrirán respuestas o funciones.',
     actions: [
       { label: 'Crear menú', target: '#menu-form [name="title"]' },
       { label: 'Configurar opciones', target: '[data-friendly-group="menu-options"]' },
@@ -90,7 +153,8 @@ const SECTION_GUIDES = {
   },
   catalog: {
     eyebrow: 'Oferta del negocio',
-    description: 'Registra productos o servicios. Las categorías quedan separadas para no recargar la pantalla.',
+    description:
+      'Registra productos o servicios. Las categorías quedan separadas para no recargar la pantalla.',
     actions: [
       { label: 'Agregar producto o servicio', target: '#catalog-item-form [name="name"]' },
       { label: 'Administrar categorías', target: '[data-friendly-group="catalog-categories"]' },
@@ -98,7 +162,8 @@ const SECTION_GUIDES = {
   },
   media: {
     eyebrow: 'Contenido visual',
-    description: 'Sube imágenes oficiales con un texto breve para utilizarlas en menús y respuestas.',
+    description:
+      'Sube imágenes oficiales con un texto breve para utilizarlas en menús y respuestas.',
   },
   hours: {
     eyebrow: 'Disponibilidad',
@@ -106,39 +171,50 @@ const SECTION_GUIDES = {
   },
   'cached-answers': {
     eyebrow: 'Respuestas aprobadas',
-    description: 'Busca primero una respuesta existente. Agrega una nueva solo cuando la información esté confirmada.',
+    description:
+      'Busca primero una respuesta existente. Agrega una nueva solo cuando la información esté confirmada.',
     actions: [
       { label: 'Buscar respuesta', target: '#cached-answer-search [name="search"]' },
-      { label: 'Agregar pregunta frecuente', target: '[data-friendly-group="cached-answer-editor"]' },
+      {
+        label: 'Agregar pregunta frecuente',
+        target: '[data-friendly-group="cached-answer-editor"]',
+      },
     ],
   },
   ai: {
     eyebrow: 'Configuración guiada',
-    description: 'Las opciones principales están visibles y los ajustes técnicos permanecen cerrados hasta que los necesites.',
+    description:
+      'Las opciones principales están visibles y los ajustes técnicos permanecen cerrados hasta que los necesites.',
   },
   'automatic-messages': {
     eyebrow: 'Programación sencilla',
-    description: 'Configura una automatización a la vez. Bienvenida aparece abierta y las demás pueden desplegarse cuando corresponda.',
+    description:
+      'Configura una automatización a la vez. Bienvenida aparece abierta y las demás pueden desplegarse cuando corresponda.',
   },
   polls: {
     eyebrow: 'Participación de la comunidad',
-    description: 'Activa la programación general, administra el banco de encuestas y abre las herramientas de prueba solo cuando las necesites.',
+    description:
+      'Activa la programación general, administra el banco de encuestas y abre las herramientas de prueba solo cuando las necesites.',
   },
   moderation: {
     eyebrow: 'Convivencia protegida',
-    description: 'Selecciona un grupo, carga sus reglas, realiza las pruebas y activa la moderación después de revisar los resultados.',
+    description:
+      'Selecciona un grupo, carga sus reglas, realiza las pruebas y activa la moderación después de revisar los resultados.',
   },
   requests: {
     eyebrow: 'Atención humana',
-    description: 'Revisa las solicitudes que el asistente derivó sin mostrar conversaciones ni datos privados.',
+    description:
+      'Revisa las solicitudes que el asistente derivó sin mostrar conversaciones ni datos privados.',
   },
   statistics: {
     eyebrow: 'Resumen de actividad',
-    description: 'Consulta primero los indicadores generales. Los eventos técnicos quedan en una sección adicional.',
+    description:
+      'Consulta primero los indicadores generales. Los eventos técnicos quedan en una sección adicional.',
   },
   maintenance: {
     eyebrow: 'Administración segura',
-    description: 'Las herramientas habituales aparecen primero. Las acciones destructivas permanecen cerradas para evitar errores.',
+    description:
+      'Las herramientas habituales aparecen primero. Las acciones destructivas permanecen cerradas para evitar errores.',
   },
 };
 
@@ -193,7 +269,10 @@ function enhanceDesktopNavigation() {
   if (!tabs || !more || more.dataset.friendlyReady === 'true') return;
 
   const buttonMap = new Map(
-    queryAll('button[data-section].bot-only', tabs).map((button) => [button.dataset.section, button]),
+    queryAll('button[data-section].bot-only', tabs).map((button) => [
+      button.dataset.section,
+      button,
+    ]),
   );
 
   const oldTitle = query('.nav-group-title.bot-only', tabs);
@@ -361,7 +440,8 @@ function directChildContaining(parent, selector) {
 
 function groupChildren(parent, nodes, configuration) {
   const uniqueNodes = [...new Set(nodes.filter((node) => node && node.parentElement === parent))];
-  if (uniqueNodes.length === 0 || query(`[data-friendly-group="${configuration.id}"]`, parent)) return null;
+  if (uniqueNodes.length === 0 || query(`[data-friendly-group="${configuration.id}"]`, parent))
+    return null;
 
   const details = createElement('details', 'card inset friendly-module-details');
   details.dataset.friendlyGroup = configuration.id;
@@ -370,7 +450,8 @@ function groupChildren(parent, nodes, configuration) {
   const summary = createElement('summary');
   const summaryCopy = createElement('span', 'friendly-details-copy');
   summaryCopy.append(createElement('strong', '', configuration.title));
-  if (configuration.description) summaryCopy.append(createElement('small', '', configuration.description));
+  if (configuration.description)
+    summaryCopy.append(createElement('small', '', configuration.description));
   summary.append(summaryCopy);
 
   const content = createElement('div', 'friendly-details-content');
@@ -591,7 +672,8 @@ function renameSections() {
 
 function enhanceSections() {
   renameSections();
-  for (const [sectionName, guide] of Object.entries(SECTION_GUIDES)) addSectionGuide(sectionName, guide);
+  for (const [sectionName, guide] of Object.entries(SECTION_GUIDES))
+    addSectionGuide(sectionName, guide);
 
   simplifyWhatsApp();
   simplifyProfile();

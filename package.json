@@ -1,8 +1,8 @@
 {
-  "name": "asistente-comunidad-neurodivergente",
+  "name": "neurobot-community",
   "version": "0.1.0",
   "private": true,
-  "description": "Plataforma local configurable de asistentes para grupos de WhatsApp.",
+  "description": "Plataforma local de asistentes para comunidades y grupos de WhatsApp mediante WhatsApp Web.",
   "license": "UNLICENSED",
   "type": "module",
   "engines": {

@@ -1,0 +1,27 @@
+Refactor comunitario inicial aplicado.
+Refactor exit code: 0
+
+up to date, audited 425 packages in 867ms
+
+109 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+Lockfile exit code: 0
+npm warn exec The following package was not found and will be installed: prettier@3.9.6
+[90mpackage.json[39m 31ms (unchanged)
+[[31merror[39m] No parser could be inferred for file "/home/runner/work/asistente-comunidad-neurodivergente/asistente-comunidad-neurodivergente/.env.example".
+[90mREADME.md[39m 69ms (unchanged)
+src/core/assistant-module-visibility-service.ts 61ms
+src/core/profile-presets.ts 26ms
+src/core/bot-instance.ts 57ms
+src/core/multi-bot-manager.ts 36ms
+src/admin/server.ts 521ms
+src/persistence/database.ts 438ms
+src/index.ts 15ms
+public/index.html 178ms
+public/multibot-panel.js 217ms
+public/friendly-panel.js 34ms
+public/styles.css 118ms
+tests/community-only-boundaries.test.ts 4ms
+Prettier exit code: 2

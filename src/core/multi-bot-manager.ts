@@ -1,6 +1,12 @@
 import type { Logger } from 'pino';
 import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
-import type { AssistantProfile, BotMode, BotRecord, ConnectorType, MenuType } from '../domain/types.js';
+import type {
+  AssistantProfile,
+  BotMode,
+  BotRecord,
+  ConnectorType,
+  MenuType,
+} from '../domain/types.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import { WhatsAppWebAdapter } from '../messaging/whatsapp-adapter.js';
 import type { AppDatabase } from '../persistence/database.js';
@@ -30,18 +36,17 @@ export class MultiBotManager {
     private readonly logger: Logger,
     private readonly options: BotInstanceOptions & { chromeExecutablePath?: string },
     private readonly clientFactory: ClientFactory = (bot) => {
-      if (bot.connectorType !== 'WHATSAPP_WEB') {
-        throw new Error('El conector WHATSAPP_CLOUD_API requiere credenciales y webhooks oficiales antes de iniciar.');
-      }
       return new WhatsAppWebAdapter(
         {
           sessionPath: bot.sessionPath,
           clientId: bot.clientId,
-          acceptPrivateMessages: bot.privateMessagesEnabled,
+          acceptPrivateMessages: false,
           maxMessageLength: options.maxMessageLength,
           developmentMode: options.developmentMode,
           communityPollVotesNoAction: bot.capabilities.communitySingleTurnMode,
-          ...(options.chromeExecutablePath === undefined ? {} : { chromeExecutablePath: options.chromeExecutablePath }),
+          ...(options.chromeExecutablePath === undefined
+            ? {}
+            : { chromeExecutablePath: options.chromeExecutablePath }),
         },
         logger,
         anonymizer,
@@ -87,11 +92,7 @@ export class MultiBotManager {
     let bot = this.database.getBot(botId);
     if (bot === null) throw new Error('El asistente no existe.');
     if (!this.canStart(bot)) {
-      throw new Error(
-        bot.connectorType === 'WHATSAPP_CLOUD_API'
-          ? 'El conector Cloud API queda pendiente hasta completar sus credenciales y webhook.'
-          : 'El asistente no puede iniciarse en su estado actual.',
-      );
+      throw new Error('El asistente comunitario no puede iniciarse en su estado actual.');
     }
     await this.sessions.pathFor(bot);
     bot = this.database.getBot(botId) as BotRecord;
@@ -116,7 +117,11 @@ export class MultiBotManager {
             result: 'archived',
           });
           this.logger.warn(
-            { operation: 'TEMPORARY_SESSION_CLEANED', botId: duplicateBotId, backupCreated: Boolean(backupPath) },
+            {
+              operation: 'TEMPORARY_SESSION_CLEANED',
+              botId: duplicateBotId,
+              backupCreated: Boolean(backupPath),
+            },
             'La sesión temporal duplicada fue aislada sin afectar al asistente existente',
           );
         },
@@ -135,12 +140,15 @@ export class MultiBotManager {
   }): Promise<BotRecord> {
     const bot = this.database.createBot({
       ...input,
+      mode: 'community',
+      connectorType: 'WHATSAPP_WEB',
+      menuType: 'automatic',
       sessionPath: this.sessions.newBotPath(input.id),
     });
     this.database.recordTechnicalEvent({
       botId: bot.id,
       eventType: 'ASSISTANT_DRAFT_CREATED',
-      result: bot.connectorType === 'WHATSAPP_WEB' ? 'linking' : 'draft',
+      result: 'linking',
     });
     if (this.canStart(bot)) {
       this.database.recordTechnicalEvent({
@@ -153,12 +161,6 @@ export class MultiBotManager {
       } catch (error) {
         this.recordInstanceFailure('BOT_START_FAILED', bot.id, error);
       }
-    } else {
-      this.database.recordTechnicalEvent({
-        botId: bot.id,
-        eventType: 'OPTIONAL_SERVICE_DISABLED',
-        result: 'connector_pending_configuration',
-      });
     }
     return bot;
   }
@@ -189,8 +191,13 @@ export class MultiBotManager {
     this.started.clear();
   }
 
-  public snapshots(): Array<{ bot: BotRecord; runtime: ReturnType<BotInstance['snapshot']> | null }> {
-    return this.database.listBots().map((bot) => ({ bot, runtime: this.instances.get(bot.id)?.snapshot() ?? null }));
+  public snapshots(): Array<{
+    bot: BotRecord;
+    runtime: ReturnType<BotInstance['snapshot']> | null;
+  }> {
+    return this.database
+      .listBots()
+      .map((bot) => ({ bot, runtime: this.instances.get(bot.id)?.snapshot() ?? null }));
   }
 
   public snapshot(botId: string): ReturnType<BotInstance['snapshot']> | null {
@@ -249,7 +256,10 @@ export class MultiBotManager {
 
   private recordInstanceFailure(operation: string, botId: string, error: unknown): void {
     const details = serializeError(error, operation, false);
-    this.logger.error({ operation, botId, ...details }, 'Falló una instancia aislada; las demás continuarán');
+    this.logger.error(
+      { operation, botId, ...details },
+      'Falló una instancia aislada; las demás continuarán',
+    );
     this.database.recordTechnicalEvent({
       botId,
       eventType: operation,

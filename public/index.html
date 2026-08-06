@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
-    <title>Panel de Asistentes</title>
+    <title>Neurobot Community</title>
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/friendly-panel.css" />
   </head>
@@ -13,8 +13,10 @@
       <header class="hero">
         <div>
           <p class="eyebrow">Panel local protegido</p>
-          <h1 id="application-title">Panel de Asistentes</h1>
-          <p id="application-subtitle">Administra cada asistente y su conexión de forma independiente.</p>
+          <h1 id="application-title">Neurobot Community</h1>
+          <p id="application-subtitle">
+            Administra asistentes para comunidades y grupos de WhatsApp.
+          </p>
         </div>
         <button id="logout" class="secondary hidden" type="button">Cerrar sesión</button>
       </header>
@@ -50,19 +52,18 @@
               <option value="status" data-bot-only>Inicio y guía</option>
               <option value="whatsapp" data-bot-only>Conexión de WhatsApp</option>
               <option value="profile" data-bot-only>Nombre y perfil</option>
-              <option value="menus" data-bot-only data-module="menus">Menú de respuestas</option>
-              <option value="catalog" data-bot-only data-module="catalog">Productos y servicios</option>
-              <option value="hours" data-bot-only data-module="hours">Horarios</option>
             </optgroup>
             <optgroup label="Más opciones" data-bot-only>
-              <option value="media" data-bot-only data-module="media">Imágenes</option>
               <option value="knowledge" data-bot-only>Información del bot</option>
               <option value="cached-answers" data-bot-only>Respuestas guardadas</option>
               <option value="ai" data-bot-only>Inteligencia artificial</option>
-              <option value="automatic-messages" data-bot-only data-module="automatic-messages">Automatizaciones</option>
+              <option value="automatic-messages" data-bot-only data-module="automatic-messages">
+                Automatizaciones
+              </option>
               <option value="polls" data-bot-only data-module="polls">Encuestas</option>
-              <option value="moderation" data-bot-only data-module="moderation">Moderación y reglas</option>
-              <option value="requests" data-bot-only data-module="requests">Solicitudes humanas</option>
+              <option value="moderation" data-bot-only data-module="moderation">
+                Moderación y reglas
+              </option>
               <option value="statistics" data-bot-only>Estadísticas</option>
               <option value="maintenance" data-bot-only>Mantenimiento</option>
             </optgroup>
@@ -73,1256 +74,2229 @@
           <aside class="panel-sidebar">
             <nav class="tabs" aria-label="Secciones del panel">
               <p class="nav-group-title global-only">Panel general</p>
-              <button data-section="bots" class="global-only active"><span aria-hidden="true">⌂</span> Mis asistentes</button>
-              <button data-section="trash" class="global-only"><span aria-hidden="true">♲</span> Papelera</button>
-              <button data-section="global-system" class="global-only"><span aria-hidden="true">⚙</span> Sistema y respaldos</button>
-              <button data-section="administrators" class="global-only"><span aria-hidden="true">⚿</span> Administradores</button>
+              <button data-section="bots" class="global-only active">
+                <span aria-hidden="true">⌂</span> Mis asistentes
+              </button>
+              <button data-section="trash" class="global-only">
+                <span aria-hidden="true">♲</span> Papelera
+              </button>
+              <button data-section="global-system" class="global-only">
+                <span aria-hidden="true">⚙</span> Sistema y respaldos
+              </button>
+              <button data-section="administrators" class="global-only">
+                <span aria-hidden="true">⚿</span> Administradores
+              </button>
 
               <p class="nav-group-title bot-only hidden">Configuración principal</p>
-              <button data-section="status" class="bot-only hidden"><span aria-hidden="true">✓</span> Inicio y guía</button>
-              <button data-section="whatsapp" class="bot-only hidden"><span aria-hidden="true">◉</span> WhatsApp</button>
-              <button data-section="profile" class="bot-only hidden"><span aria-hidden="true">✎</span> Nombre y perfil</button>
-              <button data-section="menus" data-module="menus" class="bot-only hidden"><span aria-hidden="true">☷</span> Menú de respuestas</button>
-              <button data-section="catalog" data-module="catalog" class="bot-only hidden"><span aria-hidden="true">▦</span> Productos y servicios</button>
-              <button data-section="hours" data-module="hours" class="bot-only hidden"><span aria-hidden="true">◷</span> Horarios</button>
+              <button data-section="status" class="bot-only hidden">
+                <span aria-hidden="true">✓</span> Inicio y guía
+              </button>
+              <button data-section="whatsapp" class="bot-only hidden">
+                <span aria-hidden="true">◉</span> WhatsApp
+              </button>
+              <button data-section="profile" class="bot-only hidden">
+                <span aria-hidden="true">✎</span> Nombre y perfil
+              </button>
 
               <details class="sidebar-more bot-only hidden">
                 <summary>Más opciones</summary>
-                <button data-section="media" data-module="media" class="bot-only hidden">Imágenes</button>
-                <button data-section="knowledge" class="bot-only hidden">Información del bot</button>
-                <button data-section="cached-answers" class="bot-only hidden">Respuestas guardadas</button>
+                <button data-section="knowledge" class="bot-only hidden">
+                  Información del bot
+                </button>
+                <button data-section="cached-answers" class="bot-only hidden">
+                  Respuestas guardadas
+                </button>
                 <button data-section="ai" class="bot-only hidden">Inteligencia artificial</button>
-                <button data-section="automatic-messages" data-module="automatic-messages" class="bot-only hidden">Automatizaciones</button>
-                <button data-section="polls" data-module="polls" class="bot-only hidden">Encuestas</button>
-                <button data-section="moderation" data-module="moderation" class="bot-only hidden">Moderación y reglas</button>
-                <button data-section="requests" data-module="requests" class="bot-only hidden">Solicitudes humanas</button>
+                <button
+                  data-section="automatic-messages"
+                  data-module="automatic-messages"
+                  class="bot-only hidden"
+                >
+                  Automatizaciones
+                </button>
+                <button data-section="polls" data-module="polls" class="bot-only hidden">
+                  Encuestas
+                </button>
+                <button data-section="moderation" data-module="moderation" class="bot-only hidden">
+                  Moderación y reglas
+                </button>
                 <button data-section="statistics" class="bot-only hidden">Estadísticas</button>
                 <button data-section="maintenance" class="bot-only hidden">Mantenimiento</button>
               </details>
-
             </nav>
           </aside>
 
           <div class="panel-main">
-
-        <section id="assistant-context" class="assistant-context card hidden" aria-live="polite">
-          <button id="back-to-assistants" class="secondary" type="button">← Volver a Mis asistentes</button>
-          <div>
-            <p class="eyebrow">Asistente seleccionado</p>
-            <h2 id="assistant-context-name">Asistente</h2>
-            <p id="assistant-context-detail" class="muted"></p>
-            <p id="assistant-context-warning" class="info-callout hidden"></p>
-          </div>
-        </section>
-
-        <section id="section-bots" class="panel-section">
-          <div class="section-heading">
-            <div><p class="eyebrow">Instancias independientes</p><h2>Mis asistentes</h2></div>
-            <button id="open-create-bot" type="button">Crear nuevo asistente</button>
-          </div>
-          <div id="bots-list" class="bot-grid"></div>
-          <form id="create-bot-form" class="card inset hidden">
-            <h3>Crear nuevo asistente</h3>
-            <div class="form-row">
-              <label>Negocio o comunidad<input name="organizationName" maxlength="160" required /></label>
-              <label>Nombre del bot<input name="botName" maxlength="80" required /></label>
-            </div>
-            <div class="form-row">
-              <label>Identificador interno<input name="id" maxlength="80" placeholder="Tienda de enmarcado de fotos" required /><small>Se convertirá automáticamente a minúsculas y guiones.</small></label>
-              <label>Tipo de organización<select name="organizationType"><option>Comunidad</option><option>Tienda</option><option>Restaurante</option><option>Distribuidora</option><option>Servicio profesional</option><option>Organización social</option><option>Institución educativa</option><option>Otro</option></select></label>
-            </div>
-            <div class="form-row">
-              <label>Modo<select name="mode"><option value="community">Comunidad</option><option value="business">Negocio</option><option value="mixed">Mixto</option></select></label>
-              <label>Conector de WhatsApp<select name="connectorType"><option value="WHATSAPP_WEB">WhatsApp Web — QR y grupos</option><option value="WHATSAPP_CLOUD_API">Cloud API oficial — comercial</option></select></label>
-              <label>Zona horaria<input name="timezone" value="America/Santiago" required /></label>
-            </div>
-            <div class="form-row">
-              <label>Proveedor de IA<select name="provider"><option value="groq">Groq</option><option value="disabled">Desactivado</option></select></label>
-              <label>Plantilla<select name="preset"><option value="community">Comunidad</option><option value="store">Tienda</option><option value="restaurant">Restaurante</option><option value="distributor">Distribuidora</option><option value="service">Servicio</option><option value="empty">Perfil vacío</option></select></label>
-              <label>Tipo de menú<select name="menuType"><option value="automatic">Automático</option><option value="native_buttons">Botones nativos</option><option value="native_list">Lista nativa</option><option value="numbered">Opciones numeradas</option></select></label>
-            </div>
-            <div class="info-callout">
-              <strong>Número exclusivo por asistente.</strong>
-              <p>Cada número puede estar vinculado a un solo asistente. Si ya está en uso, la vinculación se rechazará sin modificar el asistente existente.</p>
-              <label class="toggle"><input name="exclusiveNumberConfirmed" type="checkbox" required /> Comprendo y deseo crear este asistente independiente.</label>
-            </div>
-            <div class="actions"><button type="submit">Crear y preparar vinculación</button><button id="cancel-create-bot" class="secondary" type="button">Cancelar</button></div>
-          </form>
-        </section>
-
-        <section id="section-trash" class="panel-section hidden">
-          <div class="section-heading">
-            <div><p class="eyebrow">Recuperación durante 30 días</p><h2>Papelera de asistentes</h2></div>
-          </div>
-          <p class="muted">Los asistentes enviados aquí quedan detenidos. Puedes restaurarlos o eliminarlos definitivamente con una confirmación reforzada.</p>
-          <div id="trash-list" class="bot-grid"></div>
-        </section>
-
-        <section id="section-global-system" class="panel-section hidden">
-          <p class="eyebrow">Instalación completa</p>
-          <h2>Sistema y respaldos</h2>
-          <div class="status-grid">
-            <div class="status-card"><span>Identidades</span><strong>Separadas por asistente</strong></div>
-            <div class="status-card"><span>Sesiones</span><strong>Aisladas</strong></div>
-            <div class="status-card"><span>Eliminación</span><strong>Papelera protegida</strong></div>
-          </div>
-          <p class="info-callout">La configuración global no modifica automáticamente asistentes existentes. Los cambios de conexión deben hacerse dentro de cada asistente.</p>
-        </section>
-
-        <section id="section-status" class="panel-section hidden">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Resumen operativo</p>
-              <h2>Inicio</h2>
-            </div>
-            <button id="restart-connection" class="secondary">Reiniciar conexión</button>
-          </div>
-          <div id="status-cards" class="status-grid"></div>
-          <article class="setup-guide card inset">
-            <div>
-              <p class="eyebrow">Configuración rápida</p>
-              <h3>Deja el bot listo en pocos pasos</h3>
-              <p class="muted">Avanza en orden. Las opciones técnicas quedan disponibles más abajo solo si las necesitas.</p>
-            </div>
-            <div class="setup-steps">
-              <button type="button" class="setup-step" data-open-section="whatsapp"><strong>1</strong><span>Conectar WhatsApp<small id="setup-whatsapp-state">Revisar conexión</small></span></button>
-              <button type="button" class="setup-step" data-open-section="profile"><strong>2</strong><span>Revisar nombre y perfil<small id="setup-profile-state">Identidad del bot</small></span></button>
-              <button type="button" class="setup-step" data-open-section="menus" data-capability="interactiveMenusEnabled"><strong>3</strong><span>Preparar respuestas<small id="setup-menu-state">Menú principal</small></span></button>
-              <button type="button" class="setup-step" data-open-section="knowledge"><strong>4</strong><span>Cargar información<small id="setup-knowledge-state">Contenido oficial</small></span></button>
-              <button type="button" class="setup-step" data-open-section="whatsapp"><strong>5</strong><span>Realizar una prueba<small id="setup-test-state">Grupo controlado</small></span></button>
-            </div>
-          </article>
-          <details class="advanced-settings card inset">
-            <summary>Ajustes avanzados de funcionamiento</summary>
-            <p class="muted">No necesitas cambiar estos controles para la prueba normal de Neurobot.</p>
-            <form id="bot-configuration-form">
-            <h3>Canales y comportamiento</h3>
-            <div class="form-row">
-              <label>Modo<select name="mode"><option value="community">Comunidad</option><option value="business">Negocio</option><option value="mixed">Mixto</option></select></label>
-              <label>Tipo de menú<select name="menuType"><option value="automatic">Automático</option><option value="native_buttons">Botones nativos</option><option value="native_list">Lista nativa</option><option value="numbered">Opciones numeradas</option></select></label>
-            </div>
-            <p id="community-menu-help" class="info-callout hidden"><strong>Comunidad — pregunta única.</strong> Neurobot responde una sola vez cuando lo mencionan o escriben @neurobot al comienzo. No abre menús, no acepta números como continuación y no atiende chats privados.</p>
-            <div id="community-single-turn-settings" class="card inset hidden">
-              <h3>Activación de Neurobot</h3>
-              <ul class="compact-list">
-                <li>Mención real de WhatsApp: activada.</li>
-                <li>Alias escrito al comienzo: activado.</li>
-                <li>Mayúsculas y minúsculas: se consideran iguales.</li>
-                <li>Mención sin pregunta: responde con el aviso configurado y finaliza.</li>
-                <li>Respuesta: máximo 600 caracteres, 5 líneas y aproximadamente 120 tokens.</li>
-              </ul>
-            </div>
-            <div class="checks">
-              <label><input name="enabled" type="checkbox" /> Asistente activado</label>
-              <label><input name="groupsEnabled" type="checkbox" /> Grupos activados</label>
-              <label><input name="privateMessagesEnabled" type="checkbox" /> Mensajes privados activados</label>
-              <label><input name="realMentionRequired" type="checkbox" /> Permitir mención real o alias inicial</label>
-              <label><input name="continuedConversationsEnabled" type="checkbox" /> Conversaciones continuadas</label>
-            </div>
-            <button type="submit">Guardar funcionamiento</button>
-            </form>
-          </details>
-        </section>
-
-        <section id="section-whatsapp" class="panel-section hidden">
-          <div class="section-heading">
-            <div><p class="eyebrow">Sesión aislada</p><h2>WhatsApp</h2></div>
-            <div class="actions"><button id="bot-restart" class="secondary" type="button">Reiniciar conexión</button><button id="bot-unlink" class="danger" type="button">Desvincular</button></div>
-          </div>
-          <div id="whatsapp-cards" class="status-grid"></div>
-          <article id="qr-card" class="card inset hidden"><h3>Vincular número</h3><p class="muted">Escanea el código desde WhatsApp. El código no se guarda ni se registra.</p><div id="bot-qr" class="qr-box"></div></article>
-          <article class="card inset" data-requires-module="automatic-messages">
-            <div class="section-heading"><div><h3>Grupos vinculados</h3><p class="muted">Se activan automáticamente al incorporar este bot.</p></div><button id="refresh-bot-groups" class="secondary" type="button">Actualizar</button></div>
-            <div id="bot-groups-list" class="list"></div>
-          </article>
-          <article class="card inset manual-tests-card" data-requires-module="automatic-messages">
-            <h3>Pruebas manuales controladas</h3>
-            <p class="muted">Cada envío requiere confirmación y utiliza solamente un grupo activo de este asistente.</p>
-            <div class="form-row manual-tests-fields">
-              <label>Grupo de prueba<select id="manual-test-group"></select></label>
-              <label>Producto o servicio<select id="manual-test-catalog"></select></label>
-              <label>Imagen<select id="manual-test-media"></select></label>
-              <label>Encuesta<select id="manual-test-poll"></select></label>
-            </div>
-            <div class="actions manual-tests-actions">
-              <button class="manual-bot-test" data-kind="menu" type="button">Probar menú</button>
-              <button class="manual-bot-test" data-kind="catalog_item" type="button">Probar catálogo</button>
-              <button class="manual-bot-test" data-kind="media" type="button">Probar imagen</button>
-              <button id="manual-poll-test" type="button">Probar encuesta</button>
-            </div>
-          </article>
-        </section>
-
-        <section id="section-profile" class="panel-section hidden">
-          <div class="section-heading">
-            <div><p class="eyebrow">Identidad y marca blanca</p><h2>Perfil del asistente</h2></div>
-            <div class="actions hidden">
-              <select id="profile-select" aria-label="Perfil activo"></select>
-              <button id="activate-profile" class="secondary" type="button">Activar perfil</button>
-              <button id="new-profile" type="button">Crear perfil</button>
-            </div>
-          </div>
-          <div class="card inset hidden">
-            <label>Plantilla inicial<select id="profile-template"></select></label>
-            <button id="apply-profile-template" class="secondary" type="button">Aplicar con respaldo</button>
-          </div>
-          <form id="profile-form">
-            <div class="form-row">
-              <label>Nombre interno<input name="internalName" maxlength="120" required /></label>
-              <label>Nombre público<input name="organizationName" maxlength="160" required /></label>
-            </div>
-            <div class="form-row">
-              <label>Nombre del bot<input name="botName" maxlength="80" required /></label>
-              <label data-community-channel>Alias visible<input name="activationAlias" maxlength="80" placeholder="@Asistente" required /></label>
-            </div>
-            <p id="neurobot-alias-help" class="info-callout hidden">Neurobot siempre se activa escribiendo <strong>@neurobot</strong>, sin importar mayúsculas, el número o cómo esté guardado el contacto.</p>
-            <div id="activation-aliases-card" class="card inset hidden">
-              <label>Alias adicionales (uno por línea)<textarea id="activation-aliases" rows="3" placeholder="@neuroayuda"></textarea></label>
-              <p class="muted">El alias @neurobot siempre se conserva. Los alias solo activan al bot cuando aparecen al comienzo.</p>
-              <button id="save-activation-aliases" type="button">Guardar alias</button>
-            </div>
-            <div class="form-row">
-              <label>Tipo<select name="organizationType" required><option>Comunidad</option><option>Tienda</option><option>Restaurante</option><option>Distribuidora</option><option>Servicio profesional</option><option>Organización social</option><option>Institución educativa</option><option>Otro</option></select></label>
-              <label>Rubro<input name="industry" maxlength="160" required /></label>
-            </div>
-            <label>Descripción<textarea name="description" maxlength="1000" rows="3" required></textarea></label>
-            <label>Objetivo<textarea name="objective" maxlength="1200" rows="3" required></textarea></label>
-            <div class="form-row">
-              <label>Temas permitidos (uno por línea)<textarea name="allowedTopics" rows="6" required></textarea></label>
-              <label>Temas excluidos (uno por línea)<textarea name="excludedTopics" rows="6" required></textarea></label>
-            </div>
-            <label>Tono<input name="tone" maxlength="300" required /></label>
-            <div class="form-row">
-              <label>Mensaje fuera de tema<textarea name="outOfScopeMessage" maxlength="600" rows="3" required></textarea></label>
-              <label>Mensaje sin información<textarea name="noInformationMessage" maxlength="600" rows="3" required></textarea></label>
-            </div>
-            <div class="form-row">
-              <label>Mensaje por límite<textarea name="limitMessage" maxlength="600" rows="3" required></textarea></label>
-              <label>Mensaje ante error de IA<textarea name="aiErrorMessage" maxlength="600" rows="3" required></textarea></label>
-            </div>
-            <div class="form-row">
-              <label>Mensaje médico<textarea name="medicalMessage" maxlength="600" rows="3" required></textarea></label>
-              <label>Mensaje al mencionar sin pregunta<textarea name="mentionPromptMessage" maxlength="600" rows="3" required></textarea></label>
-            </div>
-            <label>Saludo local de Neurobot<textarea name="communityGreetingMessage" maxlength="1200" rows="5" required></textarea></label>
-            <div class="form-row">
-              <label>Contacto<textarea name="contactInformation" maxlength="1000" rows="3"></textarea></label>
-              <label>Horarios<textarea name="businessHours" maxlength="1000" rows="3"></textarea></label>
-            </div>
-            <div class="form-row">
-              <label>Dirección opcional<input name="address" maxlength="500" /></label>
-              <label>Zona horaria<input name="timezone" maxlength="80" required /></label>
-            </div>
-            <fieldset>
-              <legend>Marca blanca</legend>
-              <div class="form-row">
-                <label>Nombre de aplicación<input name="applicationName" maxlength="120" required /></label>
-                <label>Encabezado<input name="headerText" maxlength="160" required /></label>
-              </div>
-              <div class="form-row">
-                <label>Pie<input name="footerText" maxlength="300" /></label>
-                <label>Soporte<input name="supportInformation" maxlength="500" /></label>
-              </div>
-              <div class="form-row">
-                <label>Color principal<input name="primaryColor" type="color" /></label>
-                <label>Color secundario<input name="secondaryColor" type="color" /></label>
-              </div>
-              <label>Logo local (PNG, JPEG o WebP; máximo 384 KB)<input id="profile-logo-file" type="file" accept="image/png,image/jpeg,image/webp" /></label>
-              <input name="logoPath" type="hidden" />
-            </fieldset>
-            <button type="submit">Guardar perfil</button>
-          </form>
-          <article id="profile-preview" class="card inset" aria-label="Vista previa del perfil"></article>
-        </section>
-
-        <section id="section-knowledge" class="panel-section hidden">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Información oficial</p>
-              <h2>Información del bot</h2>
-            </div>
-            <div class="actions">
-              <button id="new-knowledge-entry" type="button">Agregar información</button>
-              <button id="toggle-knowledge-categories" class="secondary" type="button">Administrar categorías</button>
-            </div>
-          </div>
-
-          <p class="info-callout knowledge-explanation">
-            <strong>Las categorías solo sirven para ordenar.</strong>
-            La información que Neurobot utilizará para responder se crea con el botón
-            <strong>Agregar información</strong>.
-          </p>
-
-          <article id="knowledge-category-panel" class="card inset knowledge-category-panel hidden" data-friendly-group="knowledge-categories">
-            <div class="section-heading">
-              <div>
-                <h3>Administrar categorías</h3>
-                <p class="muted">Crea carpetas para organizar la información. Renombrar una categoría no modifica su contenido.</p>
-              </div>
-              <button id="new-knowledge-category" class="secondary" type="button">Nueva categoría</button>
-            </div>
-
-            <form id="knowledge-category-form" class="inline-form knowledge-editor hidden">
-              <input name="id" type="hidden" />
-              <label>Nombre de la categoría<input name="name" maxlength="100" required /></label>
-              <label class="toggle"><input name="enabled" type="checkbox" checked /> Categoría activa</label>
-              <div class="actions">
-                <button id="knowledge-category-submit" type="submit">Guardar categoría</button>
-                <button id="cancel-knowledge-category" class="secondary" type="button">Cancelar</button>
-              </div>
-            </form>
-
-            <div id="knowledge-categories" class="list compact-list"></div>
-          </article>
-
-          <section class="knowledge-saved-section" aria-labelledby="knowledge-saved-title">
-            <div class="section-heading">
-              <div>
-                <h3 id="knowledge-saved-title">Información guardada</h3>
-                <p class="muted">Cada tarjeta contiene un dato concreto que Neurobot puede consultar para responder.</p>
-              </div>
-            </div>
-            <div id="knowledge-entries" class="list"></div>
-          </section>
-
-          <form id="knowledge-entry-form" class="card inset knowledge-editor friendly-primary-card hidden">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Contenido para las respuestas</p>
-                <h3 id="knowledge-entry-form-title">Agregar información</h3>
-              </div>
-            </div>
-            <input name="id" type="hidden" />
-            <div class="form-row">
-              <label>Título breve<input name="title" maxlength="200" placeholder="Ejemplo: Taller de habilidades sociales" required /></label>
-              <label>¿En qué categoría va?<select name="categoryId" required></select></label>
-            </div>
-            <label>Información que Neurobot debe conocer<textarea name="content" maxlength="8000" rows="7" placeholder="Escribe aquí la información oficial, completa y actualizada." required></textarea></label>
-            <div class="form-row">
-              <label>Palabras que las personas podrían utilizar<textarea name="keywords" rows="4" placeholder="taller&#10;actividades&#10;inscripción"></textarea></label>
-              <label>Otras formas de decir lo mismo<textarea name="synonyms" rows="4" placeholder="curso&#10;jornada&#10;encuentro"></textarea></label>
-            </div>
-
-            <div class="knowledge-priority-control">
-              <div class="knowledge-priority-heading">
-                <span>¿Qué tan importante es esta información?</span>
-                <strong id="knowledge-priority-label">Prioridad normal</strong>
-              </div>
-              <input name="priority" type="range" min="-100" max="100" step="25" value="0" aria-describedby="knowledge-priority-help" />
-              <div class="knowledge-priority-scale" aria-hidden="true">
-                <span>Menor</span>
-                <span>Normal</span>
-                <span>Mayor</span>
-              </div>
-              <p id="knowledge-priority-help" class="muted">Usa una prioridad mayor solo cuando esta información deba preferirse frente a otros datos similares.</p>
-            </div>
-
-            <input name="internalSource" type="hidden" />
-            <label class="toggle"><input name="enabled" type="checkbox" checked /> Información activa</label>
-            <div class="actions">
-              <button type="submit">Guardar información</button>
-              <button id="cancel-knowledge-entry" class="secondary" type="button">Cancelar</button>
-            </div>
-          </form>
-        </section>
-
-        <section id="section-menus" class="panel-section hidden">
-          <div class="section-heading"><div><p class="eyebrow">Flujos locales</p><h2>Menús y opciones</h2></div><button id="new-menu" type="button">Nuevo menú</button></div>
-          <form id="menu-form" class="card inset">
-            <input name="id" type="hidden" />
-            <div class="form-row"><label>Título<input name="title" maxlength="120" required /></label><label>Menú padre<select name="parentMenuId"><option value="">Sin menú padre</option></select></label><label>Expira en minutos<input name="expirationMinutes" type="number" min="1" max="1440" value="15" /></label></div>
-            <label>Mensaje<textarea name="message" maxlength="600" rows="4" required></textarea></label>
-            <label>Texto de ayuda<input name="helpText" maxlength="300" /></label>
-            <div class="checks"><label><input name="enabled" type="checkbox" checked /> Activo</label><label><input name="isInitial" type="checkbox" /> Menú inicial</label></div>
-            <div class="actions"><button type="submit">Guardar menú</button><button id="clear-menu" class="secondary" type="button">Limpiar</button></div>
-          </form>
-          <div id="menus-list" class="list"></div>
-          <form id="menu-option-form" class="card inset">
-            <h3>Opción de menú</h3><input name="id" type="hidden" />
-            <div class="form-row"><label>Menú<select name="menuId" required></select></label><label>Etiqueta<input name="label" maxlength="100" required /></label><label>Orden<input name="order" type="number" min="1" max="100" value="1" /></label></div>
-            <div class="form-row"><label>Acción<select name="actionType"><option value="text">Mostrar texto</option><option value="catalog_item">Mostrar producto</option><option value="catalog_category">Mostrar categoría</option><option value="media">Enviar imagen</option><option value="submenu">Abrir submenú</option><option value="knowledge">Consultar conocimiento</option><option value="ai">Pregunta a IA</option><option value="hours">Mostrar horario</option><option value="address">Mostrar dirección</option><option value="payments">Formas de pago</option><option value="shipping">Despachos</option><option value="human_assistance">Atención humana</option><option value="reservation_request">Solicitud de reserva</option><option value="back">Volver</option><option value="exit">Salir</option></select></label><label>Alias (uno por línea)<textarea name="aliases" rows="3"></textarea></label></div>
-            <label>Datos de acción en formato JSON simple<textarea name="actionPayload" rows="3">{}</textarea></label>
-            <label class="toggle"><input name="enabled" type="checkbox" checked /> Opción activa</label>
-            <button type="submit">Guardar opción</button>
-          </form>
-          <div id="menu-options-list" class="list"></div>
-        </section>
-
-        <section id="section-catalog" class="panel-section hidden">
-          <div class="section-heading"><div><p class="eyebrow">Información comercial oficial</p><h2>Catálogo</h2></div></div>
-          <form id="catalog-category-form" class="inline-form"><input name="id" type="hidden" /><label>Categoría<input name="name" required /></label><label>Descripción<input name="description" /></label><label class="toggle"><input name="enabled" type="checkbox" checked /> Activa</label><button type="submit">Guardar categoría</button></form>
-          <div id="catalog-categories" class="list compact-list"></div>
-          <form id="catalog-item-form" class="card inset"><input name="id" type="hidden" />
-            <div class="form-row"><label>Nombre<input name="name" maxlength="160" required /></label><label>Código<input name="code" maxlength="80" required /></label><label>Categoría<select name="categoryId"><option value="">Sin categoría</option></select></label></div>
-            <label>Descripción<textarea name="description" maxlength="1200" rows="4"></textarea></label>
-            <div class="form-row"><label>Precio en centavos<input name="priceAmount" type="number" min="0" /></label><label>Oferta en centavos<input name="offerPriceAmount" type="number" min="0" /></label><label>Moneda<input name="currency" value="CLP" maxlength="8" /></label><label>Stock informado<input name="informedStock" type="number" min="0" /></label></div>
-            <div class="form-row"><label>Presentación<input name="presentation" /></label><label>Tamaño<input name="size" /></label><label>Disponibilidad<input name="availability" /></label></div>
-            <label>Variantes (una por línea)<textarea name="variants" rows="3"></textarea></label><label>Enlace HTTPS autorizado<input name="authorizedLink" type="url" /></label><label>Imagen principal<select name="primaryMediaId"><option value="">Sin imagen</option></select></label>
-            <label class="toggle"><input name="enabled" type="checkbox" checked /> Activo</label><div class="actions"><button type="submit">Guardar producto o servicio</button><button id="clear-catalog-item" class="secondary" type="button">Limpiar</button></div>
-          </form><div id="catalog-items" class="list"></div>
-        </section>
-
-        <section id="section-media" class="panel-section hidden">
-          <div class="section-heading"><div><p class="eyebrow">Archivos oficiales</p><h2>Imágenes</h2></div></div>
-          <form id="media-form" class="inline-form"><label>JPG, PNG o WebP<input name="file" type="file" accept="image/png,image/jpeg,image/webp" required /></label><label>Texto breve<input name="caption" maxlength="300" /></label><button type="submit">Subir imagen</button></form>
-          <div id="media-list" class="media-grid"></div>
-        </section>
-
-        <section id="section-hours" class="panel-section hidden">
-          <div class="section-heading"><div><p class="eyebrow">Atención oficial</p><h2>Horarios</h2></div><button id="add-hour" type="button">Agregar intervalo</button></div>
-          <form id="hours-form"><div id="hours-editor" class="list"></div><button type="submit">Guardar horarios</button></form>
-        </section>
-
-        <section id="section-requests" class="panel-section hidden">
-          <div class="section-heading"><div><p class="eyebrow">Derivación controlada</p><h2>Solicitudes de atención</h2></div></div>
-          <p class="muted">Solo se muestran identificadores anonimizados, intervalo, fecha y estado.</p><div id="requests-list" class="list"></div>
-        </section>
-
-        <section id="section-statistics" class="panel-section hidden">
-          <div class="section-heading"><div><p class="eyebrow">Datos agregados</p><h2>Estadísticas</h2></div></div>
-          <p class="muted">Solo se guardan cantidades y eventos técnicos seguros; no se almacenan preguntas ni respuestas.</p>
-          <div id="statistics-cards" class="status-grid"></div>
-          <div id="statistics-events" class="list"></div>
-        </section>
-
-        <section id="section-groups" class="panel-section hidden">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Acceso controlado</p>
-              <h2>Grupos detectados</h2>
-            </div>
-            <button id="refresh-groups">Actualizar lista</button>
-          </div>
-          <p class="muted">Solo los grupos autorizados pueden activar el bot.</p>
-          <div class="group-filters" role="group" aria-label="Filtrar grupos">
-            <button class="secondary active" data-group-filter="active" type="button">
-              Activos
-            </button>
-            <button class="secondary" data-group-filter="authorized" type="button">
-              Autorizados
-            </button>
-            <button class="secondary" data-group-filter="unauthorized" type="button">
-              No autorizados
-            </button>
-            <button class="secondary" data-group-filter="attention" type="button">
-              Requieren atención
-            </button>
-            <button class="secondary" data-group-filter="archived" type="button">Archivados</button>
-          </div>
-          <div id="groups-summary" class="status-grid compact"></div>
-          <div id="groups-list" class="list"></div>
-          <article class="card inset">
-            <h3>Limpieza segura</h3>
-            <p class="muted">
-              La vista previa no modifica datos. La limpieza archiva grupos vencidos y solo elimina
-              registros expirados después de una confirmación adicional.
-            </p>
-            <div class="actions">
-              <button id="preview-group-cleanup" class="secondary" type="button">
-                Vista previa
-              </button>
-              <button id="run-group-cleanup" class="danger" type="button">
-                Limpiar grupos inactivos ahora
-              </button>
-            </div>
-            <div id="group-cleanup-preview" class="list"></div>
-          </article>
-        </section>
-
-        <section id="section-commands" class="panel-section hidden">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Respuestas editables</p>
-              <h2>Comandos</h2>
-            </div>
-            <button id="new-command">Crear comando</button>
-          </div>
-          <div id="command-editor" class="card inset hidden">
-            <h3 id="command-editor-title">Nuevo comando</h3>
-            <form id="command-form">
-              <input name="id" type="hidden" />
-              <div class="form-row">
-                <label>Nombre<input name="name" pattern="[a-z0-9_-]{2,32}" required /></label>
-                <label
-                  >Prioridad<input
-                    name="priority"
-                    type="number"
-                    min="-1000"
-                    max="1000"
-                    value="0"
-                    required
-                /></label>
-              </div>
-              <label
-                >Respuesta<textarea name="response" maxlength="4000" rows="5" required></textarea>
-              </label>
-              <label
-                >Palabras clave (una por línea)<textarea
-                  name="keywords"
-                  maxlength="4000"
-                  rows="3"
-                ></textarea>
-              </label>
-              <div class="preview">
-                <span>Vista previa</span>
-                <p id="response-preview"></p>
-              </div>
-              <div class="checks">
-                <label><input name="enabled" type="checkbox" checked /> Activo</label>
-                <label><input name="healthRelated" type="checkbox" /> Relacionado con salud</label>
-              </div>
-              <div class="actions">
-                <button type="submit">Guardar</button
-                ><button id="restore-command-default" class="secondary hidden" type="button">
-                  Restaurar texto predeterminado</button
-                ><button id="cancel-command" class="secondary" type="button">Cancelar</button>
-              </div>
-              <p id="command-message-metrics" class="template-metrics muted"></p>
-            </form>
-          </div>
-          <div id="commands-list" class="list"></div>
-        </section>
-
-        <section id="section-cached-answers" class="panel-section hidden">
-          <div class="section-heading">
-            <div><p class="eyebrow">Respuestas locales reutilizables</p><h2>Respuestas guardadas</h2></div>
-          </div>
-          <p class="muted">Las preguntas frecuentes aprobadas tienen prioridad. Las respuestas automáticas solo se guardan cuando son generales, seguras y están respaldadas por información oficial.</p>
-          <form id="cached-answer-search" class="inline-form">
-            <label>Buscar<input name="search" maxlength="200" placeholder="Pregunta, categoría o respuesta" /></label>
-            <button type="submit" class="secondary">Buscar</button>
-          </form>
-          <form id="cached-answer-form" class="card inset">
-            <h3>Agregar respuesta o pregunta frecuente</h3>
-            <label>Pregunta canónica<textarea name="canonicalQuestion" maxlength="1000" rows="2" required></textarea></label>
-            <label>Respuesta<textarea name="answer" maxlength="8000" rows="5" required></textarea></label>
-            <div class="form-row">
-              <label>Categoría<input name="category" maxlength="200" value="General" required /></label>
-              <label>Origen<select name="sourceType"><option value="ADMIN_FAQ">Pregunta frecuente aprobada</option><option value="MANUAL">Respuesta manual</option></select></label>
-            </div>
-            <label>Variantes (una por línea)<textarea name="variants" rows="3"></textarea></label>
-            <button type="submit">Guardar respuesta</button>
-          </form>
-          <div id="cached-answers-list" class="list"></div>
-        </section>
-
-        <section id="section-ai" class="panel-section hidden">
-          <div class="section-heading ai-heading">
-            <div>
-              <p class="eyebrow">Configuración simplificada</p>
-              <h2>Inteligencia artificial</h2>
-              <p class="muted">Configura solo lo necesario. Los controles técnicos quedan guardados en opciones avanzadas.</p>
-            </div>
-            <div class="actions">
-              <button id="test-ai-connection" class="secondary" type="button">Probar conexión con Groq</button>
-              <a class="button-link secondary" href="/api/ai/export">Exportar estadísticas</a>
-            </div>
-          </div>
-
-          <div id="ai-status-cards" class="status-grid ai-status-overview"></div>
-          <p class="info-callout"><strong>Uso protegido.</strong> Solo las llamadas reales y exitosas a Groq descuentan el límite de IA. Los valores recomendados funcionan bien para la mayoría de los asistentes.</p>
-
-          <form id="ai-settings-form" class="card inset ai-essential-card">
-            <div>
-              <p class="eyebrow">Lo más importante</p>
-              <h3>Opciones principales</h3>
-              <p class="muted">Activa la IA y define límites sencillos. No necesitas cambiar los ajustes técnicos para usar Neurobot.</p>
-            </div>
-
-            <div class="ai-essential-grid">
-              <label class="toggle ai-primary-toggle"><input name="enabled" type="checkbox" /> IA activada</label>
-              <label>Proveedor<select name="provider"><option value="groq">Groq</option><option value="disabled">Desactivado</option></select></label>
-            </div>
-
-            <div class="ai-simple-group">
-              <h4>Extensión de las respuestas</h4>
-              <div class="ai-essential-grid">
-                <label>Máximo de caracteres<input name="responseMaxChars" type="number" min="1" /></label>
-                <label>Máximo de líneas<input name="responseMaxLines" type="number" min="1" /></label>
-              </div>
-              <p class="muted">Estos dos valores controlan qué tan largas serán las respuestas del asistente.</p>
-            </div>
-
-            <div class="ai-simple-group">
-              <h4>Límites por persona</h4>
-              <div class="ai-essential-grid">
-                <label>Consultas por hora<input name="userHourlyLimit" type="number" min="1" /></label>
-                <label>Consultas por día<input name="userDailyLimit" type="number" min="1" /></label>
-              </div>
-            </div>
-
-            <div class="ai-simple-group">
-              <h4>Límites por grupo</h4>
-              <div class="ai-essential-grid">
-                <label>Consultas por hora<input name="groupHourlyLimit" type="number" min="1" /></label>
-                <label>Consultas por día<input name="groupDailyLimit" type="number" min="1" /></label>
-              </div>
-            </div>
-
-            <div class="ai-simple-group">
-              <h4>Límite total de este asistente</h4>
-              <div class="ai-essential-grid">
-                <label>Consultas diarias<input name="globalDailyLimit" type="number" min="1" /></label>
-                <label>Consultas mensuales<input name="globalMonthlyLimit" type="number" min="1" /></label>
-              </div>
-            </div>
-
-            <div class="actions ai-essential-actions">
-              <button type="submit">Guardar opciones principales</button>
-            </div>
-
-            <details class="advanced-settings ai-advanced-panel">
-              <summary>Configuración avanzada del modelo y los límites</summary>
-              <div class="ai-advanced-content">
-                <p class="muted">Modifica estos valores únicamente cuando conozcas su función. Los valores actuales se mantienen aunque la sección esté cerrada.</p>
-                <div class="form-row">
-                  <label>Temperatura<input name="temperature" type="number" min="0" max="1" step="0.1" /></label>
-                  <label>Espera máxima (ms)<input name="timeoutMs" type="number" min="1000" max="60000" /></label>
-                </div>
-                <h4>Procesamiento por mensaje</h4>
-                <div class="form-row limits-grid">
-                  <label>Pregunta (caracteres)<input name="questionMaxChars" type="number" min="1" /></label>
-                  <label>Contexto (tokens)<input name="contextMaxTokens" type="number" min="1" /></label>
-                  <label>Entrada (tokens)<input name="inputMaxTokens" type="number" min="1" /></label>
-                  <label>Respuesta (tokens)<input name="responseMaxTokens" type="number" min="1" /></label>
-                </div>
-                <h4>Control de interacciones</h4>
-                <div class="form-row limits-grid">
-                  <label>Espera por persona (s)<input name="userCooldownSeconds" type="number" min="0" /></label>
-                  <label>Activaciones por hora<input name="interactionHourlyLimit" type="number" min="1" /></label>
-                  <label>Espera entre mensajes (s)<input name="interactionCooldownSeconds" type="number" min="0" /></label>
-                  <label>Ventana de consulta idéntica (s)<input name="duplicateQueryWindowSeconds" type="number" min="0" /></label>
-                </div>
-                <h4>Presupuesto de tokens</h4>
-                <div class="form-row limits-grid">
-                  <label>Tokens diarios<input name="globalDailyTokenLimit" type="number" min="1" /></label>
-                  <label>Tokens mensuales<input name="globalMonthlyTokenLimit" type="number" min="1" /></label>
-                </div>
-                <label class="toggle"><input name="confirmIncreasedLimits" type="checkbox" /> Confirmo aumentos sobre los máximos seguros iniciales</label>
-                <div class="actions">
-                  <button type="submit">Guardar toda la configuración</button>
-                  <button id="reset-ai-counters" class="danger" type="button">Restablecer contadores de prueba</button>
-                </div>
-              </div>
-            </details>
-          </form>
-
-          <form id="ai-credential-form" class="card inset ai-credential-card">
-            <div>
-              <p class="eyebrow">Conexión</p>
-              <h3>Clave de Groq</h3>
-              <p class="muted">Solo debes cambiarla cuando quieras configurar o reemplazar la clave. Nunca vuelve al navegador después de guardarla.</p>
-            </div>
-            <div class="form-row">
-              <label>Modalidad<select name="mode"><option value="global">Usar clave global de la instalación</option><option value="per_bot">Usar clave exclusiva de este asistente</option></select></label>
-              <label>Nueva clave exclusiva<input name="apiKey" type="password" autocomplete="new-password" minlength="16" maxlength="500" placeholder="Déjalo vacío para conservar la clave actual" /></label>
-            </div>
-            <div class="actions">
-              <button type="submit">Guardar conexión</button>
-              <button id="delete-ai-key" class="danger" type="button">Eliminar clave exclusiva</button>
-            </div>
-          </form>
-
-          <details class="card inset ai-advanced-panel">
-            <summary>Capacidad y disponibilidad</summary>
-            <div class="ai-advanced-content">
-              <p class="muted">Estos controles regulan concurrencia, espera y reintentos. Mantén los valores recomendados cuando no necesites una configuración especial.</p>
-              <div id="ai-queue-cards" class="status-grid"></div>
-              <form id="ai-queue-settings-form">
-                <div class="form-row limits-grid">
-                  <label>Llamadas simultáneas<input name="maxConcurrent" type="number" min="1" max="10" required /></label>
-                  <label>Solicitudes esperando<input name="maxQueueSize" type="number" min="1" max="100" required /></label>
-                  <label>Espera máxima en cola (s)<input name="maxQueueWaitSeconds" type="number" min="5" max="300" required /></label>
-                  <label>Timeout de Groq (s)<input name="providerTimeoutSeconds" type="number" min="5" max="60" required /></label>
-                  <label>Reintentos<input name="maxRetries" type="number" min="0" max="5" required /></label>
-                  <label>Espera inicial de reintento (s)<input name="initialRetryDelaySeconds" type="number" min="1" max="30" required /></label>
-                  <label>Espera máxima de reintento (s)<input name="maximumRetryDelaySeconds" type="number" min="1" max="60" required /></label>
-                  <label>Aviso de espera (s)<input name="waitNoticeSeconds" type="number" min="1" max="60" required /></label>
-                  <label>Pausa por persona (s)<input name="userCooldownSeconds" type="number" min="0" max="300" required /></label>
-                  <label>Ventana de duplicados (s)<input name="duplicateWindowSeconds" type="number" min="0" max="300" required /></label>
-                  <label>Ventana single-flight (s)<input name="singleFlightWindowSeconds" type="number" min="1" max="300" required /></label>
-                  <label>Intervalo entre mensajes (ms)<input name="outboundMessageIntervalMs" type="number" min="0" max="10000" required /></label>
-                  <label>Reintento sugerido (s)<input name="suggestedRetrySeconds" type="number" min="5" max="600" required /></label>
-                </div>
-                <div class="actions">
-                  <button type="submit">Guardar capacidad técnica</button>
-                  <button id="restore-ai-queue-recommended" class="secondary" type="button">Restaurar valores recomendados</button>
-                </div>
-              </form>
-              <article id="ai-queue-simulator" class="card inset hidden">
-                <h4>Probar cola de IA</h4>
-                <p class="muted">Simulación local: no llama a Groq ni envía mensajes a WhatsApp.</p>
-                <form id="ai-queue-simulator-form" class="inline-form">
-                  <label>Consultas<input name="requests" type="number" min="1" max="30" value="10" required /></label>
-                  <label>Escenario<select name="scenario"><option value="normal">Normal</option><option value="repeated">Preguntas repetidas</option><option value="rate_limited">Error 429</option><option value="timeout">Timeout</option></select></label>
-                  <button type="submit">Probar cola de IA</button>
-                </form>
-                <div id="ai-queue-simulation-result" class="status-grid"></div>
-              </article>
-            </div>
-          </details>
-
-          <details class="card inset ai-advanced-panel">
-            <summary>Presupuesto global de todos los asistentes</summary>
-            <div class="ai-advanced-content">
-              <form id="global-ai-limits-form">
-                <p class="muted">Este límite protege el presupuesto compartido entre todos los asistentes de la instalación.</p>
-                <div class="form-row limits-grid">
-                  <label>Consultas diarias<input name="dailyRequestLimit" type="number" min="1" required /></label>
-                  <label>Consultas mensuales<input name="monthlyRequestLimit" type="number" min="1" required /></label>
-                  <label>Tokens diarios<input name="dailyTokenLimit" type="number" min="1" required /></label>
-                  <label>Tokens mensuales<input name="monthlyTokenLimit" type="number" min="1" required /></label>
-                </div>
-                <button type="submit">Guardar presupuesto global</button>
-              </form>
-            </div>
-          </details>
-
-          <details class="card inset ai-advanced-panel">
-            <summary>Estadísticas y eventos detallados</summary>
-            <div class="ai-advanced-content">
-              <h3>Actividad operativa</h3>
-              <div id="operational-metrics-cards" class="status-grid"></div>
-              <h3>Eventos recientes de IA</h3>
-              <div id="ai-events" class="list"></div>
-            </div>
-          </details>
-        </section>
-
-        <section id="section-administrators" class="panel-section hidden">
-          <p class="eyebrow">Identidad verificada por número</p>
-          <h2>Administradores de WhatsApp</h2>
-          <form id="administrator-form" class="inline-form">
-            <label
-              >Número internacional<input name="number" placeholder="+56912345678" required
-            /></label>
-            <button type="submit">Agregar</button>
-          </form>
-          <div id="administrators-list" class="list"></div>
-        </section>
-
-        <section id="section-settings" class="panel-section hidden">
-          <p class="eyebrow">Comportamiento general</p>
-          <h2>Configuración</h2>
-          <form id="settings-form">
-            <label class="toggle"><input name="bot_enabled" type="checkbox" /> Bot activado</label>
-            <label
-              >Respuesta de respaldo<textarea
-                name="fallback_response"
-                maxlength="4000"
-                rows="4"
-                required
-              ></textarea>
-            </label>
-            <label
-              >Advertencia profesional<textarea
-                name="professional_warning"
-                maxlength="1000"
-                rows="3"
-                required
-              ></textarea>
-            </label>
-            <label
-              >Nivel de registros<select name="log_level">
-                <option>error</option>
-                <option>warn</option>
-                <option>info</option>
-                <option>debug</option>
-              </select></label
+            <section
+              id="assistant-context"
+              class="assistant-context card hidden"
+              aria-live="polite"
             >
-            <div class="form-row">
-              <label
-                >Máximo por usuario<input
-                  name="user_rate_limit"
-                  type="number"
-                  min="1"
-                  max="100"
-                  required
-                />
-              </label>
-              <label
-                >Máximo por grupo<input
-                  name="group_rate_limit"
-                  type="number"
-                  min="1"
-                  max="500"
-                  required
-                />
-              </label>
-            </div>
-            <div class="form-row">
-              <label
-                >Ventana (segundos)<input
-                  name="rate_window_seconds"
-                  type="number"
-                  min="10"
-                  max="3600"
-                  required
-                />
-              </label>
-              <label
-                >Enfriamiento (segundos)<input
-                  name="user_cooldown_seconds"
-                  type="number"
-                  min="0"
-                  max="3600"
-                  required
-                />
-              </label>
-            </div>
-            <label
-              >Prevención de repetición (segundos)<input
-                name="repeat_window_seconds"
-                type="number"
-                min="0"
-                max="86400"
-                required
-              />
-            </label>
-            <fieldset>
-              <legend>Vigencia de grupos</legend>
-              <label class="toggle"
-                ><input name="require_authorized_admin_in_group" type="checkbox" /> Requerir al
-                menos un administrador autorizado dentro del grupo</label
-              >
-              <div class="form-row">
-                <label
-                  >Horas antes de archivar<input
-                    name="group_archive_after_hours"
-                    type="number"
-                    min="1"
-                    max="720"
-                    required
-                /></label>
-                <label
-                  >Días antes de eliminar<input
-                    name="group_delete_after_days"
-                    type="number"
-                    min="1"
-                    max="3650"
-                    required
-                /></label>
-              </div>
-              <label
-                >Frecuencia de sincronización (minutos)<input
-                  name="group_sync_interval_minutes"
-                  type="number"
-                  min="5"
-                  max="1440"
-                  required
-              /></label>
-              <label class="toggle"
-                ><input name="group_auto_delete_enabled" type="checkbox" /> Eliminar automáticamente
-                registros archivados cuando venza la retención</label
-              >
-            </fieldset>
-            <p class="muted">
-              Los cambios de límites se aplican después de reiniciar la aplicación.
-            </p>
-            <button type="submit">Guardar cambios</button>
-          </form>
-        </section>
-
-        <section id="section-moderation" class="panel-section hidden">
-          <div class="section-heading"><div><p class="eyebrow">Protección local por grupo</p><h2>Moderación y reglas</h2></div></div>
-          <p class="info-callout"><strong>Configuración guiada.</strong> La IA solo prepara las reglas cuando lo solicitas. Los mensajes diarios se revisan localmente, sin IA ni consumo de tokens.</p>
-          <div class="card inset moderation-workspace">
-            <label>Grupo que deseas configurar<select id="moderation-group-selector"></select></label>
-            <div id="moderation-progress" class="moderation-progress" aria-label="Progreso de configuración"></div>
-            <div id="moderation-group-status" class="info-callout"></div>
-          </div>
-          <div class="moderation-tabs" role="tablist" aria-label="Secciones de moderación">
-            <button type="button" data-moderation-tab="configuration">Configuración</button>
-            <button type="button" data-moderation-tab="group-rules">Reglas del grupo</button>
-            <button type="button" data-moderation-tab="tests">Pruebas</button>
-            <button type="button" data-moderation-tab="cases">Casos pendientes</button>
-            <button type="button" data-moderation-tab="history">Historial</button>
-          </div>
-          <div data-moderation-pane="configuration" class="card inset">
-            <h3>Configuración del grupo</h3>
-            <div id="moderation-simple-summary" class="status-grid"></div>
-            <label>Administradores que recibirán un aviso privado en una reincidencia<div id="moderation-admin-recipients" class="checkbox-stack"></div></label>
-            <div class="actions"><button id="moderation-save-admins" type="button" class="secondary">Guardar destinatarios</button><button id="moderation-toggle" type="button">Activar moderación</button></div>
-            <p class="muted">La primera detección genera una advertencia en el grupo. Una reincidencia genera otra advertencia, un caso en el panel y un aviso privado. Nunca se expulsa a personas ni se eliminan mensajes automáticamente.</p>
-          </div>
-          <div data-moderation-pane="group-rules" class="card inset hidden">
-            <h3>Reglas de este grupo</h3><p>Copia y pega aquí las normas completas de este grupo. La inteligencia artificial las analizará una sola vez para preparar una moderación local. Los mensajes del grupo no se enviarán posteriormente a la inteligencia artificial.</p>
-            <form id="moderation-rules-text-form"><label>Normas y situaciones que requieren advertencia<textarea name="rulesText" maxlength="20000" rows="14" required placeholder="Ejemplo: Tratar a todas las personas con respeto. No permitir insultos, amenazas, discriminación, publicidad repetida ni compartir datos personales."></textarea></label><div class="actions"><button type="submit">Guardar borrador</button><button id="moderation-discard-rules" type="button" class="secondary">Descartar cambios</button></div></form>
-            <div class="actions spacious-actions"><button id="moderation-analyze" type="button">Analizar y preparar moderación</button></div>
-            <div id="moderation-analysis-summary" class="preview"></div>
-          </div>
-          <div data-moderation-pane="tests" class="card inset hidden">
-            <h3>Pruebas obligatorias</h3><p class="info-callout">Los textos se procesan solo en memoria: no se guardan, no crean casos, no envían mensajes y no usan IA. Para una prueba real en WhatsApp, envía el mensaje desde otra cuenta. Los mensajes enviados por la misma cuenta conectada al bot son ignorados.</p>
-            <form id="moderation-allowed-test"><label>Mensaje que debe permitirse<textarea name="text" maxlength="4000" required></textarea></label><button type="submit">Probar mensaje permitido</button></form>
-            <form id="moderation-warning-test"><label>Mensaje que debe generar advertencia<textarea name="text" maxlength="4000" required></textarea></label><button type="submit">Probar advertencia</button></form>
-            <div id="moderation-test-result" class="preview"></div>
-          </div>
-          <div data-moderation-pane="cases" class="card inset hidden"><h3>Casos pendientes</h3><p class="muted">Toda decisión es humana.</p><div id="moderation-pending-cases" class="stack"></div></div>
-          <div data-moderation-pane="history" class="card inset hidden"><h3>Historial</h3><div id="moderation-history" class="stack"></div></div>
-        </section>
-
-        <section id="section-automatic-messages" class="panel-section hidden">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Programación segura</p>
-              <h2>Mensajes automáticos</h2>
-            </div>
-            <span class="timezone-badge">America/Santiago</span>
-          </div>
-          <p class="muted">
-            Los envíos se realizan solo en grupos activos y no bloqueados, respetan el estado general del bot y
-            los silencios temporales.
-          </p>
-          <form id="automatic-messages-form">
-            <div class="card inset automatic-manual-group">
-              <label
-                >Grupo para los envíos manuales<select id="automatic-message-group" required></select>
-              </label>
-              <p class="muted">
-                Los botones solicitan confirmación y nunca permiten elegir chats privados ni grupos no
-                autorizados.
-              </p>
-            </div>
-            <article class="card inset automatic-card">
-              <div class="section-heading">
-                <div>
-                  <h3>Bienvenida</h3>
-                  <p class="muted">Agrupa varios ingresos para evitar mensajes repetidos.</p>
-                </div>
-                <label class="toggle"
-                  ><input name="welcome_enabled" type="checkbox" /> Activar</label
-                >
-              </div>
-              <input name="welcome_batch_window" type="hidden" value="5" />
-              <div class="form-row">
-                <label class="toggle"><input name="welcome_include_public_name" type="checkbox" /> Incluir nombre público de WhatsApp</label>
-                <label class="toggle"><input name="welcome_real_mention" type="checkbox" /> Realizar mención real</label>
-              </div>
-              <div class="form-row">
-                <label>Cuando no exista nombre<input name="welcome_unknown_name" maxlength="80" required /></label>
-                <label>Ingresos múltiples<select name="welcome_multiple_mode"><option value="GROUPED">Un solo mensaje agrupado</option><option value="INDIVIDUAL">Un mensaje por persona</option></select></label>
-                <label>Máximo de nombres<input name="welcome_maximum_names" type="number" min="1" max="5" required /></label>
-                <label>Espera antes de enviar (segundos)<input name="welcome_send_delay" type="number" min="0" max="60" required /></label>
-              </div>
-              <div class="form-row">
-                <label>Comprobar participantes cada (segundos)<input name="welcome_reconciliation_interval" type="number" min="60" max="3600" required /></label>
-              </div>
-              <div class="status-strip" id="welcome-runtime-status" aria-live="polite"></div>
-              <label
-                >Mensaje<textarea
-                  name="welcome_template"
-                  maxlength="2000"
-                  rows="6"
-                  required
-                ></textarea>
-              </label>
-              <p class="muted">Variables: {name}, {mention}, {communityName}, {groupName}, {assistantName}, {botAlias}. En la primera línea se recomienda usar {name} o {mention}, no ambas.</p>
-              <label>Nombre ficticio para la vista previa<input id="welcome-preview-name" maxlength="80" value="María" /></label>
-              <div class="preview">
-                <span>Vista previa</span>
-                <p id="welcome-preview"></p>
-              </div>
-              <h4>Grupos donde está activa</h4>
-              <div id="welcome-group-settings" class="list"></div>
-              <button class="secondary manual-automatic-send" data-kind="welcome" type="button">
-                Enviar bienvenida de prueba
+              <button id="back-to-assistants" class="secondary" type="button">
+                ← Volver a Mis asistentes
               </button>
-            </article>
-
-            <article class="card inset automatic-card">
-              <div class="section-heading">
-                <div>
-                  <h3>Buenos días</h3>
-                  <p class="muted">Selecciona automáticamente la plantilla según el día local.</p>
-                </div>
-                <label class="toggle"
-                  ><input name="greeting_enabled" type="checkbox" /> Activar</label
-                >
-              </div>
-              <div class="form-row">
-                <label>Hora<input name="greeting_time" type="time" step="60" required /></label>
-                <label
-                  >Tolerancia (minutos)<input
-                    name="greeting_tolerance"
-                    type="number"
-                    min="0"
-                    max="180"
-                    required
-                /></label>
-              </div>
-              <label
-                >Lunes<textarea
-                  name="greeting_monday"
-                  maxlength="2000"
-                  rows="5"
-                  required
-                ></textarea>
-              </label>
-              <label
-                >Martes a jueves<textarea
-                  name="greeting_weekday"
-                  maxlength="2000"
-                  rows="5"
-                  required
-                ></textarea>
-              </label>
-              <label
-                >Viernes<textarea
-                  name="greeting_friday"
-                  maxlength="2000"
-                  rows="5"
-                  required
-                ></textarea>
-              </label>
-              <label
-                >Fin de semana<textarea
-                  name="greeting_weekend"
-                  maxlength="2000"
-                  rows="5"
-                  required
-                ></textarea>
-              </label>
-              <div class="preview">
-                <span>Vista previa del día</span>
-                <p id="greeting-preview"></p>
-              </div>
-              <button class="secondary manual-automatic-send" data-kind="greeting" type="button">
-                Enviar saludo de prueba
-              </button>
-            </article>
-
-            <article class="card inset automatic-card">
-              <div class="section-heading">
-                <div>
-                  <h3>Reglas diarias</h3>
-                  <p class="muted">El texto se envía completo, sin modificaciones automáticas.</p>
-                </div>
-                <label class="toggle"><input name="rules_enabled" type="checkbox" /> Activar</label>
-              </div>
-              <div class="form-row">
-                <label>Hora<input name="rules_time" type="time" step="60" required /></label>
-                <label
-                  >Tolerancia (minutos)<input
-                    name="rules_tolerance"
-                    type="number"
-                    min="0"
-                    max="180"
-                    required
-                /></label>
-              </div>
-              <label
-                >Reglas<textarea
-                  name="rules_template"
-                  maxlength="8000"
-                  rows="14"
-                  required
-                ></textarea>
-              </label>
-              <div class="preview">
-                <span>Vista previa</span>
-                <p id="rules-preview"></p>
-              </div>
-              <button class="secondary manual-automatic-send" data-kind="rules" type="button">
-                Enviar reglas ahora
-              </button>
-            </article>
-
-            <button type="submit">Guardar mensajes automáticos</button>
-          </form>
-          <h3 class="subsection-title">Últimos resultados por grupo</h3>
-          <div id="automatic-deliveries" class="list"></div>
-        </section>
-
-        <section id="section-polls" class="panel-section hidden">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Participación diaria</p>
-              <h2>Encuestas</h2>
-            </div>
-            <span class="timezone-badge">America/Santiago</span>
-          </div>
-          <p class="muted">
-            Envía encuestas nativas solamente a grupos activos y no bloqueados. No se guardan votantes ni sus
-            respuestas.
-          </p>
-
-          <article class="card inset">
-            <h3>Estado general</h3>
-            <form id="poll-configuration-form">
-              <label class="toggle"
-                ><input name="enabled" type="checkbox" /> Activar encuestas diarias</label
-              >
-              <div class="form-row">
-                <label>Hora<input name="sendTime" type="time" step="60" required /></label>
-                <label
-                  >Tolerancia (minutos)<input
-                    name="toleranceMinutes"
-                    type="number"
-                    min="0"
-                    max="180"
-                    required
-                /></label>
-                <label
-                  >Modo<select name="selectionMode">
-                    <option value="SAME_FOR_ALL">Misma encuesta para todos</option>
-                    <option value="PER_GROUP">Encuesta diferente por grupo</option>
-                  </select></label
-                >
-              </div>
-              <div id="poll-schedule-summary" class="status-grid compact"></div>
-              <button type="submit">Guardar programación</button>
-            </form>
-          </article>
-
-          <article class="card inset">
-            <div class="section-heading">
               <div>
-                <h3>Banco de encuestas</h3>
-                <p class="muted">Entre 2 y 12 opciones.</p>
+                <p class="eyebrow">Asistente seleccionado</p>
+                <h2 id="assistant-context-name">Asistente</h2>
+                <p id="assistant-context-detail" class="muted"></p>
+                <p id="assistant-context-warning" class="info-callout hidden"></p>
               </div>
-              <div class="actions">
-                <button id="new-poll-template" type="button">Crear encuesta</button>
-                <button id="restore-poll-defaults" class="secondary" type="button">
-                  Restaurar predeterminadas
+            </section>
+
+            <section id="section-bots" class="panel-section">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Instancias independientes</p>
+                  <h2>Mis asistentes</h2>
+                </div>
+                <button id="open-create-bot" type="button">Crear nuevo asistente</button>
+              </div>
+              <div id="bots-list" class="bot-grid"></div>
+              <form id="create-bot-form" class="card inset hidden">
+                <h3>Crear nuevo asistente</h3>
+                <div class="form-row">
+                  <label
+                    >Negocio o comunidad<input name="organizationName" maxlength="160" required
+                  /></label>
+                  <label>Nombre del bot<input name="botName" maxlength="80" required /></label>
+                </div>
+                <div class="form-row">
+                  <label
+                    >Identificador interno<input
+                      name="id"
+                      maxlength="80"
+                      placeholder="Tienda de enmarcado de fotos"
+                      required
+                    /><small>Se convertirá automáticamente a minúsculas y guiones.</small></label
+                  >
+                  <label
+                    >Tipo de organización<select name="organizationType">
+                      <option>Comunidad</option>
+                      <option>Tienda</option>
+                      <option>Restaurante</option>
+                      <option>Distribuidora</option>
+                      <option>Servicio profesional</option>
+                      <option>Organización social</option>
+                      <option>Institución educativa</option>
+                      <option>Otro</option>
+                    </select></label
+                  >
+                </div>
+                <div class="form-row">
+                  <input name="mode" type="hidden" value="community" />
+                  <input name="connectorType" type="hidden" value="WHATSAPP_WEB" />
+                  <label
+                    >Zona horaria<input name="timezone" value="America/Santiago" required
+                  /></label>
+                </div>
+                <div class="form-row">
+                  <label
+                    >Proveedor de IA<select name="provider">
+                      <option value="groq">Groq</option>
+                      <option value="disabled">Desactivado</option>
+                    </select></label
+                  >
+                  <label
+                    >Plantilla<select name="preset">
+                      <option value="community">Comunidad</option>
+                      <option value="empty">Perfil vacío</option>
+                    </select></label
+                  >
+                  <label
+                    >Tipo de menú<select name="menuType">
+                      <option value="automatic">Automático</option>
+                      <option value="native_buttons">Botones nativos</option>
+                      <option value="native_list">Lista nativa</option>
+                      <option value="numbered">Opciones numeradas</option>
+                    </select></label
+                  >
+                </div>
+                <div class="info-callout">
+                  <strong>Número exclusivo por asistente.</strong>
+                  <p>
+                    Cada número puede estar vinculado a un solo asistente. Si ya está en uso, la
+                    vinculación se rechazará sin modificar el asistente existente.
+                  </p>
+                  <label class="toggle"
+                    ><input name="exclusiveNumberConfirmed" type="checkbox" required /> Comprendo y
+                    deseo crear este asistente independiente.</label
+                  >
+                </div>
+                <div class="actions">
+                  <button type="submit">Crear y preparar vinculación</button
+                  ><button id="cancel-create-bot" class="secondary" type="button">Cancelar</button>
+                </div>
+              </form>
+            </section>
+
+            <section id="section-trash" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Recuperación durante 30 días</p>
+                  <h2>Papelera de asistentes</h2>
+                </div>
+              </div>
+              <p class="muted">
+                Los asistentes enviados aquí quedan detenidos. Puedes restaurarlos o eliminarlos
+                definitivamente con una confirmación reforzada.
+              </p>
+              <div id="trash-list" class="bot-grid"></div>
+            </section>
+
+            <section id="section-global-system" class="panel-section hidden">
+              <p class="eyebrow">Instalación completa</p>
+              <h2>Sistema y respaldos</h2>
+              <div class="status-grid">
+                <div class="status-card">
+                  <span>Identidades</span><strong>Separadas por asistente</strong>
+                </div>
+                <div class="status-card"><span>Sesiones</span><strong>Aisladas</strong></div>
+                <div class="status-card">
+                  <span>Eliminación</span><strong>Papelera protegida</strong>
+                </div>
+              </div>
+              <p class="info-callout">
+                La configuración global no modifica automáticamente asistentes existentes. Los
+                cambios de conexión deben hacerse dentro de cada asistente.
+              </p>
+            </section>
+
+            <section id="section-status" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Resumen operativo</p>
+                  <h2>Inicio</h2>
+                </div>
+                <button id="restart-connection" class="secondary">Reiniciar conexión</button>
+              </div>
+              <div id="status-cards" class="status-grid"></div>
+              <article class="setup-guide card inset">
+                <div>
+                  <p class="eyebrow">Configuración rápida</p>
+                  <h3>Deja el bot listo en pocos pasos</h3>
+                  <p class="muted">
+                    Avanza en orden. Las opciones técnicas quedan disponibles más abajo solo si las
+                    necesitas.
+                  </p>
+                </div>
+                <div class="setup-steps">
+                  <button type="button" class="setup-step" data-open-section="whatsapp">
+                    <strong>1</strong
+                    ><span
+                      >Conectar WhatsApp<small id="setup-whatsapp-state"
+                        >Revisar conexión</small
+                      ></span
+                    >
+                  </button>
+                  <button type="button" class="setup-step" data-open-section="profile">
+                    <strong>2</strong
+                    ><span
+                      >Revisar nombre y perfil<small id="setup-profile-state"
+                        >Identidad del bot</small
+                      ></span
+                    >
+                  </button>
+                  <button
+                    type="button"
+                    class="setup-step"
+                    data-open-section="menus"
+                    data-capability="interactiveMenusEnabled"
+                  >
+                    <strong>3</strong
+                    ><span
+                      >Preparar respuestas<small id="setup-menu-state">Menú principal</small></span
+                    >
+                  </button>
+                  <button type="button" class="setup-step" data-open-section="knowledge">
+                    <strong>4</strong
+                    ><span
+                      >Cargar información<small id="setup-knowledge-state"
+                        >Contenido oficial</small
+                      ></span
+                    >
+                  </button>
+                  <button type="button" class="setup-step" data-open-section="whatsapp">
+                    <strong>5</strong
+                    ><span
+                      >Realizar una prueba<small id="setup-test-state"
+                        >Grupo controlado</small
+                      ></span
+                    >
+                  </button>
+                </div>
+              </article>
+              <details class="advanced-settings card inset">
+                <summary>Ajustes avanzados de funcionamiento</summary>
+                <p class="muted">
+                  No necesitas cambiar estos controles para la prueba normal de Neurobot.
+                </p>
+                <form id="bot-configuration-form">
+                  <h3>Canales y comportamiento</h3>
+                  <div class="form-row">
+                    <input name="mode" type="hidden" value="community" />
+                    <label
+                      >Tipo de menú<select name="menuType">
+                        <option value="automatic">Automático</option>
+                        <option value="native_buttons">Botones nativos</option>
+                        <option value="native_list">Lista nativa</option>
+                        <option value="numbered">Opciones numeradas</option>
+                      </select></label
+                    >
+                  </div>
+                  <p id="community-menu-help" class="info-callout hidden">
+                    <strong>Comunidad — pregunta única.</strong> Neurobot responde una sola vez
+                    cuando lo mencionan o escriben @neurobot al comienzo. No abre menús, no acepta
+                    números como continuación y no atiende chats privados.
+                  </p>
+                  <div id="community-single-turn-settings" class="card inset hidden">
+                    <h3>Activación de Neurobot</h3>
+                    <ul class="compact-list">
+                      <li>Mención real de WhatsApp: activada.</li>
+                      <li>Alias escrito al comienzo: activado.</li>
+                      <li>Mayúsculas y minúsculas: se consideran iguales.</li>
+                      <li>Mención sin pregunta: responde con el aviso configurado y finaliza.</li>
+                      <li>
+                        Respuesta: máximo 600 caracteres, 5 líneas y aproximadamente 120 tokens.
+                      </li>
+                    </ul>
+                  </div>
+                  <div class="checks">
+                    <label><input name="enabled" type="checkbox" /> Asistente activado</label>
+                    <label class="hidden"
+                      ><input name="groupsEnabled" type="checkbox" checked /> Grupos
+                      activados</label
+                    >
+                    <label class="hidden"
+                      ><input name="privateMessagesEnabled" type="checkbox" /> Mensajes privados
+                      desactivados</label
+                    >
+                    <label
+                      ><input name="realMentionRequired" type="checkbox" /> Permitir mención real o
+                      alias inicial</label
+                    >
+                    <label
+                      ><input name="continuedConversationsEnabled" type="checkbox" /> Conversaciones
+                      continuadas</label
+                    >
+                  </div>
+                  <button type="submit">Guardar funcionamiento</button>
+                </form>
+              </details>
+            </section>
+
+            <section id="section-whatsapp" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Sesión aislada</p>
+                  <h2>WhatsApp</h2>
+                </div>
+                <div class="actions">
+                  <button id="bot-restart" class="secondary" type="button">
+                    Reiniciar conexión</button
+                  ><button id="bot-unlink" class="danger" type="button">Desvincular</button>
+                </div>
+              </div>
+              <div id="whatsapp-cards" class="status-grid"></div>
+              <article id="qr-card" class="card inset hidden">
+                <h3>Vincular número</h3>
+                <p class="muted">
+                  Escanea el código desde WhatsApp. El código no se guarda ni se registra.
+                </p>
+                <div id="bot-qr" class="qr-box"></div>
+              </article>
+              <article class="card inset" data-requires-module="automatic-messages">
+                <div class="section-heading">
+                  <div>
+                    <h3>Grupos vinculados</h3>
+                    <p class="muted">Se activan automáticamente al incorporar este bot.</p>
+                  </div>
+                  <button id="refresh-bot-groups" class="secondary" type="button">
+                    Actualizar
+                  </button>
+                </div>
+                <div id="bot-groups-list" class="list"></div>
+              </article>
+              <article
+                class="card inset manual-tests-card"
+                data-requires-module="automatic-messages"
+              >
+                <h3>Pruebas manuales controladas</h3>
+                <p class="muted">
+                  Cada envío requiere confirmación y utiliza solamente un grupo activo de este
+                  asistente.
+                </p>
+                <div class="form-row manual-tests-fields">
+                  <label>Grupo de prueba<select id="manual-test-group"></select></label>
+                  <label>Producto o servicio<select id="manual-test-catalog"></select></label>
+                  <label>Imagen<select id="manual-test-media"></select></label>
+                  <label>Encuesta<select id="manual-test-poll"></select></label>
+                </div>
+                <div class="actions manual-tests-actions">
+                  <button class="manual-bot-test" data-kind="menu" type="button">
+                    Probar menú
+                  </button>
+                  <button class="manual-bot-test" data-kind="catalog_item" type="button">
+                    Probar catálogo
+                  </button>
+                  <button class="manual-bot-test" data-kind="media" type="button">
+                    Probar imagen
+                  </button>
+                  <button id="manual-poll-test" type="button">Probar encuesta</button>
+                </div>
+              </article>
+            </section>
+
+            <section id="section-profile" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Identidad y marca blanca</p>
+                  <h2>Perfil del asistente</h2>
+                </div>
+                <div class="actions hidden">
+                  <select id="profile-select" aria-label="Perfil activo"></select>
+                  <button id="activate-profile" class="secondary" type="button">
+                    Activar perfil
+                  </button>
+                  <button id="new-profile" type="button">Crear perfil</button>
+                </div>
+              </div>
+              <div class="card inset hidden">
+                <label>Plantilla inicial<select id="profile-template"></select></label>
+                <button id="apply-profile-template" class="secondary" type="button">
+                  Aplicar con respaldo
                 </button>
               </div>
-            </div>
-            <form id="poll-template-form" class="hidden">
-              <input name="id" type="hidden" />
-              <label>Pregunta<input name="question" maxlength="200" required /> </label>
-              <div class="form-row">
-                <label>Categoría<select name="category" required></select></label>
-                <label>Excluir hasta<input name="disabledUntil" type="datetime-local" /></label>
-              </div>
-              <label
-                >Opciones, una por línea<textarea
-                  name="options"
-                  maxlength="1212"
-                  rows="8"
-                  required
-                ></textarea>
-              </label>
-              <p class="muted">El orden de las líneas será el orden de las alternativas.</p>
-              <div class="checks">
-                <label><input name="enabled" type="checkbox" checked /> Activa</label>
-                <label><input name="favorite" type="checkbox" /> Favorita</label>
+              <form id="profile-form">
+                <div class="form-row">
+                  <label
+                    >Nombre interno<input name="internalName" maxlength="120" required
+                  /></label>
+                  <label
+                    >Nombre público<input name="organizationName" maxlength="160" required
+                  /></label>
+                </div>
+                <div class="form-row">
+                  <label>Nombre del bot<input name="botName" maxlength="80" required /></label>
+                  <label data-community-channel
+                    >Alias visible<input
+                      name="activationAlias"
+                      maxlength="80"
+                      placeholder="@Asistente"
+                      required
+                  /></label>
+                </div>
+                <p id="neurobot-alias-help" class="info-callout hidden">
+                  Neurobot siempre se activa escribiendo <strong>@neurobot</strong>, sin importar
+                  mayúsculas, el número o cómo esté guardado el contacto.
+                </p>
+                <div id="activation-aliases-card" class="card inset hidden">
+                  <label
+                    >Alias adicionales (uno por línea)<textarea
+                      id="activation-aliases"
+                      rows="3"
+                      placeholder="@neuroayuda"
+                    ></textarea>
+                  </label>
+                  <p class="muted">
+                    El alias @neurobot siempre se conserva. Los alias solo activan al bot cuando
+                    aparecen al comienzo.
+                  </p>
+                  <button id="save-activation-aliases" type="button">Guardar alias</button>
+                </div>
+                <div class="form-row">
+                  <label
+                    >Tipo<select name="organizationType" required>
+                      <option>Comunidad</option>
+                      <option>Tienda</option>
+                      <option>Restaurante</option>
+                      <option>Distribuidora</option>
+                      <option>Servicio profesional</option>
+                      <option>Organización social</option>
+                      <option>Institución educativa</option>
+                      <option>Otro</option>
+                    </select></label
+                  >
+                  <label>Rubro<input name="industry" maxlength="160" required /></label>
+                </div>
                 <label
-                  ><input name="allowMultipleAnswers" type="checkbox" /> Permitir varias
-                  respuestas</label
+                  >Descripción<textarea
+                    name="description"
+                    maxlength="1000"
+                    rows="3"
+                    required
+                  ></textarea>
+                </label>
+                <label
+                  >Objetivo<textarea name="objective" maxlength="1200" rows="3" required></textarea>
+                </label>
+                <div class="form-row">
+                  <label
+                    >Temas permitidos (uno por línea)<textarea
+                      name="allowedTopics"
+                      rows="6"
+                      required
+                    ></textarea>
+                  </label>
+                  <label
+                    >Temas excluidos (uno por línea)<textarea
+                      name="excludedTopics"
+                      rows="6"
+                      required
+                    ></textarea>
+                  </label>
+                </div>
+                <label>Tono<input name="tone" maxlength="300" required /></label>
+                <div class="form-row">
+                  <label
+                    >Mensaje fuera de tema<textarea
+                      name="outOfScopeMessage"
+                      maxlength="600"
+                      rows="3"
+                      required
+                    ></textarea>
+                  </label>
+                  <label
+                    >Mensaje sin información<textarea
+                      name="noInformationMessage"
+                      maxlength="600"
+                      rows="3"
+                      required
+                    ></textarea>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label
+                    >Mensaje por límite<textarea
+                      name="limitMessage"
+                      maxlength="600"
+                      rows="3"
+                      required
+                    ></textarea>
+                  </label>
+                  <label
+                    >Mensaje ante error de IA<textarea
+                      name="aiErrorMessage"
+                      maxlength="600"
+                      rows="3"
+                      required
+                    ></textarea>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label
+                    >Mensaje médico<textarea
+                      name="medicalMessage"
+                      maxlength="600"
+                      rows="3"
+                      required
+                    ></textarea>
+                  </label>
+                  <label
+                    >Mensaje al mencionar sin pregunta<textarea
+                      name="mentionPromptMessage"
+                      maxlength="600"
+                      rows="3"
+                      required
+                    ></textarea>
+                  </label>
+                </div>
+                <label
+                  >Saludo local de Neurobot<textarea
+                    name="communityGreetingMessage"
+                    maxlength="1200"
+                    rows="5"
+                    required
+                  ></textarea>
+                </label>
+                <div class="form-row">
+                  <label
+                    >Contacto<textarea
+                      name="contactInformation"
+                      maxlength="1000"
+                      rows="3"
+                    ></textarea>
+                  </label>
+                  <label
+                    >Horarios<textarea name="businessHours" maxlength="1000" rows="3"></textarea>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>Dirección opcional<input name="address" maxlength="500" /></label>
+                  <label>Zona horaria<input name="timezone" maxlength="80" required /></label>
+                </div>
+                <fieldset>
+                  <legend>Marca blanca</legend>
+                  <div class="form-row">
+                    <label
+                      >Nombre de aplicación<input name="applicationName" maxlength="120" required
+                    /></label>
+                    <label>Encabezado<input name="headerText" maxlength="160" required /></label>
+                  </div>
+                  <div class="form-row">
+                    <label>Pie<input name="footerText" maxlength="300" /></label>
+                    <label>Soporte<input name="supportInformation" maxlength="500" /></label>
+                  </div>
+                  <div class="form-row">
+                    <label>Color principal<input name="primaryColor" type="color" /></label>
+                    <label>Color secundario<input name="secondaryColor" type="color" /></label>
+                  </div>
+                  <label
+                    >Logo local (PNG, JPEG o WebP; máximo 384 KB)<input
+                      id="profile-logo-file"
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                  /></label>
+                  <input name="logoPath" type="hidden" />
+                </fieldset>
+                <button type="submit">Guardar perfil</button>
+              </form>
+              <article
+                id="profile-preview"
+                class="card inset"
+                aria-label="Vista previa del perfil"
+              ></article>
+            </section>
+
+            <section id="section-knowledge" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Información oficial</p>
+                  <h2>Información del bot</h2>
+                </div>
+                <div class="actions">
+                  <button id="new-knowledge-entry" type="button">Agregar información</button>
+                  <button id="toggle-knowledge-categories" class="secondary" type="button">
+                    Administrar categorías
+                  </button>
+                </div>
+              </div>
+
+              <p class="info-callout knowledge-explanation">
+                <strong>Las categorías solo sirven para ordenar.</strong>
+                La información que Neurobot utilizará para responder se crea con el botón
+                <strong>Agregar información</strong>.
+              </p>
+
+              <article
+                id="knowledge-category-panel"
+                class="card inset knowledge-category-panel hidden"
+                data-friendly-group="knowledge-categories"
+              >
+                <div class="section-heading">
+                  <div>
+                    <h3>Administrar categorías</h3>
+                    <p class="muted">
+                      Crea carpetas para organizar la información. Renombrar una categoría no
+                      modifica su contenido.
+                    </p>
+                  </div>
+                  <button id="new-knowledge-category" class="secondary" type="button">
+                    Nueva categoría
+                  </button>
+                </div>
+
+                <form id="knowledge-category-form" class="inline-form knowledge-editor hidden">
+                  <input name="id" type="hidden" />
+                  <label
+                    >Nombre de la categoría<input name="name" maxlength="100" required
+                  /></label>
+                  <label class="toggle"
+                    ><input name="enabled" type="checkbox" checked /> Categoría activa</label
+                  >
+                  <div class="actions">
+                    <button id="knowledge-category-submit" type="submit">Guardar categoría</button>
+                    <button id="cancel-knowledge-category" class="secondary" type="button">
+                      Cancelar
+                    </button>
+                  </div>
+                </form>
+
+                <div id="knowledge-categories" class="list compact-list"></div>
+              </article>
+
+              <section class="knowledge-saved-section" aria-labelledby="knowledge-saved-title">
+                <div class="section-heading">
+                  <div>
+                    <h3 id="knowledge-saved-title">Información guardada</h3>
+                    <p class="muted">
+                      Cada tarjeta contiene un dato concreto que Neurobot puede consultar para
+                      responder.
+                    </p>
+                  </div>
+                </div>
+                <div id="knowledge-entries" class="list"></div>
+              </section>
+
+              <form
+                id="knowledge-entry-form"
+                class="card inset knowledge-editor friendly-primary-card hidden"
+              >
+                <div class="section-heading">
+                  <div>
+                    <p class="eyebrow">Contenido para las respuestas</p>
+                    <h3 id="knowledge-entry-form-title">Agregar información</h3>
+                  </div>
+                </div>
+                <input name="id" type="hidden" />
+                <div class="form-row">
+                  <label
+                    >Título breve<input
+                      name="title"
+                      maxlength="200"
+                      placeholder="Ejemplo: Taller de habilidades sociales"
+                      required
+                  /></label>
+                  <label>¿En qué categoría va?<select name="categoryId" required></select></label>
+                </div>
+                <label
+                  >Información que Neurobot debe conocer<textarea
+                    name="content"
+                    maxlength="8000"
+                    rows="7"
+                    placeholder="Escribe aquí la información oficial, completa y actualizada."
+                    required
+                  ></textarea>
+                </label>
+                <div class="form-row">
+                  <label
+                    >Palabras que las personas podrían utilizar<textarea
+                      name="keywords"
+                      rows="4"
+                      placeholder="taller&#10;actividades&#10;inscripción"
+                    ></textarea>
+                  </label>
+                  <label
+                    >Otras formas de decir lo mismo<textarea
+                      name="synonyms"
+                      rows="4"
+                      placeholder="curso&#10;jornada&#10;encuentro"
+                    ></textarea>
+                  </label>
+                </div>
+
+                <div class="knowledge-priority-control">
+                  <div class="knowledge-priority-heading">
+                    <span>¿Qué tan importante es esta información?</span>
+                    <strong id="knowledge-priority-label">Prioridad normal</strong>
+                  </div>
+                  <input
+                    name="priority"
+                    type="range"
+                    min="-100"
+                    max="100"
+                    step="25"
+                    value="0"
+                    aria-describedby="knowledge-priority-help"
+                  />
+                  <div class="knowledge-priority-scale" aria-hidden="true">
+                    <span>Menor</span>
+                    <span>Normal</span>
+                    <span>Mayor</span>
+                  </div>
+                  <p id="knowledge-priority-help" class="muted">
+                    Usa una prioridad mayor solo cuando esta información deba preferirse frente a
+                    otros datos similares.
+                  </p>
+                </div>
+
+                <input name="internalSource" type="hidden" />
+                <label class="toggle"
+                  ><input name="enabled" type="checkbox" checked /> Información activa</label
                 >
-              </div>
-              <div class="preview">
-                <span>Vista previa</span>
-                <p id="poll-template-preview"></p>
-              </div>
-              <div class="actions">
-                <button type="submit">Guardar plantilla</button>
-                <button id="cancel-poll-template" class="secondary" type="button">Cancelar</button>
-              </div>
-            </form>
-            <div id="poll-templates-list" class="list"></div>
-          </article>
+                <div class="actions">
+                  <button type="submit">Guardar información</button>
+                  <button id="cancel-knowledge-entry" class="secondary" type="button">
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            </section>
 
-          <article class="card inset">
-            <div class="section-heading">
-              <div>
-                <h3>Encuestas eliminadas de este asistente</h3>
-                <p class="muted">Las plantillas permanecen disponibles para los demás asistentes.</p>
+            <section id="section-menus" class="panel-section hidden community-removed">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Flujos locales</p>
+                  <h2>Menús y opciones</h2>
+                </div>
+                <button id="new-menu" type="button">Nuevo menú</button>
               </div>
-            </div>
-            <div id="hidden-poll-templates-list" class="list"></div>
-          </article>
+              <form id="menu-form" class="card inset">
+                <input name="id" type="hidden" />
+                <div class="form-row">
+                  <label>Título<input name="title" maxlength="120" required /></label
+                  ><label
+                    >Menú padre<select name="parentMenuId">
+                      <option value="">Sin menú padre</option>
+                    </select></label
+                  ><label
+                    >Expira en minutos<input
+                      name="expirationMinutes"
+                      type="number"
+                      min="1"
+                      max="1440"
+                      value="15"
+                  /></label>
+                </div>
+                <label
+                  >Mensaje<textarea name="message" maxlength="600" rows="4" required></textarea>
+                </label>
+                <label>Texto de ayuda<input name="helpText" maxlength="300" /></label>
+                <div class="checks">
+                  <label><input name="enabled" type="checkbox" checked /> Activo</label
+                  ><label><input name="isInitial" type="checkbox" /> Menú inicial</label>
+                </div>
+                <div class="actions">
+                  <button type="submit">Guardar menú</button
+                  ><button id="clear-menu" class="secondary" type="button">Limpiar</button>
+                </div>
+              </form>
+              <div id="menus-list" class="list"></div>
+              <form id="menu-option-form" class="card inset">
+                <h3>Opción de menú</h3>
+                <input name="id" type="hidden" />
+                <div class="form-row">
+                  <label>Menú<select name="menuId" required></select></label
+                  ><label>Etiqueta<input name="label" maxlength="100" required /></label
+                  ><label
+                    >Orden<input name="order" type="number" min="1" max="100" value="1"
+                  /></label>
+                </div>
+                <div class="form-row">
+                  <label
+                    >Acción<select name="actionType">
+                      <option value="text">Mostrar texto</option>
+                      <option value="catalog_item">Mostrar producto</option>
+                      <option value="catalog_category">Mostrar categoría</option>
+                      <option value="submenu">Abrir submenú</option>
+                      <option value="knowledge">Consultar conocimiento</option>
+                      <option value="ai">Pregunta a IA</option>
+                      <option value="address">Mostrar dirección</option>
+                      <option value="payments">Formas de pago</option>
+                      <option value="shipping">Despachos</option>
+                      <option value="human_assistance">Atención humana</option>
+                      <option value="reservation_request">Solicitud de reserva</option>
+                      <option value="back">Volver</option>
+                      <option value="exit">Salir</option>
+                    </select></label
+                  ><label>Alias (uno por línea)<textarea name="aliases" rows="3"></textarea></label>
+                </div>
+                <label
+                  >Datos de acción en formato JSON simple<textarea name="actionPayload" rows="3">
+{}</textarea>
+                </label>
+                <label class="toggle"
+                  ><input name="enabled" type="checkbox" checked /> Opción activa</label
+                >
+                <button type="submit">Guardar opción</button>
+              </form>
+              <div id="menu-options-list" class="list"></div>
+            </section>
 
-          <article class="card inset">
-            <h3>Enviar encuesta de prueba</h3>
-            <p class="muted">La prueba manual funciona aunque la programación diaria esté desactivada.</p>
-            <form id="poll-test-form">
-              <div class="form-row">
-                <label>Grupo activo<select name="groupKey" required></select></label>
-                <label>Plantilla<select name="templateId" required></select></label>
+            <section id="section-catalog" class="panel-section hidden community-removed">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Información comercial oficial</p>
+                  <h2>Catálogo</h2>
+                </div>
               </div>
-              <label class="toggle"
-                ><input name="countsAsDaily" type="checkbox" /> Contar como encuesta del día</label
-              >
-              <div class="preview">
-                <span>Vista previa</span>
-                <p id="poll-test-preview"></p>
+              <form id="catalog-category-form" class="inline-form">
+                <input name="id" type="hidden" /><label
+                  >Categoría<input name="name" required /></label
+                ><label>Descripción<input name="description" /></label
+                ><label class="toggle"
+                  ><input name="enabled" type="checkbox" checked /> Activa</label
+                ><button type="submit">Guardar categoría</button>
+              </form>
+              <div id="catalog-categories" class="list compact-list"></div>
+              <form id="catalog-item-form" class="card inset">
+                <input name="id" type="hidden" />
+                <div class="form-row">
+                  <label>Nombre<input name="name" maxlength="160" required /></label
+                  ><label>Código<input name="code" maxlength="80" required /></label
+                  ><label
+                    >Categoría<select name="categoryId">
+                      <option value="">Sin categoría</option>
+                    </select></label
+                  >
+                </div>
+                <label
+                  >Descripción<textarea name="description" maxlength="1200" rows="4"></textarea>
+                </label>
+                <div class="form-row">
+                  <label>Precio en centavos<input name="priceAmount" type="number" min="0" /></label
+                  ><label
+                    >Oferta en centavos<input
+                      name="offerPriceAmount"
+                      type="number"
+                      min="0" /></label
+                  ><label>Moneda<input name="currency" value="CLP" maxlength="8" /></label
+                  ><label
+                    >Stock informado<input name="informedStock" type="number" min="0"
+                  /></label>
+                </div>
+                <div class="form-row">
+                  <label>Presentación<input name="presentation" /></label
+                  ><label>Tamaño<input name="size" /></label
+                  ><label>Disponibilidad<input name="availability" /></label>
+                </div>
+                <label
+                  >Variantes (una por línea)<textarea name="variants" rows="3"></textarea></label
+                ><label>Enlace HTTPS autorizado<input name="authorizedLink" type="url" /></label
+                ><label
+                  >Imagen principal<select name="primaryMediaId">
+                    <option value="">Sin imagen</option>
+                  </select></label
+                >
+                <label class="toggle"
+                  ><input name="enabled" type="checkbox" checked /> Activo</label
+                >
+                <div class="actions">
+                  <button type="submit">Guardar producto o servicio</button
+                  ><button id="clear-catalog-item" class="secondary" type="button">Limpiar</button>
+                </div>
+              </form>
+              <div id="catalog-items" class="list"></div>
+            </section>
+
+            <section id="section-media" class="panel-section hidden community-removed">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Archivos oficiales</p>
+                  <h2>Imágenes</h2>
+                </div>
               </div>
-              <button type="submit">Enviar encuesta de prueba</button>
-            </form>
-          </article>
+              <form id="media-form" class="inline-form">
+                <label
+                  >JPG, PNG o WebP<input
+                    name="file"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    required /></label
+                ><label>Texto breve<input name="caption" maxlength="300" /></label
+                ><button type="submit">Subir imagen</button>
+              </form>
+              <div id="media-list" class="media-grid"></div>
+            </section>
 
-          <article class="card inset">
-            <h3>Programación por fecha</h3>
-            <form id="poll-override-form">
-              <div class="form-row">
-                <label>Fecha futura<input name="localDate" type="date" required /></label>
-                <label>Plantilla<select name="templateId" required></select></label>
+            <section id="section-hours" class="panel-section hidden community-removed">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Atención oficial</p>
+                  <h2>Horarios</h2>
+                </div>
+                <button id="add-hour" type="button">Agregar intervalo</button>
               </div>
-              <label class="toggle"
-                ><input name="replaceConfirmed" type="checkbox" /> Confirmar reemplazo si la fecha
-                ya está ocupada</label
-              >
-              <button type="submit">Programar encuesta</button>
-            </form>
-            <div id="poll-overrides-list" class="list"></div>
-          </article>
+              <form id="hours-form">
+                <div id="hours-editor" class="list"></div>
+                <button type="submit">Guardar horarios</button>
+              </form>
+            </section>
 
-          <h3 class="subsection-title">Historial de envíos</h3>
-          <div id="poll-history-list" class="list"></div>
-        </section>
+            <section id="section-requests" class="panel-section hidden community-removed">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Derivación controlada</p>
+                  <h2>Solicitudes de atención</h2>
+                </div>
+              </div>
+              <p class="muted">
+                Solo se muestran identificadores anonimizados, intervalo, fecha y estado.
+              </p>
+              <div id="requests-list" class="list"></div>
+            </section>
 
-        <section id="section-maintenance" class="panel-section hidden">
-          <p class="eyebrow">Diagnóstico y control local</p>
-          <h2>Mantenimiento</h2>
-          <article class="card inset">
-            <p class="eyebrow danger-eyebrow">Zona peligrosa del asistente</p>
-            <h3>Enviar asistente a la papelera</h3>
-            <p id="assistant-trash-help" class="muted">Detiene solamente este conector y conserva sus datos durante 30 días.</p>
-            <button id="maintenance-send-to-trash" class="danger" type="button">Enviar asistente a la papelera</button>
-          </article>
-          <div id="neurobot-maintenance-tools">
-          <article class="card inset">
-            <div class="section-heading">
-              <div><h3>Grupos vinculados</h3><p class="muted">Los grupos se activan al detectar al bot. Aquí solo pueden bloquearse o desbloquearse.</p></div>
-              <button id="refresh-linked-groups" class="secondary" type="button">Actualizar</button>
-            </div>
-            <div id="linked-groups-list" class="list"></div>
-          </article>
-          <p class="eyebrow danger-eyebrow">Operaciones destructivas</p>
-          <h2>Zona de peligro</h2>
-          <p class="muted">
-            Estas opciones desconectan WhatsApp o eliminan la configuración local del chatbot.
-            Requieren confirmar nuevamente la identidad administradora.
-          </p>
-          <div class="danger-zone">
-            <article class="danger-option">
-              <div>
-                <h3>Desvincular solamente WhatsApp</h3>
-                <p>
-                  Desconecta el número actual y elimina la caché de WhatsApp Web, pero conserva la
-                  base de datos, administradores, grupos, comandos y respuestas.
+            <section id="section-statistics" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Datos agregados</p>
+                  <h2>Estadísticas</h2>
+                </div>
+              </div>
+              <p class="muted">
+                Solo se guardan cantidades y eventos técnicos seguros; no se almacenan preguntas ni
+                respuestas.
+              </p>
+              <div id="statistics-cards" class="status-grid"></div>
+              <div id="statistics-events" class="list"></div>
+            </section>
+
+            <section id="section-groups" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Acceso controlado</p>
+                  <h2>Grupos detectados</h2>
+                </div>
+                <button id="refresh-groups">Actualizar lista</button>
+              </div>
+              <p class="muted">Solo los grupos autorizados pueden activar el bot.</p>
+              <div class="group-filters" role="group" aria-label="Filtrar grupos">
+                <button class="secondary active" data-group-filter="active" type="button">
+                  Activos
+                </button>
+                <button class="secondary" data-group-filter="authorized" type="button">
+                  Autorizados
+                </button>
+                <button class="secondary" data-group-filter="unauthorized" type="button">
+                  No autorizados
+                </button>
+                <button class="secondary" data-group-filter="attention" type="button">
+                  Requieren atención
+                </button>
+                <button class="secondary" data-group-filter="archived" type="button">
+                  Archivados
+                </button>
+              </div>
+              <div id="groups-summary" class="status-grid compact"></div>
+              <div id="groups-list" class="list"></div>
+              <article class="card inset">
+                <h3>Limpieza segura</h3>
+                <p class="muted">
+                  La vista previa no modifica datos. La limpieza archiva grupos vencidos y solo
+                  elimina registros expirados después de una confirmación adicional.
+                </p>
+                <div class="actions">
+                  <button id="preview-group-cleanup" class="secondary" type="button">
+                    Vista previa
+                  </button>
+                  <button id="run-group-cleanup" class="danger" type="button">
+                    Limpiar grupos inactivos ahora
+                  </button>
+                </div>
+                <div id="group-cleanup-preview" class="list"></div>
+              </article>
+            </section>
+
+            <section id="section-commands" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Respuestas editables</p>
+                  <h2>Comandos</h2>
+                </div>
+                <button id="new-command">Crear comando</button>
+              </div>
+              <div id="command-editor" class="card inset hidden">
+                <h3 id="command-editor-title">Nuevo comando</h3>
+                <form id="command-form">
+                  <input name="id" type="hidden" />
+                  <div class="form-row">
+                    <label>Nombre<input name="name" pattern="[a-z0-9_-]{2,32}" required /></label>
+                    <label
+                      >Prioridad<input
+                        name="priority"
+                        type="number"
+                        min="-1000"
+                        max="1000"
+                        value="0"
+                        required
+                    /></label>
+                  </div>
+                  <label
+                    >Respuesta<textarea
+                      name="response"
+                      maxlength="4000"
+                      rows="5"
+                      required
+                    ></textarea>
+                  </label>
+                  <label
+                    >Palabras clave (una por línea)<textarea
+                      name="keywords"
+                      maxlength="4000"
+                      rows="3"
+                    ></textarea>
+                  </label>
+                  <div class="preview">
+                    <span>Vista previa</span>
+                    <p id="response-preview"></p>
+                  </div>
+                  <div class="checks">
+                    <label><input name="enabled" type="checkbox" checked /> Activo</label>
+                    <label
+                      ><input name="healthRelated" type="checkbox" /> Relacionado con salud</label
+                    >
+                  </div>
+                  <div class="actions">
+                    <button type="submit">Guardar</button
+                    ><button id="restore-command-default" class="secondary hidden" type="button">
+                      Restaurar texto predeterminado</button
+                    ><button id="cancel-command" class="secondary" type="button">Cancelar</button>
+                  </div>
+                  <p id="command-message-metrics" class="template-metrics muted"></p>
+                </form>
+              </div>
+              <div id="commands-list" class="list"></div>
+            </section>
+
+            <section id="section-cached-answers" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Respuestas locales reutilizables</p>
+                  <h2>Respuestas guardadas</h2>
+                </div>
+              </div>
+              <p class="muted">
+                Las preguntas frecuentes aprobadas tienen prioridad. Las respuestas automáticas solo
+                se guardan cuando son generales, seguras y están respaldadas por información
+                oficial.
+              </p>
+              <form id="cached-answer-search" class="inline-form">
+                <label
+                  >Buscar<input
+                    name="search"
+                    maxlength="200"
+                    placeholder="Pregunta, categoría o respuesta"
+                /></label>
+                <button type="submit" class="secondary">Buscar</button>
+              </form>
+              <form id="cached-answer-form" class="card inset">
+                <h3>Agregar respuesta o pregunta frecuente</h3>
+                <label
+                  >Pregunta canónica<textarea
+                    name="canonicalQuestion"
+                    maxlength="1000"
+                    rows="2"
+                    required
+                  ></textarea>
+                </label>
+                <label
+                  >Respuesta<textarea name="answer" maxlength="8000" rows="5" required></textarea>
+                </label>
+                <div class="form-row">
+                  <label
+                    >Categoría<input name="category" maxlength="200" value="General" required
+                  /></label>
+                  <label
+                    >Origen<select name="sourceType">
+                      <option value="ADMIN_FAQ">Pregunta frecuente aprobada</option>
+                      <option value="MANUAL">Respuesta manual</option>
+                    </select></label
+                  >
+                </div>
+                <label
+                  >Variantes (una por línea)<textarea name="variants" rows="3"></textarea>
+                </label>
+                <button type="submit">Guardar respuesta</button>
+              </form>
+              <div id="cached-answers-list" class="list"></div>
+            </section>
+
+            <section id="section-ai" class="panel-section hidden">
+              <div class="section-heading ai-heading">
+                <div>
+                  <p class="eyebrow">Configuración simplificada</p>
+                  <h2>Inteligencia artificial</h2>
+                  <p class="muted">
+                    Configura solo lo necesario. Los controles técnicos quedan guardados en opciones
+                    avanzadas.
+                  </p>
+                </div>
+                <div class="actions">
+                  <button id="test-ai-connection" class="secondary" type="button">
+                    Probar conexión con Groq
+                  </button>
+                  <a class="button-link secondary" href="/api/ai/export">Exportar estadísticas</a>
+                </div>
+              </div>
+
+              <div id="ai-status-cards" class="status-grid ai-status-overview"></div>
+              <p class="info-callout">
+                <strong>Uso protegido.</strong> Solo las llamadas reales y exitosas a Groq
+                descuentan el límite de IA. Los valores recomendados funcionan bien para la mayoría
+                de los asistentes.
+              </p>
+
+              <form id="ai-settings-form" class="card inset ai-essential-card">
+                <div>
+                  <p class="eyebrow">Lo más importante</p>
+                  <h3>Opciones principales</h3>
+                  <p class="muted">
+                    Activa la IA y define límites sencillos. No necesitas cambiar los ajustes
+                    técnicos para usar Neurobot.
+                  </p>
+                </div>
+
+                <div class="ai-essential-grid">
+                  <label class="toggle ai-primary-toggle"
+                    ><input name="enabled" type="checkbox" /> IA activada</label
+                  >
+                  <label
+                    >Proveedor<select name="provider">
+                      <option value="groq">Groq</option>
+                      <option value="disabled">Desactivado</option>
+                    </select></label
+                  >
+                </div>
+
+                <div class="ai-simple-group">
+                  <h4>Extensión de las respuestas</h4>
+                  <div class="ai-essential-grid">
+                    <label
+                      >Máximo de caracteres<input name="responseMaxChars" type="number" min="1"
+                    /></label>
+                    <label
+                      >Máximo de líneas<input name="responseMaxLines" type="number" min="1"
+                    /></label>
+                  </div>
+                  <p class="muted">
+                    Estos dos valores controlan qué tan largas serán las respuestas del asistente.
+                  </p>
+                </div>
+
+                <div class="ai-simple-group">
+                  <h4>Límites por persona</h4>
+                  <div class="ai-essential-grid">
+                    <label
+                      >Consultas por hora<input name="userHourlyLimit" type="number" min="1"
+                    /></label>
+                    <label
+                      >Consultas por día<input name="userDailyLimit" type="number" min="1"
+                    /></label>
+                  </div>
+                </div>
+
+                <div class="ai-simple-group">
+                  <h4>Límites por grupo</h4>
+                  <div class="ai-essential-grid">
+                    <label
+                      >Consultas por hora<input name="groupHourlyLimit" type="number" min="1"
+                    /></label>
+                    <label
+                      >Consultas por día<input name="groupDailyLimit" type="number" min="1"
+                    /></label>
+                  </div>
+                </div>
+
+                <div class="ai-simple-group">
+                  <h4>Límite total de este asistente</h4>
+                  <div class="ai-essential-grid">
+                    <label
+                      >Consultas diarias<input name="globalDailyLimit" type="number" min="1"
+                    /></label>
+                    <label
+                      >Consultas mensuales<input name="globalMonthlyLimit" type="number" min="1"
+                    /></label>
+                  </div>
+                </div>
+
+                <div class="actions ai-essential-actions">
+                  <button type="submit">Guardar opciones principales</button>
+                </div>
+
+                <details class="advanced-settings ai-advanced-panel">
+                  <summary>Configuración avanzada del modelo y los límites</summary>
+                  <div class="ai-advanced-content">
+                    <p class="muted">
+                      Modifica estos valores únicamente cuando conozcas su función. Los valores
+                      actuales se mantienen aunque la sección esté cerrada.
+                    </p>
+                    <div class="form-row">
+                      <label
+                        >Temperatura<input
+                          name="temperature"
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                      /></label>
+                      <label
+                        >Espera máxima (ms)<input
+                          name="timeoutMs"
+                          type="number"
+                          min="1000"
+                          max="60000"
+                      /></label>
+                    </div>
+                    <h4>Procesamiento por mensaje</h4>
+                    <div class="form-row limits-grid">
+                      <label
+                        >Pregunta (caracteres)<input name="questionMaxChars" type="number" min="1"
+                      /></label>
+                      <label
+                        >Contexto (tokens)<input name="contextMaxTokens" type="number" min="1"
+                      /></label>
+                      <label
+                        >Entrada (tokens)<input name="inputMaxTokens" type="number" min="1"
+                      /></label>
+                      <label
+                        >Respuesta (tokens)<input name="responseMaxTokens" type="number" min="1"
+                      /></label>
+                    </div>
+                    <h4>Control de interacciones</h4>
+                    <div class="form-row limits-grid">
+                      <label
+                        >Espera por persona (s)<input
+                          name="userCooldownSeconds"
+                          type="number"
+                          min="0"
+                      /></label>
+                      <label
+                        >Activaciones por hora<input
+                          name="interactionHourlyLimit"
+                          type="number"
+                          min="1"
+                      /></label>
+                      <label
+                        >Espera entre mensajes (s)<input
+                          name="interactionCooldownSeconds"
+                          type="number"
+                          min="0"
+                      /></label>
+                      <label
+                        >Ventana de consulta idéntica (s)<input
+                          name="duplicateQueryWindowSeconds"
+                          type="number"
+                          min="0"
+                      /></label>
+                    </div>
+                    <h4>Presupuesto de tokens</h4>
+                    <div class="form-row limits-grid">
+                      <label
+                        >Tokens diarios<input name="globalDailyTokenLimit" type="number" min="1"
+                      /></label>
+                      <label
+                        >Tokens mensuales<input
+                          name="globalMonthlyTokenLimit"
+                          type="number"
+                          min="1"
+                      /></label>
+                    </div>
+                    <label class="toggle"
+                      ><input name="confirmIncreasedLimits" type="checkbox" /> Confirmo aumentos
+                      sobre los máximos seguros iniciales</label
+                    >
+                    <div class="actions">
+                      <button type="submit">Guardar toda la configuración</button>
+                      <button id="reset-ai-counters" class="danger" type="button">
+                        Restablecer contadores de prueba
+                      </button>
+                    </div>
+                  </div>
+                </details>
+              </form>
+
+              <form id="ai-credential-form" class="card inset ai-credential-card">
+                <div>
+                  <p class="eyebrow">Conexión</p>
+                  <h3>Clave de Groq</h3>
+                  <p class="muted">
+                    Solo debes cambiarla cuando quieras configurar o reemplazar la clave. Nunca
+                    vuelve al navegador después de guardarla.
+                  </p>
+                </div>
+                <div class="form-row">
+                  <label
+                    >Modalidad<select name="mode">
+                      <option value="global">Usar clave global de la instalación</option>
+                      <option value="per_bot">Usar clave exclusiva de este asistente</option>
+                    </select></label
+                  >
+                  <label
+                    >Nueva clave exclusiva<input
+                      name="apiKey"
+                      type="password"
+                      autocomplete="new-password"
+                      minlength="16"
+                      maxlength="500"
+                      placeholder="Déjalo vacío para conservar la clave actual"
+                  /></label>
+                </div>
+                <div class="actions">
+                  <button type="submit">Guardar conexión</button>
+                  <button id="delete-ai-key" class="danger" type="button">
+                    Eliminar clave exclusiva
+                  </button>
+                </div>
+              </form>
+
+              <details class="card inset ai-advanced-panel">
+                <summary>Capacidad y disponibilidad</summary>
+                <div class="ai-advanced-content">
+                  <p class="muted">
+                    Estos controles regulan concurrencia, espera y reintentos. Mantén los valores
+                    recomendados cuando no necesites una configuración especial.
+                  </p>
+                  <div id="ai-queue-cards" class="status-grid"></div>
+                  <form id="ai-queue-settings-form">
+                    <div class="form-row limits-grid">
+                      <label
+                        >Llamadas simultáneas<input
+                          name="maxConcurrent"
+                          type="number"
+                          min="1"
+                          max="10"
+                          required
+                      /></label>
+                      <label
+                        >Solicitudes esperando<input
+                          name="maxQueueSize"
+                          type="number"
+                          min="1"
+                          max="100"
+                          required
+                      /></label>
+                      <label
+                        >Espera máxima en cola (s)<input
+                          name="maxQueueWaitSeconds"
+                          type="number"
+                          min="5"
+                          max="300"
+                          required
+                      /></label>
+                      <label
+                        >Timeout de Groq (s)<input
+                          name="providerTimeoutSeconds"
+                          type="number"
+                          min="5"
+                          max="60"
+                          required
+                      /></label>
+                      <label
+                        >Reintentos<input name="maxRetries" type="number" min="0" max="5" required
+                      /></label>
+                      <label
+                        >Espera inicial de reintento (s)<input
+                          name="initialRetryDelaySeconds"
+                          type="number"
+                          min="1"
+                          max="30"
+                          required
+                      /></label>
+                      <label
+                        >Espera máxima de reintento (s)<input
+                          name="maximumRetryDelaySeconds"
+                          type="number"
+                          min="1"
+                          max="60"
+                          required
+                      /></label>
+                      <label
+                        >Aviso de espera (s)<input
+                          name="waitNoticeSeconds"
+                          type="number"
+                          min="1"
+                          max="60"
+                          required
+                      /></label>
+                      <label
+                        >Pausa por persona (s)<input
+                          name="userCooldownSeconds"
+                          type="number"
+                          min="0"
+                          max="300"
+                          required
+                      /></label>
+                      <label
+                        >Ventana de duplicados (s)<input
+                          name="duplicateWindowSeconds"
+                          type="number"
+                          min="0"
+                          max="300"
+                          required
+                      /></label>
+                      <label
+                        >Ventana single-flight (s)<input
+                          name="singleFlightWindowSeconds"
+                          type="number"
+                          min="1"
+                          max="300"
+                          required
+                      /></label>
+                      <label
+                        >Intervalo entre mensajes (ms)<input
+                          name="outboundMessageIntervalMs"
+                          type="number"
+                          min="0"
+                          max="10000"
+                          required
+                      /></label>
+                      <label
+                        >Reintento sugerido (s)<input
+                          name="suggestedRetrySeconds"
+                          type="number"
+                          min="5"
+                          max="600"
+                          required
+                      /></label>
+                    </div>
+                    <div class="actions">
+                      <button type="submit">Guardar capacidad técnica</button>
+                      <button id="restore-ai-queue-recommended" class="secondary" type="button">
+                        Restaurar valores recomendados
+                      </button>
+                    </div>
+                  </form>
+                  <article id="ai-queue-simulator" class="card inset hidden">
+                    <h4>Probar cola de IA</h4>
+                    <p class="muted">
+                      Simulación local: no llama a Groq ni envía mensajes a WhatsApp.
+                    </p>
+                    <form id="ai-queue-simulator-form" class="inline-form">
+                      <label
+                        >Consultas<input
+                          name="requests"
+                          type="number"
+                          min="1"
+                          max="30"
+                          value="10"
+                          required
+                      /></label>
+                      <label
+                        >Escenario<select name="scenario">
+                          <option value="normal">Normal</option>
+                          <option value="repeated">Preguntas repetidas</option>
+                          <option value="rate_limited">Error 429</option>
+                          <option value="timeout">Timeout</option>
+                        </select></label
+                      >
+                      <button type="submit">Probar cola de IA</button>
+                    </form>
+                    <div id="ai-queue-simulation-result" class="status-grid"></div>
+                  </article>
+                </div>
+              </details>
+
+              <details class="card inset ai-advanced-panel">
+                <summary>Presupuesto global de todos los asistentes</summary>
+                <div class="ai-advanced-content">
+                  <form id="global-ai-limits-form">
+                    <p class="muted">
+                      Este límite protege el presupuesto compartido entre todos los asistentes de la
+                      instalación.
+                    </p>
+                    <div class="form-row limits-grid">
+                      <label
+                        >Consultas diarias<input
+                          name="dailyRequestLimit"
+                          type="number"
+                          min="1"
+                          required
+                      /></label>
+                      <label
+                        >Consultas mensuales<input
+                          name="monthlyRequestLimit"
+                          type="number"
+                          min="1"
+                          required
+                      /></label>
+                      <label
+                        >Tokens diarios<input name="dailyTokenLimit" type="number" min="1" required
+                      /></label>
+                      <label
+                        >Tokens mensuales<input
+                          name="monthlyTokenLimit"
+                          type="number"
+                          min="1"
+                          required
+                      /></label>
+                    </div>
+                    <button type="submit">Guardar presupuesto global</button>
+                  </form>
+                </div>
+              </details>
+
+              <details class="card inset ai-advanced-panel">
+                <summary>Estadísticas y eventos detallados</summary>
+                <div class="ai-advanced-content">
+                  <h3>Actividad operativa</h3>
+                  <div id="operational-metrics-cards" class="status-grid"></div>
+                  <h3>Eventos recientes de IA</h3>
+                  <div id="ai-events" class="list"></div>
+                </div>
+              </details>
+            </section>
+
+            <section id="section-administrators" class="panel-section hidden">
+              <p class="eyebrow">Identidad verificada por número</p>
+              <h2>Administradores de WhatsApp</h2>
+              <form id="administrator-form" class="inline-form">
+                <label
+                  >Número internacional<input name="number" placeholder="+56912345678" required
+                /></label>
+                <button type="submit">Agregar</button>
+              </form>
+              <div id="administrators-list" class="list"></div>
+            </section>
+
+            <section id="section-settings" class="panel-section hidden">
+              <p class="eyebrow">Comportamiento general</p>
+              <h2>Configuración</h2>
+              <form id="settings-form">
+                <label class="toggle"
+                  ><input name="bot_enabled" type="checkbox" /> Bot activado</label
+                >
+                <label
+                  >Respuesta de respaldo<textarea
+                    name="fallback_response"
+                    maxlength="4000"
+                    rows="4"
+                    required
+                  ></textarea>
+                </label>
+                <label
+                  >Advertencia profesional<textarea
+                    name="professional_warning"
+                    maxlength="1000"
+                    rows="3"
+                    required
+                  ></textarea>
+                </label>
+                <label
+                  >Nivel de registros<select name="log_level">
+                    <option>error</option>
+                    <option>warn</option>
+                    <option>info</option>
+                    <option>debug</option>
+                  </select></label
+                >
+                <div class="form-row">
+                  <label
+                    >Máximo por usuario<input
+                      name="user_rate_limit"
+                      type="number"
+                      min="1"
+                      max="100"
+                      required
+                    />
+                  </label>
+                  <label
+                    >Máximo por grupo<input
+                      name="group_rate_limit"
+                      type="number"
+                      min="1"
+                      max="500"
+                      required
+                    />
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label
+                    >Ventana (segundos)<input
+                      name="rate_window_seconds"
+                      type="number"
+                      min="10"
+                      max="3600"
+                      required
+                    />
+                  </label>
+                  <label
+                    >Enfriamiento (segundos)<input
+                      name="user_cooldown_seconds"
+                      type="number"
+                      min="0"
+                      max="3600"
+                      required
+                    />
+                  </label>
+                </div>
+                <label
+                  >Prevención de repetición (segundos)<input
+                    name="repeat_window_seconds"
+                    type="number"
+                    min="0"
+                    max="86400"
+                    required
+                  />
+                </label>
+                <fieldset>
+                  <legend>Vigencia de grupos</legend>
+                  <label class="toggle"
+                    ><input name="require_authorized_admin_in_group" type="checkbox" /> Requerir al
+                    menos un administrador autorizado dentro del grupo</label
+                  >
+                  <div class="form-row">
+                    <label
+                      >Horas antes de archivar<input
+                        name="group_archive_after_hours"
+                        type="number"
+                        min="1"
+                        max="720"
+                        required
+                    /></label>
+                    <label
+                      >Días antes de eliminar<input
+                        name="group_delete_after_days"
+                        type="number"
+                        min="1"
+                        max="3650"
+                        required
+                    /></label>
+                  </div>
+                  <label
+                    >Frecuencia de sincronización (minutos)<input
+                      name="group_sync_interval_minutes"
+                      type="number"
+                      min="5"
+                      max="1440"
+                      required
+                  /></label>
+                  <label class="toggle"
+                    ><input name="group_auto_delete_enabled" type="checkbox" /> Eliminar
+                    automáticamente registros archivados cuando venza la retención</label
+                  >
+                </fieldset>
+                <p class="muted">
+                  Los cambios de límites se aplican después de reiniciar la aplicación.
+                </p>
+                <button type="submit">Guardar cambios</button>
+              </form>
+            </section>
+
+            <section id="section-moderation" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Protección local por grupo</p>
+                  <h2>Moderación y reglas</h2>
+                </div>
+              </div>
+              <p class="info-callout">
+                <strong>Configuración guiada.</strong> La IA solo prepara las reglas cuando lo
+                solicitas. Los mensajes diarios se revisan localmente, sin IA ni consumo de tokens.
+              </p>
+              <div class="card inset moderation-workspace">
+                <label
+                  >Grupo que deseas configurar<select id="moderation-group-selector"></select
+                ></label>
+                <div
+                  id="moderation-progress"
+                  class="moderation-progress"
+                  aria-label="Progreso de configuración"
+                ></div>
+                <div id="moderation-group-status" class="info-callout"></div>
+              </div>
+              <div class="moderation-tabs" role="tablist" aria-label="Secciones de moderación">
+                <button type="button" data-moderation-tab="configuration">Configuración</button>
+                <button type="button" data-moderation-tab="group-rules">Reglas del grupo</button>
+                <button type="button" data-moderation-tab="tests">Pruebas</button>
+                <button type="button" data-moderation-tab="cases">Casos pendientes</button>
+                <button type="button" data-moderation-tab="history">Historial</button>
+              </div>
+              <div data-moderation-pane="configuration" class="card inset">
+                <h3>Configuración del grupo</h3>
+                <div id="moderation-simple-summary" class="status-grid"></div>
+                <label
+                  >Administradores que recibirán un aviso privado en una reincidencia
+                  <div id="moderation-admin-recipients" class="checkbox-stack"></div
+                ></label>
+                <div class="actions">
+                  <button id="moderation-save-admins" type="button" class="secondary">
+                    Guardar destinatarios</button
+                  ><button id="moderation-toggle" type="button">Activar moderación</button>
+                </div>
+                <p class="muted">
+                  La primera detección genera una advertencia en el grupo. Una reincidencia genera
+                  otra advertencia, un caso en el panel y un aviso privado. Nunca se expulsa a
+                  personas ni se eliminan mensajes automáticamente.
                 </p>
               </div>
-              <button id="open-unlink-whatsapp" class="danger" type="button">
-                Desvincular solamente WhatsApp
-              </button>
-            </article>
-            <article class="danger-option critical">
-              <div>
-                <h3>Restablecimiento completo del bot</h3>
+              <div data-moderation-pane="group-rules" class="card inset hidden">
+                <h3>Reglas de este grupo</h3>
                 <p>
-                  Esta acción elimina la vinculación y todas las configuraciones del chatbot. Se
-                  creará una copia de seguridad antes de continuar.
+                  Copia y pega aquí las normas completas de este grupo. La inteligencia artificial
+                  las analizará una sola vez para preparar una moderación local. Los mensajes del
+                  grupo no se enviarán posteriormente a la inteligencia artificial.
                 </p>
+                <form id="moderation-rules-text-form">
+                  <label
+                    >Normas y situaciones que requieren advertencia<textarea
+                      name="rulesText"
+                      maxlength="20000"
+                      rows="14"
+                      required
+                      placeholder="Ejemplo: Tratar a todas las personas con respeto. No permitir insultos, amenazas, discriminación, publicidad repetida ni compartir datos personales."
+                    ></textarea>
+                  </label>
+                  <div class="actions">
+                    <button type="submit">Guardar borrador</button
+                    ><button id="moderation-discard-rules" type="button" class="secondary">
+                      Descartar cambios
+                    </button>
+                  </div>
+                </form>
+                <div class="actions spacious-actions">
+                  <button id="moderation-analyze" type="button">
+                    Analizar y preparar moderación
+                  </button>
+                </div>
+                <div id="moderation-analysis-summary" class="preview"></div>
               </div>
-              <button id="open-factory-reset" class="danger-primary" type="button">
-                Restablecer bot de fábrica
-              </button>
-            </article>
-          </div>
-          </div>
-        </section>
+              <div data-moderation-pane="tests" class="card inset hidden">
+                <h3>Pruebas obligatorias</h3>
+                <p class="info-callout">
+                  Los textos se procesan solo en memoria: no se guardan, no crean casos, no envían
+                  mensajes y no usan IA. Para una prueba real en WhatsApp, envía el mensaje desde
+                  otra cuenta. Los mensajes enviados por la misma cuenta conectada al bot son
+                  ignorados.
+                </p>
+                <form id="moderation-allowed-test">
+                  <label
+                    >Mensaje que debe permitirse<textarea
+                      name="text"
+                      maxlength="4000"
+                      required
+                    ></textarea></label
+                  ><button type="submit">Probar mensaje permitido</button>
+                </form>
+                <form id="moderation-warning-test">
+                  <label
+                    >Mensaje que debe generar advertencia<textarea
+                      name="text"
+                      maxlength="4000"
+                      required
+                    ></textarea></label
+                  ><button type="submit">Probar advertencia</button>
+                </form>
+                <div id="moderation-test-result" class="preview"></div>
+              </div>
+              <div data-moderation-pane="cases" class="card inset hidden">
+                <h3>Casos pendientes</h3>
+                <p class="muted">Toda decisión es humana.</p>
+                <div id="moderation-pending-cases" class="stack"></div>
+              </div>
+              <div data-moderation-pane="history" class="card inset hidden">
+                <h3>Historial</h3>
+                <div id="moderation-history" class="stack"></div>
+              </div>
+            </section>
+
+            <section id="section-automatic-messages" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Programación segura</p>
+                  <h2>Mensajes automáticos</h2>
+                </div>
+                <span class="timezone-badge">America/Santiago</span>
+              </div>
+              <p class="muted">
+                Los envíos se realizan solo en grupos activos y no bloqueados, respetan el estado
+                general del bot y los silencios temporales.
+              </p>
+              <form id="automatic-messages-form">
+                <div class="card inset automatic-manual-group">
+                  <label
+                    >Grupo para los envíos manuales<select
+                      id="automatic-message-group"
+                      required
+                    ></select>
+                  </label>
+                  <p class="muted">
+                    Los botones solicitan confirmación y nunca permiten elegir chats privados ni
+                    grupos no autorizados.
+                  </p>
+                </div>
+                <article class="card inset automatic-card">
+                  <div class="section-heading">
+                    <div>
+                      <h3>Bienvenida</h3>
+                      <p class="muted">Agrupa varios ingresos para evitar mensajes repetidos.</p>
+                    </div>
+                    <label class="toggle"
+                      ><input name="welcome_enabled" type="checkbox" /> Activar</label
+                    >
+                  </div>
+                  <input name="welcome_batch_window" type="hidden" value="5" />
+                  <div class="form-row">
+                    <label class="toggle"
+                      ><input name="welcome_include_public_name" type="checkbox" /> Incluir nombre
+                      público de WhatsApp</label
+                    >
+                    <label class="toggle"
+                      ><input name="welcome_real_mention" type="checkbox" /> Realizar mención
+                      real</label
+                    >
+                  </div>
+                  <div class="form-row">
+                    <label
+                      >Cuando no exista nombre<input
+                        name="welcome_unknown_name"
+                        maxlength="80"
+                        required
+                    /></label>
+                    <label
+                      >Ingresos múltiples<select name="welcome_multiple_mode">
+                        <option value="GROUPED">Un solo mensaje agrupado</option>
+                        <option value="INDIVIDUAL">Un mensaje por persona</option>
+                      </select></label
+                    >
+                    <label
+                      >Máximo de nombres<input
+                        name="welcome_maximum_names"
+                        type="number"
+                        min="1"
+                        max="5"
+                        required
+                    /></label>
+                    <label
+                      >Espera antes de enviar (segundos)<input
+                        name="welcome_send_delay"
+                        type="number"
+                        min="0"
+                        max="60"
+                        required
+                    /></label>
+                  </div>
+                  <div class="form-row">
+                    <label
+                      >Comprobar participantes cada (segundos)<input
+                        name="welcome_reconciliation_interval"
+                        type="number"
+                        min="60"
+                        max="3600"
+                        required
+                    /></label>
+                  </div>
+                  <div class="status-strip" id="welcome-runtime-status" aria-live="polite"></div>
+                  <label
+                    >Mensaje<textarea
+                      name="welcome_template"
+                      maxlength="2000"
+                      rows="6"
+                      required
+                    ></textarea>
+                  </label>
+                  <p class="muted">
+                    Variables: {name}, {mention}, {communityName}, {groupName}, {assistantName},
+                    {botAlias}. En la primera línea se recomienda usar {name} o {mention}, no ambas.
+                  </p>
+                  <label
+                    >Nombre ficticio para la vista previa<input
+                      id="welcome-preview-name"
+                      maxlength="80"
+                      value="María"
+                  /></label>
+                  <div class="preview">
+                    <span>Vista previa</span>
+                    <p id="welcome-preview"></p>
+                  </div>
+                  <h4>Grupos donde está activa</h4>
+                  <div id="welcome-group-settings" class="list"></div>
+                  <button class="secondary manual-automatic-send" data-kind="welcome" type="button">
+                    Enviar bienvenida de prueba
+                  </button>
+                </article>
+
+                <article class="card inset automatic-card">
+                  <div class="section-heading">
+                    <div>
+                      <h3>Buenos días</h3>
+                      <p class="muted">
+                        Selecciona automáticamente la plantilla según el día local.
+                      </p>
+                    </div>
+                    <label class="toggle"
+                      ><input name="greeting_enabled" type="checkbox" /> Activar</label
+                    >
+                  </div>
+                  <div class="form-row">
+                    <label>Hora<input name="greeting_time" type="time" step="60" required /></label>
+                    <label
+                      >Tolerancia (minutos)<input
+                        name="greeting_tolerance"
+                        type="number"
+                        min="0"
+                        max="180"
+                        required
+                    /></label>
+                  </div>
+                  <label
+                    >Lunes<textarea
+                      name="greeting_monday"
+                      maxlength="2000"
+                      rows="5"
+                      required
+                    ></textarea>
+                  </label>
+                  <label
+                    >Martes a jueves<textarea
+                      name="greeting_weekday"
+                      maxlength="2000"
+                      rows="5"
+                      required
+                    ></textarea>
+                  </label>
+                  <label
+                    >Viernes<textarea
+                      name="greeting_friday"
+                      maxlength="2000"
+                      rows="5"
+                      required
+                    ></textarea>
+                  </label>
+                  <label
+                    >Fin de semana<textarea
+                      name="greeting_weekend"
+                      maxlength="2000"
+                      rows="5"
+                      required
+                    ></textarea>
+                  </label>
+                  <div class="preview">
+                    <span>Vista previa del día</span>
+                    <p id="greeting-preview"></p>
+                  </div>
+                  <button
+                    class="secondary manual-automatic-send"
+                    data-kind="greeting"
+                    type="button"
+                  >
+                    Enviar saludo de prueba
+                  </button>
+                </article>
+
+                <article class="card inset automatic-card">
+                  <div class="section-heading">
+                    <div>
+                      <h3>Reglas diarias</h3>
+                      <p class="muted">
+                        El texto se envía completo, sin modificaciones automáticas.
+                      </p>
+                    </div>
+                    <label class="toggle"
+                      ><input name="rules_enabled" type="checkbox" /> Activar</label
+                    >
+                  </div>
+                  <div class="form-row">
+                    <label>Hora<input name="rules_time" type="time" step="60" required /></label>
+                    <label
+                      >Tolerancia (minutos)<input
+                        name="rules_tolerance"
+                        type="number"
+                        min="0"
+                        max="180"
+                        required
+                    /></label>
+                  </div>
+                  <label
+                    >Reglas<textarea
+                      name="rules_template"
+                      maxlength="8000"
+                      rows="14"
+                      required
+                    ></textarea>
+                  </label>
+                  <div class="preview">
+                    <span>Vista previa</span>
+                    <p id="rules-preview"></p>
+                  </div>
+                  <button class="secondary manual-automatic-send" data-kind="rules" type="button">
+                    Enviar reglas ahora
+                  </button>
+                </article>
+
+                <button type="submit">Guardar mensajes automáticos</button>
+              </form>
+              <h3 class="subsection-title">Últimos resultados por grupo</h3>
+              <div id="automatic-deliveries" class="list"></div>
+            </section>
+
+            <section id="section-polls" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Participación diaria</p>
+                  <h2>Encuestas</h2>
+                </div>
+                <span class="timezone-badge">America/Santiago</span>
+              </div>
+              <p class="muted">
+                Envía encuestas nativas solamente a grupos activos y no bloqueados. No se guardan
+                votantes ni sus respuestas.
+              </p>
+
+              <article class="card inset">
+                <h3>Estado general</h3>
+                <form id="poll-configuration-form">
+                  <label class="toggle"
+                    ><input name="enabled" type="checkbox" /> Activar encuestas diarias</label
+                  >
+                  <div class="form-row">
+                    <label>Hora<input name="sendTime" type="time" step="60" required /></label>
+                    <label
+                      >Tolerancia (minutos)<input
+                        name="toleranceMinutes"
+                        type="number"
+                        min="0"
+                        max="180"
+                        required
+                    /></label>
+                    <label
+                      >Modo<select name="selectionMode">
+                        <option value="SAME_FOR_ALL">Misma encuesta para todos</option>
+                        <option value="PER_GROUP">Encuesta diferente por grupo</option>
+                      </select></label
+                    >
+                  </div>
+                  <div id="poll-schedule-summary" class="status-grid compact"></div>
+                  <button type="submit">Guardar programación</button>
+                </form>
+              </article>
+
+              <article class="card inset">
+                <div class="section-heading">
+                  <div>
+                    <h3>Banco de encuestas</h3>
+                    <p class="muted">Entre 2 y 12 opciones.</p>
+                  </div>
+                  <div class="actions">
+                    <button id="new-poll-template" type="button">Crear encuesta</button>
+                    <button id="restore-poll-defaults" class="secondary" type="button">
+                      Restaurar predeterminadas
+                    </button>
+                  </div>
+                </div>
+                <form id="poll-template-form" class="hidden">
+                  <input name="id" type="hidden" />
+                  <label>Pregunta<input name="question" maxlength="200" required /> </label>
+                  <div class="form-row">
+                    <label>Categoría<select name="category" required></select></label>
+                    <label>Excluir hasta<input name="disabledUntil" type="datetime-local" /></label>
+                  </div>
+                  <label
+                    >Opciones, una por línea<textarea
+                      name="options"
+                      maxlength="1212"
+                      rows="8"
+                      required
+                    ></textarea>
+                  </label>
+                  <p class="muted">El orden de las líneas será el orden de las alternativas.</p>
+                  <div class="checks">
+                    <label><input name="enabled" type="checkbox" checked /> Activa</label>
+                    <label><input name="favorite" type="checkbox" /> Favorita</label>
+                    <label
+                      ><input name="allowMultipleAnswers" type="checkbox" /> Permitir varias
+                      respuestas</label
+                    >
+                  </div>
+                  <div class="preview">
+                    <span>Vista previa</span>
+                    <p id="poll-template-preview"></p>
+                  </div>
+                  <div class="actions">
+                    <button type="submit">Guardar plantilla</button>
+                    <button id="cancel-poll-template" class="secondary" type="button">
+                      Cancelar
+                    </button>
+                  </div>
+                </form>
+                <div id="poll-templates-list" class="list"></div>
+              </article>
+
+              <article class="card inset">
+                <div class="section-heading">
+                  <div>
+                    <h3>Encuestas eliminadas de este asistente</h3>
+                    <p class="muted">
+                      Las plantillas permanecen disponibles para los demás asistentes.
+                    </p>
+                  </div>
+                </div>
+                <div id="hidden-poll-templates-list" class="list"></div>
+              </article>
+
+              <article class="card inset">
+                <h3>Enviar encuesta de prueba</h3>
+                <p class="muted">
+                  La prueba manual funciona aunque la programación diaria esté desactivada.
+                </p>
+                <form id="poll-test-form">
+                  <div class="form-row">
+                    <label>Grupo activo<select name="groupKey" required></select></label>
+                    <label>Plantilla<select name="templateId" required></select></label>
+                  </div>
+                  <label class="toggle"
+                    ><input name="countsAsDaily" type="checkbox" /> Contar como encuesta del
+                    día</label
+                  >
+                  <div class="preview">
+                    <span>Vista previa</span>
+                    <p id="poll-test-preview"></p>
+                  </div>
+                  <button type="submit">Enviar encuesta de prueba</button>
+                </form>
+              </article>
+
+              <article class="card inset">
+                <h3>Programación por fecha</h3>
+                <form id="poll-override-form">
+                  <div class="form-row">
+                    <label>Fecha futura<input name="localDate" type="date" required /></label>
+                    <label>Plantilla<select name="templateId" required></select></label>
+                  </div>
+                  <label class="toggle"
+                    ><input name="replaceConfirmed" type="checkbox" /> Confirmar reemplazo si la
+                    fecha ya está ocupada</label
+                  >
+                  <button type="submit">Programar encuesta</button>
+                </form>
+                <div id="poll-overrides-list" class="list"></div>
+              </article>
+
+              <h3 class="subsection-title">Historial de envíos</h3>
+              <div id="poll-history-list" class="list"></div>
+            </section>
+
+            <section id="section-maintenance" class="panel-section hidden">
+              <p class="eyebrow">Diagnóstico y control local</p>
+              <h2>Mantenimiento</h2>
+              <article class="card inset">
+                <p class="eyebrow danger-eyebrow">Zona peligrosa del asistente</p>
+                <h3>Enviar asistente a la papelera</h3>
+                <p id="assistant-trash-help" class="muted">
+                  Detiene solamente este conector y conserva sus datos durante 30 días.
+                </p>
+                <button id="maintenance-send-to-trash" class="danger" type="button">
+                  Enviar asistente a la papelera
+                </button>
+              </article>
+              <div id="neurobot-maintenance-tools">
+                <article class="card inset">
+                  <div class="section-heading">
+                    <div>
+                      <h3>Grupos vinculados</h3>
+                      <p class="muted">
+                        Los grupos se activan al detectar al bot. Aquí solo pueden bloquearse o
+                        desbloquearse.
+                      </p>
+                    </div>
+                    <button id="refresh-linked-groups" class="secondary" type="button">
+                      Actualizar
+                    </button>
+                  </div>
+                  <div id="linked-groups-list" class="list"></div>
+                </article>
+                <p class="eyebrow danger-eyebrow">Operaciones destructivas</p>
+                <h2>Zona de peligro</h2>
+                <p class="muted">
+                  Estas opciones desconectan WhatsApp o eliminan la configuración local del chatbot.
+                  Requieren confirmar nuevamente la identidad administradora.
+                </p>
+                <div class="danger-zone">
+                  <article class="danger-option">
+                    <div>
+                      <h3>Desvincular solamente WhatsApp</h3>
+                      <p>
+                        Desconecta el número actual y elimina la caché de WhatsApp Web, pero
+                        conserva la base de datos, administradores, grupos, comandos y respuestas.
+                      </p>
+                    </div>
+                    <button id="open-unlink-whatsapp" class="danger" type="button">
+                      Desvincular solamente WhatsApp
+                    </button>
+                  </article>
+                  <article class="danger-option critical">
+                    <div>
+                      <h3>Restablecimiento completo del bot</h3>
+                      <p>
+                        Esta acción elimina la vinculación y todas las configuraciones del chatbot.
+                        Se creará una copia de seguridad antes de continuar.
+                      </p>
+                    </div>
+                    <button id="open-factory-reset" class="danger-primary" type="button">
+                      Restablecer bot de fábrica
+                    </button>
+                  </article>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
       </div>

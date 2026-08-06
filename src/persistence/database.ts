@@ -108,7 +108,8 @@ export type GroupModerationProfile = {
   enabled: boolean;
   rulesText: string;
   rulesHash: string;
-  analysisStatus: 'DRAFT' | 'ANALYZING' | 'ANALYSIS_FAILED' | 'PENDING_TESTS' | 'READY' | 'ACTIVE' | 'OUTDATED';
+  analysisStatus:
+    'DRAFT' | 'ANALYZING' | 'ANALYSIS_FAILED' | 'PENDING_TESTS' | 'READY' | 'ACTIVE' | 'OUTDATED';
   testStatus: 'PENDING' | 'FAILED' | 'APPROVED';
   compiled: Record<string, unknown> | null;
   summary: Record<string, unknown> | null;
@@ -1867,22 +1868,26 @@ export class AppDatabase {
       this.saveAutomaticMessageConfiguration(configuration, 'neurobot');
     }
     if (!applied.has(11)) {
-      this.db.prepare(
-        `UPDATE assistant_profiles SET community_greeting_message = ?, limit_message = ?, updated_at = ?
+      this.db
+        .prepare(
+          `UPDATE assistant_profiles SET community_greeting_message = ?, limit_message = ?, updated_at = ?
          WHERE id IN (SELECT profile_id FROM bot_profiles WHERE bot_id = 'neurobot')`,
-      ).run(
-        '¡Hola! 👋 Soy Neurobot, el asistente de la Comunidad Neurodivergente – Autismo y TDAH. Puedo ayudarte con las normas, los grupos disponibles, las actividades y el funcionamiento de la comunidad. Llámame escribiendo @neurobot seguido de tu pregunta. Respondo una consulta a la vez y no reemplazo la orientación de profesionales.',
-        'Has alcanzado el límite temporal de preguntas nuevas que necesitan inteligencia artificial. Las consultas frecuentes y respuestas guardadas seguirán disponibles. Intenta nuevamente más tarde.',
-        new Date().toISOString(),
-      );
-      this.db.prepare(
-        `UPDATE ai_settings SET user_hourly_limit = 20, user_daily_limit = 50,
+        )
+        .run(
+          '¡Hola! 👋 Soy Neurobot, el asistente de la Comunidad Neurodivergente – Autismo y TDAH. Puedo ayudarte con las normas, los grupos disponibles, las actividades y el funcionamiento de la comunidad. Llámame escribiendo @neurobot seguido de tu pregunta. Respondo una consulta a la vez y no reemplazo la orientación de profesionales.',
+          'Has alcanzado el límite temporal de preguntas nuevas que necesitan inteligencia artificial. Las consultas frecuentes y respuestas guardadas seguirán disponibles. Intenta nuevamente más tarde.',
+          new Date().toISOString(),
+        );
+      this.db
+        .prepare(
+          `UPDATE ai_settings SET user_hourly_limit = 20, user_daily_limit = 50,
            user_cooldown_seconds = 0, group_hourly_limit = 150, group_daily_limit = 500,
            global_daily_limit = 500, global_monthly_limit = 10000,
            interaction_hourly_limit = 60, interaction_cooldown_seconds = 3,
            duplicate_query_window_seconds = 15, updated_at = ?
          WHERE profile_id IN (SELECT profile_id FROM bot_profiles WHERE bot_id = 'neurobot')`,
-      ).run(new Date().toISOString());
+        )
+        .run(new Date().toISOString());
     }
   }
 
@@ -2092,9 +2097,9 @@ export class AppDatabase {
     for (const command of commands) {
       const categoryName = commandCategory[command.name] ?? 'Preguntas frecuentes';
       const categoryId = categories.get(categoryName) ?? presentationCategory;
-      const keywords = (
-        commandKeywords.all(command.id) as Array<{ term: string }>
-      ).map((item) => item.term);
+      const keywords = (commandKeywords.all(command.id) as Array<{ term: string }>).map(
+        (item) => item.term,
+      );
       insertKnowledge.run(
         profile.id,
         categoryId,
@@ -2158,11 +2163,13 @@ export class AppDatabase {
            assistant_id, connector_type, whatsapp_web_client_id, local_auth_session_key,
            local_auth_session_path, session_ownership_verified, connector_status, created_at, updated_at
          ) VALUES ('neurobot', 'WHATSAPP_WEB', 'comunidad', 'comunidad',
-           './data/whatsapp-session', 0, 'UNLINKED', ?, ?)`
+           './data/whatsapp-session', 0, 'UNLINKED', ?, ?)`,
       )
       .run(now, now);
     const connector = this.db
-      .prepare("SELECT id FROM assistant_connectors WHERE assistant_id = 'neurobot' ORDER BY id LIMIT 1")
+      .prepare(
+        "SELECT id FROM assistant_connectors WHERE assistant_id = 'neurobot' ORDER BY id LIMIT 1",
+      )
       .get() as { id: number };
     this.db
       .prepare(
@@ -2232,13 +2239,19 @@ export class AppDatabase {
 
   private seedBotScopedAutomationPlatform(): void {
     const now = new Date().toISOString();
-    const legacyRows = this.db.prepare('SELECT * FROM automatic_message_tasks').all() as AutomaticTaskRow[];
+    const legacyRows = this.db
+      .prepare('SELECT * FROM automatic_message_tasks')
+      .all() as AutomaticTaskRow[];
     const legacyTasks = new Map(legacyRows.map((row) => [row.task_type, row]));
     const legacyTemplates = new Map(
-      (this.db.prepare('SELECT template_key, content FROM automatic_message_templates').all() as Array<{
-        template_key: string;
-        content: string;
-      }>).map((row) => [row.template_key, row.content]),
+      (
+        this.db
+          .prepare('SELECT template_key, content FROM automatic_message_templates')
+          .all() as Array<{
+          template_key: string;
+          content: string;
+        }>
+      ).map((row) => [row.template_key, row.content]),
     );
     for (const bot of this.listBots()) {
       const configuration =
@@ -2261,14 +2274,27 @@ export class AppDatabase {
            bot_id, configuration_json, customized_json, updated_at
          ) VALUES (?, ?, ?, ?)`,
       )
-      .run(botId, JSON.stringify(configuration), JSON.stringify(automaticCustomization(configuration)), now);
+      .run(
+        botId,
+        JSON.stringify(configuration),
+        JSON.stringify(automaticCustomization(configuration)),
+        now,
+      );
   }
 
   private seedBotPollTemplates(botId: string, timezone: string, now: string): void {
-    this.db.prepare(`INSERT OR IGNORE INTO assistant_ai_queue_settings(assistant_id, created_at, updated_at)
-      VALUES (?, ?, ?)`).run(botId, now, now);
-    this.db.prepare(`INSERT OR IGNORE INTO assistant_ai_provider_health(assistant_id, provider, state, updated_at)
-      VALUES (?, 'groq', 'AVAILABLE', ?)`).run(botId, now);
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO assistant_ai_queue_settings(assistant_id, created_at, updated_at)
+      VALUES (?, ?, ?)`,
+      )
+      .run(botId, now, now);
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO assistant_ai_provider_health(assistant_id, provider, state, updated_at)
+      VALUES (?, 'groq', 'AVAILABLE', ?)`,
+      )
+      .run(botId, now);
     this.db
       .prepare(
         `INSERT OR IGNORE INTO bot_poll_configurations(
@@ -2520,21 +2546,27 @@ export class AppDatabase {
     const row = this.db
       .prepare('SELECT configuration_json FROM bot_automatic_configurations WHERE bot_id = ?')
       .get(botId) as { configuration_json: string } | undefined;
-    if (row === undefined) return this.mergeWelcomeSettings(
-      defaultAutomaticConfiguration(this.getBot(botId)?.timezone ?? 'America/Santiago'), botId,
-    );
+    if (row === undefined)
+      return this.mergeWelcomeSettings(
+        defaultAutomaticConfiguration(this.getBot(botId)?.timezone ?? 'America/Santiago'),
+        botId,
+      );
     try {
       const stored = JSON.parse(row.configuration_json) as AutomaticMessageConfiguration;
-      return this.mergeWelcomeSettings({
-        ...stored,
-        welcome: {
-          ...DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.welcome,
-          ...stored.welcome,
+      return this.mergeWelcomeSettings(
+        {
+          ...stored,
+          welcome: {
+            ...DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.welcome,
+            ...stored.welcome,
+          },
         },
-      }, botId);
+        botId,
+      );
     } catch {
       return this.mergeWelcomeSettings(
-        defaultAutomaticConfiguration(this.getBot(botId)?.timezone ?? 'America/Santiago'), botId,
+        defaultAutomaticConfiguration(this.getBot(botId)?.timezone ?? 'America/Santiago'),
+        botId,
       );
     }
   }
@@ -2557,7 +2589,9 @@ export class AppDatabase {
     this.saveAssistantWelcomeSettings(configuration.welcome, botId);
     if (botId === 'neurobot') {
       this.db
-        .prepare(`UPDATE commands SET response = ?, custom = 1, updated_at = ? WHERE name = 'reglas'`)
+        .prepare(
+          `UPDATE commands SET response = ?, custom = 1, updated_at = ? WHERE name = 'reglas'`,
+        )
         .run(configuration.dailyRules.template, now);
     }
   }
@@ -2566,14 +2600,21 @@ export class AppDatabase {
     groupHash: string,
     botId = 'neurobot',
   ): { enabled: boolean; customTemplate: string | null; inheritAssistantTemplate: boolean } | null {
-    const row = this.db.prepare(`SELECT enabled, custom_template, inherit_assistant_template
-      FROM assistant_group_welcome_settings WHERE assistant_id=? AND group_hash=?`).get(botId, groupHash) as
-      { enabled: number; custom_template: string | null; inherit_assistant_template: number } | undefined;
-    return row === undefined ? null : {
-      enabled: row.enabled === 1,
-      customTemplate: row.custom_template,
-      inheritAssistantTemplate: row.inherit_assistant_template === 1,
-    };
+    const row = this.db
+      .prepare(
+        `SELECT enabled, custom_template, inherit_assistant_template
+      FROM assistant_group_welcome_settings WHERE assistant_id=? AND group_hash=?`,
+      )
+      .get(botId, groupHash) as
+      | { enabled: number; custom_template: string | null; inherit_assistant_template: number }
+      | undefined;
+    return row === undefined
+      ? null
+      : {
+          enabled: row.enabled === 1,
+          customTemplate: row.custom_template,
+          inheritAssistantTemplate: row.inherit_assistant_template === 1,
+        };
   }
 
   public listWelcomeGroupSettings(botId = 'neurobot'): Array<{
@@ -2582,10 +2623,19 @@ export class AppDatabase {
     customTemplate: string | null;
     inheritAssistantTemplate: boolean;
   }> {
-    return (this.db.prepare(`SELECT group_hash, enabled, custom_template, inherit_assistant_template
-      FROM assistant_group_welcome_settings WHERE assistant_id=? ORDER BY group_hash`).all(botId) as Array<{
-      group_hash: string; enabled: number; custom_template: string | null; inherit_assistant_template: number;
-    }>).map((row) => ({
+    return (
+      this.db
+        .prepare(
+          `SELECT group_hash, enabled, custom_template, inherit_assistant_template
+      FROM assistant_group_welcome_settings WHERE assistant_id=? ORDER BY group_hash`,
+        )
+        .all(botId) as Array<{
+        group_hash: string;
+        enabled: number;
+        custom_template: string | null;
+        inherit_assistant_template: number;
+      }>
+    ).map((row) => ({
       groupHash: row.group_hash,
       enabled: row.enabled === 1,
       customTemplate: row.custom_template,
@@ -2599,40 +2649,63 @@ export class AppDatabase {
     botId = 'neurobot',
   ): void {
     const now = new Date().toISOString();
-    this.db.prepare(`INSERT INTO assistant_group_welcome_settings(
+    this.db
+      .prepare(
+        `INSERT INTO assistant_group_welcome_settings(
       assistant_id,group_hash,enabled,custom_template,inherit_assistant_template,created_at,updated_at
     ) VALUES(?,?,?,?,?,?,?) ON CONFLICT(assistant_id,group_hash) DO UPDATE SET
       enabled=excluded.enabled,custom_template=excluded.custom_template,
-      inherit_assistant_template=excluded.inherit_assistant_template,updated_at=excluded.updated_at`).run(
-      botId, groupHash, setting.enabled ? 1 : 0, setting.customTemplate,
-      setting.inheritAssistantTemplate ? 1 : 0, now, now,
-    );
+      inherit_assistant_template=excluded.inherit_assistant_template,updated_at=excluded.updated_at`,
+      )
+      .run(
+        botId,
+        groupHash,
+        setting.enabled ? 1 : 0,
+        setting.customTemplate,
+        setting.inheritAssistantTemplate ? 1 : 0,
+        now,
+        now,
+      );
   }
 
   private mergeWelcomeSettings(
     configuration: AutomaticMessageConfiguration,
     botId: string,
   ): AutomaticMessageConfiguration {
-    const row = this.db.prepare(`SELECT enabled, template, include_public_name, enable_real_mention,
+    const row = this.db
+      .prepare(
+        `SELECT enabled, template, include_public_name, enable_real_mention,
       unknown_name_fallback, multiple_join_mode, maximum_grouped_names, send_delay_seconds
-      FROM assistant_welcome_settings WHERE assistant_id=?`).get(botId) as {
-      enabled: number; template: string; include_public_name: number; enable_real_mention: number;
-      unknown_name_fallback: string; multiple_join_mode: 'INDIVIDUAL' | 'GROUPED';
-      maximum_grouped_names: number; send_delay_seconds: number;
-    } | undefined;
+      FROM assistant_welcome_settings WHERE assistant_id=?`,
+      )
+      .get(botId) as
+      | {
+          enabled: number;
+          template: string;
+          include_public_name: number;
+          enable_real_mention: number;
+          unknown_name_fallback: string;
+          multiple_join_mode: 'INDIVIDUAL' | 'GROUPED';
+          maximum_grouped_names: number;
+          send_delay_seconds: number;
+        }
+      | undefined;
     if (row === undefined) return configuration;
-    return { ...configuration, welcome: {
-      ...configuration.welcome,
-      enabled: row.enabled === 1,
-      template: row.template,
-      includePublicName: row.include_public_name === 1,
-      enableRealMention: row.enable_real_mention === 1,
-      unknownNameFallback: row.unknown_name_fallback,
-      multipleJoinMode: row.multiple_join_mode,
-      groupSimultaneous: row.multiple_join_mode === 'GROUPED',
-      maximumGroupedNames: row.maximum_grouped_names,
-      sendDelaySeconds: row.send_delay_seconds,
-    } };
+    return {
+      ...configuration,
+      welcome: {
+        ...configuration.welcome,
+        enabled: row.enabled === 1,
+        template: row.template,
+        includePublicName: row.include_public_name === 1,
+        enableRealMention: row.enable_real_mention === 1,
+        unknownNameFallback: row.unknown_name_fallback,
+        multipleJoinMode: row.multiple_join_mode,
+        groupSimultaneous: row.multiple_join_mode === 'GROUPED',
+        maximumGroupedNames: row.maximum_grouped_names,
+        sendDelaySeconds: row.send_delay_seconds,
+      },
+    };
   }
 
   private saveAssistantWelcomeSettings(
@@ -2640,18 +2713,30 @@ export class AppDatabase {
     botId: string,
   ): void {
     const now = new Date().toISOString();
-    this.db.prepare(`INSERT INTO assistant_welcome_settings(
+    this.db
+      .prepare(
+        `INSERT INTO assistant_welcome_settings(
       assistant_id,enabled,template,include_public_name,enable_real_mention,unknown_name_fallback,
       multiple_join_mode,maximum_grouped_names,send_delay_seconds,created_at,updated_at
     ) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(assistant_id) DO UPDATE SET
       enabled=excluded.enabled,template=excluded.template,include_public_name=excluded.include_public_name,
       enable_real_mention=excluded.enable_real_mention,unknown_name_fallback=excluded.unknown_name_fallback,
       multiple_join_mode=excluded.multiple_join_mode,maximum_grouped_names=excluded.maximum_grouped_names,
-      send_delay_seconds=excluded.send_delay_seconds,updated_at=excluded.updated_at`).run(
-      botId, welcome.enabled ? 1 : 0, welcome.template, welcome.includePublicName ? 1 : 0,
-      welcome.enableRealMention ? 1 : 0, welcome.unknownNameFallback, welcome.multipleJoinMode,
-      welcome.maximumGroupedNames, welcome.sendDelaySeconds, now, now,
-    );
+      send_delay_seconds=excluded.send_delay_seconds,updated_at=excluded.updated_at`,
+      )
+      .run(
+        botId,
+        welcome.enabled ? 1 : 0,
+        welcome.template,
+        welcome.includePublicName ? 1 : 0,
+        welcome.enableRealMention ? 1 : 0,
+        welcome.unknownNameFallback,
+        welcome.multipleJoinMode,
+        welcome.maximumGroupedNames,
+        welcome.sendDelaySeconds,
+        now,
+        now,
+      );
   }
 
   public getWelcomeRuntime(botId = 'neurobot'): {
@@ -2661,16 +2746,20 @@ export class AppDatabase {
     lastSentAt: string | null;
     lastErrorCode: string | null;
   } {
-    const row = this.db.prepare(
-      `SELECT baseline_initialized, listener_registered, last_detected_at, last_sent_at,
+    const row = this.db
+      .prepare(
+        `SELECT baseline_initialized, listener_registered, last_detected_at, last_sent_at,
               last_error_code FROM bot_welcome_runtime WHERE bot_id = ?`,
-    ).get(botId) as {
-      baseline_initialized: number;
-      listener_registered: number;
-      last_detected_at: string | null;
-      last_sent_at: string | null;
-      last_error_code: string | null;
-    } | undefined;
+      )
+      .get(botId) as
+      | {
+          baseline_initialized: number;
+          listener_registered: number;
+          last_detected_at: string | null;
+          last_sent_at: string | null;
+          last_error_code: string | null;
+        }
+      | undefined;
     return {
       baselineInitialized: row?.baseline_initialized === 1,
       listenerRegistered: row?.listener_registered === 1,
@@ -2692,8 +2781,9 @@ export class AppDatabase {
   ): void {
     const current = this.getWelcomeRuntime(botId);
     const next = { ...current, ...changes };
-    this.db.prepare(
-      `INSERT INTO bot_welcome_runtime(
+    this.db
+      .prepare(
+        `INSERT INTO bot_welcome_runtime(
          bot_id, baseline_initialized, listener_registered, last_detected_at, last_sent_at,
          last_error_code, updated_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -2701,15 +2791,16 @@ export class AppDatabase {
          listener_registered=excluded.listener_registered, last_detected_at=excluded.last_detected_at,
          last_sent_at=excluded.last_sent_at, last_error_code=excluded.last_error_code,
          updated_at=excluded.updated_at`,
-    ).run(
-      botId,
-      next.baselineInitialized ? 1 : 0,
-      next.listenerRegistered ? 1 : 0,
-      next.lastDetectedAt,
-      next.lastSentAt,
-      next.lastErrorCode,
-      new Date().toISOString(),
-    );
+      )
+      .run(
+        botId,
+        next.baselineInitialized ? 1 : 0,
+        next.listenerRegistered ? 1 : 0,
+        next.lastDetectedAt,
+        next.lastSentAt,
+        next.lastErrorCode,
+        new Date().toISOString(),
+      );
   }
 
   public hasWelcomeBaselineParticipant(
@@ -2717,10 +2808,14 @@ export class AppDatabase {
     participantHash: string,
     botId = 'neurobot',
   ): boolean {
-    return this.db.prepare(
-      `SELECT 1 FROM bot_welcome_baseline
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM bot_welcome_baseline
        WHERE bot_id = ? AND group_hash = ? AND participant_hash = ?`,
-    ).get(botId, groupHash, participantHash) !== undefined;
+        )
+        .get(botId, groupHash, participantHash) !== undefined
+    );
   }
 
   public addWelcomeBaselineParticipant(
@@ -2728,37 +2823,37 @@ export class AppDatabase {
     participantHash: string,
     botId = 'neurobot',
   ): void {
-    this.db.prepare(
-      `INSERT OR IGNORE INTO bot_welcome_baseline(bot_id, group_hash, participant_hash, seen_at)
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO bot_welcome_baseline(bot_id, group_hash, participant_hash, seen_at)
        VALUES (?, ?, ?, ?)`,
-    ).run(botId, groupHash, participantHash, new Date().toISOString());
+      )
+      .run(botId, groupHash, participantHash, new Date().toISOString());
   }
 
-  public isWelcomeGroupBaselineInitialized(
-    groupHash: string,
-    botId = 'neurobot',
-  ): boolean {
-    const row = this.db.prepare(
-      `SELECT baseline_initialized FROM bot_welcome_group_runtime
+  public isWelcomeGroupBaselineInitialized(groupHash: string, botId = 'neurobot'): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT baseline_initialized FROM bot_welcome_group_runtime
        WHERE bot_id = ? AND group_hash = ?`,
-    ).get(botId, groupHash) as { baseline_initialized: number } | undefined;
+      )
+      .get(botId, groupHash) as { baseline_initialized: number } | undefined;
     return row?.baseline_initialized === 1;
   }
 
-  public markWelcomeGroupBaselineInitialized(
-    groupHash: string,
-    botId = 'neurobot',
-  ): void {
+  public markWelcomeGroupBaselineInitialized(groupHash: string, botId = 'neurobot'): void {
     const now = new Date().toISOString();
-    this.db.prepare(
-      `INSERT INTO bot_welcome_group_runtime(
+    this.db
+      .prepare(
+        `INSERT INTO bot_welcome_group_runtime(
          bot_id, group_hash, baseline_initialized, initialized_at, updated_at
        ) VALUES (?, ?, 1, ?, ?)
        ON CONFLICT(bot_id, group_hash) DO UPDATE SET
          baseline_initialized = 1,
          initialized_at = COALESCE(bot_welcome_group_runtime.initialized_at, excluded.initialized_at),
          updated_at = excluded.updated_at`,
-    ).run(botId, groupHash, now, now);
+      )
+      .run(botId, groupHash, now, now);
   }
 
   public claimWelcomeParticipant(
@@ -2769,14 +2864,16 @@ export class AppDatabase {
     botId = 'neurobot',
   ): boolean {
     const now = new Date().toISOString();
-    this.db.prepare(
-      'DELETE FROM bot_welcome_deduplication WHERE bot_id = ? AND expires_at <= ?',
-    ).run(botId, now);
-    const result = this.db.prepare(
-      `INSERT OR IGNORE INTO bot_welcome_deduplication(
+    this.db
+      .prepare('DELETE FROM bot_welcome_deduplication WHERE bot_id = ? AND expires_at <= ?')
+      .run(botId, now);
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO bot_welcome_deduplication(
          bot_id, group_hash, participant_hash, source, expires_at, created_at
        ) VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(botId, groupHash, participantHash, source, expiresAt.toISOString(), now);
+      )
+      .run(botId, groupHash, participantHash, source, expiresAt.toISOString(), now);
     return result.changes === 1;
   }
 
@@ -2830,7 +2927,15 @@ export class AppDatabase {
         VALUES (?, ?, ?, ?, ?, 'scheduled', 'PENDING', 0, NULL, ?, ?, NULL)
       `,
       )
-      .run(botId, `scheduled:${taskType}:${groupId}:${localDate}`, taskType, groupId, localDate, now, now);
+      .run(
+        botId,
+        `scheduled:${taskType}:${groupId}:${localDate}`,
+        taskType,
+        groupId,
+        localDate,
+        now,
+        now,
+      );
     return result.changes === 1 ? Number(result.lastInsertRowid) : null;
   }
 
@@ -2898,25 +3003,40 @@ export class AppDatabase {
     const safeLimit = Math.min(500, Math.max(1, Math.trunc(limit)));
     return (
       this.db
-        .prepare('SELECT * FROM bot_scheduled_message_deliveries WHERE bot_id = ? ORDER BY id DESC LIMIT ?')
+        .prepare(
+          'SELECT * FROM bot_scheduled_message_deliveries WHERE bot_id = ? ORDER BY id DESC LIMIT ?',
+        )
         .all(botId, safeLimit) as ScheduledDeliveryRow[]
     ).map(mapScheduledDelivery);
   }
 
-  public getAutomaticGroupBackoffRemainingMs(groupId: string, now = new Date(), botId = 'neurobot'): number {
+  public getAutomaticGroupBackoffRemainingMs(
+    groupId: string,
+    now = new Date(),
+    botId = 'neurobot',
+  ): number {
     const row = this.db
-      .prepare('SELECT disabled_until FROM bot_automatic_group_backoff WHERE bot_id = ? AND group_id = ?')
+      .prepare(
+        'SELECT disabled_until FROM bot_automatic_group_backoff WHERE bot_id = ? AND group_id = ?',
+      )
       .get(botId, groupId) as { disabled_until: string } | undefined;
     if (row === undefined) return 0;
     const remaining = new Date(row.disabled_until).getTime() - now.getTime();
     if (remaining <= 0) {
-      this.db.prepare('DELETE FROM bot_automatic_group_backoff WHERE bot_id = ? AND group_id = ?').run(botId, groupId);
+      this.db
+        .prepare('DELETE FROM bot_automatic_group_backoff WHERE bot_id = ? AND group_id = ?')
+        .run(botId, groupId);
       return 0;
     }
     return remaining;
   }
 
-  public setAutomaticGroupBackoff(groupId: string, until: Date, errorCode: string, botId = 'neurobot'): void {
+  public setAutomaticGroupBackoff(
+    groupId: string,
+    until: Date,
+    errorCode: string,
+    botId = 'neurobot',
+  ): void {
     const now = new Date().toISOString();
     this.db
       .prepare(
@@ -2931,7 +3051,9 @@ export class AppDatabase {
   }
 
   public getPollConfiguration(botId = 'neurobot'): PollConfiguration {
-    const row = this.db.prepare('SELECT * FROM bot_poll_configurations WHERE bot_id = ?').get(botId) as
+    const row = this.db
+      .prepare('SELECT * FROM bot_poll_configurations WHERE bot_id = ?')
+      .get(botId) as
       | {
           enabled: number;
           send_time: string;
@@ -2991,16 +3113,20 @@ export class AppDatabase {
 
   public listPollTemplates(botId = 'neurobot'): PollTemplate[] {
     const rows = this.db
-      .prepare(`SELECT templates.* FROM bot_poll_templates templates
+      .prepare(
+        `SELECT templates.* FROM bot_poll_templates templates
         LEFT JOIN assistant_poll_template_settings settings
           ON settings.assistant_id = templates.bot_id AND settings.poll_template_id = templates.id
         WHERE templates.bot_id = ? AND COALESCE(settings.status, 'ACTIVE') != 'HIDDEN'
-        ORDER BY templates.is_default DESC, templates.id`)
+        ORDER BY templates.is_default DESC, templates.id`,
+      )
       .all(botId) as PollTemplateRow[];
     const optionRows = this.db
-      .prepare(`SELECT options.template_id, options.option_text FROM bot_poll_options options
+      .prepare(
+        `SELECT options.template_id, options.option_text FROM bot_poll_options options
         JOIN bot_poll_templates templates ON templates.id = options.template_id
-        WHERE templates.bot_id = ? ORDER BY options.option_order`)
+        WHERE templates.bot_id = ? ORDER BY options.option_order`,
+      )
       .all(botId) as Array<{ template_id: number; option_text: string }>;
     const options = new Map<number, string[]>();
     for (const row of optionRows) {
@@ -3012,23 +3138,34 @@ export class AppDatabase {
   }
 
   public listHiddenPollTemplates(botId = 'neurobot'): HiddenPollTemplate[] {
-    const rows = this.db.prepare(`SELECT templates.*, settings.hidden_at, settings.removal_reason
+    const rows = this.db
+      .prepare(
+        `SELECT templates.*, settings.hidden_at, settings.removal_reason
       FROM bot_poll_templates templates
       JOIN assistant_poll_template_settings settings
         ON settings.assistant_id = templates.bot_id AND settings.poll_template_id = templates.id
       WHERE templates.bot_id = ? AND templates.is_default = 1 AND settings.status = 'HIDDEN'
-      ORDER BY settings.hidden_at DESC`).all(botId) as Array<PollTemplateRow & {
+      ORDER BY settings.hidden_at DESC`,
+      )
+      .all(botId) as Array<
+      PollTemplateRow & {
         hidden_at: string;
         removal_reason: string | null;
-      }>;
-    const optionRows = this.db.prepare(`SELECT options.template_id, options.option_text
+      }
+    >;
+    const optionRows = this.db
+      .prepare(
+        `SELECT options.template_id, options.option_text
       FROM bot_poll_options options JOIN bot_poll_templates templates ON templates.id = options.template_id
-      WHERE templates.bot_id = ? ORDER BY options.option_order`).all(botId) as Array<{
-        template_id: number;
-        option_text: string;
-      }>;
+      WHERE templates.bot_id = ? ORDER BY options.option_order`,
+      )
+      .all(botId) as Array<{
+      template_id: number;
+      option_text: string;
+    }>;
     const options = new Map<number, string[]>();
-    for (const row of optionRows) options.set(row.template_id, [...(options.get(row.template_id) ?? []), row.option_text]);
+    for (const row of optionRows)
+      options.set(row.template_id, [...(options.get(row.template_id) ?? []), row.option_text]);
     return rows.map((row) => ({
       ...mapPollTemplate(row, options.get(row.id) ?? []),
       hiddenAt: row.hidden_at,
@@ -3042,69 +3179,97 @@ export class AppDatabase {
     safeActorHash: string,
     removalReason: string | null = null,
   ): { hidden: boolean; cancelledOverrides: number; cancelledDeliveries: number } {
-    const template = this.db.prepare(
-      'SELECT id, is_default FROM bot_poll_templates WHERE id = ? AND bot_id = ?',
-    ).get(templateId, botId) as { id: number; is_default: number } | undefined;
-    if (template === undefined || template.is_default !== 1) throw new Error('POLL_ASSISTANT_MISMATCH');
-    const existing = this.db.prepare(`SELECT status FROM assistant_poll_template_settings
-      WHERE assistant_id = ? AND poll_template_id = ?`).get(botId, templateId) as { status: string } | undefined;
-    if (existing?.status === 'HIDDEN') return { hidden: false, cancelledOverrides: 0, cancelledDeliveries: 0 };
+    const template = this.db
+      .prepare('SELECT id, is_default FROM bot_poll_templates WHERE id = ? AND bot_id = ?')
+      .get(templateId, botId) as { id: number; is_default: number } | undefined;
+    if (template === undefined || template.is_default !== 1)
+      throw new Error('POLL_ASSISTANT_MISMATCH');
+    const existing = this.db
+      .prepare(
+        `SELECT status FROM assistant_poll_template_settings
+      WHERE assistant_id = ? AND poll_template_id = ?`,
+      )
+      .get(botId, templateId) as { status: string } | undefined;
+    if (existing?.status === 'HIDDEN')
+      return { hidden: false, cancelledOverrides: 0, cancelledDeliveries: 0 };
     const now = new Date().toISOString();
     return this.db.transaction(() => {
-      this.db.prepare(`INSERT INTO assistant_poll_template_settings(
+      this.db
+        .prepare(
+          `INSERT INTO assistant_poll_template_settings(
         assistant_id, poll_template_id, status, hidden_at, restored_at, safe_actor_hash,
         removal_reason, created_at, updated_at
       ) VALUES (?, ?, 'HIDDEN', ?, NULL, ?, ?, ?, ?)
       ON CONFLICT(assistant_id, poll_template_id) DO UPDATE SET status = 'HIDDEN',
         hidden_at = excluded.hidden_at, restored_at = NULL, safe_actor_hash = excluded.safe_actor_hash,
-        removal_reason = excluded.removal_reason, updated_at = excluded.updated_at`).run(
-        botId, templateId, now, safeActorHash, removalReason, now, now,
-      );
-      const cancelledOverrides = this.db.prepare(
-        'DELETE FROM bot_poll_date_overrides WHERE bot_id = ? AND template_id = ? AND local_date > date(?)',
-      ).run(botId, templateId, now).changes;
-      const cancelledDeliveries = this.db.prepare(`UPDATE bot_poll_send_history
+        removal_reason = excluded.removal_reason, updated_at = excluded.updated_at`,
+        )
+        .run(botId, templateId, now, safeActorHash, removalReason, now, now);
+      const cancelledOverrides = this.db
+        .prepare(
+          'DELETE FROM bot_poll_date_overrides WHERE bot_id = ? AND template_id = ? AND local_date > date(?)',
+        )
+        .run(botId, templateId, now).changes;
+      const cancelledDeliveries = this.db
+        .prepare(
+          `UPDATE bot_poll_send_history
         SET status = 'SKIPPED', failure_code = 'POLL_TEMPLATE_HIDDEN', attempted_at = ?,
           attempts = CASE WHEN attempts = 0 THEN 1 ELSE attempts END
-        WHERE bot_id = ? AND template_id = ? AND status = 'PENDING'`).run(now, botId, templateId).changes;
+        WHERE bot_id = ? AND template_id = ? AND status = 'PENDING'`,
+        )
+        .run(now, botId, templateId).changes;
       return { hidden: true, cancelledOverrides, cancelledDeliveries };
     })();
   }
 
-  public restorePollTemplateForAssistant(botId: string, templateId: number, safeActorHash: string): boolean {
+  public restorePollTemplateForAssistant(
+    botId: string,
+    templateId: number,
+    safeActorHash: string,
+  ): boolean {
     const now = new Date().toISOString();
-    const result = this.db.prepare(`UPDATE assistant_poll_template_settings
+    const result = this.db
+      .prepare(
+        `UPDATE assistant_poll_template_settings
       SET status = 'ACTIVE', hidden_at = NULL, restored_at = ?, safe_actor_hash = ?, updated_at = ?
       WHERE assistant_id = ? AND poll_template_id = ? AND status = 'HIDDEN'
         AND EXISTS (SELECT 1 FROM bot_poll_templates templates
-          WHERE templates.id = poll_template_id AND templates.bot_id = assistant_id AND templates.is_default = 1)`)
+          WHERE templates.id = poll_template_id AND templates.bot_id = assistant_id AND templates.is_default = 1)`,
+      )
       .run(now, safeActorHash, now, botId, templateId);
     return result.changes === 1;
   }
 
   public restoreAllDefaultPollsForAssistant(botId: string, safeActorHash: string): number {
     const now = new Date().toISOString();
-    return this.db.prepare(`UPDATE assistant_poll_template_settings
+    return this.db
+      .prepare(
+        `UPDATE assistant_poll_template_settings
       SET status = 'ACTIVE', hidden_at = NULL, restored_at = ?, safe_actor_hash = ?, updated_at = ?
       WHERE assistant_id = ? AND status = 'HIDDEN' AND poll_template_id IN (
         SELECT id FROM bot_poll_templates WHERE bot_id = ? AND is_default = 1
-      )`).run(now, safeActorHash, now, botId, botId).changes;
+      )`,
+      )
+      .run(now, safeActorHash, now, botId, botId).changes;
   }
 
   public getPollTemplate(id: number, botId = 'neurobot'): PollTemplate | null {
     return this.listPollTemplates(botId).find((template) => template.id === id) ?? null;
   }
 
-  public savePollTemplate(input: {
-    id?: number;
-    question: string;
-    category: string;
-    options: string[];
-    allowMultipleAnswers: boolean;
-    enabled: boolean;
-    favorite: boolean;
-    disabledUntil: string | null;
-  }, botId = 'neurobot'): PollTemplate {
+  public savePollTemplate(
+    input: {
+      id?: number;
+      question: string;
+      category: string;
+      options: string[];
+      allowMultipleAnswers: boolean;
+      enabled: boolean;
+      favorite: boolean;
+      disabledUntil: string | null;
+    },
+    botId = 'neurobot',
+  ): PollTemplate {
     const content = validatePollTemplateContent(input.question, input.category, input.options);
     if (input.disabledUntil !== null && !Number.isFinite(Date.parse(input.disabledUntil))) {
       throw new Error('La fecha de exclusión temporal no es válida.');
@@ -3169,7 +3334,10 @@ export class AppDatabase {
     const template = this.getPollTemplate(id, botId);
     if (template === null) return false;
     if (template.isDefault) throw new Error('Las encuestas predeterminadas no se pueden eliminar.');
-    return this.db.prepare('DELETE FROM bot_poll_templates WHERE id = ? AND bot_id = ?').run(id, botId).changes === 1;
+    return (
+      this.db.prepare('DELETE FROM bot_poll_templates WHERE id = ? AND bot_id = ?').run(id, botId)
+        .changes === 1
+    );
   }
 
   public restoreDefaultPollTemplates(botId = 'neurobot', safeActorHash = 'system'): number {
@@ -3234,7 +3402,9 @@ export class AppDatabase {
 
   public listPollDateOverrides(botId = 'neurobot'): PollDateOverride[] {
     return (
-      this.db.prepare('SELECT * FROM bot_poll_date_overrides WHERE bot_id = ? ORDER BY local_date').all(botId) as Array<{
+      this.db
+        .prepare('SELECT * FROM bot_poll_date_overrides WHERE bot_id = ? ORDER BY local_date')
+        .all(botId) as Array<{
         local_date: string;
         template_id: number;
         created_at: string;
@@ -3248,7 +3418,11 @@ export class AppDatabase {
     }));
   }
 
-  public savePollDateOverride(localDate: string, templateId: number, botId = 'neurobot'): PollDateOverride {
+  public savePollDateOverride(
+    localDate: string,
+    templateId: number,
+    botId = 'neurobot',
+  ): PollDateOverride {
     const template = this.getPollTemplate(templateId, botId);
     if (template === null) throw new Error('La encuesta seleccionada no existe.');
     if (!template.enabled) throw new Error('La encuesta seleccionada está desactivada.');
@@ -3268,20 +3442,24 @@ export class AppDatabase {
 
   public deletePollDateOverride(localDate: string, botId = 'neurobot'): boolean {
     return (
-      this.db.prepare('DELETE FROM bot_poll_date_overrides WHERE bot_id = ? AND local_date = ?').run(botId, localDate)
-        .changes === 1
+      this.db
+        .prepare('DELETE FROM bot_poll_date_overrides WHERE bot_id = ? AND local_date = ?')
+        .run(botId, localDate).changes === 1
     );
   }
 
-  public claimPollDelivery(input: {
-    deduplicationKey: string;
-    groupId: string;
-    localDate: string;
-    templateId: number;
-    source: PollDeliverySource;
-    countsAsDaily: boolean;
-    scheduledAt: Date;
-  }, botId = 'neurobot'): PollSendHistoryRecord | null {
+  public claimPollDelivery(
+    input: {
+      deduplicationKey: string;
+      groupId: string;
+      localDate: string;
+      templateId: number;
+      source: PollDeliverySource;
+      countsAsDaily: boolean;
+      scheduledAt: Date;
+    },
+    botId = 'neurobot',
+  ): PollSendHistoryRecord | null {
     const claim = this.db.transaction(() => {
       const existing = this.db
         .prepare('SELECT * FROM bot_poll_send_history WHERE bot_id = ? AND deduplication_key = ?')
@@ -3325,7 +3503,10 @@ export class AppDatabase {
     return claim();
   }
 
-  public getPollDelivery(deduplicationKey: string, botId = 'neurobot'): PollSendHistoryRecord | null {
+  public getPollDelivery(
+    deduplicationKey: string,
+    botId = 'neurobot',
+  ): PollSendHistoryRecord | null {
     const row = this.db
       .prepare('SELECT * FROM bot_poll_send_history WHERE bot_id = ? AND deduplication_key = ?')
       .get(botId, deduplicationKey) as PollHistoryRow | undefined;
@@ -3496,28 +3677,28 @@ export class AppDatabase {
       id: row.id,
       internalIdentifier: row.internal_identifier,
       clientId: row.client_id,
-      mode: row.mode,
-      connectorType: row.connector_type,
-      operatingMode: row.operating_mode,
+      mode: 'community',
+      connectorType: 'WHATSAPP_WEB',
+      operatingMode: 'COMMUNITY_GROUPS',
       lifecycleStatus: row.lifecycle_status,
       deletionLocked: row.deletion_locked === 1,
       deletedAt: row.deleted_at,
       scheduledPermanentDeletionAt: row.scheduled_permanent_deletion_at,
-      groupChannelEnabled: row.group_channel_enabled === 1,
-      privateChannelEnabled: row.private_channel_enabled === 1,
-      privateBusinessModeEnabled: row.private_business_mode_enabled === 1,
+      groupChannelEnabled: true,
+      privateChannelEnabled: false,
+      privateBusinessModeEnabled: false,
       activeConnectorId: row.active_connector_id,
       connectorMigrationLocked: row.connector_migration_locked === 1,
       capabilities: {
         communitySingleTurnMode: row.community_single_turn_mode === 1,
-        privateChatsEnabled: row.private_chats_enabled === 1,
-        conversationContinuationEnabled: row.conversation_continuation_enabled === 1,
-        interactiveMenusEnabled: row.interactive_menus_enabled === 1,
-        numericMenuRepliesEnabled: row.numeric_menu_replies_enabled === 1,
-        pollsAsMenusEnabled: row.polls_as_menus_enabled === 1,
+        privateChatsEnabled: false,
+        conversationContinuationEnabled: false,
+        interactiveMenusEnabled: false,
+        numericMenuRepliesEnabled: false,
+        pollsAsMenusEnabled: false,
         pollsForCommunityEngagementEnabled: row.polls_for_community_engagement_enabled === 1,
-        catalogEnabled: row.catalog_enabled === 1,
-        humanAssistanceEnabled: row.human_assistance_enabled === 1,
+        catalogEnabled: false,
+        humanAssistanceEnabled: false,
       },
       enabled: row.enabled === 1,
       profileId: row.profile_id,
@@ -3529,11 +3710,11 @@ export class AppDatabase {
       whatsappStatus: row.whatsapp_status,
       maskedNumber: row.masked_number,
       lastConnectedAt: row.last_connected_at,
-      groupsEnabled: row.groups_enabled === 1,
-      privateMessagesEnabled: row.private_messages_enabled === 1,
-      realMentionRequired: row.real_mention_required === 1,
-      continuedConversationsEnabled: row.continued_conversations_enabled === 1,
-      menuType: row.menu_type,
+      groupsEnabled: true,
+      privateMessagesEnabled: false,
+      realMentionRequired: true,
+      continuedConversationsEnabled: false,
+      menuType: 'automatic',
       aiCredentialMode: row.credential_mode,
       perBotAIKeyConfigured: row.key_configured === 1,
       createdAt: row.created_at,
@@ -3552,7 +3733,9 @@ export class AppDatabase {
     maskedNumber: string;
   }): { accepted: true } | { accepted: false; existingBot: BotRecord } {
     const connector = this.db
-      .prepare('SELECT id FROM assistant_connectors WHERE assistant_id = ? AND id = (SELECT active_connector_id FROM bots WHERE id = ?)')
+      .prepare(
+        'SELECT id FROM assistant_connectors WHERE assistant_id = ? AND id = (SELECT active_connector_id FROM bots WHERE id = ?)',
+      )
       .get(input.botId, input.botId) as { id: number } | undefined;
     if (connector === undefined) throw new Error('CONNECTOR_NOT_FOUND');
     const duplicate = this.db
@@ -3563,56 +3746,60 @@ export class AppDatabase {
          LIMIT 1`,
       )
       .get(input.botId, input.normalizedPhoneHash, input.whatsappIdentityHash) as
-      | { assistant_id: string }
-      | undefined;
+      { assistant_id: string } | undefined;
     if (duplicate !== undefined) {
       const now = new Date().toISOString();
-      this.db.prepare(
-        `UPDATE assistant_connectors SET connector_status='CONFLICT', conflict_reason='DUPLICATE_PHONE',
+      this.db
+        .prepare(
+          `UPDATE assistant_connectors SET connector_status='CONFLICT', conflict_reason='DUPLICATE_PHONE',
            linked_assistant_id=?, updated_at=? WHERE id=?`,
-      ).run(duplicate.assistant_id, now, connector.id);
-      this.db.prepare(
-        `UPDATE bots SET lifecycle_status='DUPLICATE_CONFIGURATION', enabled=0, updated_at=? WHERE id=?`,
-      ).run(now, input.botId);
-      this.db.prepare(
-        `UPDATE whatsapp_sessions SET status='disconnected', masked_number=NULL, updated_at=? WHERE bot_id=?`,
-      ).run(now, input.botId);
+        )
+        .run(duplicate.assistant_id, now, connector.id);
+      this.db
+        .prepare(
+          `UPDATE bots SET lifecycle_status='DUPLICATE_CONFIGURATION', enabled=0, updated_at=? WHERE id=?`,
+        )
+        .run(now, input.botId);
+      this.db
+        .prepare(
+          `UPDATE whatsapp_sessions SET status='disconnected', masked_number=NULL, updated_at=? WHERE bot_id=?`,
+        )
+        .run(now, input.botId);
       const existingBot = this.getBot(duplicate.assistant_id);
       if (existingBot === null) throw new Error('DUPLICATE_CONNECTOR_OWNER_NOT_FOUND');
       return { accepted: false, existingBot };
     }
     const now = new Date().toISOString();
     const update = this.db.transaction(() => {
-      this.db.prepare(
-        `UPDATE assistant_connectors SET normalized_phone_hash=?, whatsapp_identity_hash=?,
+      this.db
+        .prepare(
+          `UPDATE assistant_connectors SET normalized_phone_hash=?, whatsapp_identity_hash=?,
            session_ownership_verified=1, connector_status='CONNECTED', conflict_reason=NULL,
            linked_assistant_id=?, updated_at=? WHERE id=?`,
-      ).run(
-        input.normalizedPhoneHash,
-        input.whatsappIdentityHash,
-        input.botId,
-        now,
-        connector.id,
-      );
-      this.db.prepare(
-        `UPDATE bots SET lifecycle_status='CONNECTED', enabled=1, updated_at=? WHERE id=?`,
-      ).run(now, input.botId);
-      this.db.prepare(
-        `UPDATE whatsapp_sessions SET masked_number=?, status='connected', last_connected_at=?, updated_at=?
+        )
+        .run(input.normalizedPhoneHash, input.whatsappIdentityHash, input.botId, now, connector.id);
+      this.db
+        .prepare(`UPDATE bots SET lifecycle_status='CONNECTED', enabled=1, updated_at=? WHERE id=?`)
+        .run(now, input.botId);
+      this.db
+        .prepare(
+          `UPDATE whatsapp_sessions SET masked_number=?, status='connected', last_connected_at=?, updated_at=?
          WHERE bot_id=?`,
-      ).run(input.maskedNumber, now, now, input.botId);
+        )
+        .run(input.maskedNumber, now, now, input.botId);
     });
     try {
       update();
       return { accepted: true };
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes('UNIQUE')) throw error;
-      const owner = this.db.prepare(
-        `SELECT assistant_id FROM assistant_connectors WHERE assistant_id <> ?
+      const owner = this.db
+        .prepare(
+          `SELECT assistant_id FROM assistant_connectors WHERE assistant_id <> ?
           AND (normalized_phone_hash=? OR whatsapp_identity_hash=?) LIMIT 1`,
-      ).get(input.botId, input.normalizedPhoneHash, input.whatsappIdentityHash) as
-        | { assistant_id: string }
-        | undefined;
+        )
+        .get(input.botId, input.normalizedPhoneHash, input.whatsappIdentityHash) as
+        { assistant_id: string } | undefined;
       const existingBot = owner === undefined ? null : this.getBot(owner.assistant_id);
       if (existingBot === null) throw error;
       return { accepted: false, existingBot };
@@ -3623,10 +3810,13 @@ export class AppDatabase {
     reason: string;
     existingBotId: string;
   } | null {
-    const row = this.db.prepare(
-      `SELECT conflict_reason, linked_assistant_id FROM assistant_connectors
+    const row = this.db
+      .prepare(
+        `SELECT conflict_reason, linked_assistant_id FROM assistant_connectors
        WHERE assistant_id=? AND connector_status='CONFLICT' LIMIT 1`,
-    ).get(botId) as { conflict_reason: string | null; linked_assistant_id: string | null } | undefined;
+      )
+      .get(botId) as
+      { conflict_reason: string | null; linked_assistant_id: string | null } | undefined;
     return row?.conflict_reason && row.linked_assistant_id
       ? { reason: row.conflict_reason, existingBotId: row.linked_assistant_id }
       : null;
@@ -3639,17 +3829,23 @@ export class AppDatabase {
     const now = new Date();
     const deleteAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
     const operation = this.db.transaction(() => {
-      this.db.prepare(
-        `UPDATE bots SET lifecycle_status='ARCHIVED', enabled=0, deleted_at=?,
+      this.db
+        .prepare(
+          `UPDATE bots SET lifecycle_status='ARCHIVED', enabled=0, deleted_at=?,
            scheduled_permanent_deletion_at=?, updated_at=? WHERE id=?`,
-      ).run(now.toISOString(), deleteAt, now.toISOString(), botId);
-      this.db.prepare(
-        `UPDATE assistant_connectors SET connector_status='ARCHIVED', updated_at=? WHERE assistant_id=?`,
-      ).run(now.toISOString(), botId);
-      this.db.prepare(
-        `INSERT INTO assistant_deletion_audit(assistant_id,action,created_at,safe_actor_hash,backup_reference,result)
+        )
+        .run(now.toISOString(), deleteAt, now.toISOString(), botId);
+      this.db
+        .prepare(
+          `UPDATE assistant_connectors SET connector_status='ARCHIVED', updated_at=? WHERE assistant_id=?`,
+        )
+        .run(now.toISOString(), botId);
+      this.db
+        .prepare(
+          `INSERT INTO assistant_deletion_audit(assistant_id,action,created_at,safe_actor_hash,backup_reference,result)
          VALUES (?, 'ASSISTANT_SENT_TO_TRASH', ?, ?, NULL, 'ok')`,
-      ).run(botId, now.toISOString(), actorHash);
+        )
+        .run(botId, now.toISOString(), actorHash);
     });
     operation();
     return this.getBot(botId) as BotRecord;
@@ -3657,57 +3853,68 @@ export class AppDatabase {
 
   public restoreBotFromTrash(botId: string, actorHash: string): BotRecord {
     const bot = this.getBot(botId);
-    if (bot === null || bot.lifecycleStatus !== 'ARCHIVED') throw new Error('ASSISTANT_NOT_ARCHIVED');
-    const connector = this.db.prepare(
-      `SELECT normalized_phone_hash, whatsapp_identity_hash FROM assistant_connectors
+    if (bot === null || bot.lifecycleStatus !== 'ARCHIVED')
+      throw new Error('ASSISTANT_NOT_ARCHIVED');
+    const connector = this.db
+      .prepare(
+        `SELECT normalized_phone_hash, whatsapp_identity_hash FROM assistant_connectors
        WHERE assistant_id=? ORDER BY id DESC LIMIT 1`,
-    ).get(botId) as { normalized_phone_hash: string | null; whatsapp_identity_hash: string | null } | undefined;
+      )
+      .get(botId) as
+      { normalized_phone_hash: string | null; whatsapp_identity_hash: string | null } | undefined;
     if (connector?.normalized_phone_hash || connector?.whatsapp_identity_hash) {
-      const conflict = this.db.prepare(
-        `SELECT 1 FROM assistant_connectors WHERE assistant_id<>?
+      const conflict = this.db
+        .prepare(
+          `SELECT 1 FROM assistant_connectors WHERE assistant_id<>?
          AND connector_status NOT IN ('ARCHIVED','DISABLED')
          AND ((? IS NOT NULL AND normalized_phone_hash=?) OR (? IS NOT NULL AND whatsapp_identity_hash=?))`,
-      ).get(
-        botId,
-        connector.normalized_phone_hash,
-        connector.normalized_phone_hash,
-        connector.whatsapp_identity_hash,
-        connector.whatsapp_identity_hash,
-      );
+        )
+        .get(
+          botId,
+          connector.normalized_phone_hash,
+          connector.normalized_phone_hash,
+          connector.whatsapp_identity_hash,
+          connector.whatsapp_identity_hash,
+        );
       if (conflict !== undefined) throw new Error('RESTORE_PHONE_CONFLICT');
     }
     const now = new Date().toISOString();
     const operation = this.db.transaction(() => {
-      this.db.prepare(
-        `UPDATE bots SET lifecycle_status='DISABLED', enabled=0, deleted_at=NULL,
+      this.db
+        .prepare(
+          `UPDATE bots SET lifecycle_status='DISABLED', enabled=0, deleted_at=NULL,
           scheduled_permanent_deletion_at=NULL, updated_at=? WHERE id=?`,
-      ).run(now, botId);
-      this.db.prepare(
-        `UPDATE assistant_connectors SET connector_status='DISABLED', updated_at=? WHERE assistant_id=?`,
-      ).run(now, botId);
-      this.db.prepare(
-        `INSERT INTO assistant_deletion_audit(assistant_id,action,created_at,safe_actor_hash,backup_reference,result)
+        )
+        .run(now, botId);
+      this.db
+        .prepare(
+          `UPDATE assistant_connectors SET connector_status='DISABLED', updated_at=? WHERE assistant_id=?`,
+        )
+        .run(now, botId);
+      this.db
+        .prepare(
+          `INSERT INTO assistant_deletion_audit(assistant_id,action,created_at,safe_actor_hash,backup_reference,result)
          VALUES (?, 'ASSISTANT_RESTORED', ?, ?, NULL, 'ok')`,
-      ).run(botId, now, actorHash);
+        )
+        .run(botId, now, actorHash);
     });
     operation();
     return this.getBot(botId) as BotRecord;
   }
 
-  public permanentlyDeleteBot(
-    botId: string,
-    actorHash: string,
-    backupReference: string,
-  ): void {
+  public permanentlyDeleteBot(botId: string, actorHash: string, backupReference: string): void {
     const bot = this.getBot(botId);
-    if (bot === null || bot.lifecycleStatus !== 'ARCHIVED') throw new Error('ASSISTANT_NOT_ARCHIVED');
+    if (bot === null || bot.lifecycleStatus !== 'ARCHIVED')
+      throw new Error('ASSISTANT_NOT_ARCHIVED');
     if (bot.deletionLocked) throw new Error('PROTECTED_ASSISTANT_DELETION_BLOCKED');
     const now = new Date().toISOString();
     const operation = this.db.transaction(() => {
-      this.db.prepare(
-        `INSERT INTO assistant_deletion_audit(assistant_id,action,created_at,safe_actor_hash,backup_reference,result)
+      this.db
+        .prepare(
+          `INSERT INTO assistant_deletion_audit(assistant_id,action,created_at,safe_actor_hash,backup_reference,result)
          VALUES (?, 'ASSISTANT_PERMANENTLY_DELETED', ?, ?, ?, 'ok')`,
-      ).run(botId, now, actorHash, backupReference);
+        )
+        .run(botId, now, actorHash, backupReference);
       this.db.prepare('DELETE FROM bots WHERE id=?').run(botId);
     });
     operation();
@@ -3715,147 +3922,6 @@ export class AppDatabase {
 
   public async backupTo(destination: string): Promise<void> {
     await this.db.backup(destination);
-  }
-
-  public transferCommercialConfigurationToNeurobot(
-    sourceBotId: string,
-    actorHash: string,
-  ): { menus: number; catalogItems: number; mediaAssets: number; businessHours: number } {
-    if (sourceBotId === 'neurobot') throw new Error('INVALID_TRANSFER_SOURCE');
-    const source = this.getBot(sourceBotId);
-    const target = this.getBot('neurobot');
-    if (source === null || target === null) throw new Error('ASSISTANT_NOT_FOUND');
-    if (source.mode === 'community' || source.lifecycleStatus === 'ARCHIVED') {
-      throw new Error('COMMERCIAL_TRANSFER_NOT_AVAILABLE');
-    }
-    const operation = this.db.transaction(() => {
-      const mediaMap = new Map<number, number>();
-      for (const asset of this.listMediaAssets(sourceBotId)) {
-        const copy = this.createMediaAsset({
-          botId: 'neurobot',
-          internalName: asset.internalName,
-          relativePath: asset.relativePath,
-          mimeType: asset.mimeType,
-          byteSize: asset.byteSize,
-          sha256: asset.sha256,
-          caption: asset.caption,
-        });
-        mediaMap.set(asset.id, copy.id);
-      }
-
-      const categoryMap = new Map<number, number>();
-      for (const category of this.listCatalogCategories(sourceBotId)) {
-        const copy = this.saveCatalogCategory({
-          botId: 'neurobot',
-          name: category.name,
-          description: category.description,
-          enabled: category.enabled,
-        });
-        categoryMap.set(category.id, copy.id);
-      }
-
-      const itemMap = new Map<number, number>();
-      for (const item of this.listCatalogItems(sourceBotId)) {
-        const copy = this.saveCatalogItem({
-          ...item,
-          id: 0,
-          botId: 'neurobot',
-          categoryId: item.categoryId === null ? null : categoryMap.get(item.categoryId) ?? null,
-          primaryMediaId: item.primaryMediaId === null ? null : mediaMap.get(item.primaryMediaId) ?? null,
-        });
-        itemMap.set(item.id, copy.id);
-      }
-
-      const sourceMenus = this.listMenus(sourceBotId);
-      const menuMap = new Map<number, number>();
-      const pending = [...sourceMenus];
-      while (pending.length > 0) {
-        const index = pending.findIndex((menu) => menu.parentMenuId === null || menuMap.has(menu.parentMenuId));
-        if (index < 0) throw new Error('INVALID_MENU_HIERARCHY');
-        const [menu] = pending.splice(index, 1);
-        if (menu === undefined) throw new Error('INVALID_MENU_HIERARCHY');
-        const copy = this.saveMenu({
-          botId: 'neurobot',
-          parentMenuId: menu.parentMenuId === null ? null : menuMap.get(menu.parentMenuId) ?? null,
-          title: menu.title,
-          message: menu.message,
-          helpText: menu.helpText,
-          enabled: menu.enabled,
-          isInitial: menu.isInitial,
-          expirationMinutes: menu.expirationMinutes,
-        });
-        menuMap.set(menu.id, copy.id);
-      }
-      for (const option of this.listMenuOptions(sourceBotId)) {
-        let actionType = option.actionType;
-        let actionPayload = { ...option.actionPayload };
-        if (typeof actionPayload.id === 'number') {
-          if (option.actionType === 'submenu') actionPayload.id = menuMap.get(actionPayload.id) ?? actionPayload.id;
-          if (option.actionType === 'catalog_category') actionPayload.id = categoryMap.get(actionPayload.id) ?? actionPayload.id;
-          if (option.actionType === 'catalog_item') actionPayload.id = itemMap.get(actionPayload.id) ?? actionPayload.id;
-          if (option.actionType === 'media') actionPayload.id = mediaMap.get(actionPayload.id) ?? actionPayload.id;
-        }
-        if (['catalog_category', 'catalog_item', 'media', 'submenu'].includes(actionType) && !Number.isInteger(actionPayload.id)) {
-          actionType = 'knowledge';
-          actionPayload = { query: option.label };
-        }
-        this.saveMenuOption({
-          botId: 'neurobot',
-          menuId: menuMap.get(option.menuId) as number,
-          label: option.label,
-          aliases: option.aliases,
-          order: option.order,
-          actionType,
-          actionPayload,
-          enabled: option.enabled,
-        });
-      }
-
-      const hours = this.listBusinessHours(sourceBotId).map(({ weekday, localDate, openingTime, closingTime, closed, label }) => ({
-        weekday, localDate, openingTime, closingTime, closed, label,
-      }));
-      this.replaceBusinessHours('neurobot', hours);
-      const initialMenuId = [...menuMap.entries()].find(([sourceId]) => sourceMenus.find((menu) => menu.id === sourceId)?.isInitial)?.[1] ?? null;
-      const mixedCapabilities = capabilitiesFor('mixed');
-      const now = new Date().toISOString();
-      this.db.prepare(
-        `UPDATE bots SET mode='mixed', operating_mode='BUSINESS_MIXED', assistant_type='BUSINESS_MIXED',
-          group_channel_enabled=1, private_channel_enabled=1, private_business_mode_enabled=1, updated_at=?
-         WHERE id='neurobot'`,
-      ).run(now);
-      this.db.prepare(
-        `UPDATE bot_channel_settings SET groups_enabled=1, private_messages_enabled=1,
-          real_mention_required=1, continued_conversations_enabled=1,
-          private_initial_menu_id=?, menu_type=?, updated_at=? WHERE bot_id='neurobot'`,
-      ).run(initialMenuId, source.menuType, now);
-      this.db.prepare(
-        `UPDATE bot_capabilities SET community_single_turn_mode=?, private_chats_enabled=?,
-          conversation_continuation_enabled=?, interactive_menus_enabled=?, numeric_menu_replies_enabled=?,
-          polls_as_menus_enabled=?, polls_for_community_engagement_enabled=?, catalog_enabled=?,
-          human_assistance_enabled=?, updated_at=? WHERE bot_id='neurobot'`,
-      ).run(
-        mixedCapabilities.communitySingleTurnMode ? 1 : 0,
-        mixedCapabilities.privateChatsEnabled ? 1 : 0,
-        mixedCapabilities.conversationContinuationEnabled ? 1 : 0,
-        mixedCapabilities.interactiveMenusEnabled ? 1 : 0,
-        mixedCapabilities.numericMenuRepliesEnabled ? 1 : 0,
-        mixedCapabilities.pollsAsMenusEnabled ? 1 : 0,
-        mixedCapabilities.pollsForCommunityEngagementEnabled ? 1 : 0,
-        mixedCapabilities.catalogEnabled ? 1 : 0,
-        mixedCapabilities.humanAssistanceEnabled ? 1 : 0,
-        now,
-      );
-      this.sendBotToTrash(sourceBotId, actorHash);
-      this.recordTechnicalEvent({ botId: 'neurobot', eventType: 'PRIVATE_BUSINESS_CHANNEL_ENABLED', result: 'enabled' });
-      this.recordTechnicalEvent({ botId: sourceBotId, eventType: 'DRAFT_CONFIGURATION_TRANSFERRED', result: 'transferred' });
-      return {
-        menus: sourceMenus.length,
-        catalogItems: itemMap.size,
-        mediaAssets: mediaMap.size,
-        businessHours: hours.length,
-      };
-    });
-    return operation();
   }
 
   public listBotActivationAliases(botId: string): string[] {
@@ -3884,7 +3950,8 @@ export class AppDatabase {
   private replaceBotActivationAliases(botId: string, aliases: string[], now: string): void {
     const normalized = [...new Set(aliases.map(normalizeActivationAlias))];
     if (normalized.length === 0) throw new Error('Debe existir al menos un alias de activación.');
-    if (normalized.length > 10) throw new Error('Se permiten como máximo diez alias de activación.');
+    if (normalized.length > 10)
+      throw new Error('Se permiten como máximo diez alias de activación.');
     this.db.prepare('DELETE FROM bot_activation_aliases WHERE bot_id = ?').run(botId);
     const insert = this.db.prepare(
       'INSERT INTO bot_activation_aliases(bot_id, alias, created_at) VALUES (?, ?, ?)',
@@ -3901,11 +3968,13 @@ export class AppDatabase {
     menuType?: MenuType;
   }): BotRecord {
     const botId = validateBotIdentifier(input.id);
-    if (this.getBot(botId) !== null) throw new Error('Ya existe un asistente con ese identificador.');
+    if (this.getBot(botId) !== null)
+      throw new Error('Ya existe un asistente con ese identificador.');
     const now = new Date().toISOString();
-    const connectorType = input.connectorType ?? (input.mode === 'community' ? 'WHATSAPP_WEB' : 'WHATSAPP_CLOUD_API');
-    const operatingMode = operatingModeFor(input.mode);
-    const capabilities = capabilitiesFor(input.mode);
+    const mode: BotMode = 'community';
+    const connectorType: ConnectorType = 'WHATSAPP_WEB';
+    const operatingMode: BotOperatingMode = 'COMMUNITY_GROUPS';
+    const capabilities = capabilitiesFor('community');
     const create = this.db.transaction(() => {
       this.db
         .prepare(
@@ -3920,14 +3989,14 @@ export class AppDatabase {
           botId,
           botId,
           botId,
-          input.mode,
+          mode,
           connectorType,
           operatingMode,
           operatingMode,
           connectorType === 'WHATSAPP_WEB' ? 'LINKING' : 'DRAFT',
-          input.mode === 'business' ? 0 : 1,
-          input.mode === 'community' ? 0 : 1,
-          input.mode === 'mixed' ? 1 : 0,
+          1,
+          0,
+          0,
           now,
           now,
         );
@@ -3957,12 +4026,11 @@ export class AppDatabase {
           now,
           now,
         );
-      this.db.prepare('UPDATE bots SET active_connector_id = ? WHERE id = ?').run(
-        Number(connector.lastInsertRowid),
-        botId,
-      );
-      const privateMessages = capabilities.privateChatsEnabled ? 1 : 0;
-      const groupsEnabled = input.mode === 'business' ? 0 : 1;
+      this.db
+        .prepare('UPDATE bots SET active_connector_id = ? WHERE id = ?')
+        .run(Number(connector.lastInsertRowid), botId);
+      const privateMessages = 0;
+      const groupsEnabled = 1;
       this.db
         .prepare(
           `INSERT INTO bot_channel_settings(
@@ -3975,7 +4043,7 @@ export class AppDatabase {
           groupsEnabled,
           privateMessages,
           capabilities.conversationContinuationEnabled ? 1 : 0,
-          input.menuType ?? 'automatic',
+          'automatic',
           now,
         );
       this.db
@@ -4008,18 +4076,10 @@ export class AppDatabase {
            ) VALUES (?, 'global', NULL, NULL, ?)`,
         )
         .run(botId, now);
-      this.seedBotKnowledgeCategories(botId, profile.id, input.mode, now);
-      this.seedBotInitialMenu(botId, input.mode, now);
+      this.seedBotKnowledgeCategories(botId, profile.id, 'community', now);
       this.seedBotAutomation(botId, defaultAutomaticConfiguration(input.profile.timezone), now);
       this.seedBotPollTemplates(botId, input.profile.timezone, now);
       this.replaceBotActivationAliases(botId, [input.profile.activationAlias], now);
-      this.db
-        .prepare(
-          `UPDATE bot_channel_settings SET private_initial_menu_id = (
-             SELECT id FROM menu_definitions WHERE bot_id = ? AND is_initial = 1
-           ) WHERE bot_id = ?`,
-        )
-        .run(botId, botId);
       this.recordTechnicalEvent({ eventType: 'BOT_CREATED', result: 'created', botId });
     });
     create();
@@ -4032,8 +4092,30 @@ export class AppDatabase {
     mode: BotMode,
     now: string,
   ): void {
-    const community = ['Presentación', 'Normas', 'Grupos', 'Actividades', 'Horarios', 'Contacto', 'Seguridad', 'Preguntas frecuentes'];
-    const business = ['Productos', 'Servicios', 'Precios', 'Horarios', 'Dirección', 'Pagos', 'Despachos', 'Cambios', 'Garantías', 'Promociones', 'Contacto', 'Preguntas frecuentes'];
+    const community = [
+      'Presentación',
+      'Normas',
+      'Grupos',
+      'Actividades',
+      'Horarios',
+      'Contacto',
+      'Seguridad',
+      'Preguntas frecuentes',
+    ];
+    const business = [
+      'Productos',
+      'Servicios',
+      'Precios',
+      'Horarios',
+      'Dirección',
+      'Pagos',
+      'Despachos',
+      'Cambios',
+      'Garantías',
+      'Promociones',
+      'Contacto',
+      'Preguntas frecuentes',
+    ];
     const categories = mode === 'community' ? community : business;
     const insert = this.db.prepare(
       `INSERT OR IGNORE INTO knowledge_categories(
@@ -4077,10 +4159,35 @@ export class AppDatabase {
         )
       : null;
     const labels = commercial
-      ? ['Productos o servicios', 'Precios', 'Horarios', 'Dirección', 'Despachos', 'Formas de pago', 'Promociones', 'Hablar con una persona']
-      : ['Normas', 'Grupos disponibles', 'Actividades', 'Horarios', 'Contacto', 'Preguntas frecuentes'];
+      ? [
+          'Productos o servicios',
+          'Precios',
+          'Horarios',
+          'Dirección',
+          'Despachos',
+          'Formas de pago',
+          'Promociones',
+          'Hablar con una persona',
+        ]
+      : [
+          'Normas',
+          'Grupos disponibles',
+          'Actividades',
+          'Horarios',
+          'Contacto',
+          'Preguntas frecuentes',
+        ];
     const actions: MenuActionType[] = commercial
-      ? ['catalog_category', 'knowledge', 'hours', 'address', 'shipping', 'payments', 'knowledge', 'submenu']
+      ? [
+          'catalog_category',
+          'knowledge',
+          'hours',
+          'address',
+          'shipping',
+          'payments',
+          'knowledge',
+          'submenu',
+        ]
       : ['knowledge', 'knowledge', 'knowledge', 'hours', 'knowledge', 'knowledge'];
     const insert = this.db.prepare(
       `INSERT INTO menu_options(
@@ -4097,9 +4204,7 @@ export class AppDatabase {
         index + 1,
         actions[index],
         JSON.stringify(
-          commercial && index === labels.length - 1
-            ? { id: assistanceMenuId }
-            : { query: label },
+          commercial && index === labels.length - 1 ? { id: assistanceMenuId } : { query: label },
         ),
         now,
         now,
@@ -4145,14 +4250,14 @@ export class AppDatabase {
   }): BotRecord {
     const existing = this.getBot(input.botId);
     if (existing === null) throw new Error('El asistente no existe.');
-    const locked = existing.connectorMigrationLocked;
-    const fixedCommunityMode = locked && !existing.privateBusinessModeEnabled;
-    const mode: BotMode = fixedCommunityMode ? 'community' : input.mode;
-    const capabilities = fixedCommunityMode ? capabilitiesFor('community') : capabilitiesFor(mode);
+    const mode: BotMode = 'community';
+    const capabilities = capabilitiesFor('community');
     const now = new Date().toISOString();
     const update = this.db.transaction(() => {
       const changed = this.db
-        .prepare('UPDATE bots SET mode = ?, operating_mode = ?, enabled = ?, updated_at = ? WHERE id = ?')
+        .prepare(
+          'UPDATE bots SET mode = ?, operating_mode = ?, enabled = ?, updated_at = ? WHERE id = ?',
+        )
         .run(mode, operatingModeFor(mode), input.enabled ? 1 : 0, now, input.botId);
       if (changed.changes !== 1) throw new Error('El asistente no existe.');
       this.db
@@ -4164,29 +4269,14 @@ export class AppDatabase {
                ELSE lifecycle_status END
            WHERE id=?`,
         )
-        .run(
-          operatingModeFor(mode),
-          mode === 'business' ? 0 : 1,
-          mode === 'community' ? 0 : 1,
-          mode === 'mixed' ? 1 : 0,
-          input.enabled ? 1 : 0,
-          input.botId,
-        );
+        .run(operatingModeFor(mode), 1, 0, 0, input.enabled ? 1 : 0, input.botId);
       this.db
         .prepare(
           `UPDATE bot_channel_settings SET groups_enabled = ?, private_messages_enabled = ?,
              real_mention_required = ?, continued_conversations_enabled = ?, menu_type = ?,
              updated_at = ? WHERE bot_id = ?`,
         )
-        .run(
-          fixedCommunityMode ? 1 : input.groupsEnabled ? 1 : 0,
-          fixedCommunityMode ? 0 : input.privateMessagesEnabled ? 1 : 0,
-          input.realMentionRequired ? 1 : 0,
-          fixedCommunityMode ? 0 : input.continuedConversationsEnabled ? 1 : 0,
-          input.menuType,
-          now,
-          input.botId,
-        );
+        .run(1, 0, 1, 0, 'automatic', now, input.botId);
       this.db
         .prepare(
           `UPDATE bot_capabilities SET community_single_turn_mode = ?,
@@ -4198,8 +4288,8 @@ export class AppDatabase {
         )
         .run(
           capabilities.communitySingleTurnMode ? 1 : 0,
-          fixedCommunityMode ? 0 : input.privateMessagesEnabled ? 1 : 0,
-          fixedCommunityMode ? 0 : input.continuedConversationsEnabled ? 1 : 0,
+          0,
+          0,
           capabilities.interactiveMenusEnabled ? 1 : 0,
           capabilities.numericMenuRepliesEnabled ? 1 : 0,
           capabilities.pollsAsMenusEnabled ? 1 : 0,
@@ -4265,7 +4355,8 @@ export class AppDatabase {
   } {
     const row = this.db
       .prepare('SELECT credential_mode, encrypted_api_key FROM bot_ai_credentials WHERE bot_id = ?')
-      .get(botId) as { credential_mode: 'global' | 'per_bot'; encrypted_api_key: string | null } | undefined;
+      .get(botId) as
+      { credential_mode: 'global' | 'per_bot'; encrypted_api_key: string | null } | undefined;
     if (row === undefined) throw new Error('La configuración de credenciales no existe.');
     return { mode: row.credential_mode, encryptedApiKey: row.encrypted_api_key };
   }
@@ -4273,7 +4364,9 @@ export class AppDatabase {
   public listMenus(botId: string): MenuDefinition[] {
     return (
       this.db
-        .prepare('SELECT * FROM menu_definitions WHERE bot_id = ? ORDER BY is_initial DESC, title COLLATE NOCASE')
+        .prepare(
+          'SELECT * FROM menu_definitions WHERE bot_id = ? ORDER BY is_initial DESC, title COLLATE NOCASE',
+        )
         .all(botId) as Array<{
         id: number;
         bot_id: string;
@@ -4321,12 +4414,18 @@ export class AppDatabase {
     const title = validatePlainText(input.title, 'título del menú', 120);
     const message = validatePlainText(input.message, 'mensaje del menú', 600);
     const helpText = validatePlainText(input.helpText, 'ayuda del menú', 300, true);
-    if (!Number.isInteger(input.expirationMinutes) || input.expirationMinutes < 1 || input.expirationMinutes > 1440) {
+    if (
+      !Number.isInteger(input.expirationMinutes) ||
+      input.expirationMinutes < 1 ||
+      input.expirationMinutes > 1440
+    ) {
       throw new Error('La expiración del menú no es válida.');
     }
     const save = this.db.transaction(() => {
       if (input.isInitial) {
-        this.db.prepare('UPDATE menu_definitions SET is_initial = 0 WHERE bot_id = ?').run(input.botId);
+        this.db
+          .prepare('UPDATE menu_definitions SET is_initial = 0 WHERE bot_id = ?')
+          .run(input.botId);
       }
       if (input.id === undefined) {
         return Number(
@@ -4379,13 +4478,24 @@ export class AppDatabase {
   public deleteMenu(botId: string, id: number): boolean {
     const menu = this.getMenu(botId, id);
     if (menu?.isInitial === true) throw new Error('El menú inicial no se puede eliminar.');
-    return this.db.prepare('DELETE FROM menu_definitions WHERE id = ? AND bot_id = ?').run(id, botId).changes === 1;
+    return (
+      this.db.prepare('DELETE FROM menu_definitions WHERE id = ? AND bot_id = ?').run(id, botId)
+        .changes === 1
+    );
   }
 
   public listMenuOptions(botId: string, menuId?: number): MenuOption[] {
-    const rows = (menuId === undefined
-      ? this.db.prepare('SELECT * FROM menu_options WHERE bot_id = ? ORDER BY menu_id, option_order').all(botId)
-      : this.db.prepare('SELECT * FROM menu_options WHERE bot_id = ? AND menu_id = ? ORDER BY option_order').all(botId, menuId)) as Array<{
+    const rows = (
+      menuId === undefined
+        ? this.db
+            .prepare('SELECT * FROM menu_options WHERE bot_id = ? ORDER BY menu_id, option_order')
+            .all(botId)
+        : this.db
+            .prepare(
+              'SELECT * FROM menu_options WHERE bot_id = ? AND menu_id = ? ORDER BY option_order',
+            )
+            .all(botId, menuId)
+    ) as Array<{
       id: number;
       bot_id: string;
       menu_id: number;
@@ -4427,7 +4537,8 @@ export class AppDatabase {
     if (this.getMenu(input.botId, input.menuId) === null) throw new Error('El menú no existe.');
     const label = validatePlainText(input.label, 'opción', 100);
     const aliases = validateTextArray(input.aliases, 'alias de opción', 20);
-    if (!Number.isInteger(input.order) || input.order < 1 || input.order > 100) throw new Error('El orden no es válido.');
+    if (!Number.isInteger(input.order) || input.order < 1 || input.order > 100)
+      throw new Error('El orden no es válido.');
     validateActionPayload(input.actionType, input.actionPayload);
     const now = new Date().toISOString();
     let id = input.id;
@@ -4478,12 +4589,21 @@ export class AppDatabase {
   }
 
   public deleteMenuOption(botId: string, id: number): boolean {
-    return this.db.prepare('DELETE FROM menu_options WHERE id = ? AND bot_id = ?').run(id, botId).changes === 1;
+    return (
+      this.db.prepare('DELETE FROM menu_options WHERE id = ? AND bot_id = ?').run(id, botId)
+        .changes === 1
+    );
   }
 
-  public getConversationState(botId: string, chatHash: string, userHash: string): ConversationState | null {
+  public getConversationState(
+    botId: string,
+    chatHash: string,
+    userHash: string,
+  ): ConversationState | null {
     const row = this.db
-      .prepare('SELECT * FROM conversation_states WHERE bot_id = ? AND chat_hash = ? AND user_hash = ?')
+      .prepare(
+        'SELECT * FROM conversation_states WHERE bot_id = ? AND chat_hash = ? AND user_hash = ?',
+      )
       .get(botId, chatHash, userHash) as
       | {
           bot_id: string;
@@ -4539,7 +4659,9 @@ export class AppDatabase {
 
   public deleteConversationState(botId: string, chatHash: string, userHash: string): void {
     this.db
-      .prepare('DELETE FROM conversation_states WHERE bot_id = ? AND chat_hash = ? AND user_hash = ?')
+      .prepare(
+        'DELETE FROM conversation_states WHERE bot_id = ? AND chat_hash = ? AND user_hash = ?',
+      )
       .run(botId, chatHash, userHash);
   }
 
@@ -4548,52 +4670,121 @@ export class AppDatabase {
   }
 
   public deleteExpiredConversationStates(now = new Date()): number {
-    return this.db.prepare('DELETE FROM conversation_states WHERE expires_at <= ?').run(now.toISOString()).changes;
+    return this.db
+      .prepare('DELETE FROM conversation_states WHERE expires_at <= ?')
+      .run(now.toISOString()).changes;
   }
 
   public countActiveConversationStates(botId: string, now = new Date()): number {
     const row = this.db
-      .prepare('SELECT COUNT(*) AS total FROM conversation_states WHERE bot_id = ? AND expires_at > ?')
+      .prepare(
+        'SELECT COUNT(*) AS total FROM conversation_states WHERE bot_id = ? AND expires_at > ?',
+      )
       .get(botId, now.toISOString()) as { total: number };
     return row.total;
   }
 
   public listCatalogCategories(botId: string): CatalogCategory[] {
     return (
-      this.db.prepare('SELECT * FROM catalog_categories WHERE bot_id = ? ORDER BY name COLLATE NOCASE').all(botId) as Array<{
-        id: number; bot_id: string; name: string; description: string; enabled: number; created_at: string; updated_at: string;
+      this.db
+        .prepare('SELECT * FROM catalog_categories WHERE bot_id = ? ORDER BY name COLLATE NOCASE')
+        .all(botId) as Array<{
+        id: number;
+        bot_id: string;
+        name: string;
+        description: string;
+        enabled: number;
+        created_at: string;
+        updated_at: string;
       }>
-    ).map((row) => ({ id: row.id, botId: row.bot_id, name: row.name, description: row.description, enabled: row.enabled === 1, createdAt: row.created_at, updatedAt: row.updated_at }));
+    ).map((row) => ({
+      id: row.id,
+      botId: row.bot_id,
+      name: row.name,
+      description: row.description,
+      enabled: row.enabled === 1,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
   }
 
-  public saveCatalogCategory(input: { id?: number; botId: string; name: string; description: string; enabled: boolean }): CatalogCategory {
+  public saveCatalogCategory(input: {
+    id?: number;
+    botId: string;
+    name: string;
+    description: string;
+    enabled: boolean;
+  }): CatalogCategory {
     const name = validatePlainText(input.name, 'categoría del catálogo', 120);
     const description = validatePlainText(input.description, 'descripción', 600, true);
     const now = new Date().toISOString();
     let id = input.id;
     if (id === undefined) {
-      id = Number(this.db.prepare('INSERT INTO catalog_categories(bot_id, name, description, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(input.botId, name, description, input.enabled ? 1 : 0, now, now).lastInsertRowid);
+      id = Number(
+        this.db
+          .prepare(
+            'INSERT INTO catalog_categories(bot_id, name, description, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+          )
+          .run(input.botId, name, description, input.enabled ? 1 : 0, now, now).lastInsertRowid,
+      );
     } else {
-      const changed = this.db.prepare('UPDATE catalog_categories SET name = ?, description = ?, enabled = ?, updated_at = ? WHERE id = ? AND bot_id = ?').run(name, description, input.enabled ? 1 : 0, now, id, input.botId);
+      const changed = this.db
+        .prepare(
+          'UPDATE catalog_categories SET name = ?, description = ?, enabled = ?, updated_at = ? WHERE id = ? AND bot_id = ?',
+        )
+        .run(name, description, input.enabled ? 1 : 0, now, id, input.botId);
       if (changed.changes !== 1) throw new Error('La categoría no existe.');
     }
-    return this.listCatalogCategories(input.botId).find((category) => category.id === id) as CatalogCategory;
+    return this.listCatalogCategories(input.botId).find(
+      (category) => category.id === id,
+    ) as CatalogCategory;
   }
 
   public listCatalogItems(botId: string): CatalogItem[] {
     return (
-      this.db.prepare('SELECT * FROM catalog_items WHERE bot_id = ? ORDER BY name COLLATE NOCASE').all(botId) as Array<{
-        id: number; bot_id: string; category_id: number | null; name: string; code: string; description: string;
-        price_amount: number | null; offer_price_amount: number | null; currency: string; presentation: string;
-        size: string; variants: string; availability: string; informed_stock: number | null;
-        primary_media_id: number | null; authorized_link: string | null; enabled: number; created_at: string; updated_at: string;
+      this.db
+        .prepare('SELECT * FROM catalog_items WHERE bot_id = ? ORDER BY name COLLATE NOCASE')
+        .all(botId) as Array<{
+        id: number;
+        bot_id: string;
+        category_id: number | null;
+        name: string;
+        code: string;
+        description: string;
+        price_amount: number | null;
+        offer_price_amount: number | null;
+        currency: string;
+        presentation: string;
+        size: string;
+        variants: string;
+        availability: string;
+        informed_stock: number | null;
+        primary_media_id: number | null;
+        authorized_link: string | null;
+        enabled: number;
+        created_at: string;
+        updated_at: string;
       }>
     ).map((row) => ({
-      id: row.id, botId: row.bot_id, categoryId: row.category_id, name: row.name, code: row.code,
-      description: row.description, priceAmount: row.price_amount, offerPriceAmount: row.offer_price_amount,
-      currency: row.currency, presentation: row.presentation, size: row.size, variants: parseStringArray(row.variants),
-      availability: row.availability, informedStock: row.informed_stock, primaryMediaId: row.primary_media_id,
-      authorizedLink: row.authorized_link, enabled: row.enabled === 1, createdAt: row.created_at, updatedAt: row.updated_at,
+      id: row.id,
+      botId: row.bot_id,
+      categoryId: row.category_id,
+      name: row.name,
+      code: row.code,
+      description: row.description,
+      priceAmount: row.price_amount,
+      offerPriceAmount: row.offer_price_amount,
+      currency: row.currency,
+      presentation: row.presentation,
+      size: row.size,
+      variants: parseStringArray(row.variants),
+      availability: row.availability,
+      informedStock: row.informed_stock,
+      primaryMediaId: row.primary_media_id,
+      authorizedLink: row.authorized_link,
+      enabled: row.enabled === 1,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
     }));
   }
 
@@ -4604,72 +4795,162 @@ export class AppDatabase {
     const currency = validatePlainText(input.currency, 'moneda', 8).toUpperCase();
     validateMoney(input.priceAmount);
     validateMoney(input.offerPriceAmount);
-    if (input.informedStock !== null && (!Number.isInteger(input.informedStock) || input.informedStock < 0)) throw new Error('El stock informado no es válido.');
-    if (input.authorizedLink !== null && !/^https:\/\//u.test(input.authorizedLink)) throw new Error('El enlace autorizado debe utilizar HTTPS.');
+    if (
+      input.informedStock !== null &&
+      (!Number.isInteger(input.informedStock) || input.informedStock < 0)
+    )
+      throw new Error('El stock informado no es válido.');
+    if (input.authorizedLink !== null && !/^https:\/\//u.test(input.authorizedLink))
+      throw new Error('El enlace autorizado debe utilizar HTTPS.');
     const now = new Date().toISOString();
     let id = input.id;
     if (id <= 0) {
-      id = Number(this.db.prepare(
-        `INSERT INTO catalog_items(
+      id = Number(
+        this.db
+          .prepare(
+            `INSERT INTO catalog_items(
            bot_id, category_id, name, code, description, price_amount, offer_price_amount, currency,
            presentation, size, variants, availability, informed_stock, primary_media_id,
            authorized_link, enabled, created_at, updated_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(input.botId, input.categoryId, name, code, description, input.priceAmount, input.offerPriceAmount,
-        currency, validatePlainText(input.presentation, 'presentación', 200, true), validatePlainText(input.size, 'tamaño', 100, true),
-        JSON.stringify(validateTextArray(input.variants, 'variantes', 50)), validatePlainText(input.availability, 'disponibilidad', 300, true),
-        input.informedStock, input.primaryMediaId, input.authorizedLink, input.enabled ? 1 : 0, now, now).lastInsertRowid);
+          )
+          .run(
+            input.botId,
+            input.categoryId,
+            name,
+            code,
+            description,
+            input.priceAmount,
+            input.offerPriceAmount,
+            currency,
+            validatePlainText(input.presentation, 'presentación', 200, true),
+            validatePlainText(input.size, 'tamaño', 100, true),
+            JSON.stringify(validateTextArray(input.variants, 'variantes', 50)),
+            validatePlainText(input.availability, 'disponibilidad', 300, true),
+            input.informedStock,
+            input.primaryMediaId,
+            input.authorizedLink,
+            input.enabled ? 1 : 0,
+            now,
+            now,
+          ).lastInsertRowid,
+      );
     } else {
-      const changed = this.db.prepare(
-        `UPDATE catalog_items SET category_id = ?, name = ?, code = ?, description = ?, price_amount = ?,
+      const changed = this.db
+        .prepare(
+          `UPDATE catalog_items SET category_id = ?, name = ?, code = ?, description = ?, price_amount = ?,
            offer_price_amount = ?, currency = ?, presentation = ?, size = ?, variants = ?, availability = ?,
            informed_stock = ?, primary_media_id = ?, authorized_link = ?, enabled = ?, updated_at = ?
          WHERE id = ? AND bot_id = ?`,
-      ).run(input.categoryId, name, code, description, input.priceAmount, input.offerPriceAmount, currency,
-        validatePlainText(input.presentation, 'presentación', 200, true), validatePlainText(input.size, 'tamaño', 100, true),
-        JSON.stringify(validateTextArray(input.variants, 'variantes', 50)), validatePlainText(input.availability, 'disponibilidad', 300, true),
-        input.informedStock, input.primaryMediaId, input.authorizedLink, input.enabled ? 1 : 0, now, id, input.botId);
+        )
+        .run(
+          input.categoryId,
+          name,
+          code,
+          description,
+          input.priceAmount,
+          input.offerPriceAmount,
+          currency,
+          validatePlainText(input.presentation, 'presentación', 200, true),
+          validatePlainText(input.size, 'tamaño', 100, true),
+          JSON.stringify(validateTextArray(input.variants, 'variantes', 50)),
+          validatePlainText(input.availability, 'disponibilidad', 300, true),
+          input.informedStock,
+          input.primaryMediaId,
+          input.authorizedLink,
+          input.enabled ? 1 : 0,
+          now,
+          id,
+          input.botId,
+        );
       if (changed.changes !== 1) throw new Error('El producto o servicio no existe.');
     }
     return this.listCatalogItems(input.botId).find((item) => item.id === id) as CatalogItem;
   }
 
   public deleteCatalogItem(botId: string, id: number): boolean {
-    return this.db.prepare('DELETE FROM catalog_items WHERE id = ? AND bot_id = ?').run(id, botId).changes === 1;
+    return (
+      this.db.prepare('DELETE FROM catalog_items WHERE id = ? AND bot_id = ?').run(id, botId)
+        .changes === 1
+    );
   }
 
   public listMediaAssets(botId: string): MediaAsset[] {
     return (
-      this.db.prepare('SELECT * FROM media_assets WHERE bot_id = ? ORDER BY created_at DESC').all(botId) as Array<{
-        id: number; bot_id: string; internal_name: string; relative_path: string;
-        mime_type: 'image/png' | 'image/jpeg' | 'image/webp'; byte_size: number; sha256: string;
-        caption: string; enabled: number; created_at: string; updated_at: string;
+      this.db
+        .prepare('SELECT * FROM media_assets WHERE bot_id = ? ORDER BY created_at DESC')
+        .all(botId) as Array<{
+        id: number;
+        bot_id: string;
+        internal_name: string;
+        relative_path: string;
+        mime_type: 'image/png' | 'image/jpeg' | 'image/webp';
+        byte_size: number;
+        sha256: string;
+        caption: string;
+        enabled: number;
+        created_at: string;
+        updated_at: string;
       }>
-    ).map((row) => ({ id: row.id, botId: row.bot_id, internalName: row.internal_name, relativePath: row.relative_path,
-      mimeType: row.mime_type, byteSize: row.byte_size, sha256: row.sha256, caption: row.caption,
-      enabled: row.enabled === 1, createdAt: row.created_at, updatedAt: row.updated_at }));
+    ).map((row) => ({
+      id: row.id,
+      botId: row.bot_id,
+      internalName: row.internal_name,
+      relativePath: row.relative_path,
+      mimeType: row.mime_type,
+      byteSize: row.byte_size,
+      sha256: row.sha256,
+      caption: row.caption,
+      enabled: row.enabled === 1,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
   }
 
   public createMediaAsset(input: {
-    botId: string; internalName: string; relativePath: string; mimeType: MediaAsset['mimeType'];
-    byteSize: number; sha256: string; caption: string;
+    botId: string;
+    internalName: string;
+    relativePath: string;
+    mimeType: MediaAsset['mimeType'];
+    byteSize: number;
+    sha256: string;
+    caption: string;
   }): MediaAsset {
     const now = new Date().toISOString();
-    const result = this.db.prepare(
-      `INSERT INTO media_assets(
+    const result = this.db
+      .prepare(
+        `INSERT INTO media_assets(
          bot_id, internal_name, relative_path, mime_type, byte_size, sha256, caption, enabled, created_at, updated_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-    ).run(input.botId, input.internalName, input.relativePath, input.mimeType, input.byteSize, input.sha256,
-      validatePlainText(input.caption, 'texto de imagen', 300, true), now, now);
-    return this.listMediaAssets(input.botId).find((asset) => asset.id === Number(result.lastInsertRowid)) as MediaAsset;
+      )
+      .run(
+        input.botId,
+        input.internalName,
+        input.relativePath,
+        input.mimeType,
+        input.byteSize,
+        input.sha256,
+        validatePlainText(input.caption, 'texto de imagen', 300, true),
+        now,
+        now,
+      );
+    return this.listMediaAssets(input.botId).find(
+      (asset) => asset.id === Number(result.lastInsertRowid),
+    ) as MediaAsset;
   }
 
   public deleteMediaAsset(botId: string, id: number): MediaAsset | null {
     const asset = this.listMediaAssets(botId).find((item) => item.id === id) ?? null;
     if (asset === null) return null;
     const remove = this.db.transaction(() => {
-      this.db.prepare('UPDATE catalog_items SET primary_media_id = NULL WHERE bot_id = ? AND primary_media_id = ?').run(botId, id);
-      this.db.prepare('DELETE FROM catalog_item_media WHERE bot_id = ? AND media_id = ?').run(botId, id);
+      this.db
+        .prepare(
+          'UPDATE catalog_items SET primary_media_id = NULL WHERE bot_id = ? AND primary_media_id = ?',
+        )
+        .run(botId, id);
+      this.db
+        .prepare('DELETE FROM catalog_item_media WHERE bot_id = ? AND media_id = ?')
+        .run(botId, id);
       this.db.prepare('DELETE FROM media_assets WHERE bot_id = ? AND id = ?').run(botId, id);
     });
     remove();
@@ -4678,16 +4959,40 @@ export class AppDatabase {
 
   public listBusinessHours(botId: string): BusinessHour[] {
     return (
-      this.db.prepare('SELECT * FROM business_hours WHERE bot_id = ? ORDER BY local_date, weekday, opening_time').all(botId) as Array<{
-        id: number; bot_id: string; weekday: number | null; local_date: string | null; opening_time: string | null;
-        closing_time: string | null; closed: number; label: string; created_at: string; updated_at: string;
+      this.db
+        .prepare(
+          'SELECT * FROM business_hours WHERE bot_id = ? ORDER BY local_date, weekday, opening_time',
+        )
+        .all(botId) as Array<{
+        id: number;
+        bot_id: string;
+        weekday: number | null;
+        local_date: string | null;
+        opening_time: string | null;
+        closing_time: string | null;
+        closed: number;
+        label: string;
+        created_at: string;
+        updated_at: string;
       }>
-    ).map((row) => ({ id: row.id, botId: row.bot_id, weekday: row.weekday, localDate: row.local_date,
-      openingTime: row.opening_time, closingTime: row.closing_time, closed: row.closed === 1, label: row.label,
-      createdAt: row.created_at, updatedAt: row.updated_at }));
+    ).map((row) => ({
+      id: row.id,
+      botId: row.bot_id,
+      weekday: row.weekday,
+      localDate: row.local_date,
+      openingTime: row.opening_time,
+      closingTime: row.closing_time,
+      closed: row.closed === 1,
+      label: row.label,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
   }
 
-  public replaceBusinessHours(botId: string, hours: Array<Omit<BusinessHour, 'id' | 'botId' | 'createdAt' | 'updatedAt'>>): BusinessHour[] {
+  public replaceBusinessHours(
+    botId: string,
+    hours: Array<Omit<BusinessHour, 'id' | 'botId' | 'createdAt' | 'updatedAt'>>,
+  ): BusinessHour[] {
     if (hours.length > 100) throw new Error('Se excedió la cantidad máxima de horarios.');
     const now = new Date().toISOString();
     const replace = this.db.transaction(() => {
@@ -4699,8 +5004,17 @@ export class AppDatabase {
       );
       for (const hour of hours) {
         validateBusinessHour(hour);
-        insert.run(botId, hour.weekday, hour.localDate, hour.openingTime, hour.closingTime, hour.closed ? 1 : 0,
-          validatePlainText(hour.label, 'etiqueta de horario', 160, true), now, now);
+        insert.run(
+          botId,
+          hour.weekday,
+          hour.localDate,
+          hour.openingTime,
+          hour.closingTime,
+          hour.closed ? 1 : 0,
+          validatePlainText(hour.label, 'etiqueta de horario', 160, true),
+          now,
+          now,
+        );
       }
     });
     replace();
@@ -4708,27 +5022,65 @@ export class AppDatabase {
   }
 
   public createHumanAssistanceRequest(input: {
-    botId: string; chatHash: string; userHash: string; requestedInterval: string; localDate: string; note?: string;
+    botId: string;
+    chatHash: string;
+    userHash: string;
+    requestedInterval: string;
+    localDate: string;
+    note?: string;
   }): HumanAssistanceRequest {
     const now = new Date().toISOString();
-    const result = this.db.prepare(
-      `INSERT INTO human_assistance_requests(
+    const result = this.db
+      .prepare(
+        `INSERT INTO human_assistance_requests(
          bot_id, chat_hash, user_hash, requested_interval, local_date, status, note, created_at, updated_at
        ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
-    ).run(input.botId, input.chatHash, input.userHash, validatePlainText(input.requestedInterval, 'intervalo', 120, true),
-      validateDate(input.localDate), validatePlainText(input.note ?? '', 'nota', 300, true), now, now);
-    return this.listHumanAssistanceRequests(input.botId).find((item) => item.id === Number(result.lastInsertRowid)) as HumanAssistanceRequest;
+      )
+      .run(
+        input.botId,
+        input.chatHash,
+        input.userHash,
+        validatePlainText(input.requestedInterval, 'intervalo', 120, true),
+        validateDate(input.localDate),
+        validatePlainText(input.note ?? '', 'nota', 300, true),
+        now,
+        now,
+      );
+    return this.listHumanAssistanceRequests(input.botId).find(
+      (item) => item.id === Number(result.lastInsertRowid),
+    ) as HumanAssistanceRequest;
   }
 
   public listHumanAssistanceRequests(botId: string): HumanAssistanceRequest[] {
     return (
-      this.db.prepare('SELECT * FROM human_assistance_requests WHERE bot_id = ? ORDER BY created_at DESC').all(botId) as Array<{
-        id: number; bot_id: string; chat_hash: string; user_hash: string; requested_interval: string;
-        local_date: string; status: HumanAssistanceRequest['status']; note: string; created_at: string; updated_at: string;
+      this.db
+        .prepare(
+          'SELECT * FROM human_assistance_requests WHERE bot_id = ? ORDER BY created_at DESC',
+        )
+        .all(botId) as Array<{
+        id: number;
+        bot_id: string;
+        chat_hash: string;
+        user_hash: string;
+        requested_interval: string;
+        local_date: string;
+        status: HumanAssistanceRequest['status'];
+        note: string;
+        created_at: string;
+        updated_at: string;
       }>
-    ).map((row) => ({ id: row.id, botId: row.bot_id, chatHash: row.chat_hash, userHash: row.user_hash,
-      requestedInterval: row.requested_interval, localDate: row.local_date, status: row.status, note: row.note,
-      createdAt: row.created_at, updatedAt: row.updated_at }));
+    ).map((row) => ({
+      id: row.id,
+      botId: row.bot_id,
+      chatHash: row.chat_hash,
+      userHash: row.user_hash,
+      requestedInterval: row.requested_interval,
+      localDate: row.local_date,
+      status: row.status,
+      note: row.note,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
   }
 
   public updateHumanAssistanceRequest(
@@ -4737,11 +5089,15 @@ export class AppDatabase {
     status: HumanAssistanceRequest['status'],
     note: string,
   ): HumanAssistanceRequest {
-    const changed = this.db.prepare(
-      'UPDATE human_assistance_requests SET status = ?, note = ?, updated_at = ? WHERE bot_id = ? AND id = ?',
-    ).run(status, validatePlainText(note, 'nota', 300, true), new Date().toISOString(), botId, id);
+    const changed = this.db
+      .prepare(
+        'UPDATE human_assistance_requests SET status = ?, note = ?, updated_at = ? WHERE bot_id = ? AND id = ?',
+      )
+      .run(status, validatePlainText(note, 'nota', 300, true), new Date().toISOString(), botId, id);
     if (changed.changes !== 1) throw new Error('La solicitud no existe.');
-    return this.listHumanAssistanceRequests(botId).find((request) => request.id === id) as HumanAssistanceRequest;
+    return this.listHumanAssistanceRequests(botId).find(
+      (request) => request.id === id,
+    ) as HumanAssistanceRequest;
   }
 
   public listAssistantProfiles(): AssistantProfile[] {
@@ -4832,13 +5188,15 @@ export class AppDatabase {
         )
         .run(profileId, now, botId);
       if (botId === 'neurobot') {
-        this.db.prepare(
-          `UPDATE ai_settings SET user_hourly_limit = 20, user_daily_limit = 50,
+        this.db
+          .prepare(
+            `UPDATE ai_settings SET user_hourly_limit = 20, user_daily_limit = 50,
              user_cooldown_seconds = 0, group_hourly_limit = 150, group_daily_limit = 500,
              global_daily_limit = 500, global_monthly_limit = 10000,
              interaction_hourly_limit = 60, interaction_cooldown_seconds = 3,
              duplicate_query_window_seconds = 15 WHERE profile_id = ?`,
-        ).run(profileId);
+          )
+          .run(profileId);
       }
       this.db
         .prepare(
@@ -4940,7 +5298,9 @@ export class AppDatabase {
 
   public activateAssistantProfile(id: number): AssistantProfile {
     if (this.getAssistantProfile(id) === null) throw new Error('El perfil no existe.');
-    const owner = this.db.prepare('SELECT bot_id FROM assistant_profiles WHERE id = ?').get(id) as { bot_id: string };
+    const owner = this.db.prepare('SELECT bot_id FROM assistant_profiles WHERE id = ?').get(id) as {
+      bot_id: string;
+    };
     const activate = this.db.transaction(() => {
       const now = new Date().toISOString();
       this.db
@@ -4949,7 +5309,8 @@ export class AppDatabase {
       this.db
         .prepare('UPDATE assistant_profiles SET active = 1, updated_at = ? WHERE id = ?')
         .run(now, id);
-      if (owner.bot_id === 'neurobot') this.db.prepare('UPDATE linked_groups SET profile_id = ?').run(id);
+      if (owner.bot_id === 'neurobot')
+        this.db.prepare('UPDATE linked_groups SET profile_id = ?').run(id);
       this.db
         .prepare(
           `INSERT INTO bot_profiles(bot_id, profile_id, created_at, updated_at)
@@ -4970,7 +5331,12 @@ export class AppDatabase {
         `INSERT INTO assistant_profile_backups(profile_id, snapshot_json, reason, created_at)
          VALUES (?, ?, ?, ?)`,
       )
-      .run(id, JSON.stringify(profile), validatePlainText(reason, 'motivo', 120), new Date().toISOString());
+      .run(
+        id,
+        JSON.stringify(profile),
+        validatePlainText(reason, 'motivo', 120),
+        new Date().toISOString(),
+      );
     return Number(result.lastInsertRowid);
   }
 
@@ -5021,10 +5387,11 @@ export class AppDatabase {
         .run(input.profileId, name, input.enabled ? 1 : 0, now, now, owner.bot_id);
       id = Number(result.lastInsertRowid);
     } else {
-      const relatedEntries = this.db.prepare(
-        'SELECT id FROM knowledge_entries WHERE profile_id = ? AND category_id = ?',
-      ).all(input.profileId, id) as Array<{ id: number }>;
-      for (const entry of relatedEntries) this.invalidateCachedAnswersForKnowledgeEntry(input.profileId, entry.id);
+      const relatedEntries = this.db
+        .prepare('SELECT id FROM knowledge_entries WHERE profile_id = ? AND category_id = ?')
+        .all(input.profileId, id) as Array<{ id: number }>;
+      for (const entry of relatedEntries)
+        this.invalidateCachedAnswersForKnowledgeEntry(input.profileId, entry.id);
       const result = this.db
         .prepare(
           `UPDATE knowledge_categories SET name = ?, enabled = ?, updated_at = ?
@@ -5033,17 +5400,23 @@ export class AppDatabase {
         .run(name, input.enabled ? 1 : 0, now, id, input.profileId);
       if (result.changes !== 1) throw new Error('La categoría no existe.');
     }
-    return this.listKnowledgeCategories(input.profileId).find((item) => item.id === id) as KnowledgeCategory;
+    return this.listKnowledgeCategories(input.profileId).find(
+      (item) => item.id === id,
+    ) as KnowledgeCategory;
   }
 
   public deleteKnowledgeCategory(profileId: number, id: number): boolean {
     const entries = this.db
-      .prepare('SELECT COUNT(*) AS count FROM knowledge_entries WHERE category_id = ? AND profile_id = ?')
+      .prepare(
+        'SELECT COUNT(*) AS count FROM knowledge_entries WHERE category_id = ? AND profile_id = ?',
+      )
       .get(id, profileId) as { count: number };
     if (entries.count > 0) return false;
-    return this.db
-      .prepare('DELETE FROM knowledge_categories WHERE id = ? AND profile_id = ?')
-      .run(id, profileId).changes === 1;
+    return (
+      this.db
+        .prepare('DELETE FROM knowledge_categories WHERE id = ? AND profile_id = ?')
+        .run(id, profileId).changes === 1
+    );
   }
 
   public listKnowledgeEntries(profileId: number): KnowledgeEntry[] {
@@ -5116,14 +5489,18 @@ export class AppDatabase {
         );
       if (result.changes !== 1) throw new Error('La entrada no existe.');
     }
-    return this.listKnowledgeEntries(input.profileId).find((item) => item.id === id) as KnowledgeEntry;
+    return this.listKnowledgeEntries(input.profileId).find(
+      (item) => item.id === id,
+    ) as KnowledgeEntry;
   }
 
   public deleteKnowledgeEntry(profileId: number, id: number): boolean {
     this.invalidateCachedAnswersForKnowledgeEntry(profileId, id);
-    return this.db
-      .prepare('DELETE FROM knowledge_entries WHERE id = ? AND profile_id = ?')
-      .run(id, profileId).changes === 1;
+    return (
+      this.db
+        .prepare('DELETE FROM knowledge_entries WHERE id = ? AND profile_id = ?')
+        .run(id, profileId).changes === 1
+    );
   }
 
   public searchKnowledge(
@@ -5161,7 +5538,9 @@ export class AppDatabase {
              AND (entries.title LIKE ? OR entries.content LIKE ? OR entries.keywords LIKE ?)
            ORDER BY entries.priority DESC LIMIT ?`,
         )
-        .all(profileId, like, like, like, limit) as Array<KnowledgeEntryRow & { relevance: number }>;
+        .all(profileId, like, like, like, limit) as Array<
+        KnowledgeEntryRow & { relevance: number }
+      >;
     }
     let remainingCharacters = Math.max(1, Math.trunc(maximumTokens)) * 4;
     const fragments: KnowledgeFragment[] = [];
@@ -5193,21 +5572,33 @@ export class AppDatabase {
          ORDER BY CASE status WHEN 'ADMIN_APPROVED' THEN 0 WHEN 'ADMIN_EDITED' THEN 1
            WHEN 'AUTO_VERIFIED' THEN 2 ELSE 3 END, updated_at DESC`,
       )
-      .all(botId, normalizedSearch, `%${normalizedSearch}%`, `%${normalizedSearch}%`, `%${normalizedSearch}%`) as Array<Record<string, unknown>>;
+      .all(
+        botId,
+        normalizedSearch,
+        `%${normalizedSearch}%`,
+        `%${normalizedSearch}%`,
+        `%${normalizedSearch}%`,
+      ) as Array<Record<string, unknown>>;
     const variants = this.db.prepare(
       'SELECT variant FROM cached_answer_variants WHERE cached_answer_id = ? ORDER BY id',
     );
-    return rows.map((row) => mapCachedAnswer(
-      row,
-      (variants.all(Number(row.id)) as Array<{ variant: string }>).map((item) => item.variant),
-    ));
+    return rows.map((row) =>
+      mapCachedAnswer(
+        row,
+        (variants.all(Number(row.id)) as Array<{ variant: string }>).map((item) => item.variant),
+      ),
+    );
   }
 
   public getCachedAnswer(botId: string, id: number): CachedAnswer | null {
     return this.listCachedAnswers(botId).find((answer) => answer.id === id) ?? null;
   }
 
-  public findExactCachedAnswer(botId: string, normalizedQuestionHash: string, now = new Date()): CachedAnswer | null {
+  public findExactCachedAnswer(
+    botId: string,
+    normalizedQuestionHash: string,
+    now = new Date(),
+  ): CachedAnswer | null {
     const row = this.db
       .prepare(
         `SELECT DISTINCT answers.* FROM cached_answers answers
@@ -5220,7 +5611,8 @@ export class AppDatabase {
            CASE answers.status WHEN 'ADMIN_APPROVED' THEN 0 WHEN 'ADMIN_EDITED' THEN 1 ELSE 2 END
          LIMIT 1`,
       )
-      .get(botId, normalizedQuestionHash, normalizedQuestionHash, now.toISOString()) as Record<string, unknown> | undefined;
+      .get(botId, normalizedQuestionHash, normalizedQuestionHash, now.toISOString()) as
+      Record<string, unknown> | undefined;
     if (row === undefined) return null;
     return this.getCachedAnswer(botId, Number(row.id));
   }
@@ -5251,14 +5643,19 @@ export class AppDatabase {
     const canonicalQuestion = validatePlainText(input.canonicalQuestion, 'pregunta canónica', 1000);
     const answer = validatePlainText(input.answer, 'respuesta guardada', 8000);
     const category = validatePlainText(input.category, 'categoría', 200);
-    if (!/^[a-f0-9]{64}$/u.test(input.normalizedQuestionHash)) throw new Error('La huella de la pregunta no es válida.');
-    if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) throw new Error('La confianza no es válida.');
-    const sourceIds = [...new Set(input.knowledgeSourceIds.map((id) => Math.trunc(id)).filter((id) => id > 0))];
+    if (!/^[a-f0-9]{64}$/u.test(input.normalizedQuestionHash))
+      throw new Error('La huella de la pregunta no es válida.');
+    if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1)
+      throw new Error('La confianza no es válida.');
+    const sourceIds = [
+      ...new Set(input.knowledgeSourceIds.map((id) => Math.trunc(id)).filter((id) => id > 0)),
+    ];
     const now = new Date().toISOString();
     let id = input.id;
     if (id === undefined) {
-      const result = this.db.prepare(
-        `INSERT INTO cached_answers(
+      const result = this.db
+        .prepare(
+          `INSERT INTO cached_answers(
            bot_id, canonical_question, normalized_question_hash, answer, category,
            knowledge_source_ids, knowledge_version, prompt_version, status, source_type,
            confidence, created_at, updated_at, expires_at
@@ -5270,36 +5667,86 @@ export class AppDatabase {
            status = excluded.status, source_type = excluded.source_type,
            confidence = excluded.confidence, updated_at = excluded.updated_at,
            expires_at = excluded.expires_at, invalidated_at = NULL, invalidation_reason = NULL`,
-      ).run(input.botId, canonicalQuestion, input.normalizedQuestionHash, answer, category,
-        JSON.stringify(sourceIds), input.knowledgeVersion, input.promptVersion, input.status,
-        input.sourceType, input.confidence, now, now, input.expiresAt ?? null);
-      id = result.changes === 1
-        ? Number((this.db.prepare(
-            'SELECT id FROM cached_answers WHERE bot_id = ? AND normalized_question_hash = ?',
-          ).get(input.botId, input.normalizedQuestionHash) as { id: number }).id)
-        : Number(result.lastInsertRowid);
+        )
+        .run(
+          input.botId,
+          canonicalQuestion,
+          input.normalizedQuestionHash,
+          answer,
+          category,
+          JSON.stringify(sourceIds),
+          input.knowledgeVersion,
+          input.promptVersion,
+          input.status,
+          input.sourceType,
+          input.confidence,
+          now,
+          now,
+          input.expiresAt ?? null,
+        );
+      id =
+        result.changes === 1
+          ? Number(
+              (
+                this.db
+                  .prepare(
+                    'SELECT id FROM cached_answers WHERE bot_id = ? AND normalized_question_hash = ?',
+                  )
+                  .get(input.botId, input.normalizedQuestionHash) as { id: number }
+              ).id,
+            )
+          : Number(result.lastInsertRowid);
     } else {
-      const changed = this.db.prepare(
-        `UPDATE cached_answers SET canonical_question = ?, normalized_question_hash = ?,
+      const changed = this.db
+        .prepare(
+          `UPDATE cached_answers SET canonical_question = ?, normalized_question_hash = ?,
            answer = ?, category = ?, knowledge_source_ids = ?, knowledge_version = ?,
            prompt_version = ?, status = ?, source_type = ?, confidence = ?, updated_at = ?,
            expires_at = ?, invalidated_at = NULL, invalidation_reason = NULL
          WHERE id = ? AND bot_id = ?`,
-      ).run(canonicalQuestion, input.normalizedQuestionHash, answer, category, JSON.stringify(sourceIds),
-        input.knowledgeVersion, input.promptVersion, input.status, input.sourceType,
-        input.confidence, now, input.expiresAt ?? null, id, input.botId);
+        )
+        .run(
+          canonicalQuestion,
+          input.normalizedQuestionHash,
+          answer,
+          category,
+          JSON.stringify(sourceIds),
+          input.knowledgeVersion,
+          input.promptVersion,
+          input.status,
+          input.sourceType,
+          input.confidence,
+          now,
+          input.expiresAt ?? null,
+          id,
+          input.botId,
+        );
       if (changed.changes !== 1) throw new Error('La respuesta guardada no existe.');
     }
     return this.getCachedAnswer(input.botId, id) as CachedAnswer;
   }
 
-  public addCachedAnswerVariant(botId: string, answerId: number, variant: string, normalizedHash: string): CachedAnswer {
-    if (this.getCachedAnswer(botId, answerId) === null) throw new Error('La respuesta guardada no existe.');
-    if (!/^[a-f0-9]{64}$/u.test(normalizedHash)) throw new Error('La huella de la variante no es válida.');
-    this.db.prepare(
-      `INSERT INTO cached_answer_variants(cached_answer_id, variant, normalized_question_hash, created_at)
+  public addCachedAnswerVariant(
+    botId: string,
+    answerId: number,
+    variant: string,
+    normalizedHash: string,
+  ): CachedAnswer {
+    if (this.getCachedAnswer(botId, answerId) === null)
+      throw new Error('La respuesta guardada no existe.');
+    if (!/^[a-f0-9]{64}$/u.test(normalizedHash))
+      throw new Error('La huella de la variante no es válida.');
+    this.db
+      .prepare(
+        `INSERT INTO cached_answer_variants(cached_answer_id, variant, normalized_question_hash, created_at)
        VALUES (?, ?, ?, ?) ON CONFLICT(cached_answer_id, normalized_question_hash) DO UPDATE SET variant = excluded.variant`,
-    ).run(answerId, validatePlainText(variant, 'variante', 1000), normalizedHash, new Date().toISOString());
+      )
+      .run(
+        answerId,
+        validatePlainText(variant, 'variante', 1000),
+        normalizedHash,
+        new Date().toISOString(),
+      );
     return this.getCachedAnswer(botId, answerId) as CachedAnswer;
   }
 
@@ -5311,37 +5758,53 @@ export class AppDatabase {
   ): CachedAnswer {
     const now = new Date().toISOString();
     const invalidated = status === 'INVALIDATED';
-    const changed = this.db.prepare(
-      `UPDATE cached_answers SET status = ?, updated_at = ?, invalidated_at = ?, invalidation_reason = ?
+    const changed = this.db
+      .prepare(
+        `UPDATE cached_answers SET status = ?, updated_at = ?, invalidated_at = ?, invalidation_reason = ?
        WHERE id = ? AND bot_id = ?`,
-    ).run(status, now, invalidated ? now : null,
-      invalidated ? validatePlainText(reason ?? 'ADMIN_INVALIDATION', 'motivo', 200) : null,
-      answerId, botId);
+      )
+      .run(
+        status,
+        now,
+        invalidated ? now : null,
+        invalidated ? validatePlainText(reason ?? 'ADMIN_INVALIDATION', 'motivo', 200) : null,
+        answerId,
+        botId,
+      );
     if (changed.changes !== 1) throw new Error('La respuesta guardada no existe.');
     return this.getCachedAnswer(botId, answerId) as CachedAnswer;
   }
 
   public deleteCachedAnswer(botId: string, answerId: number): boolean {
-    return this.db.prepare('DELETE FROM cached_answers WHERE id = ? AND bot_id = ?').run(answerId, botId).changes === 1;
+    return (
+      this.db.prepare('DELETE FROM cached_answers WHERE id = ? AND bot_id = ?').run(answerId, botId)
+        .changes === 1
+    );
   }
 
   public recordCachedAnswerHit(botId: string, answerId: number): void {
-    this.db.prepare(
-      `UPDATE cached_answers SET hit_count = hit_count + 1, api_calls_saved = api_calls_saved + 1,
+    this.db
+      .prepare(
+        `UPDATE cached_answers SET hit_count = hit_count + 1, api_calls_saved = api_calls_saved + 1,
        last_used_at = ?, updated_at = ? WHERE id = ? AND bot_id = ?`,
-    ).run(new Date().toISOString(), new Date().toISOString(), answerId, botId);
+      )
+      .run(new Date().toISOString(), new Date().toISOString(), answerId, botId);
   }
 
   public invalidateCachedAnswersForKnowledgeEntry(profileId: number, entryId: number): number {
-    const owner = this.db.prepare('SELECT bot_id FROM assistant_profiles WHERE id = ?').get(profileId) as { bot_id: string } | undefined;
+    const owner = this.db
+      .prepare('SELECT bot_id FROM assistant_profiles WHERE id = ?')
+      .get(profileId) as { bot_id: string } | undefined;
     if (owner === undefined) return 0;
     const now = new Date().toISOString();
-    return this.db.prepare(
-      `UPDATE cached_answers SET status = 'INVALIDATED', invalidated_at = ?, updated_at = ?,
+    return this.db
+      .prepare(
+        `UPDATE cached_answers SET status = 'INVALIDATED', invalidated_at = ?, updated_at = ?,
          invalidation_reason = 'KNOWLEDGE_SOURCE_CHANGED'
        WHERE bot_id = ? AND status IN ('AUTO_VERIFIED', 'ADMIN_APPROVED', 'ADMIN_EDITED')
          AND EXISTS (SELECT 1 FROM json_each(cached_answers.knowledge_source_ids) WHERE value = ?)`,
-    ).run(now, now, owner.bot_id, entryId).changes;
+      )
+      .run(now, now, owner.bot_id, entryId).changes;
   }
 
   public registerCommunityInteraction(input: {
@@ -5352,45 +5815,75 @@ export class AppDatabase {
     localDate: string;
     hourBucket: string;
     now?: Date;
-  }): { allowed: true } | { allowed: false; reason: 'DUPLICATE_QUERY' | 'INTERACTION_COOLDOWN' | 'INTERACTION_HOURLY_LIMIT' } {
+  }):
+    | { allowed: true }
+    | {
+        allowed: false;
+        reason: 'DUPLICATE_QUERY' | 'INTERACTION_COOLDOWN' | 'INTERACTION_HOURLY_LIMIT';
+      } {
     const register = this.db.transaction(() => {
       const now = input.now ?? new Date();
       const nowIso = now.toISOString();
       const settings = this.getAISettings(input.profileId);
-      this.db.prepare('DELETE FROM bot_interaction_usage WHERE last_activation_at < ?')
+      this.db
+        .prepare('DELETE FROM bot_interaction_usage WHERE last_activation_at < ?')
         .run(new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString());
-      const latest = this.db.prepare(
-        `SELECT last_activation_at, last_query_at, last_query_hash FROM bot_interaction_usage
+      const latest = this.db
+        .prepare(
+          `SELECT last_activation_at, last_query_at, last_query_hash FROM bot_interaction_usage
          WHERE bot_id = ? AND user_hash = ? ORDER BY last_activation_at DESC LIMIT 1`,
-      ).get(input.botId, input.userHash) as {
-        last_activation_at: string;
-        last_query_at: string;
-        last_query_hash: string;
-      } | undefined;
-      if (latest !== undefined && latest.last_query_hash === input.queryHash &&
-        now.getTime() - new Date(latest.last_query_at).getTime() < settings.duplicateQueryWindowSeconds * 1000) {
+        )
+        .get(input.botId, input.userHash) as
+        | {
+            last_activation_at: string;
+            last_query_at: string;
+            last_query_hash: string;
+          }
+        | undefined;
+      if (
+        latest !== undefined &&
+        latest.last_query_hash === input.queryHash &&
+        now.getTime() - new Date(latest.last_query_at).getTime() <
+          settings.duplicateQueryWindowSeconds * 1000
+      ) {
         return { allowed: false as const, reason: 'DUPLICATE_QUERY' as const };
       }
-      if (latest !== undefined &&
-        now.getTime() - new Date(latest.last_activation_at).getTime() < settings.interactionCooldownSeconds * 1000) {
+      if (
+        latest !== undefined &&
+        now.getTime() - new Date(latest.last_activation_at).getTime() <
+          settings.interactionCooldownSeconds * 1000
+      ) {
         return { allowed: false as const, reason: 'INTERACTION_COOLDOWN' as const };
       }
-      const hourly = this.db.prepare(
-        `SELECT activations FROM bot_interaction_usage
+      const hourly = this.db
+        .prepare(
+          `SELECT activations FROM bot_interaction_usage
          WHERE bot_id = ? AND user_hash = ? AND local_date = ? AND hour_bucket = ?`,
-      ).get(input.botId, input.userHash, input.localDate, input.hourBucket) as { activations: number } | undefined;
+        )
+        .get(input.botId, input.userHash, input.localDate, input.hourBucket) as
+        { activations: number } | undefined;
       if ((hourly?.activations ?? 0) >= settings.interactionHourlyLimit) {
         return { allowed: false as const, reason: 'INTERACTION_HOURLY_LIMIT' as const };
       }
-      this.db.prepare(
-        `INSERT INTO bot_interaction_usage(
+      this.db
+        .prepare(
+          `INSERT INTO bot_interaction_usage(
            bot_id, user_hash, local_date, hour_bucket, activations,
            last_activation_at, last_query_hash, last_query_at
          ) VALUES (?, ?, ?, ?, 1, ?, ?, ?)
          ON CONFLICT(bot_id, user_hash, local_date, hour_bucket) DO UPDATE SET
            activations = activations + 1, last_activation_at = excluded.last_activation_at,
            last_query_hash = excluded.last_query_hash, last_query_at = excluded.last_query_at`,
-      ).run(input.botId, input.userHash, input.localDate, input.hourBucket, nowIso, input.queryHash, nowIso);
+        )
+        .run(
+          input.botId,
+          input.userHash,
+          input.localDate,
+          input.hourBucket,
+          nowIso,
+          input.queryHash,
+          nowIso,
+        );
       return { allowed: true as const };
     });
     return register();
@@ -5398,8 +5891,7 @@ export class AppDatabase {
 
   public getAISettings(profileId: number): AISettings {
     const row = this.db.prepare('SELECT * FROM ai_settings WHERE profile_id = ?').get(profileId) as
-      | Record<string, number | string>
-      | undefined;
+      Record<string, number | string> | undefined;
     if (row === undefined) throw new Error('No existe configuración de IA para el perfil.');
     return mapAISettings(row);
   }
@@ -5448,12 +5940,20 @@ export class AppDatabase {
     return this.getAISettings(settings.profileId);
   }
 
-  public getAIProviderStatus(profileId: number, configured: boolean, model: string): AIProviderStatus {
+  public getAIProviderStatus(
+    profileId: number,
+    configured: boolean,
+    model: string,
+  ): AIProviderStatus {
     const settings = this.getAISettings(profileId);
     const row = this.db
       .prepare('SELECT * FROM provider_health WHERE profile_id = ?')
       .get(profileId) as
-      | { connection_status: 'not_tested' | 'successful' | 'failed'; last_checked_at: string | null; last_error_code: string | null }
+      | {
+          connection_status: 'not_tested' | 'successful' | 'failed';
+          last_checked_at: string | null;
+          last_error_code: string | null;
+        }
       | undefined;
     return {
       configured,
@@ -5492,8 +5992,10 @@ export class AppDatabase {
     dailyTokenLimit: number;
     monthlyTokenLimit: number;
   }): ReturnType<AppDatabase['getGlobalAILimits']> {
-    if (input.monthlyRequestLimit < input.dailyRequestLimit) throw new Error('El límite mensual global no puede ser menor que el diario.');
-    if (input.monthlyTokenLimit < input.dailyTokenLimit) throw new Error('El límite mensual global de tokens no puede ser menor que el diario.');
+    if (input.monthlyRequestLimit < input.dailyRequestLimit)
+      throw new Error('El límite mensual global no puede ser menor que el diario.');
+    if (input.monthlyTokenLimit < input.dailyTokenLimit)
+      throw new Error('El límite mensual global de tokens no puede ser menor que el diario.');
     const changed = this.db
       .prepare(
         `UPDATE global_ai_limits SET daily_request_limit = ?, monthly_request_limit = ?,
@@ -5530,11 +6032,17 @@ export class AppDatabase {
   }
 
   public getAIQueueSettings(botId: string): AIQueueSettings {
-    const row = this.db.prepare('SELECT * FROM assistant_ai_queue_settings WHERE assistant_id = ?').get(botId) as Record<string, number> | undefined;
+    const row = this.db
+      .prepare('SELECT * FROM assistant_ai_queue_settings WHERE assistant_id = ?')
+      .get(botId) as Record<string, number> | undefined;
     if (row === undefined) {
       const now = new Date().toISOString();
-      this.db.prepare(`INSERT INTO assistant_ai_queue_settings(assistant_id, created_at, updated_at)
-        VALUES (?, ?, ?)`).run(botId, now, now);
+      this.db
+        .prepare(
+          `INSERT INTO assistant_ai_queue_settings(assistant_id, created_at, updated_at)
+        VALUES (?, ?, ?)`,
+        )
+        .run(botId, now, now);
       return this.getAIQueueSettings(botId);
     }
     return {
@@ -5556,17 +6064,31 @@ export class AppDatabase {
 
   public saveAIQueueSettings(botId: string, settings: AIQueueSettings): AIQueueSettings {
     const now = new Date().toISOString();
-    const changed = this.db.prepare(`UPDATE assistant_ai_queue_settings SET
+    const changed = this.db
+      .prepare(
+        `UPDATE assistant_ai_queue_settings SET
       max_concurrent=?, max_queue_size=?, max_queue_wait_seconds=?, provider_timeout_seconds=?,
       max_retries=?, initial_retry_delay_seconds=?, maximum_retry_delay_seconds=?, wait_notice_seconds=?,
       user_cooldown_seconds=?, duplicate_window_seconds=?, single_flight_window_seconds=?,
-      outbound_message_interval_ms=?, suggested_retry_seconds=?, updated_at=? WHERE assistant_id=?`).run(
-      settings.maxConcurrent, settings.maxQueueSize, settings.maxQueueWaitSeconds,
-      settings.providerTimeoutSeconds, settings.maxRetries, settings.initialRetryDelaySeconds,
-      settings.maximumRetryDelaySeconds, settings.waitNoticeSeconds, settings.userCooldownSeconds,
-      settings.duplicateWindowSeconds, settings.singleFlightWindowSeconds,
-      settings.outboundMessageIntervalMs, settings.suggestedRetrySeconds, now, botId,
-    );
+      outbound_message_interval_ms=?, suggested_retry_seconds=?, updated_at=? WHERE assistant_id=?`,
+      )
+      .run(
+        settings.maxConcurrent,
+        settings.maxQueueSize,
+        settings.maxQueueWaitSeconds,
+        settings.providerTimeoutSeconds,
+        settings.maxRetries,
+        settings.initialRetryDelaySeconds,
+        settings.maximumRetryDelaySeconds,
+        settings.waitNoticeSeconds,
+        settings.userCooldownSeconds,
+        settings.duplicateWindowSeconds,
+        settings.singleFlightWindowSeconds,
+        settings.outboundMessageIntervalMs,
+        settings.suggestedRetrySeconds,
+        now,
+        botId,
+      );
     if (changed.changes !== 1) throw new Error('AI_QUEUE_SETTINGS_NOT_FOUND');
     return this.getAIQueueSettings(botId);
   }
@@ -5578,34 +6100,59 @@ export class AppDatabase {
     waitMs = 0,
   ): void {
     const columns: Record<string, string> = {
-      queuedCount: 'queued_count', processedCount: 'processed_count', completedCount: 'completed_count',
-      failedCount: 'failed_count', expiredCount: 'expired_count', rejectedCount: 'rejected_count',
-      timeoutCount: 'timeout_count', rateLimitCount: 'rate_limit_count', retryCount: 'retry_count',
-      coalescedCount: 'coalesced_count', duplicateSuppressedCount: 'duplicate_suppressed_count',
+      queuedCount: 'queued_count',
+      processedCount: 'processed_count',
+      completedCount: 'completed_count',
+      failedCount: 'failed_count',
+      expiredCount: 'expired_count',
+      rejectedCount: 'rejected_count',
+      timeoutCount: 'timeout_count',
+      rateLimitCount: 'rate_limit_count',
+      retryCount: 'retry_count',
+      coalescedCount: 'coalesced_count',
+      duplicateSuppressedCount: 'duplicate_suppressed_count',
       cacheBypassCount: 'cache_bypass_count',
     };
     const column = columns[field];
     if (column === undefined) throw new Error('AI_QUEUE_METRIC_INVALID');
     const now = new Date().toISOString();
-    this.db.prepare(`INSERT INTO assistant_ai_queue_metrics(
+    this.db
+      .prepare(
+        `INSERT INTO assistant_ai_queue_metrics(
       assistant_id, local_date, ${column}, total_wait_ms, maximum_wait_ms, created_at, updated_at
     ) VALUES (?, ?, 1, ?, ?, ?, ?)
     ON CONFLICT(assistant_id, local_date) DO UPDATE SET ${column}=${column}+1,
       total_wait_ms=total_wait_ms+excluded.total_wait_ms,
-      maximum_wait_ms=MAX(maximum_wait_ms, excluded.maximum_wait_ms), updated_at=excluded.updated_at`).run(
-      botId, localDate, Math.max(0, Math.trunc(waitMs)), Math.max(0, Math.trunc(waitMs)), now, now,
-    );
+      maximum_wait_ms=MAX(maximum_wait_ms, excluded.maximum_wait_ms), updated_at=excluded.updated_at`,
+      )
+      .run(
+        botId,
+        localDate,
+        Math.max(0, Math.trunc(waitMs)),
+        Math.max(0, Math.trunc(waitMs)),
+        now,
+        now,
+      );
   }
 
   public getAIQueueMetrics(botId: string, localDate: string): AIQueueMetrics {
-    const row = this.db.prepare('SELECT * FROM assistant_ai_queue_metrics WHERE assistant_id=? AND local_date=?').get(botId, localDate) as Record<string, number> | undefined;
+    const row = this.db
+      .prepare('SELECT * FROM assistant_ai_queue_metrics WHERE assistant_id=? AND local_date=?')
+      .get(botId, localDate) as Record<string, number> | undefined;
     const value = (key: string): number => row?.[key] ?? 0;
     const processed = value('processed_count');
     return {
-      queuedCount: value('queued_count'), processedCount: processed, completedCount: value('completed_count'),
-      failedCount: value('failed_count'), expiredCount: value('expired_count'), rejectedCount: value('rejected_count'),
-      timeoutCount: value('timeout_count'), rateLimitCount: value('rate_limit_count'), retryCount: value('retry_count'),
-      coalescedCount: value('coalesced_count'), duplicateSuppressedCount: value('duplicate_suppressed_count'),
+      queuedCount: value('queued_count'),
+      processedCount: processed,
+      completedCount: value('completed_count'),
+      failedCount: value('failed_count'),
+      expiredCount: value('expired_count'),
+      rejectedCount: value('rejected_count'),
+      timeoutCount: value('timeout_count'),
+      rateLimitCount: value('rate_limit_count'),
+      retryCount: value('retry_count'),
+      coalescedCount: value('coalesced_count'),
+      duplicateSuppressedCount: value('duplicate_suppressed_count'),
       cacheBypassCount: value('cache_bypass_count'),
       averageWaitMs: processed === 0 ? 0 : Math.round(value('total_wait_ms') / processed),
       maximumWaitMs: value('maximum_wait_ms'),
@@ -5624,27 +6171,49 @@ export class AppDatabase {
     lastFailureAt: string | null;
     lastSafeErrorCode: string | null;
   }): void {
-    this.db.prepare(`INSERT INTO assistant_ai_provider_health(
+    this.db
+      .prepare(
+        `INSERT INTO assistant_ai_provider_health(
       assistant_id,provider,state,consecutive_failures,circuit_state,circuit_opened_at,circuit_retry_at,
       last_success_at,last_failure_at,last_safe_error_code,updated_at
     ) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(assistant_id,provider) DO UPDATE SET
       state=excluded.state,consecutive_failures=excluded.consecutive_failures,circuit_state=excluded.circuit_state,
       circuit_opened_at=excluded.circuit_opened_at,circuit_retry_at=excluded.circuit_retry_at,
       last_success_at=excluded.last_success_at,last_failure_at=excluded.last_failure_at,
-      last_safe_error_code=excluded.last_safe_error_code,updated_at=excluded.updated_at`).run(
-      input.botId,input.provider,input.state,input.consecutiveFailures,input.circuitState,input.circuitOpenedAt,
-      input.circuitRetryAt,input.lastSuccessAt,input.lastFailureAt,input.lastSafeErrorCode,new Date().toISOString(),
-    );
+      last_safe_error_code=excluded.last_safe_error_code,updated_at=excluded.updated_at`,
+      )
+      .run(
+        input.botId,
+        input.provider,
+        input.state,
+        input.consecutiveFailures,
+        input.circuitState,
+        input.circuitOpenedAt,
+        input.circuitRetryAt,
+        input.lastSuccessAt,
+        input.lastFailureAt,
+        input.lastSafeErrorCode,
+        new Date().toISOString(),
+      );
   }
 
   public getAIProviderQueueHealth(botId: string): Record<string, unknown> {
-    return (this.db.prepare(`SELECT provider,state,consecutive_failures AS consecutiveFailures,
+    return (
+      (this.db
+        .prepare(
+          `SELECT provider,state,consecutive_failures AS consecutiveFailures,
       circuit_state AS circuitState,circuit_opened_at AS circuitOpenedAt,circuit_retry_at AS circuitRetryAt,
       last_success_at AS lastSuccessAt,last_failure_at AS lastFailureAt,last_safe_error_code AS lastSafeErrorCode,
-      updated_at AS updatedAt FROM assistant_ai_provider_health WHERE assistant_id=? AND provider='groq'`).get(botId) as Record<string, unknown> | undefined) ?? {
-      provider: 'groq', state: 'NOT_CONFIGURED', consecutiveFailures: 0, circuitState: 'CLOSED',
-      lastSafeErrorCode: null,
-    };
+      updated_at AS updatedAt FROM assistant_ai_provider_health WHERE assistant_id=? AND provider='groq'`,
+        )
+        .get(botId) as Record<string, unknown> | undefined) ?? {
+        provider: 'groq',
+        state: 'NOT_CONFIGURED',
+        consecutiveFailures: 0,
+        circuitState: 'CLOSED',
+        lastSafeErrorCode: null,
+      }
+    );
   }
 
   public reserveAIUsage(input: {
@@ -5663,7 +6232,9 @@ export class AppDatabase {
       const now = input.now ?? new Date();
       const nowIso = now.toISOString();
       this.db
-        .prepare("UPDATE ai_request_reservations SET status = 'RELEASED' WHERE status = 'PENDING' AND expires_at <= ?")
+        .prepare(
+          "UPDATE ai_request_reservations SET status = 'RELEASED' WHERE status = 'PENDING' AND expires_at <= ?",
+        )
         .run(nowIso);
       const settings = this.getAISettings(input.profileId);
       const botId = input.botId ?? 'neurobot';
@@ -5720,7 +6291,10 @@ export class AppDatabase {
            FROM ai_usage_by_group
            WHERE profile_id = ? AND group_hash = ? AND local_date = ?`,
         )
-        .get(input.hourBucket, input.profileId, input.groupHash, input.localDate) as { daily: number; hourly: number };
+        .get(input.hourBucket, input.profileId, input.groupHash, input.localDate) as {
+        daily: number;
+        hourly: number;
+      };
       const pendingGroup = this.db
         .prepare(
           `SELECT COUNT(*) AS daily,
@@ -5729,17 +6303,26 @@ export class AppDatabase {
            WHERE profile_id = ? AND group_hash = ? AND local_date = ?
              AND status = 'PENDING' AND expires_at > ?`,
         )
-        .get(input.hourBucket, input.profileId, input.groupHash, input.localDate, nowIso) as { daily: number; hourly: number };
+        .get(input.hourBucket, input.profileId, input.groupHash, input.localDate, nowIso) as {
+        daily: number;
+        hourly: number;
+      };
       if (group.hourly + pendingGroup.hourly >= settings.groupHourlyLimit)
         return { allowed: false, code: 'AI_LIMIT_GROUP_HOURLY_REACHED' };
       if (group.daily + pendingGroup.daily >= settings.groupDailyLimit)
         return { allowed: false, code: 'AI_LIMIT_GROUP_DAILY_REACHED' };
       const daily = this.db
-        .prepare('SELECT requests, total_tokens FROM ai_usage_daily WHERE profile_id = ? AND local_date = ?')
-        .get(input.profileId, input.localDate) as { requests: number; total_tokens: number } | undefined;
+        .prepare(
+          'SELECT requests, total_tokens FROM ai_usage_daily WHERE profile_id = ? AND local_date = ?',
+        )
+        .get(input.profileId, input.localDate) as
+        { requests: number; total_tokens: number } | undefined;
       const monthly = this.db
-        .prepare('SELECT requests, total_tokens FROM ai_usage_monthly WHERE profile_id = ? AND local_month = ?')
-        .get(input.profileId, input.localMonth) as { requests: number; total_tokens: number } | undefined;
+        .prepare(
+          'SELECT requests, total_tokens FROM ai_usage_monthly WHERE profile_id = ? AND local_month = ?',
+        )
+        .get(input.profileId, input.localMonth) as
+        { requests: number; total_tokens: number } | undefined;
       const globalLimits = this.db.prepare('SELECT * FROM global_ai_limits WHERE id = 1').get() as {
         daily_request_limit: number;
         monthly_request_limit: number;
@@ -5747,27 +6330,43 @@ export class AppDatabase {
         monthly_token_limit: number;
       };
       const globalDaily = this.db
-        .prepare('SELECT COALESCE(SUM(requests), 0) AS requests, COALESCE(SUM(total_tokens), 0) AS tokens FROM ai_usage_daily WHERE local_date = ?')
+        .prepare(
+          'SELECT COALESCE(SUM(requests), 0) AS requests, COALESCE(SUM(total_tokens), 0) AS tokens FROM ai_usage_daily WHERE local_date = ?',
+        )
         .get(input.localDate) as { requests: number; tokens: number };
       const globalMonthly = this.db
-        .prepare('SELECT COALESCE(SUM(requests), 0) AS requests, COALESCE(SUM(total_tokens), 0) AS tokens FROM ai_usage_monthly WHERE local_month = ?')
+        .prepare(
+          'SELECT COALESCE(SUM(requests), 0) AS requests, COALESCE(SUM(total_tokens), 0) AS tokens FROM ai_usage_monthly WHERE local_month = ?',
+        )
         .get(input.localMonth) as { requests: number; tokens: number };
       if ((daily?.requests ?? 0) + pending.requests >= settings.globalDailyLimit)
         return { allowed: false, code: 'AI_LIMIT_DAILY_REACHED' };
       if ((monthly?.requests ?? 0) + pending.requests >= settings.globalMonthlyLimit)
         return { allowed: false, code: 'AI_LIMIT_MONTHLY_REACHED' };
       const reservationTokens = input.estimatedInputTokens + input.reservedOutputTokens;
-      if ((daily?.total_tokens ?? 0) + pending.tokens + reservationTokens > settings.globalDailyTokenLimit)
+      if (
+        (daily?.total_tokens ?? 0) + pending.tokens + reservationTokens >
+        settings.globalDailyTokenLimit
+      )
         return { allowed: false, code: 'AI_LIMIT_DAILY_TOKENS_REACHED' };
-      if ((monthly?.total_tokens ?? 0) + pending.tokens + reservationTokens > settings.globalMonthlyTokenLimit)
+      if (
+        (monthly?.total_tokens ?? 0) + pending.tokens + reservationTokens >
+        settings.globalMonthlyTokenLimit
+      )
         return { allowed: false, code: 'AI_LIMIT_MONTHLY_TOKENS_REACHED' };
       if (globalDaily.requests + globalPending.requests >= globalLimits.daily_request_limit)
         return { allowed: false, code: 'AI_LIMIT_DAILY_REACHED' };
       if (globalMonthly.requests + globalPending.requests >= globalLimits.monthly_request_limit)
         return { allowed: false, code: 'AI_LIMIT_MONTHLY_REACHED' };
-      if (globalDaily.tokens + globalPending.tokens + reservationTokens > globalLimits.daily_token_limit)
+      if (
+        globalDaily.tokens + globalPending.tokens + reservationTokens >
+        globalLimits.daily_token_limit
+      )
         return { allowed: false, code: 'AI_LIMIT_DAILY_TOKENS_REACHED' };
-      if (globalMonthly.tokens + globalPending.tokens + reservationTokens > globalLimits.monthly_token_limit)
+      if (
+        globalMonthly.tokens + globalPending.tokens + reservationTokens >
+        globalLimits.monthly_token_limit
+      )
         return { allowed: false, code: 'AI_LIMIT_MONTHLY_TOKENS_REACHED' };
       const id = randomUUID();
       this.db
@@ -5828,20 +6427,50 @@ export class AppDatabase {
       if (row === undefined) return false;
       const now = new Date().toISOString();
       if (result === 'failed') {
-        this.db.prepare(
-          `INSERT INTO ai_usage_events(
+        this.db
+          .prepare(
+            `INSERT INTO ai_usage_events(
              profile_id, local_date, local_month, group_hash, user_hash, result, error_code,
              input_tokens, output_tokens, total_tokens, created_at, bot_id
            ) VALUES (?, ?, ?, ?, ?, 'failed', ?, 0, 0, 0, ?, ?)`,
-        ).run(row.profile_id, row.local_date, row.local_month, row.group_hash, row.user_hash,
-          errorCode, now, row.bot_id);
-        this.db.prepare(
-          "UPDATE ai_request_reservations SET status = 'RELEASED', completed_at = ? WHERE id = ?",
-        ).run(now, reservationId);
+          )
+          .run(
+            row.profile_id,
+            row.local_date,
+            row.local_month,
+            row.group_hash,
+            row.user_hash,
+            errorCode,
+            now,
+            row.bot_id,
+          );
+        this.db
+          .prepare(
+            "UPDATE ai_request_reservations SET status = 'RELEASED', completed_at = ? WHERE id = ?",
+          )
+          .run(now, reservationId);
         return true;
       }
-      this.upsertAIUsageAggregate('ai_usage_daily', 'local_date', row.bot_id, row.profile_id, row.local_date, usage, 0, now);
-      this.upsertAIUsageAggregate('ai_usage_monthly', 'local_month', row.bot_id, row.profile_id, row.local_month, usage, 0, now);
+      this.upsertAIUsageAggregate(
+        'ai_usage_daily',
+        'local_date',
+        row.bot_id,
+        row.profile_id,
+        row.local_date,
+        usage,
+        0,
+        now,
+      );
+      this.upsertAIUsageAggregate(
+        'ai_usage_monthly',
+        'local_month',
+        row.bot_id,
+        row.profile_id,
+        row.local_month,
+        usage,
+        0,
+        now,
+      );
       this.db
         .prepare(
           `INSERT INTO ai_usage_by_anonymized_user(
@@ -5854,7 +6483,17 @@ export class AppDatabase {
              total_tokens = total_tokens + excluded.total_tokens,
              last_request_at = excluded.last_request_at`,
         )
-        .run(row.profile_id, row.user_hash, row.local_date, hourBucket, usage.inputTokens, usage.outputTokens, usage.totalTokens, now, row.bot_id);
+        .run(
+          row.profile_id,
+          row.user_hash,
+          row.local_date,
+          hourBucket,
+          usage.inputTokens,
+          usage.outputTokens,
+          usage.totalTokens,
+          now,
+          row.bot_id,
+        );
       this.db
         .prepare(
           `INSERT INTO ai_usage_by_group(
@@ -5866,7 +6505,17 @@ export class AppDatabase {
              output_tokens = output_tokens + excluded.output_tokens,
              total_tokens = total_tokens + excluded.total_tokens, updated_at = excluded.updated_at`,
         )
-        .run(row.profile_id, row.group_hash, row.local_date, hourBucket, usage.inputTokens, usage.outputTokens, usage.totalTokens, now, row.bot_id);
+        .run(
+          row.profile_id,
+          row.group_hash,
+          row.local_date,
+          hourBucket,
+          usage.inputTokens,
+          usage.outputTokens,
+          usage.totalTokens,
+          now,
+          row.bot_id,
+        );
       this.db
         .prepare(
           `INSERT INTO ai_usage_events(
@@ -5874,9 +6523,24 @@ export class AppDatabase {
              input_tokens, output_tokens, total_tokens, created_at, bot_id
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(row.profile_id, row.local_date, row.local_month, row.group_hash, row.user_hash, result, errorCode, usage.inputTokens, usage.outputTokens, usage.totalTokens, now, row.bot_id);
+        .run(
+          row.profile_id,
+          row.local_date,
+          row.local_month,
+          row.group_hash,
+          row.user_hash,
+          result,
+          errorCode,
+          usage.inputTokens,
+          usage.outputTokens,
+          usage.totalTokens,
+          now,
+          row.bot_id,
+        );
       this.db
-        .prepare("UPDATE ai_request_reservations SET status = 'COMPLETED', completed_at = ? WHERE id = ?")
+        .prepare(
+          "UPDATE ai_request_reservations SET status = 'COMPLETED', completed_at = ? WHERE id = ?",
+        )
         .run(now, reservationId);
       return true;
     });
@@ -5905,16 +6569,31 @@ export class AppDatabase {
            output_tokens = output_tokens + excluded.output_tokens,
            total_tokens = total_tokens + excluded.total_tokens, updated_at = excluded.updated_at`,
       )
-      .run(profileId, period, failed, usage.inputTokens, usage.outputTokens, usage.totalTokens, now, botId);
+      .run(
+        profileId,
+        period,
+        failed,
+        usage.inputTokens,
+        usage.outputTokens,
+        usage.totalTokens,
+        now,
+        botId,
+      );
   }
 
   public releaseAIUsageReservation(reservationId: string): void {
     this.db
-      .prepare("UPDATE ai_request_reservations SET status = 'RELEASED' WHERE id = ? AND status = 'PENDING'")
+      .prepare(
+        "UPDATE ai_request_reservations SET status = 'RELEASED' WHERE id = ? AND status = 'PENDING'",
+      )
       .run(reservationId);
   }
 
-  public getAIUsageSummary(profileId: number, localDate: string, localMonth: string): AIUsageSummary & { monthlyRequests: number; monthlyTokens: number } {
+  public getAIUsageSummary(
+    profileId: number,
+    localDate: string,
+    localMonth: string,
+  ): AIUsageSummary & { monthlyRequests: number; monthlyTokens: number } {
     const daily = this.db
       .prepare('SELECT * FROM ai_usage_daily WHERE profile_id = ? AND local_date = ?')
       .get(profileId, localDate) as Record<string, number> | undefined;
@@ -5926,14 +6605,32 @@ export class AppDatabase {
     const totalTokens = daily?.total_tokens ?? 0;
     return {
       requests,
-      failedRequests: Number((this.db.prepare(
-        "SELECT COUNT(*) AS count FROM ai_usage_events WHERE profile_id = ? AND local_date = ? AND result = 'failed'",
-      ).get(profileId, localDate) as { count: number }).count),
+      failedRequests: Number(
+        (
+          this.db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM ai_usage_events WHERE profile_id = ? AND local_date = ? AND result = 'failed'",
+            )
+            .get(profileId, localDate) as { count: number }
+        ).count,
+      ),
       inputTokens: daily?.input_tokens ?? 0,
       outputTokens: daily?.output_tokens ?? 0,
       totalTokens,
-      dailyBudgetPercent: Math.min(100, Math.max((requests / settings.globalDailyLimit) * 100, (totalTokens / settings.globalDailyTokenLimit) * 100)),
-      monthlyBudgetPercent: Math.min(100, Math.max(((monthly?.requests ?? 0) / settings.globalMonthlyLimit) * 100, ((monthly?.total_tokens ?? 0) / settings.globalMonthlyTokenLimit) * 100)),
+      dailyBudgetPercent: Math.min(
+        100,
+        Math.max(
+          (requests / settings.globalDailyLimit) * 100,
+          (totalTokens / settings.globalDailyTokenLimit) * 100,
+        ),
+      ),
+      monthlyBudgetPercent: Math.min(
+        100,
+        Math.max(
+          ((monthly?.requests ?? 0) / settings.globalMonthlyLimit) * 100,
+          ((monthly?.total_tokens ?? 0) / settings.globalMonthlyTokenLimit) * 100,
+        ),
+      ),
       monthlyRequests: monthly?.requests ?? 0,
       monthlyTokens: monthly?.total_tokens ?? 0,
     };
@@ -5946,14 +6643,18 @@ export class AppDatabase {
            total_tokens, created_at FROM ai_usage_events
          WHERE profile_id = ? ORDER BY id DESC LIMIT ?`,
       )
-      .all(profileId, Math.min(500, Math.max(1, Math.trunc(limit)))) as Array<Record<string, unknown>>;
+      .all(profileId, Math.min(500, Math.max(1, Math.trunc(limit)))) as Array<
+      Record<string, unknown>
+    >;
   }
 
   public getBotOperationalMetrics(botId: string): Record<string, number> {
-    const rows = this.db.prepare(
-      `SELECT event_type, COUNT(*) AS count FROM technical_events
+    const rows = this.db
+      .prepare(
+        `SELECT event_type, COUNT(*) AS count FROM technical_events
        WHERE bot_id = ? GROUP BY event_type`,
-    ).all(botId) as Array<{ event_type: string; count: number }>;
+      )
+      .all(botId) as Array<{ event_type: string; count: number }>;
     const count = new Map(rows.map((row) => [row.event_type, row.count]));
     const value = (event: string): number => count.get(event) ?? 0;
     const greetings = value('COMMUNITY_GREETING_LOCAL_RESPONSE');
@@ -5981,7 +6682,9 @@ export class AppDatabase {
   }
 
   public resetAIUsageForDevelopment(profileId: number): void {
-    const owner = this.db.prepare('SELECT bot_id FROM assistant_profiles WHERE id = ?').get(profileId) as { bot_id: string } | undefined;
+    const owner = this.db
+      .prepare('SELECT bot_id FROM assistant_profiles WHERE id = ?')
+      .get(profileId) as { bot_id: string } | undefined;
     const reset = this.db.transaction(() => {
       for (const table of [
         'ai_usage_daily',
@@ -5995,15 +6698,17 @@ export class AppDatabase {
       }
       if (owner !== undefined) {
         this.db.prepare('DELETE FROM bot_interaction_usage WHERE bot_id = ?').run(owner.bot_id);
-        this.db.prepare(
-          `DELETE FROM technical_events WHERE bot_id = ? AND event_type IN (
+        this.db
+          .prepare(
+            `DELETE FROM technical_events WHERE bot_id = ? AND event_type IN (
              'REAL_MENTION_RECEIVED', 'TEXT_ALIAS_RECEIVED', 'COMMUNITY_GREETING_LOCAL_RESPONSE',
              'LOCAL_FAQ_RESPONSE', 'KNOWLEDGE_DIRECT_RESPONSE', 'ANSWER_CACHE_EXACT_HIT',
              'ANSWER_CACHE_EQUIVALENT_HIT', 'ANSWER_CACHE_MISS', 'AI_CALL_SUCCESS',
              'AI_CALL_FAILED', 'AI_LIMIT_REACHED', 'OUT_OF_SCOPE_LOCAL_RESPONSE',
              'KNOWLEDGE_NOT_FOUND', 'DUPLICATE_QUERY_SUPPRESSED', 'CONCURRENT_QUERY_COALESCED'
            )`,
-        ).run(owner.bot_id);
+          )
+          .run(owner.bot_id);
       }
     });
     reset();
@@ -6054,11 +6759,15 @@ export class AppDatabase {
              VALUES (?, ?, 'MANUAL_BLOCK', ?)`,
           )
           .run(groupId, profile.id, now);
-        this.db.prepare('UPDATE groups SET authorized = 0, updated_at = ? WHERE chat_id = ?').run(now, groupId);
+        this.db
+          .prepare('UPDATE groups SET authorized = 0, updated_at = ? WHERE chat_id = ?')
+          .run(now, groupId);
       } else {
         this.db.prepare('DELETE FROM blocked_groups WHERE group_id = ?').run(groupId);
         if (group.status === 'ACTIVE' && group.botIsMember === true) {
-          this.db.prepare('UPDATE groups SET authorized = 1, updated_at = ? WHERE chat_id = ?').run(now, groupId);
+          this.db
+            .prepare('UPDATE groups SET authorized = 1, updated_at = ? WHERE chat_id = ?')
+            .run(now, groupId);
         }
       }
     });
@@ -6068,7 +6777,9 @@ export class AppDatabase {
   }
 
   public isGroupBlocked(groupId: string): boolean {
-    return this.db.prepare('SELECT 1 FROM blocked_groups WHERE group_id = ?').get(groupId) !== undefined;
+    return (
+      this.db.prepare('SELECT 1 FROM blocked_groups WHERE group_id = ?').get(groupId) !== undefined
+    );
   }
 
   public synchronizeBotGroup(
@@ -6132,18 +6843,23 @@ export class AppDatabase {
   }
 
   public markBotGroupNotMember(botId: string, groupId: string, now = new Date()): boolean {
-    return this.db
-      .prepare(
-        `UPDATE bot_groups SET active = 0, bot_is_member = 0, status = 'BOT_NOT_MEMBER',
+    return (
+      this.db
+        .prepare(
+          `UPDATE bot_groups SET active = 0, bot_is_member = 0, status = 'BOT_NOT_MEMBER',
            deactivated_at = ?, last_seen_at = ? WHERE bot_id = ? AND group_id = ?`,
-      )
-      .run(now.toISOString(), now.toISOString(), botId, groupId).changes === 1;
+        )
+        .run(now.toISOString(), now.toISOString(), botId, groupId).changes === 1
+    );
   }
 
   public canBotSendToGroup(botId: string, groupId: string): boolean {
     const row = this.db
-      .prepare('SELECT active, blocked, bot_is_member FROM bot_groups WHERE bot_id = ? AND group_id = ?')
-      .get(botId, groupId) as { active: number; blocked: number; bot_is_member: number | null } | undefined;
+      .prepare(
+        'SELECT active, blocked, bot_is_member FROM bot_groups WHERE bot_id = ? AND group_id = ?',
+      )
+      .get(botId, groupId) as
+      { active: number; blocked: number; bot_is_member: number | null } | undefined;
     return row?.active === 1 && row.blocked === 0 && row.bot_is_member === 1;
   }
 
@@ -6170,7 +6886,10 @@ export class AppDatabase {
     return result.changes === 1;
   }
 
-  public listBotGroups(botId: string, anonymize: (identifier: string) => string): LinkedGroupRecord[] {
+  public listBotGroups(
+    botId: string,
+    anonymize: (identifier: string) => string,
+  ): LinkedGroupRecord[] {
     return (
       this.db
         .prepare('SELECT * FROM bot_groups WHERE bot_id = ? ORDER BY name COLLATE NOCASE')
@@ -6199,7 +6918,9 @@ export class AppDatabase {
     key: string,
     anonymize: (identifier: string) => string,
   ): string | null {
-    const rows = this.db.prepare('SELECT group_id FROM bot_groups WHERE bot_id = ?').all(botId) as Array<{ group_id: string }>;
+    const rows = this.db
+      .prepare('SELECT group_id FROM bot_groups WHERE bot_id = ?')
+      .all(botId) as Array<{ group_id: string }>;
     return rows.find((row) => anonymize(row.group_id) === key)?.group_id ?? null;
   }
 
@@ -6421,14 +7142,15 @@ export class AppDatabase {
 
   public archiveGroup(id: string, now = new Date()): boolean {
     const archive = this.db.transaction(() => {
-      const changed = this.db
-        .prepare(
-          `
+      const changed =
+        this.db
+          .prepare(
+            `
           UPDATE groups SET status = 'ARCHIVED', authorized = 0,
             archived_at = COALESCE(archived_at, ?), updated_at = ? WHERE chat_id = ?
         `,
-        )
-        .run(now.toISOString(), now.toISOString(), id).changes === 1;
+          )
+          .run(now.toISOString(), now.toISOString(), id).changes === 1;
       this.db
         .prepare(
           'UPDATE linked_groups SET active = 0, deactivated_at = ?, last_verified_at = ? WHERE group_id = ?',
@@ -6465,9 +7187,19 @@ export class AppDatabase {
       this.db.prepare('DELETE FROM automatic_group_backoff WHERE group_id = ?').run(id);
       this.db.prepare('DELETE FROM scheduled_message_deliveries WHERE group_id = ?').run(id);
       this.db.prepare('DELETE FROM poll_send_history WHERE group_id = ?').run(id);
-      this.db.prepare("DELETE FROM bot_automatic_group_backoff WHERE bot_id = 'neurobot' AND group_id = ?").run(id);
-      this.db.prepare("DELETE FROM bot_scheduled_message_deliveries WHERE bot_id = 'neurobot' AND group_id = ?").run(id);
-      this.db.prepare("DELETE FROM bot_poll_send_history WHERE bot_id = 'neurobot' AND group_id = ?").run(id);
+      this.db
+        .prepare(
+          "DELETE FROM bot_automatic_group_backoff WHERE bot_id = 'neurobot' AND group_id = ?",
+        )
+        .run(id);
+      this.db
+        .prepare(
+          "DELETE FROM bot_scheduled_message_deliveries WHERE bot_id = 'neurobot' AND group_id = ?",
+        )
+        .run(id);
+      this.db
+        .prepare("DELETE FROM bot_poll_send_history WHERE bot_id = 'neurobot' AND group_id = ?")
+        .run(id);
       this.db.prepare("DELETE FROM bot_groups WHERE bot_id = 'neurobot' AND group_id = ?").run(id);
       this.db.prepare('DELETE FROM blocked_groups WHERE group_id = ?').run(id);
       this.db.prepare('DELETE FROM linked_groups WHERE group_id = ?').run(id);
@@ -6490,9 +7222,11 @@ export class AppDatabase {
       this.db
         .prepare('DELETE FROM bot_poll_send_history WHERE bot_id = ? AND group_id = ?')
         .run(botId, groupId);
-      return this.db
-        .prepare('DELETE FROM bot_groups WHERE bot_id = ? AND group_id = ?')
-        .run(botId, groupId).changes === 1;
+      return (
+        this.db
+          .prepare('DELETE FROM bot_groups WHERE bot_id = ? AND group_id = ?')
+          .run(botId, groupId).changes === 1
+      );
     });
     return remove();
   }
@@ -6912,153 +7646,388 @@ export class AppDatabase {
 
   public getGroupModerationProfile(assistantId: string, groupHash: string): GroupModerationProfile {
     const now = new Date().toISOString();
-    this.db.prepare(`INSERT OR IGNORE INTO group_moderation_profiles(assistant_id,group_hash,created_at,updated_at)
-      VALUES(?,?,?,?)`).run(assistantId, groupHash, now, now);
-    const row = this.db.prepare('SELECT * FROM group_moderation_profiles WHERE assistant_id=? AND group_hash=?')
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO group_moderation_profiles(assistant_id,group_hash,created_at,updated_at)
+      VALUES(?,?,?,?)`,
+      )
+      .run(assistantId, groupHash, now, now);
+    const row = this.db
+      .prepare('SELECT * FROM group_moderation_profiles WHERE assistant_id=? AND group_hash=?')
       .get(assistantId, groupHash) as Record<string, unknown>;
     return mapGroupModerationProfile(row);
   }
 
   public listGroupModerationProfiles(assistantId: string): GroupModerationProfile[] {
-    return (this.db.prepare('SELECT * FROM group_moderation_profiles WHERE assistant_id=? ORDER BY updated_at DESC').all(assistantId) as Array<Record<string, unknown>>)
-      .map(mapGroupModerationProfile);
+    return (
+      this.db
+        .prepare(
+          'SELECT * FROM group_moderation_profiles WHERE assistant_id=? ORDER BY updated_at DESC',
+        )
+        .all(assistantId) as Array<Record<string, unknown>>
+    ).map(mapGroupModerationProfile);
   }
 
-  public saveGroupModerationDraft(assistantId: string, groupHash: string, rulesText: string, rulesHash: string): GroupModerationProfile {
+  public saveGroupModerationDraft(
+    assistantId: string,
+    groupHash: string,
+    rulesText: string,
+    rulesHash: string,
+  ): GroupModerationProfile {
     const current = this.getGroupModerationProfile(assistantId, groupHash);
     const changed = current.rulesHash !== rulesHash;
     const now = new Date().toISOString();
-    this.db.prepare(`UPDATE group_moderation_profiles SET rules_text=?,rules_hash=?,enabled=CASE WHEN ? THEN 0 ELSE enabled END,
+    this.db
+      .prepare(
+        `UPDATE group_moderation_profiles SET rules_text=?,rules_hash=?,enabled=CASE WHEN ? THEN 0 ELSE enabled END,
       analysis_status=CASE WHEN ? THEN 'OUTDATED' ELSE analysis_status END,test_status=CASE WHEN ? THEN 'PENDING' ELSE test_status END,
-      activated_at=CASE WHEN ? THEN NULL ELSE activated_at END,updated_at=? WHERE assistant_id=? AND group_hash=?`)
-      .run(rulesText,rulesHash,changed?1:0,changed?1:0,changed?1:0,changed?1:0,now,assistantId,groupHash);
+      activated_at=CASE WHEN ? THEN NULL ELSE activated_at END,updated_at=? WHERE assistant_id=? AND group_hash=?`,
+      )
+      .run(
+        rulesText,
+        rulesHash,
+        changed ? 1 : 0,
+        changed ? 1 : 0,
+        changed ? 1 : 0,
+        changed ? 1 : 0,
+        now,
+        assistantId,
+        groupHash,
+      );
     return this.getGroupModerationProfile(assistantId, groupHash);
   }
 
   public markGroupModerationAnalyzing(assistantId: string, groupHash: string): void {
     this.getGroupModerationProfile(assistantId, groupHash);
-    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=0,analysis_status='ANALYZING',test_status='PENDING',updated_at=?
-      WHERE assistant_id=? AND group_hash=?`).run(new Date().toISOString(),assistantId,groupHash);
+    this.db
+      .prepare(
+        `UPDATE group_moderation_profiles SET enabled=0,analysis_status='ANALYZING',test_status='PENDING',updated_at=?
+      WHERE assistant_id=? AND group_hash=?`,
+      )
+      .run(new Date().toISOString(), assistantId, groupHash);
   }
 
   public failGroupModerationAnalysis(assistantId: string, groupHash: string): void {
-    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=0,analysis_status='ANALYSIS_FAILED',test_status='FAILED',updated_at=?
-      WHERE assistant_id=? AND group_hash=?`).run(new Date().toISOString(),assistantId,groupHash);
+    this.db
+      .prepare(
+        `UPDATE group_moderation_profiles SET enabled=0,analysis_status='ANALYSIS_FAILED',test_status='FAILED',updated_at=?
+      WHERE assistant_id=? AND group_hash=?`,
+      )
+      .run(new Date().toISOString(), assistantId, groupHash);
   }
 
-  public saveCompiledGroupModeration(input: { assistantId:string; groupHash:string; rulesHash:string; compiled:Record<string,unknown>; summary:Record<string,unknown>; provider:string; model:string; inputTokens:number; outputTokens:number }): GroupModerationProfile {
+  public saveCompiledGroupModeration(input: {
+    assistantId: string;
+    groupHash: string;
+    rulesHash: string;
+    compiled: Record<string, unknown>;
+    summary: Record<string, unknown>;
+    provider: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+  }): GroupModerationProfile {
     const now = new Date().toISOString();
-    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=0,rules_hash=?,compiled_json=?,compiled_summary_json=?,provider=?,model=?,
+    this.db
+      .prepare(
+        `UPDATE group_moderation_profiles SET enabled=0,rules_hash=?,compiled_json=?,compiled_summary_json=?,provider=?,model=?,
       input_tokens=?,output_tokens=?,analysis_status='PENDING_TESTS',test_status='PENDING',last_analyzed_at=?,last_tested_at=NULL,activated_at=NULL,updated_at=?
-      WHERE assistant_id=? AND group_hash=?`).run(input.rulesHash,JSON.stringify(input.compiled),JSON.stringify(input.summary),input.provider,input.model,
-        input.inputTokens,input.outputTokens,now,now,input.assistantId,input.groupHash);
-    this.db.prepare('DELETE FROM group_moderation_tests WHERE assistant_id=? AND group_hash=?').run(input.assistantId,input.groupHash);
-    return this.getGroupModerationProfile(input.assistantId,input.groupHash);
+      WHERE assistant_id=? AND group_hash=?`,
+      )
+      .run(
+        input.rulesHash,
+        JSON.stringify(input.compiled),
+        JSON.stringify(input.summary),
+        input.provider,
+        input.model,
+        input.inputTokens,
+        input.outputTokens,
+        now,
+        now,
+        input.assistantId,
+        input.groupHash,
+      );
+    this.db
+      .prepare('DELETE FROM group_moderation_tests WHERE assistant_id=? AND group_hash=?')
+      .run(input.assistantId, input.groupHash);
+    return this.getGroupModerationProfile(input.assistantId, input.groupHash);
   }
 
-  public recordGroupModerationTest(input: { assistantId:string; groupHash:string; rulesHash:string; testType:'AUTOMATIC'|'MANUAL_ALLOWED'|'MANUAL_WARNING'; expected:'ALLOW'|'WARNING'; actual:'ALLOW'|'WARNING'|'ERROR'; category?:string|null; passed:boolean }): void {
-    this.db.prepare(`INSERT INTO group_moderation_tests(assistant_id,group_hash,rules_hash,test_type,expected_result,actual_result,category,passed,created_at)
-      VALUES(?,?,?,?,?,?,?,?,?)`).run(input.assistantId,input.groupHash,input.rulesHash,input.testType,input.expected,input.actual,input.category??null,input.passed?1:0,new Date().toISOString());
+  public recordGroupModerationTest(input: {
+    assistantId: string;
+    groupHash: string;
+    rulesHash: string;
+    testType: 'AUTOMATIC' | 'MANUAL_ALLOWED' | 'MANUAL_WARNING';
+    expected: 'ALLOW' | 'WARNING';
+    actual: 'ALLOW' | 'WARNING' | 'ERROR';
+    category?: string | null;
+    passed: boolean;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO group_moderation_tests(assistant_id,group_hash,rules_hash,test_type,expected_result,actual_result,category,passed,created_at)
+      VALUES(?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        input.assistantId,
+        input.groupHash,
+        input.rulesHash,
+        input.testType,
+        input.expected,
+        input.actual,
+        input.category ?? null,
+        input.passed ? 1 : 0,
+        new Date().toISOString(),
+      );
   }
 
-  public listGroupModerationTests(assistantId: string, groupHash: string, rulesHash: string): Array<Record<string, unknown>> {
-    return this.db.prepare(`SELECT test_type AS testType,expected_result AS expected,actual_result AS actual,category,passed,created_at AS createdAt
-      FROM group_moderation_tests WHERE assistant_id=? AND group_hash=? AND rules_hash=? ORDER BY id`).all(assistantId,groupHash,rulesHash) as Array<Record<string,unknown>>;
+  public listGroupModerationTests(
+    assistantId: string,
+    groupHash: string,
+    rulesHash: string,
+  ): Array<Record<string, unknown>> {
+    return this.db
+      .prepare(
+        `SELECT test_type AS testType,expected_result AS expected,actual_result AS actual,category,passed,created_at AS createdAt
+      FROM group_moderation_tests WHERE assistant_id=? AND group_hash=? AND rules_hash=? ORDER BY id`,
+      )
+      .all(assistantId, groupHash, rulesHash) as Array<Record<string, unknown>>;
   }
 
-  public updateGroupModerationTestStatus(assistantId: string, groupHash: string, approved: boolean): GroupModerationProfile {
-    const now=new Date().toISOString();
-    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=0,test_status=?,analysis_status=?,last_tested_at=?,updated_at=?
-      WHERE assistant_id=? AND group_hash=?`).run(approved?'APPROVED':'FAILED',approved?'READY':'PENDING_TESTS',now,now,assistantId,groupHash);
-    return this.getGroupModerationProfile(assistantId,groupHash);
+  public updateGroupModerationTestStatus(
+    assistantId: string,
+    groupHash: string,
+    approved: boolean,
+  ): GroupModerationProfile {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE group_moderation_profiles SET enabled=0,test_status=?,analysis_status=?,last_tested_at=?,updated_at=?
+      WHERE assistant_id=? AND group_hash=?`,
+      )
+      .run(
+        approved ? 'APPROVED' : 'FAILED',
+        approved ? 'READY' : 'PENDING_TESTS',
+        now,
+        now,
+        assistantId,
+        groupHash,
+      );
+    return this.getGroupModerationProfile(assistantId, groupHash);
   }
 
-  public setGroupModerationEnabled(assistantId: string, groupHash: string, enabled: boolean): GroupModerationProfile {
-    const profile=this.getGroupModerationProfile(assistantId,groupHash);
-    if(enabled && (profile.analysisStatus!=='READY' || profile.testStatus!=='APPROVED' || profile.compiled===null)) throw new Error('MODERATION_TESTS_REQUIRED');
-    const now=new Date().toISOString();
-    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=?,analysis_status=?,activated_at=?,updated_at=? WHERE assistant_id=? AND group_hash=?`)
-      .run(enabled?1:0,enabled?'ACTIVE':(profile.compiled===null?'DRAFT':'READY'),enabled?now:null,now,assistantId,groupHash);
-    return this.getGroupModerationProfile(assistantId,groupHash);
+  public setGroupModerationEnabled(
+    assistantId: string,
+    groupHash: string,
+    enabled: boolean,
+  ): GroupModerationProfile {
+    const profile = this.getGroupModerationProfile(assistantId, groupHash);
+    if (
+      enabled &&
+      (profile.analysisStatus !== 'READY' ||
+        profile.testStatus !== 'APPROVED' ||
+        profile.compiled === null)
+    )
+      throw new Error('MODERATION_TESTS_REQUIRED');
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE group_moderation_profiles SET enabled=?,analysis_status=?,activated_at=?,updated_at=? WHERE assistant_id=? AND group_hash=?`,
+      )
+      .run(
+        enabled ? 1 : 0,
+        enabled ? 'ACTIVE' : profile.compiled === null ? 'DRAFT' : 'READY',
+        enabled ? now : null,
+        now,
+        assistantId,
+        groupHash,
+      );
+    return this.getGroupModerationProfile(assistantId, groupHash);
   }
 
-  public replaceGroupModerationRecipients(assistantId:string,groupHash:string,recipients:Array<{administratorHash:string;encryptedIdentifier:string}>): void {
-    const now=new Date().toISOString(); const replace=this.db.transaction(()=>{
-      this.db.prepare('DELETE FROM group_moderation_admin_recipients WHERE assistant_id=? AND group_hash=?').run(assistantId,groupHash);
-      const statement=this.db.prepare(`INSERT INTO group_moderation_admin_recipients(assistant_id,group_hash,administrator_hash,encrypted_identifier,enabled,created_at,updated_at) VALUES(?,?,?,?,1,?,?)`);
-      for(const recipient of recipients)statement.run(assistantId,groupHash,recipient.administratorHash,recipient.encryptedIdentifier,now,now);
-    }); replace();
+  public replaceGroupModerationRecipients(
+    assistantId: string,
+    groupHash: string,
+    recipients: Array<{ administratorHash: string; encryptedIdentifier: string }>,
+  ): void {
+    const now = new Date().toISOString();
+    const replace = this.db.transaction(() => {
+      this.db
+        .prepare(
+          'DELETE FROM group_moderation_admin_recipients WHERE assistant_id=? AND group_hash=?',
+        )
+        .run(assistantId, groupHash);
+      const statement = this.db.prepare(
+        `INSERT INTO group_moderation_admin_recipients(assistant_id,group_hash,administrator_hash,encrypted_identifier,enabled,created_at,updated_at) VALUES(?,?,?,?,1,?,?)`,
+      );
+      for (const recipient of recipients)
+        statement.run(
+          assistantId,
+          groupHash,
+          recipient.administratorHash,
+          recipient.encryptedIdentifier,
+          now,
+          now,
+        );
+    });
+    replace();
   }
 
-  public listGroupModerationRecipients(assistantId:string,groupHash:string): Array<{administratorHash:string;encryptedIdentifier:string}> {
-    return this.db.prepare(`SELECT administrator_hash AS administratorHash,encrypted_identifier AS encryptedIdentifier FROM group_moderation_admin_recipients
-      WHERE assistant_id=? AND group_hash=? AND enabled=1 ORDER BY created_at`).all(assistantId,groupHash) as Array<{administratorHash:string;encryptedIdentifier:string}>;
+  public listGroupModerationRecipients(
+    assistantId: string,
+    groupHash: string,
+  ): Array<{ administratorHash: string; encryptedIdentifier: string }> {
+    return this.db
+      .prepare(
+        `SELECT administrator_hash AS administratorHash,encrypted_identifier AS encryptedIdentifier FROM group_moderation_admin_recipients
+      WHERE assistant_id=? AND group_hash=? AND enabled=1 ORDER BY created_at`,
+      )
+      .all(assistantId, groupHash) as Array<{
+      administratorHash: string;
+      encryptedIdentifier: string;
+    }>;
   }
 
   public getModerationSettings(assistantId: string): ModerationSettings {
     this.ensureModerationSettings(assistantId);
-    const row = this.db.prepare('SELECT * FROM assistant_moderation_settings WHERE assistant_id=?').get(assistantId) as Record<string, unknown>;
+    const row = this.db
+      .prepare('SELECT * FROM assistant_moderation_settings WHERE assistant_id=?')
+      .get(assistantId) as Record<string, unknown>;
     return {
       enabled: row.enabled === 1,
       defaultGroupMode: String(row.default_group_mode) as ModerationGroupMode,
-      reviewThreshold: Number(row.review_threshold), warningThreshold: Number(row.warning_threshold),
-      adminNotificationThreshold: Number(row.admin_notification_threshold), recurrenceWindowDays: Number(row.recurrence_window_days),
-      warningCooldownMinutes: Number(row.warning_cooldown_minutes), publicWarningLimit: Number(row.public_warning_limit),
-      publicWarningWindowMinutes: Number(row.public_warning_window_minutes), temporaryEvidenceEnabled: row.temporary_evidence_enabled === 1,
-      temporaryEvidenceHours: Number(row.temporary_evidence_hours), warningMode: String(row.warning_mode) as ModerationSettings['warningMode'],
-      automaticAIReviewEnabled: false, manualAIReviewEnabled: false, automaticBanEnabled: false, automaticDeletionEnabled: false,
-      firstWarningMessage: String(row.first_warning_message), secondWarningMessage: String(row.second_warning_message),
+      reviewThreshold: Number(row.review_threshold),
+      warningThreshold: Number(row.warning_threshold),
+      adminNotificationThreshold: Number(row.admin_notification_threshold),
+      recurrenceWindowDays: Number(row.recurrence_window_days),
+      warningCooldownMinutes: Number(row.warning_cooldown_minutes),
+      publicWarningLimit: Number(row.public_warning_limit),
+      publicWarningWindowMinutes: Number(row.public_warning_window_minutes),
+      temporaryEvidenceEnabled: row.temporary_evidence_enabled === 1,
+      temporaryEvidenceHours: Number(row.temporary_evidence_hours),
+      warningMode: String(row.warning_mode) as ModerationSettings['warningMode'],
+      automaticAIReviewEnabled: false,
+      manualAIReviewEnabled: false,
+      automaticBanEnabled: false,
+      automaticDeletionEnabled: false,
+      firstWarningMessage: String(row.first_warning_message),
+      secondWarningMessage: String(row.second_warning_message),
       repeatedWarningMessage: String(row.repeated_warning_message),
     };
   }
 
-  public saveModerationSettings(assistantId: string, settings: ModerationSettings): ModerationSettings {
+  public saveModerationSettings(
+    assistantId: string,
+    settings: ModerationSettings,
+  ): ModerationSettings {
     this.ensureModerationSettings(assistantId);
     const now = new Date().toISOString();
-    this.db.prepare(`UPDATE assistant_moderation_settings SET enabled=?,default_group_mode=?,review_threshold=?,warning_threshold=?,
+    this.db
+      .prepare(
+        `UPDATE assistant_moderation_settings SET enabled=?,default_group_mode=?,review_threshold=?,warning_threshold=?,
       admin_notification_threshold=?,recurrence_window_days=?,warning_cooldown_minutes=?,public_warning_limit=?,
       public_warning_window_minutes=?,temporary_evidence_enabled=?,temporary_evidence_hours=?,warning_mode=?,
       automatic_ai_review_enabled=0,manual_ai_review_enabled=0,automatic_ban_enabled=0,automatic_deletion_enabled=0,
-      first_warning_message=?,second_warning_message=?,repeated_warning_message=?,updated_at=? WHERE assistant_id=?`).run(
-      settings.enabled ? 1 : 0, settings.defaultGroupMode, settings.reviewThreshold, settings.warningThreshold,
-      settings.adminNotificationThreshold, settings.recurrenceWindowDays, settings.warningCooldownMinutes,
-      settings.publicWarningLimit, settings.publicWarningWindowMinutes, settings.temporaryEvidenceEnabled ? 1 : 0,
-      settings.temporaryEvidenceHours, settings.warningMode, settings.firstWarningMessage, settings.secondWarningMessage,
-      settings.repeatedWarningMessage, now, assistantId,
-    );
+      first_warning_message=?,second_warning_message=?,repeated_warning_message=?,updated_at=? WHERE assistant_id=?`,
+      )
+      .run(
+        settings.enabled ? 1 : 0,
+        settings.defaultGroupMode,
+        settings.reviewThreshold,
+        settings.warningThreshold,
+        settings.adminNotificationThreshold,
+        settings.recurrenceWindowDays,
+        settings.warningCooldownMinutes,
+        settings.publicWarningLimit,
+        settings.publicWarningWindowMinutes,
+        settings.temporaryEvidenceEnabled ? 1 : 0,
+        settings.temporaryEvidenceHours,
+        settings.warningMode,
+        settings.firstWarningMessage,
+        settings.secondWarningMessage,
+        settings.repeatedWarningMessage,
+        now,
+        assistantId,
+      );
     return this.getModerationSettings(assistantId);
   }
 
-  public listModerationGroupSettings(assistantId: string): Array<{ groupHash: string; mode: ModerationGroupMode; enabled: boolean }> {
-    return (this.db.prepare('SELECT group_hash,mode,enabled FROM assistant_group_moderation_settings WHERE assistant_id=? ORDER BY group_hash').all(assistantId) as Array<Record<string, unknown>>)
-      .map((row) => ({ groupHash: String(row.group_hash), mode: String(row.mode) as ModerationGroupMode, enabled: row.enabled === 1 }));
+  public listModerationGroupSettings(
+    assistantId: string,
+  ): Array<{ groupHash: string; mode: ModerationGroupMode; enabled: boolean }> {
+    return (
+      this.db
+        .prepare(
+          'SELECT group_hash,mode,enabled FROM assistant_group_moderation_settings WHERE assistant_id=? ORDER BY group_hash',
+        )
+        .all(assistantId) as Array<Record<string, unknown>>
+    ).map((row) => ({
+      groupHash: String(row.group_hash),
+      mode: String(row.mode) as ModerationGroupMode,
+      enabled: row.enabled === 1,
+    }));
   }
 
-  public saveModerationGroupSettings(assistantId: string, groupHash: string, mode: ModerationGroupMode): void {
+  public saveModerationGroupSettings(
+    assistantId: string,
+    groupHash: string,
+    mode: ModerationGroupMode,
+  ): void {
     const now = new Date().toISOString();
-    this.db.prepare(`INSERT INTO assistant_group_moderation_settings(assistant_id,group_hash,mode,enabled,created_at,updated_at)
-      VALUES(?,?,?,?,?,?) ON CONFLICT(assistant_id,group_hash) DO UPDATE SET mode=excluded.mode,enabled=excluded.enabled,updated_at=excluded.updated_at`)
+    this.db
+      .prepare(
+        `INSERT INTO assistant_group_moderation_settings(assistant_id,group_hash,mode,enabled,created_at,updated_at)
+      VALUES(?,?,?,?,?,?) ON CONFLICT(assistant_id,group_hash) DO UPDATE SET mode=excluded.mode,enabled=excluded.enabled,updated_at=excluded.updated_at`,
+      )
       .run(assistantId, groupHash, mode, mode === 'DISABLED' ? 0 : 1, now, now);
   }
 
   public listModerationRules(assistantId: string, includeDisabled = true): ModerationRule[] {
-    const rows = this.db.prepare(`SELECT * FROM moderation_rules WHERE assistant_id=? ${includeDisabled ? '' : 'AND enabled=1'} ORDER BY id`).all(assistantId) as Array<Record<string, unknown>>;
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM moderation_rules WHERE assistant_id=? ${includeDisabled ? '' : 'AND enabled=1'} ORDER BY id`,
+      )
+      .all(assistantId) as Array<Record<string, unknown>>;
     return rows.map((row) => this.mapModerationRule(row));
   }
 
   public getModerationRule(assistantId: string, ruleId: number): ModerationRule | null {
-    const row = this.db.prepare('SELECT * FROM moderation_rules WHERE assistant_id=? AND id=?').get(assistantId, ruleId) as Record<string, unknown> | undefined;
+    const row = this.db
+      .prepare('SELECT * FROM moderation_rules WHERE assistant_id=? AND id=?')
+      .get(assistantId, ruleId) as Record<string, unknown> | undefined;
     return row === undefined ? null : this.mapModerationRule(row);
   }
 
-  public createModerationRule(assistantId: string, input: Omit<ModerationRule, 'id' | 'assistantId' | 'createdAt' | 'updatedAt'>): ModerationRule {
-    if (input.enabled && input.conditions.filter((condition) => condition.enabled).length === 0) throw new Error('MODERATION_RULE_REQUIRES_CONDITION');
+  public createModerationRule(
+    assistantId: string,
+    input: Omit<ModerationRule, 'id' | 'assistantId' | 'createdAt' | 'updatedAt'>,
+  ): ModerationRule {
+    if (input.enabled && input.conditions.filter((condition) => condition.enabled).length === 0)
+      throw new Error('MODERATION_RULE_REQUIRES_CONDITION');
     const create = this.db.transaction(() => {
       const now = new Date().toISOString();
-      const result = this.db.prepare(`INSERT INTO moderation_rules(assistant_id,name,description,category,severity,detection_type,score,
+      const result = this.db
+        .prepare(
+          `INSERT INTO moderation_rules(assistant_id,name,description,category,severity,detection_type,score,
         review_threshold,warning_threshold,admin_notification_threshold,enabled,applies_to_all_groups,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(assistantId,input.name,input.description,input.category,input.severity,input.detectionType,input.score,
-        input.reviewThreshold,input.warningThreshold,input.adminNotificationThreshold,input.enabled ? 1 : 0,input.appliesToAllGroups ? 1 : 0,now,now);
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        )
+        .run(
+          assistantId,
+          input.name,
+          input.description,
+          input.category,
+          input.severity,
+          input.detectionType,
+          input.score,
+          input.reviewThreshold,
+          input.warningThreshold,
+          input.adminNotificationThreshold,
+          input.enabled ? 1 : 0,
+          input.appliesToAllGroups ? 1 : 0,
+          now,
+          now,
+        );
       const ruleId = Number(result.lastInsertRowid);
       this.replaceModerationConditions(ruleId, input.conditions, input.exceptions, now);
       return ruleId;
@@ -7066,15 +8035,38 @@ export class AppDatabase {
     return this.getModerationRule(assistantId, create()) as ModerationRule;
   }
 
-  public updateModerationRule(assistantId: string, ruleId: number, input: Omit<ModerationRule, 'id' | 'assistantId' | 'createdAt' | 'updatedAt'>): ModerationRule {
-    if (this.getModerationRule(assistantId, ruleId) === null) throw new Error('MODERATION_RULE_NOT_FOUND');
-    if (input.enabled && input.conditions.filter((condition) => condition.enabled).length === 0) throw new Error('MODERATION_RULE_REQUIRES_CONDITION');
+  public updateModerationRule(
+    assistantId: string,
+    ruleId: number,
+    input: Omit<ModerationRule, 'id' | 'assistantId' | 'createdAt' | 'updatedAt'>,
+  ): ModerationRule {
+    if (this.getModerationRule(assistantId, ruleId) === null)
+      throw new Error('MODERATION_RULE_NOT_FOUND');
+    if (input.enabled && input.conditions.filter((condition) => condition.enabled).length === 0)
+      throw new Error('MODERATION_RULE_REQUIRES_CONDITION');
     const update = this.db.transaction(() => {
       const now = new Date().toISOString();
-      this.db.prepare(`UPDATE moderation_rules SET name=?,description=?,category=?,severity=?,detection_type=?,score=?,review_threshold=?,
-        warning_threshold=?,admin_notification_threshold=?,enabled=?,applies_to_all_groups=?,updated_at=? WHERE assistant_id=? AND id=?`).run(
-        input.name,input.description,input.category,input.severity,input.detectionType,input.score,input.reviewThreshold,input.warningThreshold,
-        input.adminNotificationThreshold,input.enabled ? 1 : 0,input.appliesToAllGroups ? 1 : 0,now,assistantId,ruleId);
+      this.db
+        .prepare(
+          `UPDATE moderation_rules SET name=?,description=?,category=?,severity=?,detection_type=?,score=?,review_threshold=?,
+        warning_threshold=?,admin_notification_threshold=?,enabled=?,applies_to_all_groups=?,updated_at=? WHERE assistant_id=? AND id=?`,
+        )
+        .run(
+          input.name,
+          input.description,
+          input.category,
+          input.severity,
+          input.detectionType,
+          input.score,
+          input.reviewThreshold,
+          input.warningThreshold,
+          input.adminNotificationThreshold,
+          input.enabled ? 1 : 0,
+          input.appliesToAllGroups ? 1 : 0,
+          now,
+          assistantId,
+          ruleId,
+        );
       this.db.prepare('DELETE FROM moderation_rule_conditions WHERE rule_id=?').run(ruleId);
       this.db.prepare('DELETE FROM moderation_rule_exceptions WHERE rule_id=?').run(ruleId);
       this.replaceModerationConditions(ruleId, input.conditions, input.exceptions, now);
@@ -7084,168 +8076,440 @@ export class AppDatabase {
   }
 
   public deleteModerationRule(assistantId: string, ruleId: number): boolean {
-    return this.db.prepare('DELETE FROM moderation_rules WHERE assistant_id=? AND id=?').run(assistantId, ruleId).changes === 1;
+    return (
+      this.db
+        .prepare('DELETE FROM moderation_rules WHERE assistant_id=? AND id=?')
+        .run(assistantId, ruleId).changes === 1
+    );
   }
 
   public listModerationTerms(assistantId: string): Array<Record<string, unknown>> {
-    return this.db.prepare(`SELECT id,rule_id AS ruleId,term,normalized_term AS normalizedTerm,category,severity,match_mode AS matchMode,
-      score,enabled,created_at AS createdAt,updated_at AS updatedAt FROM moderation_terms WHERE assistant_id=? ORDER BY id`).all(assistantId) as Array<Record<string, unknown>>;
+    return this.db
+      .prepare(
+        `SELECT id,rule_id AS ruleId,term,normalized_term AS normalizedTerm,category,severity,match_mode AS matchMode,
+      score,enabled,created_at AS createdAt,updated_at AS updatedAt FROM moderation_terms WHERE assistant_id=? ORDER BY id`,
+      )
+      .all(assistantId) as Array<Record<string, unknown>>;
   }
 
-  public createModerationTerm(assistantId: string, input: { ruleId: number | null; term: string; normalizedTerm: string; category: string; severity: ModerationSeverity; matchMode: string; score: number; enabled: boolean }): Record<string, unknown> {
+  public createModerationTerm(
+    assistantId: string,
+    input: {
+      ruleId: number | null;
+      term: string;
+      normalizedTerm: string;
+      category: string;
+      severity: ModerationSeverity;
+      matchMode: string;
+      score: number;
+      enabled: boolean;
+    },
+  ): Record<string, unknown> {
     const now = new Date().toISOString();
-    const result = this.db.prepare(`INSERT INTO moderation_terms(assistant_id,rule_id,term,normalized_term,category,severity,match_mode,score,enabled,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(assistantId,input.ruleId,input.term,input.normalizedTerm,input.category,input.severity,input.matchMode,input.score,input.enabled ? 1 : 0,now,now);
-    return this.db.prepare('SELECT id,rule_id AS ruleId,term,normalized_term AS normalizedTerm,category,severity,match_mode AS matchMode,score,enabled FROM moderation_terms WHERE id=?').get(result.lastInsertRowid) as Record<string, unknown>;
+    const result = this.db
+      .prepare(
+        `INSERT INTO moderation_terms(assistant_id,rule_id,term,normalized_term,category,severity,match_mode,score,enabled,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        assistantId,
+        input.ruleId,
+        input.term,
+        input.normalizedTerm,
+        input.category,
+        input.severity,
+        input.matchMode,
+        input.score,
+        input.enabled ? 1 : 0,
+        now,
+        now,
+      );
+    return this.db
+      .prepare(
+        'SELECT id,rule_id AS ruleId,term,normalized_term AS normalizedTerm,category,severity,match_mode AS matchMode,score,enabled FROM moderation_terms WHERE id=?',
+      )
+      .get(result.lastInsertRowid) as Record<string, unknown>;
   }
 
   public deleteModerationTerm(assistantId: string, termId: number): boolean {
-    return this.db.prepare('DELETE FROM moderation_terms WHERE assistant_id=? AND id=?').run(assistantId, termId).changes === 1;
+    return (
+      this.db
+        .prepare('DELETE FROM moderation_terms WHERE assistant_id=? AND id=?')
+        .run(assistantId, termId).changes === 1
+    );
   }
 
-  public createModerationCase(input: { assistantId: string; groupHash: string; participantHash: string; messageHash: string; category: string; matchedRuleIds: number[]; score: number; severity: ModerationSeverity; warningNumber: number; warningSentAt: string | null; adminNotifiedAt: string | null; encryptedEvidence: string | null; evidenceExpiresAt: string | null }): number | null {
+  public createModerationCase(input: {
+    assistantId: string;
+    groupHash: string;
+    participantHash: string;
+    messageHash: string;
+    category: string;
+    matchedRuleIds: number[];
+    score: number;
+    severity: ModerationSeverity;
+    warningNumber: number;
+    warningSentAt: string | null;
+    adminNotifiedAt: string | null;
+    encryptedEvidence: string | null;
+    evidenceExpiresAt: string | null;
+  }): number | null {
     const now = new Date().toISOString();
-    const result = this.db.prepare(`INSERT OR IGNORE INTO moderation_cases(assistant_id,group_hash,participant_hash,message_hash,category,matched_rule_ids,
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO moderation_cases(assistant_id,group_hash,participant_hash,message_hash,category,matched_rule_ids,
       score,severity,warning_number,status,warning_sent_at,admin_notified_at,encrypted_temporary_evidence,evidence_expires_at,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,'PENDING',?,?,?,?,?,?)`).run(input.assistantId,input.groupHash,input.participantHash,input.messageHash,input.category,
-      JSON.stringify(input.matchedRuleIds),input.score,input.severity,input.warningNumber,input.warningSentAt,input.adminNotifiedAt,input.encryptedEvidence,
-      input.evidenceExpiresAt,now,now);
+      VALUES(?,?,?,?,?,?,?,?,?,'PENDING',?,?,?,?,?,?)`,
+      )
+      .run(
+        input.assistantId,
+        input.groupHash,
+        input.participantHash,
+        input.messageHash,
+        input.category,
+        JSON.stringify(input.matchedRuleIds),
+        input.score,
+        input.severity,
+        input.warningNumber,
+        input.warningSentAt,
+        input.adminNotifiedAt,
+        input.encryptedEvidence,
+        input.evidenceExpiresAt,
+        now,
+        now,
+      );
     return result.changes === 1 ? Number(result.lastInsertRowid) : null;
   }
 
   public listModerationCases(assistantId: string, status?: string): Array<Record<string, unknown>> {
     this.expireModerationEvidence(assistantId);
     this.anonymizeExpiredModerationCases(assistantId);
-    const rows = this.db.prepare(`SELECT id,group_hash AS groupHash,participant_hash AS participantHash,message_hash AS messageHash,category,
+    const rows = this.db
+      .prepare(
+        `SELECT id,group_hash AS groupHash,participant_hash AS participantHash,message_hash AS messageHash,category,
       matched_rule_ids AS matchedRuleIds,score,severity,warning_number AS warningNumber,status,warning_sent_at AS warningSentAt,
       admin_notified_at AS adminNotifiedAt,reviewed_at AS reviewedAt,decision,evidence_expires_at AS evidenceExpiresAt,created_at AS createdAt,
-      updated_at AS updatedAt FROM moderation_cases WHERE assistant_id=? ${status === undefined ? '' : 'AND status=?'} ORDER BY created_at DESC LIMIT 500`)
-      .all(...(status === undefined ? [assistantId] : [assistantId, status])) as Array<Record<string, unknown>>;
-    return rows.map((row) => ({ ...row, matchedRuleIds: parseNumberArray(String(row.matchedRuleIds)) }));
+      updated_at AS updatedAt FROM moderation_cases WHERE assistant_id=? ${status === undefined ? '' : 'AND status=?'} ORDER BY created_at DESC LIMIT 500`,
+      )
+      .all(...(status === undefined ? [assistantId] : [assistantId, status])) as Array<
+      Record<string, unknown>
+    >;
+    return rows.map((row) => ({
+      ...row,
+      matchedRuleIds: parseNumberArray(String(row.matchedRuleIds)),
+    }));
   }
 
-  public reviewModerationCase(assistantId: string, caseId: number, decision: 'CONFIRMED' | 'FALSE_POSITIVE' | 'DISMISSED' | 'RESOLVED'): boolean {
+  public reviewModerationCase(
+    assistantId: string,
+    caseId: number,
+    decision: 'CONFIRMED' | 'FALSE_POSITIVE' | 'DISMISSED' | 'RESOLVED',
+  ): boolean {
     const now = new Date().toISOString();
-    return this.db.prepare(`UPDATE moderation_cases SET status=?,decision=?,reviewed_at=?,updated_at=? WHERE assistant_id=? AND id=?`)
-      .run(decision, decision, now, now, assistantId, caseId).changes === 1;
+    return (
+      this.db
+        .prepare(
+          `UPDATE moderation_cases SET status=?,decision=?,reviewed_at=?,updated_at=? WHERE assistant_id=? AND id=?`,
+        )
+        .run(decision, decision, now, now, assistantId, caseId).changes === 1
+    );
   }
 
-  public getModerationEvidence(assistantId: string, caseId: number): { encrypted: string; messageHash: string; expiresAt: string } | null {
+  public getModerationEvidence(
+    assistantId: string,
+    caseId: number,
+  ): { encrypted: string; messageHash: string; expiresAt: string } | null {
     this.expireModerationEvidence(assistantId);
-    const row=this.db.prepare(`SELECT encrypted_temporary_evidence AS encrypted,message_hash AS messageHash,evidence_expires_at AS expiresAt
-      FROM moderation_cases WHERE assistant_id=? AND id=? AND encrypted_temporary_evidence IS NOT NULL`).get(assistantId,caseId) as {encrypted:string;messageHash:string;expiresAt:string}|undefined;
-    return row??null;
+    const row = this.db
+      .prepare(
+        `SELECT encrypted_temporary_evidence AS encrypted,message_hash AS messageHash,evidence_expires_at AS expiresAt
+      FROM moderation_cases WHERE assistant_id=? AND id=? AND encrypted_temporary_evidence IS NOT NULL`,
+      )
+      .get(assistantId, caseId) as
+      { encrypted: string; messageHash: string; expiresAt: string } | undefined;
+    return row ?? null;
   }
 
-  public getModerationRecurrence(assistantId: string, groupHash: string, participantHash: string): { activeCount: number; lastWarningAt: string | null; expiresAt: string } | null {
-    const row = this.db.prepare('SELECT active_count,last_warning_at,expires_at FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?')
-      .get(assistantId, groupHash, participantHash) as { active_count: number; last_warning_at: string | null; expires_at: string } | undefined;
+  public getModerationRecurrence(
+    assistantId: string,
+    groupHash: string,
+    participantHash: string,
+  ): { activeCount: number; lastWarningAt: string | null; expiresAt: string } | null {
+    const row = this.db
+      .prepare(
+        'SELECT active_count,last_warning_at,expires_at FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?',
+      )
+      .get(assistantId, groupHash, participantHash) as
+      { active_count: number; last_warning_at: string | null; expires_at: string } | undefined;
     if (row === undefined) return null;
     if (Date.parse(row.expires_at) <= Date.now()) {
-      this.db.prepare('DELETE FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?').run(assistantId, groupHash, participantHash);
+      this.db
+        .prepare(
+          'DELETE FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?',
+        )
+        .run(assistantId, groupHash, participantHash);
       return null;
     }
-    return { activeCount: row.active_count, lastWarningAt: row.last_warning_at, expiresAt: row.expires_at };
+    return {
+      activeCount: row.active_count,
+      lastWarningAt: row.last_warning_at,
+      expiresAt: row.expires_at,
+    };
   }
 
-  public saveModerationRecurrence(assistantId: string, groupHash: string, participantHash: string, activeCount: number, lastWarningAt: string | null, expiresAt: string): void {
+  public saveModerationRecurrence(
+    assistantId: string,
+    groupHash: string,
+    participantHash: string,
+    activeCount: number,
+    lastWarningAt: string | null,
+    expiresAt: string,
+  ): void {
     const now = new Date().toISOString();
-    this.db.prepare(`INSERT INTO moderation_recurrence(assistant_id,group_hash,participant_hash,active_count,window_started_at,last_warning_at,expires_at,updated_at)
+    this.db
+      .prepare(
+        `INSERT INTO moderation_recurrence(assistant_id,group_hash,participant_hash,active_count,window_started_at,last_warning_at,expires_at,updated_at)
       VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(assistant_id,group_hash,participant_hash) DO UPDATE SET active_count=excluded.active_count,
-      last_warning_at=excluded.last_warning_at,expires_at=excluded.expires_at,updated_at=excluded.updated_at`)
-      .run(assistantId,groupHash,participantHash,activeCount,now,lastWarningAt,expiresAt,now);
+      last_warning_at=excluded.last_warning_at,expires_at=excluded.expires_at,updated_at=excluded.updated_at`,
+      )
+      .run(
+        assistantId,
+        groupHash,
+        participantHash,
+        activeCount,
+        now,
+        lastWarningAt,
+        expiresAt,
+        now,
+      );
   }
 
-  public resetModerationRecurrence(assistantId: string, groupHash: string, participantHash: string): void {
-    this.db.prepare('DELETE FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?').run(assistantId,groupHash,participantHash);
+  public resetModerationRecurrence(
+    assistantId: string,
+    groupHash: string,
+    participantHash: string,
+  ): void {
+    this.db
+      .prepare(
+        'DELETE FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?',
+      )
+      .run(assistantId, groupHash, participantHash);
   }
 
-  public decrementModerationRecurrence(assistantId: string, groupHash: string, participantHash: string): void {
-    const recurrence=this.getModerationRecurrence(assistantId,groupHash,participantHash);
-    if(recurrence===null||recurrence.activeCount<=1){this.resetModerationRecurrence(assistantId,groupHash,participantHash);return;}
-    this.db.prepare('UPDATE moderation_recurrence SET active_count=active_count-1,updated_at=? WHERE assistant_id=? AND group_hash=? AND participant_hash=?')
-      .run(new Date().toISOString(),assistantId,groupHash,participantHash);
+  public decrementModerationRecurrence(
+    assistantId: string,
+    groupHash: string,
+    participantHash: string,
+  ): void {
+    const recurrence = this.getModerationRecurrence(assistantId, groupHash, participantHash);
+    if (recurrence === null || recurrence.activeCount <= 1) {
+      this.resetModerationRecurrence(assistantId, groupHash, participantHash);
+      return;
+    }
+    this.db
+      .prepare(
+        'UPDATE moderation_recurrence SET active_count=active_count-1,updated_at=? WHERE assistant_id=? AND group_hash=? AND participant_hash=?',
+      )
+      .run(new Date().toISOString(), assistantId, groupHash, participantHash);
   }
 
   public incrementModerationMetric(assistantId: string, field: string): void {
-    const columns: Record<string,string> = { reviewed:'messages_reviewed',allowed:'messages_allowed',matches:'matches_detected',warnings:'warnings_sent',
-      recurrences:'recurrences_detected',cases:'admin_cases_created',falsePositives:'false_positives',confirmed:'confirmed_cases',errors:'local_errors' };
+    const columns: Record<string, string> = {
+      reviewed: 'messages_reviewed',
+      allowed: 'messages_allowed',
+      matches: 'matches_detected',
+      warnings: 'warnings_sent',
+      recurrences: 'recurrences_detected',
+      cases: 'admin_cases_created',
+      falsePositives: 'false_positives',
+      confirmed: 'confirmed_cases',
+      errors: 'local_errors',
+    };
     const column = columns[field];
     if (column === undefined) throw new Error('MODERATION_METRIC_INVALID');
-    const date = new Date().toISOString().slice(0,10); const now = new Date().toISOString();
-    this.db.prepare(`INSERT INTO moderation_metrics(assistant_id,local_date,${column},created_at,updated_at) VALUES(?,?,1,?,?)
-      ON CONFLICT(assistant_id,local_date) DO UPDATE SET ${column}=${column}+1,updated_at=excluded.updated_at`).run(assistantId,date,now,now);
+    const date = new Date().toISOString().slice(0, 10);
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO moderation_metrics(assistant_id,local_date,${column},created_at,updated_at) VALUES(?,?,1,?,?)
+      ON CONFLICT(assistant_id,local_date) DO UPDATE SET ${column}=${column}+1,updated_at=excluded.updated_at`,
+      )
+      .run(assistantId, date, now, now);
   }
 
   public getModerationMetrics(assistantId: string): Record<string, unknown> {
-    const date = new Date().toISOString().slice(0,10);
-    return (this.db.prepare(`SELECT messages_reviewed AS messagesReviewed,messages_allowed AS messagesAllowed,matches_detected AS matchesDetected,
+    const date = new Date().toISOString().slice(0, 10);
+    return (
+      (this.db
+        .prepare(
+          `SELECT messages_reviewed AS messagesReviewed,messages_allowed AS messagesAllowed,matches_detected AS matchesDetected,
       warnings_sent AS warningsSent,recurrences_detected AS recurrencesDetected,admin_cases_created AS adminCasesCreated,
       false_positives AS falsePositives,confirmed_cases AS confirmedCases,local_errors AS localErrors,ai_reviews AS aiReviews,ai_tokens AS aiTokens,
-      updated_at AS updatedAt FROM moderation_metrics WHERE assistant_id=? AND local_date=?`).get(assistantId,date) as Record<string, unknown> | undefined) ?? {
-      messagesReviewed:0,messagesAllowed:0,matchesDetected:0,warningsSent:0,recurrencesDetected:0,adminCasesCreated:0,
-      falsePositives:0,confirmedCases:0,localErrors:0,aiReviews:0,aiTokens:0,updatedAt:null,
-    };
+      updated_at AS updatedAt FROM moderation_metrics WHERE assistant_id=? AND local_date=?`,
+        )
+        .get(assistantId, date) as Record<string, unknown> | undefined) ?? {
+        messagesReviewed: 0,
+        messagesAllowed: 0,
+        matchesDetected: 0,
+        warningsSent: 0,
+        recurrencesDetected: 0,
+        adminCasesCreated: 0,
+        falsePositives: 0,
+        confirmedCases: 0,
+        localErrors: 0,
+        aiReviews: 0,
+        aiTokens: 0,
+        updatedAt: null,
+      }
+    );
   }
 
   public expireModerationEvidence(assistantId: string): number {
     const now = new Date().toISOString();
-    return this.db.prepare(`UPDATE moderation_cases SET encrypted_temporary_evidence=NULL,evidence_expires_at=NULL,updated_at=?
-      WHERE assistant_id=? AND encrypted_temporary_evidence IS NOT NULL AND evidence_expires_at<=?`).run(now,assistantId,now).changes;
+    return this.db
+      .prepare(
+        `UPDATE moderation_cases SET encrypted_temporary_evidence=NULL,evidence_expires_at=NULL,updated_at=?
+      WHERE assistant_id=? AND encrypted_temporary_evidence IS NOT NULL AND evidence_expires_at<=?`,
+      )
+      .run(now, assistantId, now).changes;
   }
 
   public anonymizeExpiredModerationCases(assistantId: string): number {
-    const settings=this.getModerationSettings(assistantId);
-    const cutoff=new Date(Date.now()-settings.recurrenceWindowDays*86_400_000).toISOString();
-    return this.db.prepare(`UPDATE moderation_cases SET participant_hash='expired:'||id,message_hash='expired:'||id,updated_at=?
-      WHERE assistant_id=? AND created_at<=? AND participant_hash NOT LIKE 'expired:%'`).run(new Date().toISOString(),assistantId,cutoff).changes;
+    const settings = this.getModerationSettings(assistantId);
+    const cutoff = new Date(Date.now() - settings.recurrenceWindowDays * 86_400_000).toISOString();
+    return this.db
+      .prepare(
+        `UPDATE moderation_cases SET participant_hash='expired:'||id,message_hash='expired:'||id,updated_at=?
+      WHERE assistant_id=? AND created_at<=? AND participant_hash NOT LIKE 'expired:%'`,
+      )
+      .run(new Date().toISOString(), assistantId, cutoff).changes;
   }
 
   private ensureModerationSettings(assistantId: string): void {
     if (this.getBot(assistantId) === null) throw new Error('ASSISTANT_NOT_FOUND');
     const now = new Date().toISOString();
-    this.db.prepare('INSERT OR IGNORE INTO assistant_moderation_settings(assistant_id,created_at,updated_at) VALUES(?,?,?)').run(assistantId,now,now);
+    this.db
+      .prepare(
+        'INSERT OR IGNORE INTO assistant_moderation_settings(assistant_id,created_at,updated_at) VALUES(?,?,?)',
+      )
+      .run(assistantId, now, now);
   }
 
   private mapModerationRule(row: Record<string, unknown>): ModerationRule {
     const ruleId = Number(row.id);
-    const conditions = (this.db.prepare('SELECT * FROM moderation_rule_conditions WHERE rule_id=? ORDER BY id').all(ruleId) as Array<Record<string, unknown>>).map((item) => ({
-      id:Number(item.id),conditionType:String(item.condition_type),operator:String(item.operator) as 'ALL'|'ANY'|'EXCLUDE',normalizedValue:String(item.normalized_value),
-      configuration:parseSafeJsonObject(String(item.configuration_json)),enabled:item.enabled===1,
+    const conditions = (
+      this.db
+        .prepare('SELECT * FROM moderation_rule_conditions WHERE rule_id=? ORDER BY id')
+        .all(ruleId) as Array<Record<string, unknown>>
+    ).map((item) => ({
+      id: Number(item.id),
+      conditionType: String(item.condition_type),
+      operator: String(item.operator) as 'ALL' | 'ANY' | 'EXCLUDE',
+      normalizedValue: String(item.normalized_value),
+      configuration: parseSafeJsonObject(String(item.configuration_json)),
+      enabled: item.enabled === 1,
     }));
-    const exceptions = (this.db.prepare('SELECT * FROM moderation_rule_exceptions WHERE rule_id=? ORDER BY id').all(ruleId) as Array<Record<string, unknown>>).map((item) => ({
-      id:Number(item.id),exceptionType:String(item.exception_type),normalizedValue:String(item.normalized_value),enabled:item.enabled===1,
+    const exceptions = (
+      this.db
+        .prepare('SELECT * FROM moderation_rule_exceptions WHERE rule_id=? ORDER BY id')
+        .all(ruleId) as Array<Record<string, unknown>>
+    ).map((item) => ({
+      id: Number(item.id),
+      exceptionType: String(item.exception_type),
+      normalizedValue: String(item.normalized_value),
+      enabled: item.enabled === 1,
     }));
-    return { id:ruleId,assistantId:String(row.assistant_id),name:String(row.name),description:String(row.description),category:String(row.category),
-      severity:String(row.severity) as ModerationSeverity,detectionType:String(row.detection_type),score:Number(row.score),reviewThreshold:Number(row.review_threshold),
-      warningThreshold:Number(row.warning_threshold),adminNotificationThreshold:Number(row.admin_notification_threshold),enabled:row.enabled===1,
-      appliesToAllGroups:row.applies_to_all_groups===1,conditions,exceptions,createdAt:String(row.created_at),updatedAt:String(row.updated_at) };
+    return {
+      id: ruleId,
+      assistantId: String(row.assistant_id),
+      name: String(row.name),
+      description: String(row.description),
+      category: String(row.category),
+      severity: String(row.severity) as ModerationSeverity,
+      detectionType: String(row.detection_type),
+      score: Number(row.score),
+      reviewThreshold: Number(row.review_threshold),
+      warningThreshold: Number(row.warning_threshold),
+      adminNotificationThreshold: Number(row.admin_notification_threshold),
+      enabled: row.enabled === 1,
+      appliesToAllGroups: row.applies_to_all_groups === 1,
+      conditions,
+      exceptions,
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    };
   }
 
-  private replaceModerationConditions(ruleId: number, conditions: ModerationRule['conditions'], exceptions: ModerationRule['exceptions'], now: string): void {
-    const conditionStatement = this.db.prepare(`INSERT INTO moderation_rule_conditions(rule_id,condition_type,operator,normalized_value,configuration_json,enabled,created_at,updated_at)
+  private replaceModerationConditions(
+    ruleId: number,
+    conditions: ModerationRule['conditions'],
+    exceptions: ModerationRule['exceptions'],
+    now: string,
+  ): void {
+    const conditionStatement = this.db
+      .prepare(`INSERT INTO moderation_rule_conditions(rule_id,condition_type,operator,normalized_value,configuration_json,enabled,created_at,updated_at)
       VALUES(?,?,?,?,?,?,?,?)`);
-    for (const condition of conditions) conditionStatement.run(ruleId,condition.conditionType,condition.operator,condition.normalizedValue,
-      JSON.stringify(condition.configuration),condition.enabled ? 1 : 0,now,now);
-    const exceptionStatement = this.db.prepare(`INSERT INTO moderation_rule_exceptions(rule_id,exception_type,normalized_value,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?)`);
-    for (const exception of exceptions) exceptionStatement.run(ruleId,exception.exceptionType,exception.normalizedValue,exception.enabled ? 1 : 0,now,now);
+    for (const condition of conditions)
+      conditionStatement.run(
+        ruleId,
+        condition.conditionType,
+        condition.operator,
+        condition.normalizedValue,
+        JSON.stringify(condition.configuration),
+        condition.enabled ? 1 : 0,
+        now,
+        now,
+      );
+    const exceptionStatement = this.db.prepare(
+      `INSERT INTO moderation_rule_exceptions(rule_id,exception_type,normalized_value,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
+    );
+    for (const exception of exceptions)
+      exceptionStatement.run(
+        ruleId,
+        exception.exceptionType,
+        exception.normalizedValue,
+        exception.enabled ? 1 : 0,
+        now,
+        now,
+      );
   }
 }
 
 function mapGroupModerationProfile(row: Record<string, unknown>): GroupModerationProfile {
   return {
-    assistantId:String(row.assistant_id),groupHash:String(row.group_hash),enabled:row.enabled===1,
-    rulesText:String(row.rules_text??''),rulesHash:String(row.rules_hash??''),
-    analysisStatus:String(row.analysis_status) as GroupModerationProfile['analysisStatus'],
-    testStatus:String(row.test_status) as GroupModerationProfile['testStatus'],
-    compiled:row.compiled_json===null||row.compiled_json===undefined?null:parseSafeJsonObject(String(row.compiled_json)),
-    summary:row.compiled_summary_json===null||row.compiled_summary_json===undefined?null:parseSafeJsonObject(String(row.compiled_summary_json)),
-    provider:row.provider===null||row.provider===undefined?null:String(row.provider),model:row.model===null||row.model===undefined?null:String(row.model),
-    inputTokens:Number(row.input_tokens??0),outputTokens:Number(row.output_tokens??0),firstWarningMessage:String(row.first_warning_message),
-    secondWarningMessage:String(row.second_warning_message),recurrenceWindowDays:Number(row.recurrence_window_days),
-    lastAnalyzedAt:row.last_analyzed_at===null||row.last_analyzed_at===undefined?null:String(row.last_analyzed_at),
-    lastTestedAt:row.last_tested_at===null||row.last_tested_at===undefined?null:String(row.last_tested_at),
-    activatedAt:row.activated_at===null||row.activated_at===undefined?null:String(row.activated_at),updatedAt:String(row.updated_at),
+    assistantId: String(row.assistant_id),
+    groupHash: String(row.group_hash),
+    enabled: row.enabled === 1,
+    rulesText: String(row.rules_text ?? ''),
+    rulesHash: String(row.rules_hash ?? ''),
+    analysisStatus: String(row.analysis_status) as GroupModerationProfile['analysisStatus'],
+    testStatus: String(row.test_status) as GroupModerationProfile['testStatus'],
+    compiled:
+      row.compiled_json === null || row.compiled_json === undefined
+        ? null
+        : parseSafeJsonObject(String(row.compiled_json)),
+    summary:
+      row.compiled_summary_json === null || row.compiled_summary_json === undefined
+        ? null
+        : parseSafeJsonObject(String(row.compiled_summary_json)),
+    provider: row.provider === null || row.provider === undefined ? null : String(row.provider),
+    model: row.model === null || row.model === undefined ? null : String(row.model),
+    inputTokens: Number(row.input_tokens ?? 0),
+    outputTokens: Number(row.output_tokens ?? 0),
+    firstWarningMessage: String(row.first_warning_message),
+    secondWarningMessage: String(row.second_warning_message),
+    recurrenceWindowDays: Number(row.recurrence_window_days),
+    lastAnalyzedAt:
+      row.last_analyzed_at === null || row.last_analyzed_at === undefined
+        ? null
+        : String(row.last_analyzed_at),
+    lastTestedAt:
+      row.last_tested_at === null || row.last_tested_at === undefined
+        ? null
+        : String(row.last_tested_at),
+    activatedAt:
+      row.activated_at === null || row.activated_at === undefined ? null : String(row.activated_at),
+    updatedAt: String(row.updated_at),
   };
 }
 
@@ -7474,7 +8738,9 @@ function mapAISettings(row: Record<string, number | string>): AISettings {
 function parseStringArray(value: string): string[] {
   try {
     const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string')
+      : [];
   } catch {
     return [];
   }
@@ -7485,8 +8751,9 @@ function parseSafeObject(value: string): Record<string, string | number | boolea
     const parsed: unknown = JSON.parse(value);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
     return Object.fromEntries(
-      Object.entries(parsed).filter((entry): entry is [string, string | number | boolean | null] =>
-        entry[1] === null || ['string', 'number', 'boolean'].includes(typeof entry[1]),
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string | number | boolean | null] =>
+          entry[1] === null || ['string', 'number', 'boolean'].includes(typeof entry[1]),
       ),
     );
   } catch {
@@ -7497,15 +8764,17 @@ function parseSafeObject(value: string): Record<string, string | number | boolea
 function parseSafeJsonObject(value: string): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(value);
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
   } catch {
     return {};
   }
 }
 
-function validateAssistantProfile<T extends Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>>(
-  input: T,
-): T {
+function validateAssistantProfile<
+  T extends Omit<AssistantProfile, 'id' | 'active' | 'createdAt' | 'updatedAt'>,
+>(input: T): T {
   const organizationTypes: OrganizationType[] = [
     'Comunidad',
     'Tienda',
@@ -7516,7 +8785,8 @@ function validateAssistantProfile<T extends Omit<AssistantProfile, 'id' | 'activ
     'Institución educativa',
     'Otro',
   ];
-  if (!organizationTypes.includes(input.organizationType)) throw new Error('El tipo de organización no es válido.');
+  if (!organizationTypes.includes(input.organizationType))
+    throw new Error('El tipo de organización no es válido.');
   const activationAlias = validatePlainText(input.activationAlias, 'alias', 80);
   if (!activationAlias.startsWith('@')) throw new Error('El alias visible debe comenzar con @.');
   const timezone = validateTimezone(input.timezone);
@@ -7534,15 +8804,24 @@ function validateAssistantProfile<T extends Omit<AssistantProfile, 'id' | 'activ
     excludedTopics: validateTextArray(input.excludedTopics, 'temas excluidos'),
     tone: validatePlainText(input.tone, 'tono', 300),
     outOfScopeMessage: validatePlainText(input.outOfScopeMessage, 'mensaje fuera de tema', 600),
-    noInformationMessage: validatePlainText(input.noInformationMessage, 'mensaje sin información', 600),
+    noInformationMessage: validatePlainText(
+      input.noInformationMessage,
+      'mensaje sin información',
+      600,
+    ),
     limitMessage: validatePlainText(input.limitMessage, 'mensaje de límite', 600),
     aiErrorMessage: validatePlainText(input.aiErrorMessage, 'mensaje de error', 600),
     medicalMessage: validatePlainText(input.medicalMessage, 'mensaje médico', 600),
     mentionPromptMessage: validatePlainText(input.mentionPromptMessage, 'mensaje de mención', 600),
-    communityGreetingMessage: validatePlainText(input.communityGreetingMessage, 'saludo comunitario', 1200),
+    communityGreetingMessage: validatePlainText(
+      input.communityGreetingMessage,
+      'saludo comunitario',
+      1200,
+    ),
     contactInformation: validatePlainText(input.contactInformation, 'contacto', 1000, true),
     businessHours: validatePlainText(input.businessHours, 'horarios', 1000, true),
-    address: input.address === null ? null : validatePlainText(input.address, 'dirección', 500, true),
+    address:
+      input.address === null ? null : validatePlainText(input.address, 'dirección', 500, true),
     logoPath,
     primaryColor: validateColor(input.primaryColor),
     secondaryColor: validateColor(input.secondaryColor),
@@ -7570,7 +8849,8 @@ function validateKnowledgeEntry(input: {
   internalSource: string | null;
 } {
   const priority = Math.trunc(input.priority);
-  if (priority < -100 || priority > 100) throw new Error('La prioridad debe estar entre -100 y 100.');
+  if (priority < -100 || priority > 100)
+    throw new Error('La prioridad debe estar entre -100 y 100.');
   return {
     title: validatePlainText(input.title, 'título', 200),
     content: validatePlainText(input.content, 'contenido', 8000),
@@ -7611,14 +8891,19 @@ function validateAISettings(settings: AISettings): void {
       throw new Error(`El valor de ${label} no es válido.`);
     }
   }
-  if (settings.temperature < 0 || settings.temperature > 1) throw new Error('La temperatura no es válida.');
-  if (settings.userDailyLimit < settings.userHourlyLimit) throw new Error('El límite diario por usuario no puede ser menor que el límite horario.');
-  if (settings.groupDailyLimit < settings.groupHourlyLimit) throw new Error('El límite diario por grupo no puede ser menor que el límite horario.');
-  if (settings.globalMonthlyLimit < settings.globalDailyLimit) throw new Error('El límite mensual no puede ser menor que el diario.');
+  if (settings.temperature < 0 || settings.temperature > 1)
+    throw new Error('La temperatura no es válida.');
+  if (settings.userDailyLimit < settings.userHourlyLimit)
+    throw new Error('El límite diario por usuario no puede ser menor que el límite horario.');
+  if (settings.groupDailyLimit < settings.groupHourlyLimit)
+    throw new Error('El límite diario por grupo no puede ser menor que el límite horario.');
+  if (settings.globalMonthlyLimit < settings.globalDailyLimit)
+    throw new Error('El límite mensual no puede ser menor que el diario.');
 }
 
 function validateTextArray(values: string[], field: string, maximumItems = 30): string[] {
-  if (!Array.isArray(values) || values.length > maximumItems) throw new Error(`La lista de ${field} no es válida.`);
+  if (!Array.isArray(values) || values.length > maximumItems)
+    throw new Error(`La lista de ${field} no es válida.`);
   return [...new Set(values.map((value) => validatePlainText(value, field, 180)).filter(Boolean))];
 }
 
@@ -7633,7 +8918,11 @@ function validatePlainText(
   if ((!allowEmpty && normalized.length === 0) || normalized.length > maximumLength) {
     throw new Error(`El campo ${field} debe tener hasta ${maximumLength} caracteres.`);
   }
-  if (/[<>]/u.test(normalized) || [...normalized].some((character) => character.codePointAt(0) === 0) || normalized.includes('```')) {
+  if (
+    /[<>]/u.test(normalized) ||
+    [...normalized].some((character) => character.codePointAt(0) === 0) ||
+    normalized.includes('```')
+  ) {
     throw new Error(`El campo ${field} debe contener solamente texto plano.`);
   }
   return normalized;
@@ -7641,7 +8930,8 @@ function validatePlainText(
 
 function validateColor(value: string): string {
   const normalized = value.trim().toLowerCase();
-  if (!/^#[0-9a-f]{6}$/u.test(normalized)) throw new Error('El color debe usar el formato #RRGGBB.');
+  if (!/^#[0-9a-f]{6}$/u.test(normalized))
+    throw new Error('El color debe usar el formato #RRGGBB.');
   return normalized;
 }
 
@@ -7664,15 +8954,34 @@ function validateLogoPath(value: string): string {
 }
 
 function normalizeSearchTerms(value: string): string[] {
-  const stopWords = new Set(['a', 'al', 'de', 'del', 'el', 'en', 'es', 'la', 'las', 'lo', 'los', 'por', 'que', 'un', 'una', 'y']);
-  return [...new Set(
-    value
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/gu, '')
-      .toLocaleLowerCase('es')
-      .match(/[a-z0-9]{2,}/gu)
-      ?.filter((term) => !stopWords.has(term)) ?? [],
-  )].slice(0, 12);
+  const stopWords = new Set([
+    'a',
+    'al',
+    'de',
+    'del',
+    'el',
+    'en',
+    'es',
+    'la',
+    'las',
+    'lo',
+    'los',
+    'por',
+    'que',
+    'un',
+    'una',
+    'y',
+  ]);
+  return [
+    ...new Set(
+      value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/gu, '')
+        .toLocaleLowerCase('es')
+        .match(/[a-z0-9]{2,}/gu)
+        ?.filter((term) => !stopWords.has(term)) ?? [],
+    ),
+  ].slice(0, 12);
 }
 
 function validateBotIdentifier(value: string): string {
@@ -7705,10 +9014,20 @@ function validateActionPayload(
   payload: Record<string, string | number | boolean | null>,
 ): void {
   const serialized = JSON.stringify(payload);
-  if (serialized.length > 1000 || /(?:powershell|cmd\.exe|\/bin\/|javascript:|\bselect\b.+\bfrom\b|\bdrop\s+table\b)/iu.test(serialized)) {
+  if (
+    serialized.length > 1000 ||
+    /(?:powershell|cmd\.exe|\/bin\/|javascript:|\bselect\b.+\bfrom\b|\bdrop\s+table\b)/iu.test(
+      serialized,
+    )
+  ) {
     throw new Error('La acción contiene datos no permitidos.');
   }
-  const referenceActions: MenuActionType[] = ['catalog_item', 'catalog_category', 'media', 'submenu'];
+  const referenceActions: MenuActionType[] = [
+    'catalog_item',
+    'catalog_category',
+    'media',
+    'submenu',
+  ];
   if (referenceActions.includes(actionType) && !Number.isInteger(payload.id)) {
     throw new Error('La acción requiere un identificador interno válido.');
   }
@@ -7726,13 +9045,22 @@ function validateMoney(value: number | null): void {
 function validateBusinessHour(
   value: Omit<BusinessHour, 'id' | 'botId' | 'createdAt' | 'updatedAt'>,
 ): void {
-  if (value.weekday !== null && (!Number.isInteger(value.weekday) || value.weekday < 0 || value.weekday > 6)) {
+  if (
+    value.weekday !== null &&
+    (!Number.isInteger(value.weekday) || value.weekday < 0 || value.weekday > 6)
+  ) {
     throw new Error('El día de la semana no es válido.');
   }
   if (value.localDate !== null) validateDate(value.localDate);
-  if (value.weekday === null && value.localDate === null) throw new Error('El horario requiere un día o una fecha.');
+  if (value.weekday === null && value.localDate === null)
+    throw new Error('El horario requiere un día o una fecha.');
   if (!value.closed) {
-    if (value.openingTime === null || value.closingTime === null || !isTime(value.openingTime) || !isTime(value.closingTime)) {
+    if (
+      value.openingTime === null ||
+      value.closingTime === null ||
+      !isTime(value.openingTime) ||
+      !isTime(value.closingTime)
+    ) {
       throw new Error('El intervalo de atención no es válido.');
     }
   }
@@ -7775,10 +9103,18 @@ function automaticConfigurationFromLegacy(
       sendTime: greeting?.send_time ?? defaults.dailyGreeting.sendTime,
       toleranceMinutes: greeting?.tolerance_minutes ?? defaults.dailyGreeting.toleranceMinutes,
       templates: {
-        monday: templates.get(AUTOMATIC_TEMPLATE_KEYS.greetingMonday) ?? defaults.dailyGreeting.templates.monday,
-        weekday: templates.get(AUTOMATIC_TEMPLATE_KEYS.greetingWeekday) ?? defaults.dailyGreeting.templates.weekday,
-        friday: templates.get(AUTOMATIC_TEMPLATE_KEYS.greetingFriday) ?? defaults.dailyGreeting.templates.friday,
-        weekend: templates.get(AUTOMATIC_TEMPLATE_KEYS.greetingWeekend) ?? defaults.dailyGreeting.templates.weekend,
+        monday:
+          templates.get(AUTOMATIC_TEMPLATE_KEYS.greetingMonday) ??
+          defaults.dailyGreeting.templates.monday,
+        weekday:
+          templates.get(AUTOMATIC_TEMPLATE_KEYS.greetingWeekday) ??
+          defaults.dailyGreeting.templates.weekday,
+        friday:
+          templates.get(AUTOMATIC_TEMPLATE_KEYS.greetingFriday) ??
+          defaults.dailyGreeting.templates.friday,
+        weekend:
+          templates.get(AUTOMATIC_TEMPLATE_KEYS.greetingWeekend) ??
+          defaults.dailyGreeting.templates.weekend,
       },
     },
     dailyRules: {
@@ -7790,15 +9126,22 @@ function automaticConfigurationFromLegacy(
   };
 }
 
-function automaticCustomization(configuration: AutomaticMessageConfiguration): Record<string, boolean> {
+function automaticCustomization(
+  configuration: AutomaticMessageConfiguration,
+): Record<string, boolean> {
   const defaults = DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION;
   return {
     [AUTOMATIC_TEMPLATE_KEYS.welcome]: configuration.welcome.template !== defaults.welcome.template,
-    [AUTOMATIC_TEMPLATE_KEYS.dailyRules]: configuration.dailyRules.template !== defaults.dailyRules.template,
-    [AUTOMATIC_TEMPLATE_KEYS.greetingMonday]: configuration.dailyGreeting.templates.monday !== defaults.dailyGreeting.templates.monday,
-    [AUTOMATIC_TEMPLATE_KEYS.greetingWeekday]: configuration.dailyGreeting.templates.weekday !== defaults.dailyGreeting.templates.weekday,
-    [AUTOMATIC_TEMPLATE_KEYS.greetingFriday]: configuration.dailyGreeting.templates.friday !== defaults.dailyGreeting.templates.friday,
-    [AUTOMATIC_TEMPLATE_KEYS.greetingWeekend]: configuration.dailyGreeting.templates.weekend !== defaults.dailyGreeting.templates.weekend,
+    [AUTOMATIC_TEMPLATE_KEYS.dailyRules]:
+      configuration.dailyRules.template !== defaults.dailyRules.template,
+    [AUTOMATIC_TEMPLATE_KEYS.greetingMonday]:
+      configuration.dailyGreeting.templates.monday !== defaults.dailyGreeting.templates.monday,
+    [AUTOMATIC_TEMPLATE_KEYS.greetingWeekday]:
+      configuration.dailyGreeting.templates.weekday !== defaults.dailyGreeting.templates.weekday,
+    [AUTOMATIC_TEMPLATE_KEYS.greetingFriday]:
+      configuration.dailyGreeting.templates.friday !== defaults.dailyGreeting.templates.friday,
+    [AUTOMATIC_TEMPLATE_KEYS.greetingWeekend]:
+      configuration.dailyGreeting.templates.weekend !== defaults.dailyGreeting.templates.weekend,
   };
 }
 
@@ -7808,15 +9151,23 @@ function setAutomaticTemplate(
   content: string,
 ): void {
   if (templateKey === AUTOMATIC_TEMPLATE_KEYS.welcome) configuration.welcome.template = content;
-  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.dailyRules) configuration.dailyRules.template = content;
-  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.greetingMonday) configuration.dailyGreeting.templates.monday = content;
-  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.greetingWeekday) configuration.dailyGreeting.templates.weekday = content;
-  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.greetingFriday) configuration.dailyGreeting.templates.friday = content;
-  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.greetingWeekend) configuration.dailyGreeting.templates.weekend = content;
+  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.dailyRules)
+    configuration.dailyRules.template = content;
+  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.greetingMonday)
+    configuration.dailyGreeting.templates.monday = content;
+  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.greetingWeekday)
+    configuration.dailyGreeting.templates.weekday = content;
+  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.greetingFriday)
+    configuration.dailyGreeting.templates.friday = content;
+  else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.greetingWeekend)
+    configuration.dailyGreeting.templates.weekend = content;
 }
 
 function validateDate(value: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value) || Number.isNaN(new Date(`${value}T00:00:00Z`).getTime())) {
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/u.test(value) ||
+    Number.isNaN(new Date(`${value}T00:00:00Z`).getTime())
+  ) {
     throw new Error('La fecha no es válida.');
   }
   return value;
