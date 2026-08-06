@@ -105,12 +105,20 @@ index = re.sub(
 write('src/index.ts', index)
 
 database = read('src/persistence/database.ts')
-database = database.replace('  ConnectorType,\n', '')
+for imported_type in (
+    '  BotCapabilities,\n',
+    '  BotMode,\n',
+    '  BotOperatingMode,\n',
+    '  ConnectorType,\n',
+):
+    database = database.replace(imported_type, '')
 database = database.replace('          values.businessHours,\n', "          '',\n")
 for helper in (
     'validateActionPayload',
     'validateMoney',
     'validateBusinessHour',
+    'validateDate',
+    'isTime',
     'operatingModeFor',
     'capabilitiesFor',
 ):
