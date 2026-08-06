@@ -345,7 +345,9 @@ describe('API administrativa', () => {
     database.setGroupAuthorized('grupo-bienvenida@g.us', true);
     const auth = await login(app);
     const view = await app.inject({
-      method: 'GET', url: '/api/automatic-messages', headers: { cookie: auth.cookie },
+      method: 'GET',
+      url: '/api/automatic-messages',
+      headers: { cookie: auth.cookie },
     });
     const groupKey = view.json().authorizedGroups[0].key;
     const preview = await injectAuthenticated(app, auth, {
@@ -362,12 +364,17 @@ describe('API administrativa', () => {
       method: 'PATCH',
       url: '/api/automatic-messages/welcome/groups',
       payload: {
-        groupKey, enabled: true, inheritAssistantTemplate: false, customTemplate: 'Hola {name}',
+        groupKey,
+        enabled: true,
+        inheritAssistantTemplate: false,
+        customTemplate: 'Hola {name}',
       },
     });
     expect(groupUpdate.statusCode).toBe(200);
     expect(database.getWelcomeGroupSetting(groupKey)).toMatchObject({
-      enabled: true, inheritAssistantTemplate: false, customTemplate: 'Hola {name}',
+      enabled: true,
+      inheritAssistantTemplate: false,
+      customTemplate: 'Hola {name}',
     });
     expect(JSON.stringify(database.getTechnicalEvents())).not.toContain('María');
 
@@ -375,7 +382,10 @@ describe('API administrativa', () => {
       method: 'PATCH',
       url: '/api/automatic-messages/welcome/groups',
       payload: {
-        groupKey, enabled: true, inheritAssistantTemplate: false, customTemplate: 'Hola {desconocida}',
+        groupKey,
+        enabled: true,
+        inheritAssistantTemplate: false,
+        customTemplate: 'Hola {desconocida}',
       },
     });
     expect(invalid.statusCode).toBe(400);
@@ -493,13 +503,23 @@ describe('API administrativa', () => {
     });
     expect(listed.body).not.toContain('groupHash');
     expect(listed.body).not.toContain('userHash');
-    expect((await injectAuthenticated(app, auth, {
-      method: 'PATCH', url: `/api/bots/neurobot/cached-answers/${id}`,
-      payload: { action: 'disable' },
-    })).json().answer.status).toBe('DISABLED');
-    expect((await injectAuthenticated(app, auth, {
-      method: 'DELETE', url: `/api/bots/neurobot/cached-answers/${id}`,
-    })).statusCode).toBe(200);
+    expect(
+      (
+        await injectAuthenticated(app, auth, {
+          method: 'PATCH',
+          url: `/api/bots/neurobot/cached-answers/${id}`,
+          payload: { action: 'disable' },
+        })
+      ).json().answer.status,
+    ).toBe('DISABLED');
+    expect(
+      (
+        await injectAuthenticated(app, auth, {
+          method: 'DELETE',
+          url: `/api/bots/neurobot/cached-answers/${id}`,
+        })
+      ).statusCode,
+    ).toBe(200);
   });
 
   it('rechaza módulos comunitarios en un negocio y protege la papelera', async () => {
@@ -511,9 +531,9 @@ describe('API administrativa', () => {
       profile: createProfileFromPreset({
         organizationName: 'Negocio aislado',
         botName: 'Bot negocio',
-        organizationType: 'Tienda',
+        organizationType: 'Comunidad',
         timezone: 'America/Santiago',
-        preset: 'store',
+        preset: 'community',
       }),
     });
     const auth = await login(app);
@@ -553,25 +573,36 @@ describe('API administrativa', () => {
   it('administra la capacidad de IA por asistente y protege el simulador', async () => {
     const auth = await login(app);
     const view = await app.inject({
-      method: 'GET', url: '/api/bots/neurobot/ai', headers: { cookie: auth.cookie },
+      method: 'GET',
+      url: '/api/bots/neurobot/ai',
+      headers: { cookie: auth.cookie },
     });
     expect(view.statusCode).toBe(200);
     expect(view.json().queue).toMatchObject({
-      processing: 0, waiting: 0, settings: { maxConcurrent: 3, maxQueueSize: 20 },
+      processing: 0,
+      waiting: 0,
+      settings: { maxConcurrent: 3, maxQueueSize: 20 },
     });
     const settings = { ...view.json().queue.settings, maxConcurrent: 2, maxQueueSize: 12 };
     const updated = await injectAuthenticated(app, auth, {
-      method: 'PATCH', url: '/api/bots/neurobot/ai/queue-settings', payload: settings,
+      method: 'PATCH',
+      url: '/api/bots/neurobot/ai/queue-settings',
+      payload: settings,
     });
     expect(updated.statusCode).toBe(200);
-    expect(database.getAIQueueSettings('neurobot')).toMatchObject({ maxConcurrent: 2, maxQueueSize: 12 });
+    expect(database.getAIQueueSettings('neurobot')).toMatchObject({
+      maxConcurrent: 2,
+      maxQueueSize: 12,
+    });
     const invalid = await injectAuthenticated(app, auth, {
-      method: 'PATCH', url: '/api/bots/neurobot/ai/queue-settings',
+      method: 'PATCH',
+      url: '/api/bots/neurobot/ai/queue-settings',
       payload: { ...settings, maxConcurrent: -1 },
     });
     expect(invalid.statusCode).toBe(400);
     const simulation = await injectAuthenticated(app, auth, {
-      method: 'POST', url: '/api/bots/neurobot/ai/simulate-queue',
+      method: 'POST',
+      url: '/api/bots/neurobot/ai/simulate-queue',
       payload: { requests: 10, scenario: 'normal' },
     });
     expect(simulation.statusCode).toBe(404);
@@ -579,28 +610,118 @@ describe('API administrativa', () => {
 
   it('administra moderación local solo en asistentes con canal grupal', async () => {
     const auth = await login(app);
-    const initial = await app.inject({ method:'GET',url:'/api/bots/neurobot/moderation',headers:{cookie:auth.cookie} });
+    const initial = await app.inject({
+      method: 'GET',
+      url: '/api/bots/neurobot/moderation',
+      headers: { cookie: auth.cookie },
+    });
     expect(initial.statusCode).toBe(200);
-    expect(initial.json()).toMatchObject({settings:{enabled:false,automaticAIReviewEnabled:false,automaticBanEnabled:false,automaticDeletionEnabled:false},metrics:{aiReviews:0,aiTokens:0}});
-    const rulePayload = {name:'Convivencia',description:'Regla concreta de prueba',category:'RESPETO',severity:'ALTA',detectionType:'EXACT_WORD',score:4,
-      reviewThreshold:3,warningThreshold:4,adminNotificationThreshold:4,enabled:true,appliesToAllGroups:true,
-      conditions:[{id:0,conditionType:'EXACT_WORD',operator:'ANY',normalizedValue:'prohibida',configuration:{},enabled:true}],exceptions:[]};
-    const created = await injectAuthenticated(app,auth,{method:'POST',url:'/api/bots/neurobot/moderation/rules',payload:rulePayload});
+    expect(initial.json()).toMatchObject({
+      settings: {
+        enabled: false,
+        automaticAIReviewEnabled: false,
+        automaticBanEnabled: false,
+        automaticDeletionEnabled: false,
+      },
+      metrics: { aiReviews: 0, aiTokens: 0 },
+    });
+    const rulePayload = {
+      name: 'Convivencia',
+      description: 'Regla concreta de prueba',
+      category: 'RESPETO',
+      severity: 'ALTA',
+      detectionType: 'EXACT_WORD',
+      score: 4,
+      reviewThreshold: 3,
+      warningThreshold: 4,
+      adminNotificationThreshold: 4,
+      enabled: true,
+      appliesToAllGroups: true,
+      conditions: [
+        {
+          id: 0,
+          conditionType: 'EXACT_WORD',
+          operator: 'ANY',
+          normalizedValue: 'prohibida',
+          configuration: {},
+          enabled: true,
+        },
+      ],
+      exceptions: [],
+    };
+    const created = await injectAuthenticated(app, auth, {
+      method: 'POST',
+      url: '/api/bots/neurobot/moderation/rules',
+      payload: rulePayload,
+    });
     expect(created.statusCode).toBe(200);
-    const simulation = await injectAuthenticated(app,auth,{method:'POST',url:'/api/bots/neurobot/moderation/test',payload:{text:'palabra prohibida'}});
+    const simulation = await injectAuthenticated(app, auth, {
+      method: 'POST',
+      url: '/api/bots/neurobot/moderation/test',
+      payload: { text: 'palabra prohibida' },
+    });
     expect(simulation.statusCode).toBe(200);
-    expect(simulation.json()).toMatchObject({simulation:true,result:{action:'WARNING_AND_NOTIFY',totalScore:4}});
+    expect(simulation.json()).toMatchObject({
+      simulation: true,
+      result: { action: 'WARNING_AND_NOTIFY', totalScore: 4 },
+    });
     expect(database.listModerationCases('neurobot')).toHaveLength(0);
-    expect(database.getModerationMetrics('neurobot')).toMatchObject({messagesReviewed:0,aiReviews:0,aiTokens:0});
-    const exported = await app.inject({method:'GET',url:'/api/bots/neurobot/moderation/export',headers:{cookie:auth.cookie}});
+    expect(database.getModerationMetrics('neurobot')).toMatchObject({
+      messagesReviewed: 0,
+      aiReviews: 0,
+      aiTokens: 0,
+    });
+    const exported = await app.inject({
+      method: 'GET',
+      url: '/api/bots/neurobot/moderation/export',
+      headers: { cookie: auth.cookie },
+    });
     expect(exported.statusCode).toBe(200);
     expect(JSON.stringify(exported.json())).not.toContain('participantHash');
     expect(JSON.stringify(exported.json())).not.toContain('messageHash');
 
-    const privateBot = database.createBot({id:'solo-privado',mode:'business',sessionPath:'data/test-private',profile:createProfileFromPreset({organizationName:'Privado',botName:'Privado',organizationType:'Tienda',timezone:'America/Santiago',preset:'store'})});
-    const mixedBot = database.createBot({id:'canal-mixto',mode:'mixed',sessionPath:'data/test-mixed',profile:createProfileFromPreset({organizationName:'Mixto',botName:'Mixto',organizationType:'Tienda',timezone:'America/Santiago',preset:'store'})});
-    expect((await app.inject({method:'GET',url:`/api/bots/${privateBot.id}/moderation`,headers:{cookie:auth.cookie}})).statusCode).toBe(404);
-    expect((await app.inject({method:'GET',url:`/api/bots/${mixedBot.id}/moderation`,headers:{cookie:auth.cookie}})).statusCode).toBe(200);
+    const privateBot = database.createBot({
+      id: 'solo-privado',
+      mode: 'business',
+      sessionPath: 'data/test-private',
+      profile: createProfileFromPreset({
+        organizationName: 'Privado',
+        botName: 'Privado',
+        organizationType: 'Tienda',
+        timezone: 'America/Santiago',
+        preset: 'store',
+      }),
+    });
+    const mixedBot = database.createBot({
+      id: 'canal-mixto',
+      mode: 'mixed',
+      sessionPath: 'data/test-mixed',
+      profile: createProfileFromPreset({
+        organizationName: 'Mixto',
+        botName: 'Mixto',
+        organizationType: 'Tienda',
+        timezone: 'America/Santiago',
+        preset: 'store',
+      }),
+    });
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/api/bots/${privateBot.id}/moderation`,
+          headers: { cookie: auth.cookie },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/api/bots/${mixedBot.id}/moderation`,
+          headers: { cookie: auth.cookie },
+        })
+      ).statusCode,
+    ).toBe(200);
   });
 });
 

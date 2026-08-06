@@ -13,7 +13,6 @@ import type { AIProvider } from '../ai/ai-provider.js';
 import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
 import { hashNormalizedQuestion, normalizeQuestionForCache } from '../ai/answer-cache-service.js';
 import type { AutomaticMessageService } from '../core/automatic-message-service.js';
-import { CatalogService } from '../core/catalog-service.js';
 import {
   AUTOMATIC_TEMPLATE_KEYS,
   DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION,
@@ -25,7 +24,6 @@ import {
 } from '../core/assistant-module-visibility-service.js';
 import type { ConnectionManager } from '../core/connection-manager.js';
 import type { GroupDiscoveryService } from '../core/group-discovery-service.js';
-import { InteractiveMessageAdapter } from '../core/interactive-message-adapter.js';
 import {
   MaintenanceAlreadyRunningError,
   type MaintenanceService,
@@ -1036,21 +1034,17 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           eventType: 'PROTECTED_ASSISTANT_DELETION_BLOCKED',
           result: 'blocked',
         });
-        return reply
-          .code(403)
-          .send({
-            error: 'Este asistente está protegido y no puede enviarse a la papelera.',
-            code: 'PROTECTED_ASSISTANT_DELETION_BLOCKED',
-          });
+        return reply.code(403).send({
+          error: 'Este asistente está protegido y no puede enviarse a la papelera.',
+          code: 'PROTECTED_ASSISTANT_DELETION_BLOCKED',
+        });
       }
       const input = trashAssistantSchema.parse(request.body);
       if (input.confirmationName !== bot.botName) {
-        return reply
-          .code(400)
-          .send({
-            error: 'El nombre de confirmación no coincide.',
-            code: 'CONFIRMATION_NAME_MISMATCH',
-          });
+        return reply.code(400).send({
+          error: 'El nombre de confirmación no coincide.',
+          code: 'CONFIRMATION_NAME_MISMATCH',
+        });
       }
       const session = getSession(request, sessions) as PanelSession;
       const passwordHash = context.database.getPanelPasswordHash(session.username);
@@ -1085,21 +1079,17 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         return { assistant: adminBotResponse(context, restored) };
       } catch (error) {
         if (error instanceof Error && error.message === 'RESTORE_PHONE_CONFLICT') {
-          return reply
-            .code(409)
-            .send({
-              error:
-                'No se puede restaurar porque esa identidad de WhatsApp pertenece a otro asistente activo.',
-              code: 'RESTORE_PHONE_CONFLICT',
-            });
+          return reply.code(409).send({
+            error:
+              'No se puede restaurar porque esa identidad de WhatsApp pertenece a otro asistente activo.',
+            code: 'RESTORE_PHONE_CONFLICT',
+          });
         }
         if (error instanceof Error && error.message === 'ASSISTANT_NOT_ARCHIVED') {
-          return reply
-            .code(404)
-            .send({
-              error: 'El asistente no está en la papelera.',
-              code: 'ASSISTANT_NOT_ARCHIVED',
-            });
+          return reply.code(404).send({
+            error: 'El asistente no está en la papelera.',
+            code: 'ASSISTANT_NOT_ARCHIVED',
+          });
         }
         throw error;
       }
@@ -1123,22 +1113,18 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           eventType: 'PROTECTED_ASSISTANT_DELETION_BLOCKED',
           result: 'blocked',
         });
-        return reply
-          .code(403)
-          .send({
-            error: 'Este asistente está protegido y no puede eliminarse.',
-            code: 'PROTECTED_ASSISTANT_DELETION_BLOCKED',
-          });
+        return reply.code(403).send({
+          error: 'Este asistente está protegido y no puede eliminarse.',
+          code: 'PROTECTED_ASSISTANT_DELETION_BLOCKED',
+        });
       }
       const input = permanentlyDeleteAssistantSchema.parse(request.body);
       const expectedPhrase = `ELIMINAR PERMANENTEMENTE ${bot.botName}`;
       if (input.confirmationPhrase !== expectedPhrase) {
-        return reply
-          .code(400)
-          .send({
-            error: 'La frase de confirmación no coincide.',
-            code: 'CONFIRMATION_PHRASE_MISMATCH',
-          });
+        return reply.code(400).send({
+          error: 'La frase de confirmación no coincide.',
+          code: 'CONFIRMATION_PHRASE_MISMATCH',
+        });
       }
       const session = getSession(request, sessions) as PanelSession;
       const passwordHash = context.database.getPanelPasswordHash(session.username);
@@ -1630,13 +1616,11 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           lastEvent: cases[0]?.createdAt ?? null,
           aiConsumption: '0 tokens durante la moderación diaria.',
         },
-        administrators: context.database
-          .listAdministrators()
-          .map((identifier) => ({
-            identifier,
-            hash: context.anonymizer.identifier(identifier),
-            label: identifier.replace(/@(?:c|lid)\.us$/u, ''),
-          })),
+        administrators: context.database.listAdministrators().map((identifier) => ({
+          identifier,
+          hash: context.anonymizer.identifier(identifier),
+          label: identifier.replace(/@(?:c|lid)\.us$/u, ''),
+        })),
         safety: {
           automaticAIReviewEnabled: false,
           manualAIReviewEnabled: false,
@@ -1773,13 +1757,11 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           },
           'No fue posible preparar la moderación del grupo',
         );
-        return reply
-          .code(422)
-          .send({
-            error:
-              'No fue posible preparar una configuración segura. Revisa el texto e inténtalo nuevamente.',
-            code: 'MODERATION_ANALYSIS_FAILED',
-          });
+        return reply.code(422).send({
+          error:
+            'No fue posible preparar una configuración segura. Revisa el texto e inténtalo nuevamente.',
+          code: 'MODERATION_ANALYSIS_FAILED',
+        });
       }
     },
   );
@@ -1829,12 +1811,10 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         .parse(request.params).groupHash;
       const enabled = z.object({ enabled: z.boolean() }).strict().parse(request.body).enabled;
       if (enabled && context.database.listGroupModerationRecipients(botId, groupHash).length === 0)
-        return reply
-          .code(409)
-          .send({
-            error: 'Selecciona al menos un administrador para los avisos privados.',
-            code: 'MODERATION_ADMIN_REQUIRED',
-          });
+        return reply.code(409).send({
+          error: 'Selecciona al menos un administrador para los avisos privados.',
+          code: 'MODERATION_ADMIN_REQUIRED',
+        });
       try {
         const profile = context.database.setGroupModerationEnabled(botId, groupHash, enabled);
         context.database.recordTechnicalEvent({
@@ -1845,12 +1825,10 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         });
         return { profile: { ...profile, compiled: undefined } };
       } catch {
-        return reply
-          .code(409)
-          .send({
-            error: 'Completa y aprueba las pruebas antes de activar la moderación.',
-            code: 'MODERATION_TESTS_REQUIRED',
-          });
+        return reply.code(409).send({
+          error: 'Completa y aprueba las pruebas antes de activar la moderación.',
+          code: 'MODERATION_TESTS_REQUIRED',
+        });
       }
     },
   );
@@ -2041,19 +2019,17 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           },
           context.database.getModerationSettings(botId),
           context.database.listModerationRules(botId, false),
-          context.database
-            .listModerationTerms(botId)
-            .map((item) => ({
-              id: Number(item.id),
-              term: String(item.term),
-              normalizedTerm: String(item.normalizedTerm),
-              category: String(item.category),
-              severity: String(item.severity) as
-                'INFORMATIVA' | 'LEVE' | 'MEDIA' | 'ALTA' | 'CRITICA',
-              matchMode: String(item.matchMode),
-              score: Number(item.score),
-              enabled: item.enabled === 1,
-            })),
+          context.database.listModerationTerms(botId).map((item) => ({
+            id: Number(item.id),
+            term: String(item.term),
+            normalizedTerm: String(item.normalizedTerm),
+            category: String(item.category),
+            severity: String(item.severity) as
+              'INFORMATIVA' | 'LEVE' | 'MEDIA' | 'ALTA' | 'CRITICA',
+            matchMode: String(item.matchMode),
+            score: Number(item.score),
+            enabled: item.enabled === 1,
+          })),
         );
       context.database.recordTechnicalEvent({
         botId,
@@ -2165,17 +2141,15 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         rules: context.database
           .listModerationRules(botId)
           .map((rule) => ({ ...moderationRuleForTransfer(rule), enabled: false })),
-        terms: context.database
-          .listModerationTerms(botId)
-          .map((term) => ({
-            ruleId: null,
-            term: String(term.term),
-            category: String(term.category),
-            severity: String(term.severity),
-            matchMode: String(term.matchMode),
-            score: Number(term.score),
-            enabled: false,
-          })),
+        terms: context.database.listModerationTerms(botId).map((term) => ({
+          ruleId: null,
+          term: String(term.term),
+          category: String(term.category),
+          severity: String(term.severity),
+          matchMode: String(term.matchMode),
+          score: Number(term.score),
+          enabled: false,
+        })),
       };
     },
   );
@@ -2247,12 +2221,10 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const profile = context.database.getBotProfile(botId);
       const input = aiSettingsSchema.parse(request.body);
       if (exceedsSafeDefaults(input) && !input.confirmIncreasedLimits) {
-        return reply
-          .code(409)
-          .send({
-            error: 'Confirma explícitamente el aumento sobre los límites seguros iniciales.',
-            code: 'AI_LIMIT_INCREASE_CONFIRMATION_REQUIRED',
-          });
+        return reply.code(409).send({
+          error: 'Confirma explícitamente el aumento sobre los límites seguros iniciales.',
+          code: 'AI_LIMIT_INCREASE_CONFIRMATION_REQUIRED',
+        });
       }
       const { confirmIncreasedLimits, ...values } = input;
       void confirmIncreasedLimits;
@@ -2446,11 +2418,9 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         };
       }
       if (input.apiKey === undefined || context.secretVault?.isConfigured() !== true) {
-        return reply
-          .code(409)
-          .send({
-            error: 'APP_ENCRYPTION_KEY debe estar configurada para guardar una clave por bot.',
-          });
+        return reply.code(409).send({
+          error: 'APP_ENCRYPTION_KEY debe estar configurada para guardar una clave por bot.',
+        });
       }
       const encrypted = context.secretVault.encrypt(input.apiKey, `bot:${botId}:groq`);
       context.database.setBotEncryptedCredential(
@@ -2472,49 +2442,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       context.database.setBotEncryptedCredential(botId, 'per_bot', null, null);
       audit(context, 'bot_ai_key_delete', botId, 'ok', botId);
       return { configured: false, mode: 'per_bot' };
-    },
-  );
-
-  app.get('/api/bots/:botId/menus', { preHandler: requireSession(sessions) }, async (request) => {
-    const botId = parseBotId(request.params);
-    return {
-      menus: context.database.listMenus(botId),
-      options: context.database.listMenuOptions(botId),
-    };
-  });
-
-  app.post(
-    '/api/bots/:botId/menus',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const input = menuSchema.parse(request.body);
-      const menu = context.database.saveMenu({
-        ...(input.id === undefined ? {} : { id: input.id }),
-        botId,
-        parentMenuId: input.parentMenuId,
-        title: input.title,
-        message: input.message,
-        helpText: input.helpText,
-        enabled: input.enabled,
-        isInitial: input.isInitial,
-        expirationMinutes: input.expirationMinutes,
-      });
-      audit(context, 'menu_save', String(menu.id), 'ok', botId);
-      return reply.code(input.id === undefined ? 201 : 200).send({ menu });
-    },
-  );
-
-  app.delete(
-    '/api/bots/:botId/menus/:id',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      if (!context.database.deleteMenu(botId, id))
-        return reply.code(404).send({ error: 'Menú no encontrado.' });
-      audit(context, 'menu_delete', String(id), 'ok', botId);
-      return { deleted: true };
     },
   );
 
@@ -2550,284 +2477,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         return reply.code(404).send({ error: 'Opción no encontrada.' });
       audit(context, 'menu_option_delete', String(id), 'ok', botId);
       return { deleted: true };
-    },
-  );
-
-  app.get('/api/bots/:botId/catalog', { preHandler: requireSession(sessions) }, async (request) => {
-    const botId = parseBotId(request.params);
-    return {
-      categories: context.database.listCatalogCategories(botId),
-      items: context.database.listCatalogItems(botId),
-    };
-  });
-
-  app.post(
-    '/api/bots/:botId/catalog/categories',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const input = catalogCategorySchema.parse(request.body);
-      const category = context.database.saveCatalogCategory({
-        ...(input.id === undefined ? {} : { id: input.id }),
-        botId,
-        name: input.name,
-        description: input.description,
-        enabled: input.enabled,
-      });
-      audit(context, 'catalog_category_save', String(category.id), 'ok', botId);
-      return reply.code(input.id === undefined ? 201 : 200).send({ category });
-    },
-  );
-
-  app.post(
-    '/api/bots/:botId/catalog/items',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const input = catalogItemSchema.parse(request.body);
-      const item = context.database.saveCatalogItem({ ...input, botId });
-      audit(context, 'catalog_item_save', String(item.id), 'ok', botId);
-      return reply.code(input.id === 0 ? 201 : 200).send({ item });
-    },
-  );
-
-  app.delete(
-    '/api/bots/:botId/catalog/items/:id',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      if (!context.database.deleteCatalogItem(botId, id))
-        return reply.code(404).send({ error: 'Producto o servicio no encontrado.' });
-      audit(context, 'catalog_item_delete', String(id), 'ok', botId);
-      return { deleted: true };
-    },
-  );
-
-  app.get('/api/bots/:botId/hours', { preHandler: requireSession(sessions) }, async (request) => ({
-    hours: context.database.listBusinessHours(parseBotId(request.params)),
-  }));
-
-  app.put(
-    '/api/bots/:botId/hours',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      const input = z
-        .object({ hours: z.array(businessHourSchema).max(100) })
-        .strict()
-        .parse(request.body);
-      const hours = context.database.replaceBusinessHours(botId, input.hours);
-      audit(context, 'business_hours_replace', botId, 'ok', botId);
-      return { hours };
-    },
-  );
-
-  app.get(
-    '/api/bots/:botId/requests',
-    { preHandler: requireSession(sessions) },
-    async (request) => ({
-      requests: context.database.listHumanAssistanceRequests(parseBotId(request.params)),
-    }),
-  );
-
-  app.patch(
-    '/api/bots/:botId/requests/:id',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      const input = z
-        .object({
-          status: z.enum(['pending', 'confirmed', 'rejected', 'attended', 'cancelled']),
-          note: z.string().trim().max(300),
-        })
-        .strict()
-        .parse(request.body);
-      const assistanceRequest = context.database.updateHumanAssistanceRequest(
-        botId,
-        id,
-        input.status,
-        input.note,
-      );
-      audit(context, 'human_request_update', String(id), 'ok', botId);
-      return { request: assistanceRequest };
-    },
-  );
-
-  app.get('/api/bots/:botId/media', { preHandler: requireSession(sessions) }, async (request) => ({
-    assets: context.database
-      .listMediaAssets(parseBotId(request.params))
-      .map((asset) => ({ ...asset, sha256: undefined, relativePath: undefined })),
-  }));
-
-  app.post(
-    '/api/bots/:botId/media',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      if (context.database.getBot(botId) === null)
-        return reply.code(404).send({ error: 'Asistente no encontrado.' });
-      const input = z
-        .object({
-          mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
-          data: z.string().min(1).max(520_000),
-          caption: z.string().trim().max(300),
-        })
-        .strict()
-        .parse(request.body);
-      if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(input.data))
-        return reply.code(400).send({ error: 'Archivo inválido.' });
-      const content = Buffer.from(input.data, 'base64');
-      if (
-        content.length === 0 ||
-        content.length > 384 * 1024 ||
-        !matchesImageSignature(content, input.mimeType)
-      ) {
-        return reply
-          .code(400)
-          .send({ error: 'La imagen debe ser PNG, JPEG o WebP y pesar menos de 384 KB.' });
-      }
-      const extension =
-        input.mimeType === 'image/png' ? 'png' : input.mimeType === 'image/webp' ? 'webp' : 'jpg';
-      const fileName = `${randomUUID()}.${extension}`;
-      const root = context.mediaDirectory ?? resolve(process.cwd(), 'data', 'media');
-      const botDirectory = join(root, botId);
-      await mkdir(botDirectory, { recursive: true });
-      const filePath = join(botDirectory, fileName);
-      await writeFile(filePath, content, { flag: 'wx' });
-      let asset: ReturnType<AppDatabase['createMediaAsset']>;
-      try {
-        asset = context.database.createMediaAsset({
-          botId,
-          internalName: `${botId}-${fileName}`,
-          relativePath: fileName,
-          mimeType: input.mimeType,
-          byteSize: content.length,
-          sha256: createHash('sha256').update(content).digest('hex'),
-          caption: input.caption,
-        });
-      } catch (error) {
-        const trash = join(root, '.trash', botId);
-        await mkdir(trash, { recursive: true });
-        await rename(filePath, join(trash, `${Date.now()}-${fileName}`));
-        throw error;
-      }
-      audit(context, 'media_upload', String(asset.id), 'ok', botId);
-      return reply
-        .code(201)
-        .send({ asset: { ...asset, sha256: undefined, relativePath: undefined } });
-    },
-  );
-
-  app.get(
-    '/api/bots/:botId/media/:id/file',
-    { preHandler: requireSession(sessions) },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      const asset = context.database
-        .listMediaAssets(botId)
-        .find((item) => item.id === id && item.enabled);
-      if (asset === undefined) return reply.code(404).send({ error: 'Imagen no encontrada.' });
-      const root = context.mediaDirectory ?? resolve(process.cwd(), 'data', 'media');
-      const content = await readFile(join(root, botId, basename(asset.relativePath)));
-      return reply.type(asset.mimeType).send(content);
-    },
-  );
-
-  app.delete(
-    '/api/bots/:botId/media/:id',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      const asset = context.database.listMediaAssets(botId).find((item) => item.id === id) ?? null;
-      if (asset === null) return reply.code(404).send({ error: 'Imagen no encontrada.' });
-      const root = context.mediaDirectory ?? resolve(process.cwd(), 'data', 'media');
-      const trash = join(root, '.trash', botId);
-      await mkdir(trash, { recursive: true });
-      const source = join(root, botId, basename(asset.relativePath));
-      const destination = join(trash, `${Date.now()}-${basename(asset.relativePath)}`);
-      await rename(source, destination);
-      try {
-        if (context.database.deleteMediaAsset(botId, id) === null) {
-          await rename(destination, source);
-          return reply.code(404).send({ error: 'Imagen no encontrada.' });
-        }
-      } catch (error) {
-        await rename(destination, source);
-        throw error;
-      }
-      audit(context, 'media_delete', String(id), 'ok', botId);
-      return { deleted: true, recoverable: true };
-    },
-  );
-
-  app.post(
-    '/api/bots/:botId/manual-test',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const input = manualBotTestSchema.parse(request.body);
-      const groupId = resolveBotGroupKey(context, botId, input.groupKey);
-      const client = context.multiBotManager?.client(botId) ?? null;
-      if (groupId === null || !context.database.canBotSendToGroup(botId, groupId)) {
-        return reply.code(404).send({ error: 'El grupo de prueba no está disponible.' });
-      }
-      if (client === null || !client.isReady()) {
-        return reply.code(503).send({ error: 'WhatsApp no está conectado para este asistente.' });
-      }
-      const bot = context.database.getBot(botId);
-      if (bot === null) return reply.code(404).send({ error: 'Asistente no encontrado.' });
-      if (input.kind === 'menu' && !bot.capabilities.interactiveMenusEnabled) {
-        return reply
-          .code(409)
-          .send({ error: 'Este asistente funciona con preguntas únicas y no utiliza menús.' });
-      }
-      if (input.kind !== 'menu' && !bot.capabilities.catalogEnabled) {
-        return reply
-          .code(409)
-          .send({ error: 'Este asistente no tiene funciones comerciales habilitadas.' });
-      }
-      if (input.kind === 'menu') {
-        const menu = context.database
-          .listMenus(botId)
-          .find((item) => item.isInitial && item.enabled);
-        if (menu === undefined)
-          return reply.code(404).send({ error: 'No existe un menú inicial activo.' });
-        const adapter = new InteractiveMessageAdapter(client, context.logger, botId);
-        await adapter.sendMenu(
-          groupId,
-          menu,
-          context.database.listMenuOptions(botId, menu.id),
-          context.database.getBot(botId)?.menuType ?? 'numbered',
-        );
-      } else if (input.kind === 'catalog_item') {
-        if (input.resourceId === undefined)
-          return reply.code(400).send({ error: 'Selecciona un producto o servicio.' });
-        await client.sendMessage(
-          groupId,
-          new CatalogService(context.database, botId).itemText(input.resourceId),
-        );
-      } else {
-        if (input.resourceId === undefined || client.sendMedia === undefined) {
-          return reply.code(400).send({ error: 'Selecciona una imagen compatible.' });
-        }
-        const asset = context.database
-          .listMediaAssets(botId)
-          .find((item) => item.id === input.resourceId && item.enabled);
-        if (asset === undefined)
-          return reply.code(404).send({ error: 'La imagen no está disponible.' });
-        const root = context.mediaDirectory ?? resolve(process.cwd(), 'data', 'media');
-        await client.sendMedia(
-          groupId,
-          join(root, botId, basename(asset.relativePath)),
-          asset.caption,
-        );
-      }
-      audit(context, `manual_${input.kind}_test`, input.groupKey, 'sent', botId);
-      return { sent: true, kind: input.kind };
     },
   );
 
@@ -2932,7 +2581,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
       const input = z
         .object({
-          preset: z.enum(['community', 'store', 'restaurant', 'distributor', 'service', 'empty']),
+          preset: z.enum(['community', 'empty']),
           confirmed: z.literal(true),
         })
         .strict()
@@ -3909,12 +3558,10 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           templateId: id,
           result: 'rejected',
         });
-        return reply
-          .code(404)
-          .send({
-            error: 'No se pudo modificar la encuesta seleccionada.',
-            code: 'POLL_TEMPLATE_NOT_FOUND',
-          });
+        return reply.code(404).send({
+          error: 'No se pudo modificar la encuesta seleccionada.',
+          code: 'POLL_TEMPLATE_NOT_FOUND',
+        });
       }
       if (template.isDefault) {
         const session = getSession(request, sessions) as PanelSession;
@@ -4371,11 +4018,6 @@ function moduleForProtectedRoute(route: string): AssistantModuleKey | null {
   if (route.startsWith('/api/polls')) return 'polls';
   if (route.startsWith('/api/automatic-messages')) return 'automatic-messages';
   if (route.includes('/groups')) return 'automatic-messages';
-  if (route.includes('/catalog')) return 'catalog';
-  if (route.includes('/media')) return 'media';
-  if (route.includes('/hours')) return 'hours';
-  if (route.includes('/requests')) return 'requests';
-  if (route.includes('/menus')) return 'menus';
   return null;
 }
 
