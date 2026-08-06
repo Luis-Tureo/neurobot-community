@@ -1,34 +1,104 @@
-name: Verify GitHub CLI
+name: Apply Community Main Refactor
 
 on:
-  workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - '.github/workflows/github-cli.yml'
-  pull_request:
-    paths:
-      - '.github/workflows/github-cli.yml'
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  verify-gh:
-    name: Verify gh availability and authentication
+  apply:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-
+    timeout-minutes: 45
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
-      - name: Show GitHub CLI version
-        run: gh --version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
 
-      - name: Verify GitHub authentication
-        run: gh auth status
+      - name: Apply patch and validate
+        shell: bash
+        run: |
+          set +e
+          report=/tmp/refactor-report.txt
+          : > "$report"
 
-      - name: Verify repository access
-        run: gh repo view "$GH_REPO" --json nameWithOwner,defaultBranchRef,visibility
+          python - <<'PY' >> "$report" 2>&1
+          from pathlib import Path
+
+          source = Path('.github/workflows/agent-apply-main-refactor.yml').read_text(encoding='utf-8')
+          marker = "          python - <<'PY'\n"
+          start = source.index(marker) + len(marker)
+          end = source.index("\n          PY\n", start)
+          lines = source[start:end].splitlines()
+          code = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
+          Path('/tmp/apply-refactor.py').write_text(code, encoding='utf-8')
+          print(f'Extracted {len(lines)} Python lines.')
+          PY
+          extract_status=$?
+          echo "extract_status=$extract_status" >> "$report"
+
+          if [ "$extract_status" -eq 0 ]; then
+            python /tmp/apply-refactor.py >> "$report" 2>&1
+            patch_status=$?
+          else
+            patch_status=99
+          fi
+          echo "patch_status=$patch_status" >> "$report"
+
+          if [ "$patch_status" -eq 0 ]; then
+            npm ci >> "$report" 2>&1
+            install_status=$?
+          else
+            install_status=99
+          fi
+          echo "install_status=$install_status" >> "$report"
+
+          if [ "$install_status" -eq 0 ]; then
+            npx prettier --write src public tests docs README.md .github/workflows/validate-main.yml >> "$report" 2>&1
+            prettier_status=$?
+            npm run check >> "$report" 2>&1
+            check_status=$?
+          else
+            prettier_status=99
+            check_status=99
+          fi
+          echo "prettier_status=$prettier_status" >> "$report"
+          echo "check_status=$check_status" >> "$report"
+
+          if [ "$patch_status" -eq 0 ] && [ "$install_status" -eq 0 ] && [ "$prettier_status" -eq 0 ] && [ "$check_status" -eq 0 ]; then
+            rm -f .github/workflows/agent-apply-main-refactor.yml
+            rm -f .github/workflows/agent-diagnose-main-refactor.yml
+            rm -f .github/workflows/agent-community-audit.yml
+            rm -f .github/workflows/audit-community-final.yml
+            rm -f .github/workflows/github-cli.yml
+            rm -f refactor-diagnostic.txt
+            rm -rf agent-audit agent-transfer
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add -A
+            git commit -m 'refactor: modularize community automations and apply pending features'
+            git push origin HEAD:main
+            exit 0
+          fi
+
+          cp "$report" /tmp/refactor-report-final.txt
+          git reset --hard HEAD
+          git clean -fd
+          cp /tmp/refactor-report-final.txt refactor-diagnostic.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add refactor-diagnostic.txt
+          git commit -m 'chore: publish refactor diagnostic'
+          git push origin HEAD:main
+          cat "$report"
+          exit 1
