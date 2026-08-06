@@ -25,16 +25,12 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: Apply deep cleanup when pending
+      - name: Apply and preserve deep cleanup
         shell: bash
         run: |
           set -euo pipefail
           if grep -q "export type BotMode = 'community' | 'business' | 'mixed'" src/domain/types.ts; then
             python scripts/deep-clean-community-only.py
-            npx prettier --write \
-              src/domain/types.ts src/core/profile-presets.ts src/persistence/database.ts \
-              src/core/multi-bot-manager.ts src/core/bot-instance.ts src/admin/server.ts \
-              public/index.html public/multibot-panel.js tests
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -A
@@ -42,6 +38,23 @@ jobs:
             git push origin HEAD:agent/refactor-neurobot-community
           else
             echo "La limpieza profunda ya está aplicada."
+          fi
+      - name: Format transformed sources
+        run: |
+          npx prettier --write \
+            src/domain/types.ts src/core/profile-presets.ts src/persistence/database.ts \
+            src/core/multi-bot-manager.ts src/core/bot-instance.ts src/admin/server.ts \
+            public/index.html public/multibot-panel.js tests
+      - name: Commit formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "style: format community-only refactor"
+            git push origin HEAD:agent/refactor-neurobot-community
           fi
       - name: Install dependencies
         run: npm ci
