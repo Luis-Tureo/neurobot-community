@@ -33,7 +33,6 @@ import type {
   AssistantLifecycleStatus,
   AssistantProfile,
   CommandRecord,
-  ConnectorType,
   DeliverySource,
   DetectedGroup,
   GroupRecord,
@@ -4201,7 +4200,7 @@ export class AppDatabase {
           values.medicalMessage,
           values.mentionPromptMessage,
           values.contactInformation,
-          values.businessHours,
+          '',
           values.address,
           values.timezone,
           now,
@@ -4273,7 +4272,7 @@ export class AppDatabase {
           values.mentionPromptMessage,
           values.communityGreetingMessage,
           values.contactInformation,
-          values.businessHours,
+          '',
           values.address,
           values.timezone,
           now,
@@ -8007,63 +8006,6 @@ function validateSessionPath(value: string): string {
   return normalized;
 }
 
-function validateActionPayload(
-  actionType: MenuActionType,
-  payload: Record<string, string | number | boolean | null>,
-): void {
-  const serialized = JSON.stringify(payload);
-  if (
-    serialized.length > 1000 ||
-    /(?:powershell|cmd\.exe|\/bin\/|javascript:|\bselect\b.+\bfrom\b|\bdrop\s+table\b)/iu.test(
-      serialized,
-    )
-  ) {
-    throw new Error('La acción contiene datos no permitidos.');
-  }
-  const referenceActions: MenuActionType[] = [
-    'catalog_item',
-    'catalog_category',
-    'media',
-    'submenu',
-  ];
-  if (referenceActions.includes(actionType) && !Number.isInteger(payload.id)) {
-    throw new Error('La acción requiere un identificador interno válido.');
-  }
-  if (actionType === 'text' && typeof payload.text !== 'string') {
-    throw new Error('La acción de texto requiere un mensaje.');
-  }
-}
-
-function validateMoney(value: number | null): void {
-  if (value !== null && (!Number.isInteger(value) || value < 0 || value > 1_000_000_000_00)) {
-    throw new Error('El precio no es válido.');
-  }
-}
-
-function validateBusinessHour(
-  value: Omit<BusinessHour, 'id' | 'botId' | 'createdAt' | 'updatedAt'>,
-): void {
-  if (
-    value.weekday !== null &&
-    (!Number.isInteger(value.weekday) || value.weekday < 0 || value.weekday > 6)
-  ) {
-    throw new Error('El día de la semana no es válido.');
-  }
-  if (value.localDate !== null) validateDate(value.localDate);
-  if (value.weekday === null && value.localDate === null)
-    throw new Error('El horario requiere un día o una fecha.');
-  if (!value.closed) {
-    if (
-      value.openingTime === null ||
-      value.closingTime === null ||
-      !isTime(value.openingTime) ||
-      !isTime(value.closingTime)
-    ) {
-      throw new Error('El intervalo de atención no es válido.');
-    }
-  }
-}
-
 function defaultAutomaticConfiguration(timezone: string): AutomaticMessageConfiguration {
   return {
     timezone,
@@ -8210,28 +8152,6 @@ function requireAdministratorId(value: string): string {
   const normalized = canonicalPhoneIdentity(value);
   if (normalized === null) throw new Error('El identificador del administrador no es válido.');
   return normalized;
-}
-
-function operatingModeFor(mode: BotMode): BotOperatingMode {
-  if (mode === 'community') return 'COMMUNITY_GROUPS';
-  if (mode === 'business') return 'BUSINESS_PRIVATE';
-  return 'BUSINESS_MIXED';
-}
-
-function capabilitiesFor(mode: BotMode): BotCapabilities {
-  const community = mode !== 'business';
-  const commercial = mode !== 'community';
-  return {
-    communitySingleTurnMode: community,
-    privateChatsEnabled: commercial,
-    conversationContinuationEnabled: commercial,
-    interactiveMenusEnabled: commercial,
-    numericMenuRepliesEnabled: commercial,
-    pollsAsMenusEnabled: false,
-    pollsForCommunityEngagementEnabled: community,
-    catalogEnabled: commercial,
-    humanAssistanceEnabled: commercial,
-  };
 }
 
 function normalizeActivationAlias(value: string): string {

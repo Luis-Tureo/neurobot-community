@@ -27,16 +27,7 @@ async function main(): Promise<void> {
   const database = new AppDatabase(environment.databasePath);
   database.migrate();
   for (const bot of database.listBots()) {
-    database.updateBotConfiguration({
-      botId: bot.id,
-      mode: 'community',
-      enabled: bot.enabled,
-      groupsEnabled: true,
-      privateMessagesEnabled: false,
-      realMentionRequired: true,
-      continuedConversationsEnabled: false,
-      menuType: 'automatic',
-    });
+    database.updateBotConfiguration({ botId: bot.id, enabled: bot.enabled });
   }
   database.setBotSessionPath('neurobot', environment.sessionPath);
   await ensureInitialAdministrator(database, environment.panelInitialPassword);

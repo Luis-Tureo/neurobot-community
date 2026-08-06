@@ -1,3 +1,5 @@
+import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
+import type { Logger } from 'pino';
 import type { AssistantProfile, BotRecord } from '../domain/types.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import { WhatsAppWebAdapter } from '../messaging/whatsapp-adapter.js';

@@ -211,14 +211,13 @@ describe('cola de solicitudes de IA por asistente', () => {
     const community = new AIRequestQueueService(database, createLogger('silent'), 'neurobot');
     const otherBot = database.createBot({
       id: 'otro-asistente-cola',
-      mode: 'business',
       sessionPath: 'data/sessions/otro-asistente-cola',
       profile: database.getBotProfile('neurobot'),
     });
-    const business = new AIRequestQueueService(database, createLogger('silent'), otherBot.id);
-    expect(community).not.toBe(business);
+    const alternative = new AIRequestQueueService(database, createLogger('silent'), otherBot.id);
+    expect(community).not.toBe(alternative);
     expect(community.snapshot().settings).toMatchObject({ maxConcurrent: 3 });
-    expect(business.snapshot().settings).toMatchObject({ maxConcurrent: 3 });
+    expect(alternative.snapshot().settings).toMatchObject({ maxConcurrent: 3 });
   });
 
   it('acepta tres, deja veinte esperando y rechaza dos de veinticinco', async () => {

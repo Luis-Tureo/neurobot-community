@@ -681,7 +681,7 @@ describe('API administrativa', () => {
       profile: createProfileFromPreset({
         organizationName: 'Privado',
         botName: 'Privado',
-        organizationType: 'Tienda',
+        organizationType: 'Comunidad',
         timezone: 'America/Santiago',
         preset: 'community',
       }),
@@ -692,7 +692,7 @@ describe('API administrativa', () => {
       profile: createProfileFromPreset({
         organizationName: 'Mixto',
         botName: 'Mixto',
-        organizationType: 'Tienda',
+        organizationType: 'Comunidad',
         timezone: 'America/Santiago',
         preset: 'community',
       }),

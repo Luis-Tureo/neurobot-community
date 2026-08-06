@@ -72,8 +72,6 @@ describe('banco y selección de encuestas', () => {
     try {
       const other = database.createBot({
         id: 'comunidad-alternativa',
-        mode: 'mixed',
-        connectorType: 'WHATSAPP_WEB',
         sessionPath: 'data/sessions/comunidad-alternativa',
         profile: createProfileFromPreset({
           organizationName: 'Comunidad alternativa',

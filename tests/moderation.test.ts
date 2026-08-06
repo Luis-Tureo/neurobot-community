@@ -365,17 +365,16 @@ describe('incidentes y advertencias locales', () => {
   });
 });
 
-function createBot(database: AppDatabase, id: string, mode: 'community' | 'business' | 'mixed') {
+function createBot(database: AppDatabase, id: string, _mode: 'community' | 'business' | 'mixed') {
   return database.createBot({
     id,
-    mode,
     sessionPath: `data/sessions/${id}`,
     profile: createProfileFromPreset({
       organizationName: id,
       botName: 'Bot',
-      organizationType: mode === 'community' ? 'Comunidad' : 'Tienda',
+      organizationType: 'Comunidad',
       timezone: 'America/Santiago',
-      preset: mode === 'community' ? 'community' : 'community',
+      preset: 'community',
     }),
   });
 }
