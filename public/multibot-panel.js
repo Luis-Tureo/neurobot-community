@@ -25,8 +25,6 @@ const botConnectionLabels = {
   resetting: 'Restableciendo',
 };
 
-const dayLabels = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-
 const lifecycleLabels = {
   DRAFT: 'Borrador',
   UNLINKED: 'Sin vincular',
@@ -99,10 +97,6 @@ function actionButton(label, className, handler) {
 
 function safeDate(value) {
   return value ? new Date(value).toLocaleString('es-CL') : 'Sin registro';
-}
-
-function botModeLabel() {
-  return 'Comunidad';
 }
 
 function setSection(name) {
@@ -2225,6 +2219,15 @@ function configureForms() {
     } catch (error) {
       notify(error.message, true);
     }
+  });
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new window.FileReader();
+    reader.addEventListener('load', () => resolve(String(reader.result).split(',')[1] || ''));
+    reader.addEventListener('error', () => reject(new Error('No fue posible leer el archivo.')));
+    reader.readAsDataURL(file);
   });
 }
 
