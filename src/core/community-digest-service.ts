@@ -45,6 +45,11 @@ type CommunityDigestServiceOptions = {
   isPaused?: () => boolean;
 };
 
+type DueDigest = {
+  period: CommunityDigestPeriod;
+  scheduledDate: string;
+};
+
 export class CommunityDigestService {
   private readonly botId: string;
   private readonly tickIntervalMs: number;
@@ -95,25 +100,37 @@ export class CommunityDigestService {
   }
 
   public configuration(): CommunityDigestConfiguration {
+    const botTimezone = this.database.getBot(this.botId)?.timezone;
+    const fallbackTimezone =
+      botTimezone !== undefined && isValidTimezone(botTimezone)
+        ? botTimezone
+        : DEFAULT_COMMUNITY_DIGEST_CONFIGURATION.timezone;
     const fallback: CommunityDigestConfiguration = {
       ...DEFAULT_COMMUNITY_DIGEST_CONFIGURATION,
-      timezone:
-        this.database.getBot(this.botId)?.timezone ??
-        DEFAULT_COMMUNITY_DIGEST_CONFIGURATION.timezone,
+      timezone: fallbackTimezone,
     };
     const stored = this.database.getSetting<Partial<CommunityDigestConfiguration>>(
       this.configurationKey(),
       {},
     );
-    return {
+    const configuration: CommunityDigestConfiguration = {
       ...fallback,
       ...stored,
       daily: { ...fallback.daily, ...(stored.daily ?? {}) },
       weekly: { ...fallback.weekly, ...(stored.weekly ?? {}) },
     };
+    return {
+      ...configuration,
+      timezone: isValidTimezone(configuration.timezone)
+        ? configuration.timezone
+        : fallbackTimezone,
+    };
   }
 
   public saveConfiguration(configuration: CommunityDigestConfiguration): void {
+    if (!isValidTimezone(configuration.timezone)) {
+      throw new Error('INVALID_TIMEZONE');
+    }
     this.database.setSetting(this.configurationKey(), configuration);
     this.reconfigure();
     this.event('COMMUNITY_DIGEST_CONFIGURATION_UPDATED', 'updated');
@@ -123,39 +140,43 @@ export class CommunityDigestService {
     if (this.isPaused() || !this.client.isReady()) return;
     const configuration = this.configuration();
     const local = toLocalDateTime(now, configuration.timezone);
-    const due: CommunityDigestPeriod[] = [];
+    const due: DueDigest[] = [];
 
-    if (
-      configuration.daily.enabled &&
-      insideTolerance(
+    if (configuration.daily.enabled) {
+      const scheduledDate = scheduledDateForWindow(
+        local.date,
         local.minuteOfDay,
         configuration.daily.sendTime,
         configuration.daily.toleranceMinutes,
-      )
-    ) {
-      due.push('daily');
+      );
+      if (scheduledDate !== null) due.push({ period: 'daily', scheduledDate });
     }
-    if (
-      configuration.weekly.enabled &&
-      local.weekday === configuration.weekly.weekday &&
-      insideTolerance(
+
+    if (configuration.weekly.enabled) {
+      const scheduledDate = scheduledDateForWindow(
+        local.date,
         local.minuteOfDay,
         configuration.weekly.sendTime,
         configuration.weekly.toleranceMinutes,
-      )
-    ) {
-      due.push('weekly');
+      );
+      if (
+        scheduledDate !== null &&
+        weekdayForCalendarDate(scheduledDate) === configuration.weekly.weekday
+      ) {
+        due.push({ period: 'weekly', scheduledDate });
+      }
     }
+
     if (due.length === 0) return;
 
     const runState = this.database.getSetting<Record<string, string>>(this.runStateKey(), {});
-    for (const period of due) {
+    for (const { period, scheduledDate } of due) {
       for (const groupId of this.database.listActiveBotGroupIds(this.botId)) {
         const marker = `${period}:${this.anonymizer.identifier(groupId)}`;
-        if (runState[marker] === local.date) continue;
+        if (runState[marker] === scheduledDate) continue;
         const result = await this.send(period, groupId, now);
         if (result.status !== 'FAILED') {
-          runState[marker] = local.date;
+          runState[marker] = scheduledDate;
           this.database.setSetting(this.runStateKey(), runState);
         }
       }
@@ -237,6 +258,13 @@ export class CommunityDigestService {
         };
       }
       if (!this.provider.isConfigured()) {
+        this.event(
+          'COMMUNITY_DIGEST_FAILED',
+          'failed',
+          'AI_NOT_CONFIGURED',
+          groupHash,
+          messages.length,
+        );
         return failed(period, 'AI_NOT_CONFIGURED', messages.length);
       }
       const summary = await this.generate(period, messages);
@@ -327,14 +355,24 @@ export class CommunityDigestService {
     groupHash?: string,
     itemCount?: number,
   ): void {
-    this.database.recordTechnicalEvent({
-      botId: this.botId,
-      eventType,
-      result,
-      ...(errorCode === undefined || errorCode === null ? {} : { errorCode }),
-      ...(groupHash === undefined ? {} : { groupHash }),
-      ...(itemCount === undefined ? {} : { itemCount }),
-    });
+    try {
+      this.database.recordTechnicalEvent({
+        botId: this.botId,
+        eventType,
+        result,
+        ...(errorCode === undefined || errorCode === null ? {} : { errorCode }),
+        ...(groupHash === undefined ? {} : { groupHash }),
+        ...(itemCount === undefined ? {} : { itemCount }),
+      });
+    } catch (error) {
+      this.logger.warn(
+        {
+          operation: 'communityDigestTechnicalEvent',
+          ...serializeError(error, 'COMMUNITY_DIGEST_EVENT_PERSISTENCE_FAILED', false),
+        },
+        'No fue posible persistir un evento del resumen comunitario',
+      );
+    }
     this.logger.info(
       {
         operation: eventType,
@@ -360,15 +398,46 @@ function sanitizeBody(value: string): string {
     .slice(0, 1200);
 }
 
-function insideTolerance(
+function scheduledDateForWindow(
+  localDate: string,
   minuteOfDay: number,
   sendTime: string,
   toleranceMinutes: number,
-): boolean {
-  const [hours = 0, minutes = 0] = sendTime.split(':').map(Number);
-  const target = hours * 60 + minutes;
-  const direct = Math.abs(minuteOfDay - target);
-  return Math.min(direct, 1440 - direct) <= toleranceMinutes;
+): string | null {
+  const match = /^(\d{2}):(\d{2})$/u.exec(sendTime);
+  if (match === null) return null;
+  const target = Number(match[1]) * 60 + Number(match[2]);
+  const end = target + toleranceMinutes;
+
+  if (end < 1440) {
+    return minuteOfDay >= target && minuteOfDay <= end ? localDate : null;
+  }
+
+  if (minuteOfDay >= target) return localDate;
+  return minuteOfDay <= end - 1440 ? previousCalendarDate(localDate) : null;
+}
+
+function previousCalendarDate(value: string): string {
+  const [year = 0, month = 1, day = 1] = value.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day) - 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+function weekdayForCalendarDate(value: string): CommunityDigestWeekday {
+  const weekdays: CommunityDigestWeekday[] = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const weekday = weekdays[new Date(`${value}T00:00:00.000Z`).getUTCDay()];
+  if (weekday === undefined) throw new Error('INVALID_CALENDAR_DATE');
+  return weekday;
+}
+
+function isValidTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: value }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function failed(
