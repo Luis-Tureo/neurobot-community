@@ -44,6 +44,25 @@ jobs:
         run: |
           set -euo pipefail
           if [ -f scripts/fix-community-ui-deep.py ]; then
+            python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/fix-community-ui-deep.py')
+          text = path.read_text(encoding='utf-8')
+          old = """        end = text.find(f'</{tag}>', marker_index)
+                  if end < 0:
+                      raise RuntimeError(f'No se encontró </{tag}> para {marker}')
+                  end += len(tag) + 3
+          """
+          new = """        closing = re.search(rf'</{re.escape(tag)}\\s*>', text[marker_index:])
+                  if closing is None:
+                      raise RuntimeError(f'No se encontró cierre de {tag} para {marker}')
+                  end = marker_index + closing.end()
+          """
+          if old not in text:
+              raise SystemExit('No se encontró el analizador HTML que debía corregirse.')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
             python scripts/fix-community-ui-deep.py
           fi
       - name: Format transformed sources
