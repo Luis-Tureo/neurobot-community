@@ -44,6 +44,7 @@ describe('history moderation alerts', () => {
   it('groups violations by person and keeps the report brief', () => {
     const summary = buildHistoryModerationAlert(report);
 
+    expect(summary.text).not.toBeNull();
     expect(summary.offenderCount).toBe(2);
     expect(summary.violationCount).toBe(4);
     expect(summary.text).toContain('Persona Uno — +56911111111');
