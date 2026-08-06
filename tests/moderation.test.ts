@@ -18,17 +18,15 @@ describe('moderación local aislada por asistente', () => {
   });
   afterEach(() => database.close());
 
-  it('muestra el módulo solamente cuando existe canal grupal compatible', () => {
+  it('muestra el módulo en todos los asistentes normalizados como comunidad', () => {
     const visibility = new AssistantModuleVisibilityService();
-    expect(
-      visibility.visibleModules(
-        database.getBot('neurobot') as NonNullable<ReturnType<AppDatabase['getBot']>>,
-      ),
-    ).toContain('moderation');
-    const privateBot = createBot(database, 'negocio-privado', 'business');
-    const mixedBot = createBot(database, 'negocio-mixto', 'mixed');
-    expect(visibility.visibleModules(privateBot)).not.toContain('moderation');
-    expect(visibility.visibleModules(mixedBot)).toContain('moderation');
+    const primary = database.getBot('neurobot')!;
+    const fromBusinessInput = createBot(database, 'comunidad-uno', 'business');
+    const fromMixedInput = createBot(database, 'comunidad-dos', 'mixed');
+    for (const bot of [primary, fromBusinessInput, fromMixedInput]) {
+      expect(bot.mode).toBe('community');
+      expect(visibility.visibleModules(bot)).toContain('moderation');
+    }
   });
 
   it('migra desactivada, sin IA, expulsión ni eliminación automática', () => {

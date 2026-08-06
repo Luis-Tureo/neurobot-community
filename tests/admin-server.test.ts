@@ -522,52 +522,51 @@ describe('API administrativa', () => {
     ).toBe(200);
   });
 
-  it('rechaza módulos comunitarios en un negocio y protege la papelera', async () => {
+  it('normaliza asistentes a comunidad y protege la papelera', async () => {
     const bot = database.createBot({
-      id: 'negocio-aislado',
+      id: 'comunidad-aislada',
       mode: 'business',
       connectorType: 'WHATSAPP_CLOUD_API',
-      sessionPath: 'data/sessions/negocio-aislado',
+      sessionPath: 'data/sessions/comunidad-aislada',
       profile: createProfileFromPreset({
-        organizationName: 'Negocio aislado',
-        botName: 'Bot negocio',
+        organizationName: 'Comunidad aislada',
+        botName: 'Bot comunidad',
         organizationType: 'Comunidad',
         timezone: 'America/Santiago',
         preset: 'community',
       }),
     });
+    expect(bot).toMatchObject({
+      mode: 'community',
+      connectorType: 'WHATSAPP_WEB',
+      groupsEnabled: true,
+      privateMessagesEnabled: false,
+    });
     const auth = await login(app);
-
-    const hiddenModule = await app.inject({
+    const groups = await app.inject({
       method: 'GET',
       url: `/api/bots/${bot.id}/groups`,
       headers: { cookie: auth.cookie },
     });
-    expect(hiddenModule.statusCode).toBe(404);
-    expect(hiddenModule.json()).toMatchObject({ code: 'ASSISTANT_MODULE_NOT_AVAILABLE' });
-
+    expect(groups.statusCode).toBe(200);
     const protectedAssistant = await injectAuthenticated(app, auth, {
       method: 'POST',
       url: '/api/bots/neurobot/trash',
       payload: { password: 'contraseña-de-prueba', confirmationName: 'Neurobot' },
     });
     expect(protectedAssistant.statusCode).toBe(403);
-
     const archived = await injectAuthenticated(app, auth, {
       method: 'POST',
       url: `/api/bots/${bot.id}/trash`,
-      payload: { password: 'contraseña-de-prueba', confirmationName: 'Bot negocio' },
+      payload: { password: 'contraseña-de-prueba', confirmationName: 'Bot comunidad' },
     });
     expect(archived.statusCode).toBe(200);
-    expect(database.getBot(bot.id)?.lifecycleStatus).toBe('ARCHIVED');
-
     const restored = await injectAuthenticated(app, auth, {
       method: 'POST',
       url: `/api/bots/${bot.id}/restore`,
       payload: { confirmed: true },
     });
     expect(restored.statusCode).toBe(200);
-    expect(database.getBot(bot.id)).toMatchObject({ lifecycleStatus: 'DISABLED', enabled: false });
   });
 
   it('administra la capacidad de IA por asistente y protege el simulador', async () => {
@@ -608,7 +607,7 @@ describe('API administrativa', () => {
     expect(simulation.statusCode).toBe(404);
   });
 
-  it('administra moderación local solo en asistentes con canal grupal', async () => {
+  it('administra moderación local en todos los asistentes comunitarios', async () => {
     const auth = await login(app);
     const initial = await app.inject({
       method: 'GET',
@@ -712,7 +711,7 @@ describe('API administrativa', () => {
           headers: { cookie: auth.cookie },
         })
       ).statusCode,
-    ).toBe(404);
+    ).toBe(200);
     expect(
       (
         await app.inject({
