@@ -41,8 +41,12 @@ jobs:
           end = source.index("\n          PY\n", start)
           lines = source[start:end].splitlines()
           code = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
+          code = code.replace(
+              "const [hours, minutes] = sendTime.split(':').map(Number);",
+              "const [hours = 0, minutes = 0] = sendTime.split(':').map(Number);",
+          )
           Path('/tmp/apply-refactor.py').write_text(code, encoding='utf-8')
-          print(f'Extracted {len(lines)} Python lines.')
+          print(f'Extracted and corrected {len(lines)} Python lines.')
           PY
           extract_status=$?
           echo "extract_status=$extract_status" >> "$report"
@@ -56,6 +60,35 @@ jobs:
           echo "patch_status=$patch_status" >> "$report"
 
           if [ "$patch_status" -eq 0 ]; then
+            cat > .github/workflows/validate-main.yml <<'YAML'
+          name: Validate main
+
+          on:
+            push:
+              branches: [main]
+            pull_request:
+            workflow_dispatch:
+
+          permissions:
+            contents: read
+
+          concurrency:
+            group: validate-main-${{ github.ref }}
+            cancel-in-progress: true
+
+          jobs:
+            validate:
+              runs-on: ubuntu-latest
+              timeout-minutes: 30
+              steps:
+                - uses: actions/checkout@v4
+                - uses: actions/setup-node@v4
+                  with:
+                    node-version: '24'
+                    cache: npm
+                - run: npm ci
+                - run: npm run check
+          YAML
             npm ci >> "$report" 2>&1
             install_status=$?
           else
