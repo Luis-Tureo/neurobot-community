@@ -1,13 +1,18 @@
 name: Deep Clean Neurobot Community
+
 on:
-  issues:
-    types: [opened, reopened]
+  pull_request:
+    branches:
+      - main
+    types: [opened, reopened, synchronize]
+
 permissions:
   contents: write
-  issues: write
+  pull-requests: write
+
 jobs:
   clean:
-    if: github.event.issue.title == '[fix-community-tests]'
+    if: github.event.pull_request.head.ref == 'agent/refactor-neurobot-community'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -20,42 +25,31 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: Apply deep cleanup
-        run: |
-          set -euo pipefail
-          python scripts/deep-clean-community-only.py
-          npx prettier --write \
-            src/domain/types.ts src/core/profile-presets.ts src/persistence/database.ts \
-            src/core/multi-bot-manager.ts src/core/bot-instance.ts src/admin/server.ts \
-            public/index.html public/multibot-panel.js tests
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "refactor: remove commercial domain and panel modules" || true
-          git push origin HEAD:agent/refactor-neurobot-community
-      - name: Validate
-        id: validation
+      - name: Apply deep cleanup when pending
         shell: bash
         run: |
-          set +e
-          : > report.txt
-          run_step(){ name="$1"; shift; echo "## $name" >> report.txt; echo '```text' >> report.txt; "$@" >> report.txt 2>&1; code=$?; echo '```' >> report.txt; echo "Exit code: $code" >> report.txt; echo >> report.txt; return $code; }
-          result=0
-          run_step "npm ci" npm ci || result=1
-          if [ "$result" -eq 0 ]; then run_step "Typecheck" npm run typecheck || result=1; fi
-          if [ "$result" -eq 0 ]; then run_step "Lint" npm run lint || result=1; fi
-          if [ "$result" -eq 0 ]; then run_step "Tests" npm test || result=1; fi
-          if [ "$result" -eq 0 ]; then run_step "Build" npm run build || result=1; fi
-          echo "result=$result" >> "$GITHUB_OUTPUT"
-          exit 0
-      - name: Publish
-        uses: actions/github-script@v7
-        env:
-          RESULT: ${{ steps.validation.outputs.result }}
-        with:
-          script: |
-            const fs=require('fs'); let report=fs.readFileSync('report.txt','utf8'); if(report.length>60000) report=report.slice(0,60000)+'\n\n[Registro truncado]';
-            await github.rest.issues.createComment({owner:context.repo.owner,repo:context.repo.repo,issue_number:context.issue.number,body:`${process.env.RESULT==='0'?'✅ Limpieza profunda validada':'❌ La limpieza profunda requiere correcciones'}\n\n${report}`});
-            await github.rest.issues.update({owner:context.repo.owner,repo:context.repo.repo,issue_number:context.issue.number,state:'closed',state_reason:'completed'});
-      - if: steps.validation.outputs.result != '0'
-        run: exit 1
+          set -euo pipefail
+          if grep -q "export type BotMode = 'community' | 'business' | 'mixed'" src/domain/types.ts; then
+            python scripts/deep-clean-community-only.py
+            npx prettier --write \
+              src/domain/types.ts src/core/profile-presets.ts src/persistence/database.ts \
+              src/core/multi-bot-manager.ts src/core/bot-instance.ts src/admin/server.ts \
+              public/index.html public/multibot-panel.js tests
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "refactor: remove commercial domain and panel modules"
+            git push origin HEAD:agent/refactor-neurobot-community
+          else
+            echo "La limpieza profunda ya está aplicada."
+          fi
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Tests
+        run: npm test
+      - name: Build
+        run: npm run build
