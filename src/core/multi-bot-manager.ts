@@ -102,21 +102,20 @@ export class MultiBotManager {
         onDuplicateIdentity: async (duplicateBotId) => {
           const duplicateBot = this.database.getBot(duplicateBotId);
           if (duplicateBot === null) return;
-          const backupPath = await this.sessions.archive(duplicateBot);
+          await this.sessions.clear(duplicateBot);
           this.instances.delete(duplicateBotId);
           this.started.delete(duplicateBotId);
           this.database.recordTechnicalEvent({
             botId: duplicateBotId,
             eventType: 'TEMPORARY_SESSION_CLEANED',
-            result: 'archived',
+            result: 'cleared',
           });
           this.logger.warn(
             {
               operation: 'TEMPORARY_SESSION_CLEANED',
               botId: duplicateBotId,
-              backupCreated: Boolean(backupPath),
             },
-            'La sesión temporal duplicada fue aislada sin afectar al asistente existente',
+            'La sesión temporal duplicada fue eliminada sin afectar al asistente existente',
           );
         },
       },
