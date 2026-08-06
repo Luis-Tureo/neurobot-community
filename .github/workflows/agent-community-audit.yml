@@ -1,0 +1,76 @@
+name: Agent Community Audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/agent-community-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Capture repository inventory
+        shell: bash
+        run: |
+          mkdir -p agent-audit
+          find . -path './.git' -prune -o -path './node_modules' -prune -o -type f -print | sort > agent-audit/files.txt
+          git log --oneline -40 > agent-audit/recent-commits.txt
+          git status --short > agent-audit/git-status.txt
+          {
+            echo '# Feature search'
+            echo
+            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones'; do
+              echo "## $term"
+              grep -RniI --exclude-dir=.git --exclude-dir=node_modules --exclude='package-lock.json' "$term" . || true
+              echo
+            done
+          } > agent-audit/feature-search.txt
+
+      - name: Run validation
+        id: validation
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run check 2>&1 | tee agent-audit/npm-check.txt
+
+      - name: Copy source snapshot
+        shell: bash
+        run: |
+          mkdir -p agent-audit/source
+          rsync -a \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='agent-audit/source' \
+            ./ agent-audit/source/
+
+      - name: Upload audit bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: neurobot-community-audit
+          path: agent-audit
+          retention-days: 3
+
+      - name: Fail if validation failed
+        if: steps.validation.outcome != 'success'
+        run: exit 1
