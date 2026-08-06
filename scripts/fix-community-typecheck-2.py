@@ -15,6 +15,8 @@ server = server.replace("import { mkdir, readFile, rename, writeFile } from 'nod
 for name in ('menuSchema', 'menuOptionSchema', 'catalogCategorySchema', 'catalogItemSchema', 'businessHourSchema', 'manualBotTestSchema'):
     pattern = re.compile(rf"const {name} = z[\s\S]*?\.strict\(\);\n\n")
     server, _ = pattern.subn('', server, count=1)
+route_pattern = re.compile(r"^  app\.(?:get|post|put|patch|delete)\((?P<body>[\s\S]*?)^  \);\n", re.M)
+server = route_pattern.sub(lambda match: '' if '/menu-options' in match.group('body') else match.group(0), server)
 write('src/admin/server.ts', server)
 
 bot = read('src/core/bot-instance.ts')
@@ -22,6 +24,7 @@ bot = bot.replace("      bot.id,\n      undefined,\n      this.outboundQueue,", 
 write('src/core/bot-instance.ts', bot)
 
 processor = read('src/core/message-processor.ts')
+processor = processor.replace("import { normalizeText } from '../utils/text.js';\n", '')
 processor = re.sub(
     r"    if \(!message\.mentionsBot && !aliasMentioned\) \{[\s\S]*?      return 'ignored';\n    \}\n\n    const activationType",
     "    if (!message.mentionsBot && !aliasMentioned) {\n"
@@ -44,12 +47,7 @@ processor = re.sub(
 write('src/core/message-processor.ts', processor)
 
 database = read('src/persistence/database.ts')
-database = re.sub(
-    r"\nfunction normalizeMenuAlias\([\s\S]*?\n\}\n",
-    "\n",
-    database,
-    count=1,
-)
+database = re.sub(r"\nfunction normalizeMenuAlias\([\s\S]*?\n\}\n", "\n", database, count=1)
 write('src/persistence/database.ts', database)
 
 for relative in ('tests/admin-server.test.ts', 'tests/moderation.test.ts'):
