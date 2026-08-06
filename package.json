@@ -10,6 +10,9 @@
     "npm": ">=11.0.0"
   },
   "scripts": {
+    "preinstall": "node scripts/verify-runtime.mjs",
+    "runtime:check": "node scripts/verify-runtime.mjs",
+    "node:update:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update-node-windows.ps1",
     "setup": "tsx scripts/setup.ts",
     "dev": "tsx src/index.ts",
     "dev:watch": "tsx watch src/index.ts",
@@ -22,7 +25,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run lint && npm run test && npm run build",
+    "check": "npm run runtime:check && npm run typecheck && npm run lint && npm run test && npm run build",
     "smoke": "tsx scripts/smoke.ts",
     "db:init": "tsx scripts/init-db.ts",
     "admin:reset": "tsx scripts/reset-admin.ts"
