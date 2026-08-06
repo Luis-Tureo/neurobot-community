@@ -29,7 +29,19 @@ jobs:
         run: npm ci
 
       - name: Load verified transformation
-        run: curl --fail --silent --show-error --location https://raw.githubusercontent.com/Luis-Tureo/neurobot-business/c2bffc53e0c8a58aa0f9db2d60f0d5d9ae3c7cee/scripts/remove-backup-system.py --output scripts/remove-backup-system.py
+        shell: bash
+        run: |
+          curl --fail --silent --show-error --location https://raw.githubusercontent.com/Luis-Tureo/neurobot-business/c2bffc53e0c8a58aa0f9db2d60f0d5d9ae3c7cee/scripts/remove-backup-system.py --output scripts/remove-backup-system.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/remove-backup-system.py')
+          text = path.read_text(encoding='utf-8')
+          old = r'backupReference: string,\s*\): void'
+          new = r'backupReference: string,?\s*\): void'
+          if old not in text:
+              raise SystemExit('No se encontró el patrón de firma esperado.')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
 
       - name: Remove backup system
         run: python scripts/remove-backup-system.py
