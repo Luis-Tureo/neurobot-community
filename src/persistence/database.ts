@@ -2202,47 +2202,7 @@ export class AppDatabase {
          ) VALUES ('neurobot', 'global', NULL, NULL, ?)`,
       )
       .run(now);
-    const initialMenu = this.db
-      .prepare("SELECT id FROM menu_definitions WHERE bot_id = 'neurobot' AND is_initial = 1")
-      .get() as { id: number } | undefined;
-    if (initialMenu === undefined) {
-      const result = this.db
-        .prepare(
-          `INSERT INTO menu_definitions(
-             bot_id, parent_menu_id, title, message, help_text, enabled, is_initial,
-             expiration_minutes, created_at, updated_at
-           ) VALUES ('neurobot', NULL, 'Información',
-             'Puedo ayudarte con normas, grupos, actividades y contacto. ¿Qué deseas consultar?',
-             'Selecciona una opción.', 1, 1, 15, ?, ?)`,
-        )
-        .run(now, now);
-      const menuId = Number(result.lastInsertRowid);
-      const insertOption = this.db.prepare(
-        `INSERT INTO menu_options(
-           bot_id, menu_id, label, aliases, option_order, action_type, action_payload,
-           enabled, created_at, updated_at
-         ) VALUES ('neurobot', ?, ?, ?, ?, 'knowledge', ?, 1, ?, ?)`,
-      );
-      const options = [
-        ['Normas', ['reglas'], 'normas'],
-        ['Grupos disponibles', ['grupos'], 'grupos disponibles'],
-        ['Actividades', ['actividad'], 'actividades'],
-        ['Horarios', ['horario'], 'horarios'],
-        ['Contacto', ['contactar'], 'contacto'],
-        ['Preguntas frecuentes', ['ayuda', 'opciones'], 'preguntas frecuentes'],
-      ] as const;
-      options.forEach(([label, aliases, query], index) =>
-        insertOption.run(
-          menuId,
-          label,
-          JSON.stringify(aliases),
-          index + 1,
-          JSON.stringify({ query }),
-          now,
-          now,
-        ),
-      );
-    }
+
   }
 
   private seedBotScopedAutomationPlatform(): void {
