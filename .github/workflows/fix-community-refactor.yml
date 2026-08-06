@@ -1,0 +1,69 @@
+name: Fix Neurobot Community Refactor
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  fix:
+    if: github.event.issue.title == '[fix-community-refactor]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/refactor-neurobot-community
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Apply fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/fix-community-typecheck.py
+          npx prettier --write \
+            src/admin/server.ts src/core/message-processor.ts src/persistence/database.ts \
+            tests/assistant-platform.test.ts tests/admin-server.test.ts \
+            tests/moderation.test.ts tests/message-processor.test.ts \
+            tests/community-only-boundaries.test.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "refactor: remove remaining business code paths" || true
+          git push origin HEAD:agent/refactor-neurobot-community
+      - name: Validate
+        id: validate
+        shell: bash
+        run: |
+          set +e
+          : > fix-report.txt
+          run_step() { name="$1"; shift; echo "## $name" >> fix-report.txt; echo '```text' >> fix-report.txt; "$@" >> fix-report.txt 2>&1; status=$?; echo '```' >> fix-report.txt; echo "Exit code: $status" >> fix-report.txt; echo >> fix-report.txt; return $status; }
+          overall=0
+          run_step "npm ci" npm ci || overall=1
+          if [ "$overall" -eq 0 ]; then run_step "Typecheck" npm run typecheck || overall=1; fi
+          if [ "$overall" -eq 0 ]; then run_step "Lint" npm run lint || overall=1; fi
+          if [ "$overall" -eq 0 ]; then run_step "Tests" npm test || overall=1; fi
+          if [ "$overall" -eq 0 ]; then run_step "Build" npm run build || overall=1; fi
+          echo "overall=$overall" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Publish report
+        uses: actions/github-script@v7
+        env:
+          RESULT: ${{ steps.validate.outputs.overall }}
+        with:
+          script: |
+            const fs = require('fs');
+            let report = fs.readFileSync('fix-report.txt', 'utf8');
+            if (report.length > 60000) report = `${report.slice(0,60000)}\n\n[Registro truncado]`;
+            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body: `${process.env.RESULT === '0' ? '✅ Corrección validada' : '❌ Quedan correcciones'}\n\n${report}` });
+            await github.rest.issues.update({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, state: 'closed', state_reason: 'completed' });
+      - name: Fail if needed
+        if: steps.validate.outputs.overall != '0'
+        run: exit 1
