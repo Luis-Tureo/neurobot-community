@@ -1,0 +1,49 @@
+name: Audit Final Neurobot Community Boundaries
+on:
+  issues:
+    types: [opened, reopened]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  audit:
+    if: github.event.issue.title == '[audit-community-final]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/refactor-neurobot-community
+      - name: Generate report
+        shell: bash
+        run: |
+          set +e
+          : > audit-final.txt
+          echo '## Archivos potencialmente empresariales o Meta' >> audit-final.txt
+          find src public tests docs scripts -type f 2>/dev/null | grep -Ei 'cloud|meta|catalog|business|conversation-flow|interactive-message|reservation|request|hours|menu' | sort >> audit-final.txt || true
+          echo >> audit-final.txt
+          echo '## Referencias Meta/Cloud API' >> audit-final.txt
+          grep -RInE --exclude-dir=.git --exclude='package-lock.json' --exclude='audit-final.txt' 'WHATSAPP_CLOUD_API|graph\.facebook|Cloud API|Meta API|phoneNumberId|accessToken|verifyToken|webhook' src public tests docs scripts README.md .env.example package.json 2>/dev/null >> audit-final.txt || true
+          echo >> audit-final.txt
+          echo '## Referencias funcionales de negocio' >> audit-final.txt
+          grep -RInE --exclude-dir=.git --exclude='package-lock.json' --exclude='audit-final.txt' 'BUSINESS_PRIVATE|BUSINESS_MIXED|mode: .business.|mode: .mixed.|catalog|catálogo|menuOption|menu-options|businessHours|horarios comerciales|humanAssistance|atención humana|reservation|reserva|shipping|despacho|payment|formas de pago|privateMessagesEnabled: true|privateChatsEnabled: true|conversationContinuationEnabled: true|interactiveMenusEnabled: true' src public tests docs scripts README.md 2>/dev/null >> audit-final.txt || true
+          echo >> audit-final.txt
+          echo '## Rutas API publicadas' >> audit-final.txt
+          grep -nE "app\.(get|post|put|patch|delete)\(" src/admin/server.ts -A2 | grep -E "'/api|\"/api" >> audit-final.txt || true
+          echo >> audit-final.txt
+          echo '## Secciones y navegación del panel' >> audit-final.txt
+          grep -nE 'data-section=|id="section-|value="(menus|catalog|media|hours|requests)' public/index.html >> audit-final.txt || true
+          echo >> audit-final.txt
+          echo '## Resumen' >> audit-final.txt
+          echo "Cloud adapter present: $(test -e src/messaging/whatsapp-cloud-api-adapter.ts && echo YES || echo NO)" >> audit-final.txt
+          echo "Conversation flow present: $(test -e src/core/conversation-flow-service.ts && echo YES || echo NO)" >> audit-final.txt
+          echo "Catalog service present: $(test -e src/core/catalog-service.ts && echo YES || echo NO)" >> audit-final.txt
+          echo "Business hours service present: $(test -e src/core/business-hours-service.ts && echo YES || echo NO)" >> audit-final.txt
+          echo "Interactive message adapter present: $(test -e src/core/interactive-message-adapter.ts && echo YES || echo NO)" >> audit-final.txt
+      - name: Publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs=require('fs'); let report=fs.readFileSync('audit-final.txt','utf8'); if(report.length>60000) report=report.slice(0,60000)+'\n\n[Informe truncado]';
+            await github.rest.issues.createComment({owner:context.repo.owner,repo:context.repo.repo,issue_number:context.issue.number,body:report});
+            await github.rest.issues.update({owner:context.repo.owner,repo:context.repo.repo,issue_number:context.issue.number,state:'closed',state_reason:'completed'});
