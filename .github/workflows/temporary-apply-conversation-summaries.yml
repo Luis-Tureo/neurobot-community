@@ -1,0 +1,65 @@
+name: Temporary conversation summary validation
+
+on:
+  pull_request:
+    branches:
+      - agent/refactor-neurobot-community
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: github.head_ref == 'agent/conversation-summaries'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/conversation-summaries
+
+      - name: Apply integration patches
+        run: python scripts/apply-conversation-summaries.py
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Format changed files
+        run: |
+          npx prettier --write \
+            README.md \
+            public/index.html \
+            public/multibot-panel.js \
+            public/conversation-summaries.js \
+            public/conversation-summaries.css \
+            src/index.ts \
+            src/admin/conversation-summary-routes.ts \
+            src/core/bot-instance.ts \
+            src/core/conversation-summary-service.ts \
+            src/core/message-processor.ts \
+            src/core/multi-bot-manager.ts \
+            tests/conversation-summary-service.test.ts
+
+      - name: Validate project
+        run: npm run check
+
+      - name: Commit validated feature
+        run: |
+          rm -f scripts/apply-conversation-summaries.py
+          rm -f scripts/.conversation-summary-trigger
+          rm -f .github/workflows/apply-conversation-summaries.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "feat: integrate AI conversation summaries"
+            git push origin HEAD:agent/conversation-summaries
+          fi
