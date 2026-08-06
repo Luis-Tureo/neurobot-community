@@ -1,0 +1,97 @@
+name: Fix no-backup residuals
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.head_ref == 'agent/refactor-neurobot-community' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout community branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/refactor-neurobot-community
+
+      - name: Remove remaining backup calls
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          server = Path('src/admin/server.ts')
+          server_text = server.read_text(encoding='utf-8')
+          old_import = "import { basename, dirname, join, resolve } from 'node:path';"
+          if old_import not in server_text:
+              raise SystemExit('No se encontró el import de dirname esperado.')
+          server.write_text(
+              server_text.replace(old_import, "import { basename, join, resolve } from 'node:path';", 1),
+              encoding='utf-8',
+          )
+
+          manager = Path('src/core/multi-bot-manager.ts')
+          manager_text = manager.read_text(encoding='utf-8')
+          old_block = """          const backupPath = await this.sessions.archive(duplicateBot);
+          this.instances.delete(duplicateBotId);
+          this.started.delete(duplicateBotId);
+          this.database.recordTechnicalEvent({
+            botId: duplicateBotId,
+            eventType: 'TEMPORARY_SESSION_CLEANED',
+            result: 'archived',
+          });
+          this.logger.warn(
+            {
+              operation: 'TEMPORARY_SESSION_CLEANED',
+              botId: duplicateBotId,
+              backupCreated: Boolean(backupPath),
+            },
+            'La sesión temporal duplicada fue aislada sin afectar al asistente existente',
+          );"""
+          new_block = """          await this.sessions.clear(duplicateBot);
+          this.instances.delete(duplicateBotId);
+          this.started.delete(duplicateBotId);
+          this.database.recordTechnicalEvent({
+            botId: duplicateBotId,
+            eventType: 'TEMPORARY_SESSION_CLEANED',
+            result: 'cleared',
+          });
+          this.logger.warn(
+            {
+              operation: 'TEMPORARY_SESSION_CLEANED',
+              botId: duplicateBotId,
+            },
+            'La sesión temporal duplicada fue eliminada sin afectar al asistente existente',
+          );"""
+          if old_block not in manager_text:
+              raise SystemExit('No se encontró el bloque de archivado duplicado esperado.')
+          manager.write_text(manager_text.replace(old_block, new_block, 1), encoding='utf-8')
+          PY
+
+      - name: Format and commit
+        shell: bash
+        run: |
+          npx prettier --write src/admin/server.ts src/core/multi-bot-manager.ts
+          rm -f .github/workflows/fix-no-backup-residuals.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Eliminar residuos del archivado de sesiones"
+          git push origin HEAD:agent/refactor-neurobot-community
+
+      - name: Typecheck
+        run: npm ci && npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
