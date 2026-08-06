@@ -1,4 +1,4 @@
-name: Align Neurobot Community Tests
+name: Deep Clean Neurobot Community
 on:
   issues:
     types: [opened, reopened]
@@ -6,10 +6,10 @@ permissions:
   contents: write
   issues: write
 jobs:
-  align:
+  clean:
     if: github.event.issue.title == '[fix-community-tests]'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,15 +20,18 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: Align tests
+      - name: Apply deep cleanup
         run: |
           set -euo pipefail
-          python scripts/fix-community-tests.py
-          npx prettier --write tests/admin-server.test.ts tests/moderation.test.ts tests/panel-usability.test.ts tests/knowledge-panel-ui.test.ts tests/moderation-ui.test.ts tests/answer-cache-ui.test.ts
+          python scripts/deep-clean-community-only.py
+          npx prettier --write \
+            src/domain/types.ts src/core/profile-presets.ts src/persistence/database.ts \
+            src/core/multi-bot-manager.ts src/core/bot-instance.ts src/admin/server.ts \
+            public/index.html public/multibot-panel.js tests
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "test: align coverage with community-only architecture" || true
+          git commit -m "refactor: remove commercial domain and panel modules" || true
           git push origin HEAD:agent/refactor-neurobot-community
       - name: Validate
         id: validation
@@ -52,7 +55,7 @@ jobs:
         with:
           script: |
             const fs=require('fs'); let report=fs.readFileSync('report.txt','utf8'); if(report.length>60000) report=report.slice(0,60000)+'\n\n[Registro truncado]';
-            await github.rest.issues.createComment({owner:context.repo.owner,repo:context.repo.repo,issue_number:context.issue.number,body:`${process.env.RESULT==='0'?'✅ Pruebas comunitarias validadas':'❌ Quedan correcciones en pruebas'}\n\n${report}`});
+            await github.rest.issues.createComment({owner:context.repo.owner,repo:context.repo.repo,issue_number:context.issue.number,body:`${process.env.RESULT==='0'?'✅ Limpieza profunda validada':'❌ La limpieza profunda requiere correcciones'}\n\n${report}`});
             await github.rest.issues.update({owner:context.repo.owner,repo:context.repo.repo,issue_number:context.issue.number,state:'closed',state_reason:'completed'});
       - if: steps.validation.outputs.result != '0'
         run: exit 1
