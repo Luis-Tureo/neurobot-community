@@ -1,0 +1,65 @@
+.summary-privacy-note {
+  margin-bottom: 1rem;
+}
+
+.summary-settings {
+  margin-bottom: 1rem;
+}
+
+.summary-schedule-grid,
+.summary-two-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.summary-schedule-grid fieldset {
+  min-width: 0;
+  margin: 0;
+}
+
+.summary-schedule-grid label + label {
+  margin-top: 0.75rem;
+}
+
+.summary-two-columns {
+  align-items: start;
+}
+
+.summary-group-row {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.summary-result {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.summary-result-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.summary-text {
+  margin: 0;
+  white-space: pre-line;
+}
+
+@media (max-width: 760px) {
+  .summary-schedule-grid,
+  .summary-two-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-group-row,
+  .summary-result-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
