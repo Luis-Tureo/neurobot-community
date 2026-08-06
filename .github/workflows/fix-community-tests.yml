@@ -39,13 +39,20 @@ jobs:
           else
             echo "La limpieza profunda ya está aplicada."
           fi
+      - name: Repair transformed community UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f scripts/fix-community-ui-deep.py ]; then
+            python scripts/fix-community-ui-deep.py
+          fi
       - name: Format transformed sources
         run: |
           npx prettier --write \
             src/domain/types.ts src/core/profile-presets.ts src/persistence/database.ts \
             src/core/multi-bot-manager.ts src/core/bot-instance.ts src/admin/server.ts \
             public/index.html public/multibot-panel.js tests
-      - name: Commit formatting
+      - name: Commit corrected sources
         shell: bash
         run: |
           set -euo pipefail
@@ -53,7 +60,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "style: format community-only refactor"
+            git commit -m "fix: repair community-only panel after deep cleanup"
             git push origin HEAD:agent/refactor-neurobot-community
           fi
       - name: Install dependencies
