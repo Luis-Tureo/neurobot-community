@@ -8,7 +8,9 @@ describe('persistencia SQLite', () => {
     const database = new AppDatabase(':memory:');
     database.migrate();
     database.migrate();
-    expect(database.getMigrationVersions()).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    expect(database.getMigrationVersions()).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+    ]);
     expect(database.getBotProfile('neurobot')).toMatchObject({
       botName: 'Neurobot',
       activationAlias: '@neurobot',
@@ -192,18 +194,26 @@ describe('persistencia SQLite', () => {
       });
       configuration.welcome.template = 'Hola {name} en {groupName}';
       database.saveAutomaticMessageConfiguration(configuration, 'neurobot');
-      database.saveWelcomeGroupSetting('grupo-anonimo', {
-        enabled: true,
-        customTemplate: 'Bienvenida {mention}',
-        inheritAssistantTemplate: false,
-      }, 'neurobot');
-      expect(database.getAutomaticMessageConfiguration('neurobot').welcome.template).toBe('Hola {name} en {groupName}');
+      database.saveWelcomeGroupSetting(
+        'grupo-anonimo',
+        {
+          enabled: true,
+          customTemplate: 'Bienvenida {mention}',
+          inheritAssistantTemplate: false,
+        },
+        'neurobot',
+      );
+      expect(database.getAutomaticMessageConfiguration('neurobot').welcome.template).toBe(
+        'Hola {name} en {groupName}',
+      );
       expect(database.getWelcomeGroupSetting('grupo-anonimo', 'neurobot')).toEqual({
         enabled: true,
         customTemplate: 'Bienvenida {mention}',
         inheritAssistantTemplate: false,
       });
-      expect(JSON.stringify(database.listWelcomeGroupSettings('neurobot'))).not.toMatch(/@(?:c\.us|lid)/u);
+      expect(JSON.stringify(database.listWelcomeGroupSettings('neurobot'))).not.toMatch(
+        /@(?:c\.us|lid)/u,
+      );
     } finally {
       database.close();
     }

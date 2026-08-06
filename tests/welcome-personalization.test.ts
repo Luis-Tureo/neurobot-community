@@ -42,10 +42,16 @@ describe('personalización segura de bienvenidas', () => {
 
   it('rechaza variables desconocidas y renderiza solamente las permitidas', () => {
     expect(() => validateWelcomeTemplate('Hola {codigo}')).toThrow('variable');
-    expect(renderWelcomeTemplate('Hola {name} en {groupName}', {
-      name: 'María', mention: '@María', communityName: 'Comunidad', groupName: 'General',
-      assistantName: 'Neurobot', botAlias: '@neurobot',
-    })).toBe('Hola María en General');
+    expect(
+      renderWelcomeTemplate('Hola {name} en {groupName}', {
+        name: 'María',
+        mention: '@María',
+        communityName: 'Comunidad',
+        groupName: 'General',
+        assistantName: 'Neurobot',
+        botAlias: '@neurobot',
+      }),
+    ).toBe('Hola María en General');
   });
 
   it('agrupa nombres sin duplicarlos', () => {

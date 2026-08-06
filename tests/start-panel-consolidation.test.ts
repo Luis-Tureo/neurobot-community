@@ -10,7 +10,7 @@ describe('inicio consolidado y carga automática de asistentes', () => {
   it('deja un solo módulo de inicio y los grupos del menú parten cerrados', () => {
     expect(friendly).toContain("label: 'Inicio'");
     expect(friendly).toContain("description: 'Estado, conexión y grupos'");
-    expect(friendly).toContain("open: false");
+    expect(friendly).toContain('open: false');
     expect(friendly).not.toContain("label: 'Inicio y conexión'");
     expect(friendly).not.toContain("{ section: 'whatsapp', label: 'Conexión de WhatsApp'");
     expect(friendly).not.toContain('observer.observe(tabs');
@@ -38,9 +38,9 @@ describe('inicio consolidado y carga automática de asistentes', () => {
 
   it('carga los asistentes aunque falle el módulo de administradores y evita inicializaciones duplicadas', () => {
     expect(app).toContain('let administratorsError = null');
-    expect(app.indexOf("window.dispatchEvent(new window.CustomEvent('multibot-panel-load'))")).toBeGreaterThan(
-      app.indexOf('administratorsError = error'),
-    );
+    expect(
+      app.indexOf("window.dispatchEvent(new window.CustomEvent('multibot-panel-load'))"),
+    ).toBeGreaterThan(app.indexOf('administratorsError = error'));
     expect(multibot).toContain('let initializationPromise = null');
     expect(multibot).toContain('requestMultibotInitialization');
     expect(multibot).toContain('assistantsEmpty');

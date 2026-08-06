@@ -28,7 +28,9 @@ describe('panel minimalista para comunidad', () => {
     expect(script).toContain('Ver banco de encuestas');
     expect(script).toContain('Probar encuesta');
     expect(script).toContain("hide($('#restore-poll-defaults'))");
-    expect(script).toContain("hide(labelForField($('#poll-configuration-form'), 'toleranceMinutes'))");
+    expect(script).toContain(
+      "hide(labelForField($('#poll-configuration-form'), 'toleranceMinutes'))",
+    );
     expect(script).toContain("hide(labelForField($('#poll-configuration-form'), 'selectionMode'))");
     expect(script).toContain('hide(overrideArticle)');
   });
@@ -46,6 +48,6 @@ describe('panel minimalista para comunidad', () => {
   });
 
   it('carga la nueva capa desde el panel amigable', () => {
-    expect(friendly).toContain("minimal-community-panel.js");
+    expect(friendly).toContain('minimal-community-panel.js');
   });
 });

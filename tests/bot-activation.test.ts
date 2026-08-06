@@ -69,11 +69,15 @@ describe('detector central de activación', () => {
   );
 
   it('acepta alias adicionales configurados sin coincidencias parciales', () => {
-    expect(detectBotActivation(message('@neuroayuda normas'), null, ['@neurobot', '@neuroayuda'])).toMatchObject({
+    expect(
+      detectBotActivation(message('@neuroayuda normas'), null, ['@neurobot', '@neuroayuda']),
+    ).toMatchObject({
       type: 'TEXT_ALIAS',
       question: 'normas',
       detectedAlias: '@neuroayuda',
     });
-    expect(detectBotActivation(message('@neuroayudante normas'), null, ['@neuroayuda']).type).toBe('NOT_ACTIVATED');
+    expect(detectBotActivation(message('@neuroayudante normas'), null, ['@neuroayuda']).type).toBe(
+      'NOT_ACTIVATED',
+    );
   });
 });

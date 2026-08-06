@@ -27,10 +27,10 @@ def remove_element_containing(text: str, tag: str, marker: str) -> str:
         start = text.rfind(f'<{tag}', 0, marker_index)
         if start < 0:
             raise RuntimeError(f'No se encontró <{tag}> para {marker}')
-        end = text.find(f'</{tag}>', marker_index)
-        if end < 0:
-            raise RuntimeError(f'No se encontró </{tag}> para {marker}')
-        end += len(tag) + 3
+        closing = re.search(rf'</{re.escape(tag)}\s*>', text[marker_index:])
+        if closing is None:
+            raise RuntimeError(f'No se encontró cierre de {tag} para {marker}')
+        end = marker_index + closing.end()
         while end < len(text) and text[end] in ' \t':
             end += 1
         if end < len(text) and text[end] == '\n':

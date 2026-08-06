@@ -139,7 +139,6 @@ function setBotNavigationAvailable(available) {
   document.querySelector('#assistant-context')?.classList.toggle('hidden', !available);
 }
 
-
 function applyBotModules(modules = []) {
   const allowed = new Set([
     'overview',
@@ -195,7 +194,7 @@ function updateAssistantContext() {
   if (!panelState.bot || !panelState.profile) return;
   document.querySelector('#assistant-context-name').textContent = panelState.profile.botName;
   document.querySelector('#assistant-context-detail').textContent = [
-    botModeLabel(panelState.bot.mode),
+    'Comunidad',
     lifecycleLabels[panelState.bot.lifecycleStatus] || panelState.bot.lifecycleStatus,
     panelState.bot.phoneNumber || 'Sin número vinculado',
   ].join(' · ');
@@ -851,12 +850,6 @@ async function loadBotSummary(refreshForms = true) {
           : 'Configurada e inactiva'
         : 'No configurada',
     ],
-    [
-      'Modo',
-      result.bot.operatingMode === 'COMMUNITY_GROUPS'
-        ? 'Comunidad — pregunta única'
-        : botModeLabel(result.bot.mode),
-    ],
     ['Grupos activos', result.groups.filter((group) => group.active && !group.blocked).length],
     ['Consultas hoy', result.usage.requests],
     ['Tokens hoy', result.usage.totalTokens],
@@ -925,32 +918,9 @@ async function loadBotSummary(refreshForms = true) {
 
 function fillBotConfiguration(bot) {
   const form = document.querySelector('#bot-configuration-form');
-  form.elements.mode.value = 'community';
-  form.elements.menuType.value = bot.menuType;
-  [
-    'enabled',
-    'groupsEnabled',
-    'privateMessagesEnabled',
-    'realMentionRequired',
-    'continuedConversationsEnabled',
-  ].forEach((field) => {
-    form.elements[field].checked = Boolean(bot[field]);
-  });
-  const singleTurnCommunity = Boolean(bot.capabilities.communitySingleTurnMode);
-  form.elements.mode.disabled = true;
-  form.elements.menuType.disabled = !bot.capabilities.interactiveMenusEnabled;
-  form.elements.privateMessagesEnabled.checked = false;
-  form.elements.privateMessagesEnabled.disabled = true;
-  form.elements.realMentionRequired.checked = singleTurnCommunity || bot.realMentionRequired;
-  form.elements.realMentionRequired.disabled = singleTurnCommunity;
-  form.elements.continuedConversationsEnabled.checked =
-    bot.capabilities.conversationContinuationEnabled && bot.continuedConversationsEnabled;
-  form.elements.continuedConversationsEnabled.disabled =
-    !bot.capabilities.conversationContinuationEnabled;
-  document.querySelector('#community-menu-help').classList.toggle('hidden', !singleTurnCommunity);
-  document
-    .querySelector('#community-single-turn-settings')
-    .classList.toggle('hidden', !singleTurnCommunity);
+  form.elements.enabled.checked = Boolean(bot.enabled);
+  form.elements.groupsEnabled.checked = true;
+  form.elements.realMentionRequired.checked = true;
 }
 
 function fillActivationAliases(aliases = []) {
@@ -1325,56 +1295,6 @@ function fillKnowledgeEntry(entry) {
   window.setTimeout(() => form.elements.title.focus(), 250);
 }
 
-
-
-
-
-function formatMoney(amount, currency) {
-  return new Intl.NumberFormat('es-CL', { style: 'currency', currency }).format(amount / 100);
-}
-
-
-
-
-
-,
-) {
-  const row = node('article', undefined, 'list-item hour-row');
-  const fields = node('div', undefined, 'hour-fields');
-  const weekday = document.createElement('select');
-  weekday.dataset.field = 'weekday';
-  dayLabels.forEach((label, index) => weekday.add(new window.Option(label, String(index))));
-  weekday.value = hour.weekday === null ? '' : String(hour.weekday);
-  const date = document.createElement('input');
-  date.type = 'date';
-  date.dataset.field = 'localDate';
-  date.value = hour.localDate || '';
-  const opening = document.createElement('input');
-  opening.type = 'time';
-  opening.dataset.field = 'openingTime';
-  opening.value = hour.openingTime || '';
-  const closing = document.createElement('input');
-  closing.type = 'time';
-  closing.dataset.field = 'closingTime';
-  closing.value = hour.closingTime || '';
-  const label = document.createElement('input');
-  label.dataset.field = 'label';
-  label.placeholder = 'Etiqueta o feriado';
-  label.value = hour.label || '';
-  const closedLabel = node('label', undefined, 'toggle');
-  const closed = document.createElement('input');
-  closed.type = 'checkbox';
-  closed.dataset.field = 'closed';
-  closed.checked = hour.closed;
-  closedLabel.append(closed, document.createTextNode(' Cerrado'));
-  fields.append(weekday, date, opening, closing, label, closedLabel);
-  row.append(
-    fields,
-    actionButton('Quitar', 'danger', () => row.remove()),
-  );
-  document.querySelector('#hours-editor').append(row);
-}
-
 async function loadAI() {
   if (!panelState.selectedBotId) return;
   const [result, global] = await Promise.all([
@@ -1614,7 +1534,6 @@ async function loadTrash() {
   });
 }
 
-
 function lines(value) {
   return value
     .split(/\r?\n/u)
@@ -1632,13 +1551,6 @@ function normalizeBotIdentifier(value) {
     .replace(/^-|-$/gu, '');
   if (normalized && !/^[a-z]/u.test(normalized)) normalized = `bot-${normalized}`;
   return normalized.slice(0, 40).replace(/-$/u, '');
-}
-
-function clearForm(form, defaults = {}) {
-  form.reset();
-  Object.entries(defaults).forEach(([field, value]) => {
-    form.elements[field].value = value;
-  });
 }
 
 function configureForms() {
@@ -2315,9 +2227,6 @@ function configureForms() {
     }
   });
 }
-
-
-
 
 let configured = false;
 let initializationPromise = null;

@@ -13,7 +13,9 @@ class FakeWhatsAppClient extends EventEmitter {
   public readonly getState = vi.fn(async () => 'CONNECTED');
   public readonly getChats = vi.fn(async () => this.chats);
   public readonly getChatById = vi.fn(async (chatId: string) => this.chatsById.get(chatId));
-  public readonly getContactById = vi.fn(async (contactId: string) => this.contactsById.get(contactId));
+  public readonly getContactById = vi.fn(async (contactId: string) =>
+    this.contactsById.get(contactId),
+  );
   public readonly getContactLidAndPhone = vi.fn(async () => this.lidMappings);
   public pupPage:
     | {
@@ -334,10 +336,12 @@ describe('adaptador de WhatsApp', () => {
     await adapter.initialize();
     fake.emit('ready');
 
-    await expect(adapter.listGroups()).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'grupo-activo@g.us', botIsMember: true }),
-      expect.objectContaining({ id: 'grupo-abandonado@g.us', botIsMember: false }),
-    ]));
+    await expect(adapter.listGroups()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'grupo-activo@g.us', botIsMember: true }),
+        expect.objectContaining({ id: 'grupo-abandonado@g.us', botIsMember: false }),
+      ]),
+    );
   });
 
   it('adapta !ayuda con campos públicos de MessageId sin _serialized', async () => {
@@ -598,14 +602,23 @@ describe('adaptador de WhatsApp', () => {
       id: { _serialized: 'join-public-name' },
       recipientIds: ['persona@lid'],
       type: 'add',
-      getRecipients: vi.fn(async () => [{
-        id: { _serialized: 'persona@lid' }, pushname: 'María', name: 'Nombre de agenda',
-      }]),
+      getRecipients: vi.fn(async () => [
+        {
+          id: { _serialized: 'persona@lid' },
+          pushname: 'María',
+          name: 'Nombre de agenda',
+        },
+      ]),
     });
     await vi.waitFor(() => expect(groupJoins).toHaveLength(1));
-    expect(groupJoins[0]?.participants).toEqual([{
-      participantId: '56912345678@c.us', displayName: 'María', nameSource: 'PUSHNAME', mentionId: 'persona@lid',
-    }]);
+    expect(groupJoins[0]?.participants).toEqual([
+      {
+        participantId: '56912345678@c.us',
+        displayName: 'María',
+        nameSource: 'PUSHNAME',
+        mentionId: 'persona@lid',
+      },
+    ]);
     expect(JSON.stringify(captured.entries)).not.toContain('María');
     expect(JSON.stringify(captured.entries)).not.toContain('Nombre de agenda');
   });
@@ -620,22 +633,26 @@ describe('adaptador de WhatsApp', () => {
       id: { _serialized: 'join-aliases' },
       recipientIds: ['persona@lid', '56912345678@c.us'],
       type: 'add',
-      getRecipients: vi.fn(async () => [{
-        id: { _serialized: 'persona@lid' },
-        pushname: 'Luis',
-      }]),
+      getRecipients: vi.fn(async () => [
+        {
+          id: { _serialized: 'persona@lid' },
+          pushname: 'Luis',
+        },
+      ]),
     });
 
     await vi.waitFor(() => expect(groupJoins).toHaveLength(1));
     expect(groupJoins[0]).toMatchObject({
       groupId: 'grupo-normal@g.us',
       participantIds: ['56912345678@c.us'],
-      participants: [{
-        participantId: '56912345678@c.us',
-        displayName: 'Luis',
-        nameSource: 'PUSHNAME',
-        mentionId: 'persona@lid',
-      }],
+      participants: [
+        {
+          participantId: '56912345678@c.us',
+          displayName: 'Luis',
+          nameSource: 'PUSHNAME',
+          mentionId: 'persona@lid',
+        },
+      ],
     });
   });
 

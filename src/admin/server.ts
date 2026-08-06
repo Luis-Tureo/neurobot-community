@@ -229,7 +229,9 @@ const botCreateSchema = z
   .object({
     id: z.preprocess(
       (value) => (typeof value === 'string' ? normalizeBotIdentifier(value) : value),
-      z.string().regex(/^[a-z][a-z0-9-]{2,39}$/u, 'Escribe un identificador de al menos 3 caracteres.'),
+      z
+        .string()
+        .regex(/^[a-z][a-z0-9-]{2,39}$/u, 'Escribe un identificador de al menos 3 caracteres.'),
     ),
     organizationName: z.string().trim().min(1).max(160),
     botName: z.string().trim().min(1).max(80),
@@ -727,7 +729,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       code: 'MAINTENANCE_IN_PROGRESS',
     });
   });
-
 
   app.addHook('preHandler', async (request, reply) => {
     if (!request.url.startsWith('/api/')) return;

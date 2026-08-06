@@ -9,12 +9,14 @@ describe('refinamiento final del panel de comunidad', () => {
     expect(script).toContain("q('#section-status .setup-guide')?.remove()");
     expect(script).toContain("qa('.friendly-module-intro').forEach((node) => node.remove())");
     expect(script).toContain('removeKnowledgeModule');
-    expect(script).toContain("qa('[data-section=\"knowledge\"]')");
+    expect(script).toContain('qa(\'[data-section="knowledge"]\')');
   });
 
   it('ordena el historial en un solo recuadro y quita formularios y filtros', () => {
     expect(script).toContain("q('#cached-answer-search')?.remove()");
-    expect(script).toContain("q('[data-friendly-group=\"cached-answer-editor\"]', section)?.remove()");
+    expect(script).toContain(
+      'q(\'[data-friendly-group="cached-answer-editor"]\', section)?.remove()',
+    );
     expect(script).toContain("q('.minimal-history-filters', section)?.remove()");
     expect(script).toContain('refined-history-workspace');
     expect(styles).toContain('.refined-history-workspace');
@@ -28,7 +30,7 @@ describe('refinamiento final del panel de comunidad', () => {
 
   it('simplifica las encuestas y mantiene crear encuesta dentro del banco', () => {
     expect(script).toContain('refined-poll-bank-actions');
-    expect(script).toContain("actions.append(createButton)");
+    expect(script).toContain('actions.append(createButton)');
     expect(script).toContain("q('#restore-poll-defaults')?.remove()");
     expect(styles).toContain('#section-polls .friendly-collapsed .refined-poll-bank-actions');
   });

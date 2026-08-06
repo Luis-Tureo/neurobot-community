@@ -5,7 +5,7 @@ const styles = readFileSync('public/panel-refinement.css', 'utf8');
 
 describe('estabilidad del refinamiento visual', () => {
   it('no observa todo el documento ni reescribe textos sin comprobar cambios', () => {
-    expect(script).not.toContain("observe(document.body, { childList: true, subtree: true })");
+    expect(script).not.toContain('observe(document.body, { childList: true, subtree: true })');
     expect(script).toContain('function setTextIfChanged');
     expect(script).toContain('setTextIfChanged(node, cleaned)');
     expect(script).toContain('function scheduleRefinement');

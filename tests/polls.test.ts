@@ -71,26 +71,44 @@ describe('banco y selección de encuestas', () => {
     const { database, repository, selector } = createSubject();
     try {
       const other = database.createBot({
-        id: 'comunidad-alternativa', mode: 'mixed', connectorType: 'WHATSAPP_WEB',
+        id: 'comunidad-alternativa',
+        mode: 'mixed',
+        connectorType: 'WHATSAPP_WEB',
         sessionPath: 'data/sessions/comunidad-alternativa',
-        profile: createProfileFromPreset({ organizationName: 'Comunidad alternativa', botName: 'Bot alternativo',
-          organizationType: 'Comunidad', timezone: 'America/Santiago', preset: 'community' }),
+        profile: createProfileFromPreset({
+          organizationName: 'Comunidad alternativa',
+          botName: 'Bot alternativo',
+          organizationType: 'Comunidad',
+          timezone: 'America/Santiago',
+          preset: 'community',
+        }),
       });
       const otherRepository = new PollRepository(database, other.id);
       const target = repository.templates().find((template) => template.isDefault);
-      if (target === undefined || target.defaultKey === null) throw new Error('Falta plantilla predeterminada.');
-      expect(otherRepository.templates()).toContainEqual(expect.objectContaining({ defaultKey: target.defaultKey }));
+      if (target === undefined || target.defaultKey === null)
+        throw new Error('Falta plantilla predeterminada.');
+      expect(otherRepository.templates()).toContainEqual(
+        expect.objectContaining({ defaultKey: target.defaultKey }),
+      );
       repository.saveOverride('2099-10-10', target.id);
       const outcome = repository.hideDefaultTemplate(target.id, 'actor-seguro');
       expect(outcome).toMatchObject({ hidden: true, cancelledOverrides: 1 });
       expect(repository.template(target.id)).toBeNull();
       expect(repository.hiddenTemplates()).toMatchObject([{ id: target.id }]);
-      expect(otherRepository.templates()).toContainEqual(expect.objectContaining({ defaultKey: target.defaultKey }));
-      expect(selector.select('2099-10-10', null, new Date('2099-10-10T16:00:00Z'))?.id).not.toBe(target.id);
-      expect(DEFAULT_POLL_TEMPLATES.some((template) => template.key === target.defaultKey)).toBe(true);
+      expect(otherRepository.templates()).toContainEqual(
+        expect.objectContaining({ defaultKey: target.defaultKey }),
+      );
+      expect(selector.select('2099-10-10', null, new Date('2099-10-10T16:00:00Z'))?.id).not.toBe(
+        target.id,
+      );
+      expect(DEFAULT_POLL_TEMPLATES.some((template) => template.key === target.defaultKey)).toBe(
+        true,
+      );
       expect(repository.restoreDefaultTemplate(target.id, 'actor-seguro')).toBe(true);
       expect(repository.restoreDefaultTemplate(target.id, 'actor-seguro')).toBe(false);
-      expect(repository.templates().filter((template) => template.id === target.id)).toHaveLength(1);
+      expect(repository.templates().filter((template) => template.id === target.id)).toHaveLength(
+        1,
+      );
     } finally {
       database.close();
     }
@@ -99,9 +117,19 @@ describe('banco y selección de encuestas', () => {
   it('restaura todas sin afectar encuestas personalizadas', () => {
     const { database, repository } = createSubject();
     try {
-      const defaults = repository.templates().filter((template) => template.isDefault).slice(0, 2);
-      const custom = repository.saveTemplate({ question: 'Encuesta personalizada segura', category: 'Actividades',
-        options: ['Una', 'Dos'], allowMultipleAnswers: false, enabled: true, favorite: false, disabledUntil: null });
+      const defaults = repository
+        .templates()
+        .filter((template) => template.isDefault)
+        .slice(0, 2);
+      const custom = repository.saveTemplate({
+        question: 'Encuesta personalizada segura',
+        category: 'Actividades',
+        options: ['Una', 'Dos'],
+        allowMultipleAnswers: false,
+        enabled: true,
+        favorite: false,
+        disabledUntil: null,
+      });
       defaults.forEach((template) => repository.hideDefaultTemplate(template.id, 'actor-seguro'));
       expect(repository.restoreDefaults('actor-seguro')).toBe(2);
       expect(repository.template(custom.id)).not.toBeNull();
