@@ -6,7 +6,7 @@ on:
     paths:
       - '.github/workflows/agent-community-audit.yml'
   issues:
-    types: [opened]
+    types: [opened, edited]
   workflow_dispatch:
 
 permissions:
@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   apply:
-    if: github.event_name != 'issues' || github.event.issue.title == '[agent-refactor-main]'
+    if: github.event_name != 'issues' || contains(github.event.issue.body, 'RUN_MAIN_COMMUNITY_REFACTOR')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
