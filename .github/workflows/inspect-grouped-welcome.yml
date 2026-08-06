@@ -25,5 +25,9 @@ jobs:
           set -euo pipefail
           echo '=== welcome settings references ==='
           grep -RInE 'sendDelaySeconds|batchWindowSeconds|multipleJoinMode|maximumGroupedNames|includePublicName|enableRealMention' src public tests README.md || true
-          echo '=== welcome service methods ==='
-          grep -nE 'flushWelcome|buildWelcomeMessages|WELCOME_MULTIPLE_JOIN_GROUPED|setTimeout' src/core/automatic-message-service.ts || true
+          echo '=== welcome form controls ==='
+          grep -nE 'welcome_batch_window|welcome_multiple_mode|welcome_maximum_names|welcome_send_delay|welcome_group_simultaneous' public/index.html public/app.js || true
+          echo '=== automatic messages routes ==='
+          grep -nE "automatic-messages|automaticMessagesSchema|saveAutomaticMessageConfiguration" src/admin/server.ts src/persistence/database.ts || true
+          echo '=== relevant test names ==='
+          grep -nE "agrupa varias personas|bienvenida|multipleJoinMode|sendDelaySeconds|batchWindowSeconds" tests/automatic-message-service.test.ts tests/automatic-messages-ui.test.ts tests/database.test.ts || true
