@@ -16,9 +16,6 @@ import { DEFAULT_POLL_TEMPLATES } from '../core/poll-defaults.js';
 import type {
   AutomaticMessageConfiguration,
   AutomaticMessageType,
-  BotCapabilities,
-  BotMode,
-  BotOperatingMode,
   BotRecord,
   CachedAnswer,
   CachedAnswerSourceType,
@@ -8101,20 +8098,6 @@ function setAutomaticTemplate(
     configuration.dailyGreeting.templates.friday = content;
   else if (templateKey === AUTOMATIC_TEMPLATE_KEYS.greetingWeekend)
     configuration.dailyGreeting.templates.weekend = content;
-}
-
-function validateDate(value: string): string {
-  if (
-    !/^\d{4}-\d{2}-\d{2}$/u.test(value) ||
-    Number.isNaN(new Date(`${value}T00:00:00Z`).getTime())
-  ) {
-    throw new Error('La fecha no es válida.');
-  }
-  return value;
-}
-
-function isTime(value: string): boolean {
-  return /^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(value);
 }
 
 function validatePollTemplateContent(
