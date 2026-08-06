@@ -1,6 +1,10 @@
-name: Apply community refactor from issue
+name: Apply community refactor from main
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/agent-community-audit.yml'
   issues:
     types: [opened]
   workflow_dispatch:
@@ -11,7 +15,7 @@ permissions:
 
 jobs:
   apply:
-    if: github.event_name == 'workflow_dispatch' || github.event.issue.title == '[agent-refactor-main]'
+    if: github.event_name != 'issues' || github.event.issue.title == '[agent-refactor-main]'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
