@@ -42,11 +42,17 @@ export class BotInstance extends BaseBotInstance {
   }
 
   public override async start(): Promise<void> {
-    this.communityDigest?.start();
+    if (this.communityDigest !== null) {
+      registerCommunityDigestService(this.bot.id, this.communityDigest);
+      this.communityDigest.start();
+    }
     try {
       await super.start();
     } catch (error) {
       this.communityDigest?.stop();
+      if (this.communityDigest !== null) {
+        unregisterCommunityDigestService(this.bot.id, this.communityDigest);
+      }
       throw error;
     }
   }
