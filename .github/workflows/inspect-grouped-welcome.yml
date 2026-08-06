@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/grouped-welcome-default
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -54,7 +57,6 @@ jobs:
                   raise SystemExit(f'La expresión no coincidió exactamente una vez en {path}: {pattern}')
               write(path, updated)
 
-          # Fixed runtime constants and defaults.
           replace_once(
               'src/core/automatic-message-defaults.ts',
               "export const AUTOMATIC_MESSAGE_TIMEZONE = 'America/Santiago' as const;\n",
@@ -65,7 +67,6 @@ jobs:
           defaults = defaults.replace('sendDelaySeconds: 2,', 'sendDelaySeconds: WELCOME_BATCH_DELAY_SECONDS,')
           write('src/core/automatic-message-defaults.ts', defaults)
 
-          # Runtime service: always wait ten seconds and always group two or more joins.
           replace_once(
               'src/core/automatic-message-service.ts',
               "import { ExpiringSet } from './expiring-cache.js';",
@@ -171,7 +172,6 @@ jobs:
               new_builder + '\n\n  private async sendAndRecord(',
           )
 
-          # Server and persistence normalize legacy fields to the fixed policy.
           replace_once(
               'src/admin/server.ts',
               '        welcome: { ...input.welcome, template: assertPlainText(input.welcome.template) },',
@@ -188,7 +188,6 @@ jobs:
               "      welcome.enableRealMention ? 1 : 0, welcome.unknownNameFallback, 'GROUPED',\n      5, 10, now, now,",
           )
 
-          # Remove grouping controls from the panel while keeping single-person personalization controls.
           replace_once(
               'public/index.html',
               '<p class="muted">Agrupa varios ingresos para evitar mensajes repetidos.</p>',
@@ -246,7 +245,6 @@ jobs:
           )
           write('public/app.js', app)
 
-          # Service tests: prove the fixed 10-second window and plural message.
           replace_once(
               'tests/automatic-message-service.test.ts',
               '''function enableWelcome(database: AppDatabase, batchWindowSeconds = 30): void {
@@ -319,14 +317,11 @@ jobs:
                 service.stop();
                 database.close();
               }
-            };
-'''
-          # Correct the terminator after composing the raw block.
-          grouped_test = grouped_test.replace("            };\n", "            });\n")
+            });'''
           regex_once(
               'tests/automatic-message-service.test.ts',
               r"  it\('deduplica ingresos, agrupa varias personas y envía una sola bienvenida',[\s\S]*?\n  it\('usa nombres públicos",
-              grouped_test + "\n  it('usa nombres públicos",
+              grouped_test + "\n\n  it('usa nombres públicos",
           )
           replace_once(
               'tests/automatic-message-service.test.ts',
@@ -334,7 +329,6 @@ jobs:
               "      expect(client.sentMessages[0]?.text).toContain('¡Bienvenidos nuevos integrantes! 👋');\n      expect(client.sentMessages[0]?.text).toContain(\n        'Este es un espacio de respeto, apoyo e inclusión.',\n      );\n      expect(client.sentMessages[0]?.mentionIds).toBeUndefined();",
           )
 
-          # UI and persistence tests reflect the non-configurable policy.
           replace_once(
               'tests/automatic-messages-ui.test.ts',
               '    expect(html).toContain(\'name="welcome_multiple_mode"\');',
@@ -345,7 +339,6 @@ jobs:
           database_tests = database_tests.replace('sendDelaySeconds: 2,', 'sendDelaySeconds: 10,')
           write('tests/database.test.ts', database_tests)
 
-          # Document the permanent behavior.
           replace_once(
               'README.md',
               '- Automatizaciones y encuestas independientes por asistente y zona horaria.\n',
