@@ -14,7 +14,12 @@ const botQuerySchema = z
 
 const configurationSchema = z
   .object({
-    timezone: z.string().trim().min(1).max(80),
+    timezone: z
+      .string()
+      .trim()
+      .min(1)
+      .max(80)
+      .refine(isValidTimezone, 'La zona horaria no es válida.'),
     daily: z
       .object({
         enabled: z.boolean(),
@@ -153,6 +158,8 @@ export function registerCommunityDigestRoutes(
       const history = await service.exportHistory(input.period, groupId);
       return reply
         .header('content-type', 'text/plain; charset=utf-8')
+        .header('cache-control', 'no-store, max-age=0')
+        .header('pragma', 'no-cache')
         .header(
           'content-disposition',
           `attachment; filename="historial-${input.period}-${input.groupKey}.txt"`,
@@ -171,4 +178,13 @@ function unavailable(reply: FastifyReply): FastifyReply {
     error: 'El servicio de resúmenes no está disponible.',
     code: 'COMMUNITY_DIGEST_UNAVAILABLE',
   });
+}
+
+function isValidTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: value }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
 }
