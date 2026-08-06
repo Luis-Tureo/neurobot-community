@@ -1,0 +1,969 @@
+# Feature search
+
+## daily summary
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+
+## weekly summary
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+
+## resumen diario
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+
+## resumen semanal
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+
+## chat history
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+
+## historial
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+./.github/workflows/apply-panel-minimal-v2.yml:86:              r'\s*<p[^>]*>\s*El historial se ordena automáticamente.*?</p>',
+./tests/polls-ui.test.ts:9:  it('incluye configuración, banco, prueba, fechas e historial', () => {
+./tests/polls-ui.test.ts:18:      'Historial de envíos',
+./tests/polls.test.ts:411:  if (history === null) throw new Error('No se pudo registrar el historial de prueba.');
+./tests/panel-freeze-regression.test.ts:20:  it('conserva la simplificación solicitada del historial y los módulos', () => {
+./tests/minimal-community-panel.test.ts:8:  it('convierte respuestas guardadas en un historial de preguntas', () => {
+./tests/minimal-community-panel.test.ts:9:    expect(script).toContain('Historial de preguntas');
+./tests/minimal-community-panel.test.ts:12:    expect(script).toContain("button.textContent = 'Eliminar del historial'");
+./tests/panel-refinement.test.ts:15:  it('ordena el historial en un solo recuadro y quita formularios y filtros', () => {
+./scripts/apply-panel-minimal-v2.py:314:    if (textIncludes(paragraph, /El historial se ordena automáticamente/iu)) hideV2(paragraph);
+./scripts/apply-panel-minimal-v2.py:842:  it('muestra el historial como tabla y permite editar en la misma página', () => {
+./scripts/apply-panel-minimal-v2.py:1032:      actionButton('Eliminar del historial', 'danger', async () => {
+./scripts/apply-panel-minimal-v2.py:1033:        if (!window.confirm('¿Eliminar esta pregunta del historial?')) return;
+./scripts/apply-panel-minimal-v2.py:1036:        notify('Pregunta eliminada del historial.');
+./docs/MODERACION_SIMPLIFICADA_POR_GRUPO.md:30:Antes de esta migración se crea una copia de la base de datos. Las configuraciones técnicas anteriores se conservan, pero quedan desactivadas. No se modifica LocalAuth, la sesión de WhatsApp, `.env`, los grupos, los administradores ni el historial existente.
+./docs/manual-tests.md:75:- [ ] Probar sin marcar **Contar como encuesta del día** y confirmar que el historial la identifica como manual.
+./docs/manual-tests.md:79:- [ ] Reiniciar la aplicación y confirmar que el historial permanece y no se duplica el envío diario.
+./docs/ENCUESTAS_POR_ASISTENTE.md:7:La acción **Eliminar de este asistente** oculta una plantilla predeterminada únicamente para el asistente administrado. Deja de estar disponible para envíos manuales y selección automática. Las programaciones futuras dependientes se cancelan; el historial y las encuestas ya enviadas se conservan.
+./docs/MODERACION_LOCAL_POR_REGLAS.md:18:Al desactivarlo se conservan reglas y estadísticas, pero los mensajes nuevos dejan de analizarse. Nunca se revisa historial ni se generan advertencias retroactivas.
+./public/panel-refinement.js:63:    description.textContent = 'El historial se ordena automáticamente desde las preguntas más consultadas.';
+./public/minimal-community-panel-base.js:84:    if (title) title.textContent = 'Historial de preguntas';
+./public/minimal-community-panel-base.js:88:  if (mobile) mobile.textContent = 'Historial de preguntas';
+./public/minimal-community-panel-base.js:90:  if (heading) heading.textContent = 'Historial de preguntas';
+./public/minimal-community-panel-base.js:149:      else if (label === 'Eliminar') button.textContent = 'Eliminar del historial';
+./public/index.html:939:            <button type="button" data-moderation-tab="history">Historial</button>
+./public/index.html:961:          <div data-moderation-pane="history" class="card inset hidden"><h3>Historial</h3><div id="moderation-history" class="stack"></div></div>
+./public/index.html:1271:          <h3 class="subsection-title">Historial de envíos</h3>
+./public/friendly-panel.js:518:      description: 'Consulta el historial cuando necesites verificar un envío.',
+./public/friendly-panel.js:538:      title: 'Historial de envíos',
+./public/friendly-panel.js:550:    history: 'Historial',
+./README.md:62:- Encuestas nativas diarias con banco SQLite editable, selección determinista e historial sin datos de votantes.
+./README.md:85:La IA solo se consulta cuando hay una pregunta válida, conocimiento oficial relacionado, proveedor activo, credencial configurada y presupuesto disponible. Las preguntas fuera de tema, médicas o sin conocimiento se resuelven localmente sin consumir tokens. No se guarda la pregunta, la respuesta ni el historial; solo contadores de uso y códigos técnicos seguros.
+./README.md:280:El panel permite activar la tarea, cambiar hora y tolerancia, elegir modo global o por grupo, crear y editar plantillas, ordenar opciones por líneas, habilitar respuestas múltiples, marcar favoritas, excluirlas temporalmente, restaurar predeterminadas, fijar una fecha y revisar historial. Para probar:
+
+## moderation
+./.github/workflows/inspect-community-boundaries.yml:38:          around src/core/assistant-module-visibility-service.ts 'business|mixed|private|catalog|menu|media|hours|request|automatic|poll|moderation'
+./.github/workflows/inspect-community-boundaries.yml:77:              section 'Application startup and instances'; around src/index.ts 'cloud|connector|business|mixed|private|catalog|menu|hours|request|webhook'; around src/core/bot-instance.ts 'cloud|connector|business|mixed|private|catalog|menu|hours|request|conversation'; around src/core/multi-bot-manager.ts 'cloud|connector|business|mixed|private|catalog|menu|hours|request|conversation'; around src/core/assistant-module-visibility-service.ts 'business|mixed|private|catalog|menu|media|hours|request|automatic|poll|moderation'; around src/core/profile-presets.ts 'business|mixed|store|restaurant|distributor|service|community|empty';
+./.github/workflows/fix-community-refactor.yml:34:            tests/moderation.test.ts tests/message-processor.test.ts \
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+./.github/workflows/fix-community-refactor-2.yml:27:          npx prettier --write src/admin/server.ts src/core/bot-instance.ts src/core/message-processor.ts src/persistence/database.ts tests/admin-server.test.ts tests/moderation.test.ts
+./tests/admin-server.test.ts:582:    const initial = await app.inject({ method:'GET',url:'/api/bots/neurobot/moderation',headers:{cookie:auth.cookie} });
+./tests/admin-server.test.ts:588:    const created = await injectAuthenticated(app,auth,{method:'POST',url:'/api/bots/neurobot/moderation/rules',payload:rulePayload});
+./tests/admin-server.test.ts:590:    const simulation = await injectAuthenticated(app,auth,{method:'POST',url:'/api/bots/neurobot/moderation/test',payload:{text:'palabra prohibida'}});
+./tests/admin-server.test.ts:593:    expect(database.listModerationCases('neurobot')).toHaveLength(0);
+./tests/admin-server.test.ts:594:    expect(database.getModerationMetrics('neurobot')).toMatchObject({messagesReviewed:0,aiReviews:0,aiTokens:0});
+./tests/admin-server.test.ts:595:    const exported = await app.inject({method:'GET',url:'/api/bots/neurobot/moderation/export',headers:{cookie:auth.cookie}});
+./tests/admin-server.test.ts:602:    expect((await app.inject({method:'GET',url:`/api/bots/${privateBot.id}/moderation`,headers:{cookie:auth.cookie}})).statusCode).toBe(404);
+./tests/admin-server.test.ts:603:    expect((await app.inject({method:'GET',url:`/api/bots/${mixedBot.id}/moderation`,headers:{cookie:auth.cookie}})).statusCode).toBe(200);
+./tests/moderation-ui.test.ts:6:    expect(html).toContain('id="moderation-group-selector"');
+./tests/moderation-ui.test.ts:7:    for(const tab of ['configuration','group-rules','tests','cases','history'])expect(html).toContain(`data-moderation-tab="${tab}"`);
+./tests/moderation-ui.test.ts:8:    expect(html).not.toContain('data-moderation-tab="terms"');expect(html).not.toContain('data-moderation-tab="spam"');expect(html).not.toContain('>Heredar<');
+./tests/moderation-ui.test.ts:11:    expect(html).toContain('id="moderation-rules-text-form"');expect(html).toContain('Analizar y preparar moderación');expect(html).toContain('id="moderation-toggle"');
+./tests/moderation-ui.test.ts:18:    expect(styles).toContain('.moderation-progress');expect(styles).toContain('.progress-step.complete');expect(html).toContain('id="moderation-allowed-test"');expect(html).toContain('id="moderation-warning-test"');expect(html).toContain('Los textos se procesan solo en memoria');
+./tests/group-moderation-service.test.ts:3:import { GroupModerationService } from '../src/moderation/group-moderation-service.js';
+./tests/group-moderation-service.test.ts:21:  let database:AppDatabase;let service:GroupModerationService;let provider:CompilerProvider;
+./tests/group-moderation-service.test.ts:22:  beforeEach(()=>{database=new AppDatabase(':memory:');database.migrate();service=new GroupModerationService(database);provider=new CompilerProvider();});
+./tests/group-moderation-service.test.ts:29:    expect(()=>database.setGroupModerationEnabled('neurobot','grupo-seguro-0000001',true)).toThrow('MODERATION_TESTS_REQUIRED');
+./tests/group-moderation-service.test.ts:32:    expect(database.setGroupModerationEnabled('neurobot','grupo-seguro-0000001',true).enabled).toBe(true);
+./tests/group-moderation-service.test.ts:40:    const changed=database.getGroupModerationProfile('neurobot',group);
+./tests/group-moderation-service.test.ts:47:    expect(JSON.stringify(database.listGroupModerationTests('neurobot',group,database.getGroupModerationProfile('neurobot',group).rulesHash))).not.toContain('texto temporal irrepetible');
+./tests/group-moderation-service.test.ts:53:    expect(database.getGroupModerationProfile('neurobot',group)).toMatchObject({enabled:false,analysisStatus:'ANALYSIS_FAILED',testStatus:'FAILED'});
+./tests/group-moderation-service.test.ts:60:    expect(database.getGroupModerationProfile('neurobot','grupo-seguro-0000005').compiled).not.toBeNull();
+./tests/group-moderation-service.test.ts:61:    expect(database.getGroupModerationProfile('neurobot','grupo-seguro-0000006')).toMatchObject({compiled:null,analysisStatus:'OUTDATED'});
+./tests/panel-usability.test.ts:70:    expect(panel).toContain('legacyModerationAvailable');
+./tests/panel-usability.test.ts:71:    expect(panel).toContain('if (!legacyModerationAvailable || data.settings === undefined) return;');
+./tests/moderation.test.ts:4:import type { IncomingMessage, ModerationRule } from '../src/domain/types.js';
+./tests/moderation.test.ts:7:import { LocalModerationEngine } from '../src/moderation/local-moderation-engine.js';
+./tests/moderation.test.ts:8:import { ModerationService } from '../src/moderation/moderation-service.js';
+./tests/moderation.test.ts:20:    expect(visibility.visibleModules(database.getBot('neurobot') as NonNullable<ReturnType<AppDatabase['getBot']>>)).toContain('moderation');
+./tests/moderation.test.ts:23:    expect(visibility.visibleModules(privateBot)).not.toContain('moderation');
+./tests/moderation.test.ts:24:    expect(visibility.visibleModules(mixedBot)).toContain('moderation');
+./tests/moderation.test.ts:28:    expect(database.getModerationSettings('neurobot')).toMatchObject({
+./tests/moderation.test.ts:32:    expect(database.getModerationMetrics('neurobot')).toMatchObject({ aiReviews:0,aiTokens:0 });
+./tests/moderation.test.ts:37:    database.createModerationRule('neurobot', ruleInput('Regla Neurobot','EXACT_WORD','prohibida',4));
+./tests/moderation.test.ts:38:    expect(database.listModerationRules('neurobot')).toHaveLength(1);
+./tests/moderation.test.ts:39:    expect(database.listModerationRules(other.id)).toHaveLength(0);
+./tests/moderation.test.ts:43:    database.saveModerationGroupSettings('neurobot','a'.repeat(20),'DISABLED');
+./tests/moderation.test.ts:44:    database.saveModerationGroupSettings('neurobot','b'.repeat(20),'ENABLED');
+./tests/moderation.test.ts:45:    expect(database.listModerationGroupSettings('neurobot')).toEqual([
+./tests/moderation.test.ts:51:    const engine=new LocalModerationEngine();const settings=database.getModerationSettings('neurobot');
+./tests/moderation.test.ts:58:    const engine=new LocalModerationEngine();const settings=database.getModerationSettings('neurobot');
+./tests/moderation.test.ts:66:    const engine=new LocalModerationEngine();const settings=database.getModerationSettings('neurobot');
+./tests/moderation.test.ts:75:    const engine=new LocalModerationEngine();const settings=database.getModerationSettings('neurobot');
+./tests/moderation.test.ts:83:    expect(LocalModerationEngine.validateSafePattern('(a+)+$')).toBe(false);
+./tests/moderation.test.ts:84:    expect(LocalModerationEngine.validateSafePattern('palabra\\s+segura')).toBe(true);
+./tests/moderation.test.ts:88:    const engine=new LocalModerationEngine();const settings=database.getModerationSettings('neurobot');
+./tests/moderation.test.ts:98:  let database: AppDatabase; let client: SimulatedMessagingClient; let service: ModerationService;
+./tests/moderation.test.ts:102:    database.createModerationRule('neurobot',ruleInput('Respeto','EXACT_WORD','prohibida',4));
+./tests/moderation.test.ts:104:    database.saveGroupModerationDraft('neurobot','grupo',rulesText,rulesHash);
+./tests/moderation.test.ts:105:    database.saveCompiledGroupModeration({assistantId:'neurobot',groupHash:'grupo',rulesHash,provider:'test',model:'local',inputTokens:0,outputTokens:0,
+./tests/moderation.test.ts:107:    for(const test of [{type:'AUTOMATIC' as const,expected:'ALLOW' as const},{type:'AUTOMATIC' as const,expected:'WARNING' as const},{type:'MANUAL_ALLOWED' as const,expected:'ALLOW' as const},{type:'MANUAL_WARNING' as const,expected:'WARNING' as const}])database.recordGroupModerationTest({assistantId:'neurobot',groupHash:'grupo',rulesHash,testType:test.type,expected:test.expected,actual:test.expected,passed:true});
+./tests/moderation.test.ts:108:    database.updateGroupModerationTestStatus('neurobot','grupo',true);database.setGroupModerationEnabled('neurobot','grupo',true);
+./tests/moderation.test.ts:109:    const vault=new SecretVault('x'.repeat(32));const administratorHash='administrador-seguro';const administratorId='56900000000@c.us';database.replaceGroupModerationRecipients('neurobot','grupo',[{administratorHash,encryptedIdentifier:vault.encrypt(administratorId,`moderation-recipient:neurobot:grupo:${administratorHash}`).encrypted}]);
+./tests/moderation.test.ts:111:    service=new ModerationService(database,outbound,createLogger('silent'),'neurobot',vault);
+./tests/moderation.test.ts:116:    database.setGroupModerationEnabled('neurobot','grupo',false);
+./tests/moderation.test.ts:118:    expect(result.reviewed).toBe(false);expect(client.sentMessages).toHaveLength(0);expect(database.listModerationCases('neurobot')).toHaveLength(0);
+./tests/moderation.test.ts:130:    expect(database.listModerationCases('neurobot')).toHaveLength(1);
+./tests/moderation.test.ts:131:    expect(database.getModerationMetrics('neurobot')).toMatchObject({warningsSent:1,aiReviews:0,aiTokens:0});
+./tests/moderation.test.ts:138:    expect(database.getModerationSettings('neurobot')).toMatchObject({automaticBanEnabled:false,automaticDeletionEnabled:false});
+./tests/moderation.test.ts:143:    database.saveModerationRecurrence('neurobot','grupo','persona',1,new Date(Date.now()-11*60_000).toISOString(),new Date(Date.now()+86_400_000).toISOString());
+./tests/moderation.test.ts:148:    expect(database.getTechnicalEvents().some((event)=>event.event_type==='MODERATION_ADMIN_NOTIFIED')).toBe(true);
+./tests/moderation.test.ts:153:    const moderationCase=database.listModerationCases('neurobot')[0] as Record<string,unknown>;
+./tests/moderation.test.ts:154:    expect(moderationCase.evidenceExpiresAt).not.toBeNull();
+./tests/moderation.test.ts:155:    expect(database.reviewModerationCase('neurobot',Number(moderationCase.id),'FALSE_POSITIVE')).toBe(true);
+./tests/moderation.test.ts:156:    database.resetModerationRecurrence('neurobot','grupo','persona');
+./tests/moderation.test.ts:157:    expect(database.getModerationRecurrence('neurobot','grupo','persona')).toBeNull();
+./tests/moderation.test.ts:158:    database.createModerationCase({assistantId:'neurobot',groupHash:'grupo',participantHash:'otra',messageHash:'expirada',category:'OTRA',matchedRuleIds:[],score:3,
+./tests/moderation.test.ts:160:    expect(database.expireModerationEvidence('neurobot')).toBe(1);
+./tests/moderation.test.ts:164:    const before=database.listModerationCases('neurobot').length;const result=service.test('contenido prohibida');
+./tests/moderation.test.ts:165:    expect(result.action).toBe('WARNING_AND_NOTIFY');expect(database.listModerationCases('neurobot')).toHaveLength(before);expect(client.sentMessages).toHaveLength(0);
+./tests/moderation.test.ts:174:function ruleInput(name: string,conditionType: string,value: string,score: number): Omit<ModerationRule,'id'|'assistantId'|'createdAt'|'updatedAt'> {
+./tests/moderation.test.ts:179:function storedRule(database: AppDatabase,input: ReturnType<typeof ruleInput>) { return database.createModerationRule('neurobot',input); }
+./src/persistence/database.ts:57:  ModerationGroupMode,
+./src/persistence/database.ts:58:  ModerationRule,
+./src/persistence/database.ts:59:  ModerationSettings,
+./src/persistence/database.ts:60:  ModerationSeverity,
+./src/persistence/database.ts:105:export type GroupModerationProfile = {
+./src/persistence/database.ts:1560:          CREATE TABLE assistant_moderation_settings (
+./src/persistence/database.ts:1584:          CREATE TABLE assistant_group_moderation_settings (
+./src/persistence/database.ts:1593:          CREATE TABLE moderation_rules (
+./src/persistence/database.ts:1610:          CREATE INDEX idx_moderation_rules_assistant ON moderation_rules(assistant_id, enabled, category);
+./src/persistence/database.ts:1611:          CREATE TABLE moderation_rule_conditions (
+./src/persistence/database.ts:1613:            rule_id INTEGER NOT NULL REFERENCES moderation_rules(id) ON DELETE CASCADE,
+./src/persistence/database.ts:1622:          CREATE INDEX idx_moderation_conditions_rule ON moderation_rule_conditions(rule_id, enabled);
+./src/persistence/database.ts:1623:          CREATE TABLE moderation_rule_exceptions (
+./src/persistence/database.ts:1625:            rule_id INTEGER NOT NULL REFERENCES moderation_rules(id) ON DELETE CASCADE,
+./src/persistence/database.ts:1632:          CREATE INDEX idx_moderation_exceptions_rule ON moderation_rule_exceptions(rule_id, enabled);
+./src/persistence/database.ts:1633:          CREATE TABLE moderation_terms (
+./src/persistence/database.ts:1636:            rule_id INTEGER REFERENCES moderation_rules(id) ON DELETE SET NULL,
+./src/persistence/database.ts:1648:          CREATE INDEX idx_moderation_terms_assistant ON moderation_terms(assistant_id, enabled);
+./src/persistence/database.ts:1649:          CREATE TABLE moderation_cases (
+./src/persistence/database.ts:1671:          CREATE INDEX idx_moderation_cases_assistant ON moderation_cases(assistant_id, status, created_at DESC);
+./src/persistence/database.ts:1672:          CREATE INDEX idx_moderation_cases_participant ON moderation_cases(assistant_id, group_hash, participant_hash, created_at DESC);
+./src/persistence/database.ts:1673:          CREATE TABLE moderation_recurrence (
+./src/persistence/database.ts:1684:          CREATE TABLE moderation_metrics (
+./src/persistence/database.ts:1702:          INSERT INTO assistant_moderation_settings(assistant_id, created_at, updated_at)
+./src/persistence/database.ts:1751:          CREATE TABLE group_moderation_profiles (
+./src/persistence/database.ts:1777:          CREATE INDEX idx_group_moderation_profiles_state
+./src/persistence/database.ts:1778:            ON group_moderation_profiles(assistant_id, enabled, analysis_status);
+./src/persistence/database.ts:1779:          CREATE TABLE group_moderation_tests (
+./src/persistence/database.ts:1791:          CREATE INDEX idx_group_moderation_tests_profile
+./src/persistence/database.ts:1792:            ON group_moderation_tests(assistant_id, group_hash, rules_hash, created_at DESC);
+./src/persistence/database.ts:1793:          CREATE TABLE group_moderation_admin_recipients (
+./src/persistence/database.ts:1803:          UPDATE assistant_moderation_settings SET enabled=0, default_group_mode='DISABLED', updated_at=datetime('now');
+./src/persistence/database.ts:1804:          UPDATE assistant_group_moderation_settings SET mode='DISABLED', enabled=0, updated_at=datetime('now');
+./src/persistence/database.ts:1810:          UPDATE group_moderation_profiles SET
+./src/persistence/database.ts:6913:  public getGroupModerationProfile(assistantId: string, groupHash: string): GroupModerationProfile {
+./src/persistence/database.ts:6915:    this.db.prepare(`INSERT OR IGNORE INTO group_moderation_profiles(assistant_id,group_hash,created_at,updated_at)
+./src/persistence/database.ts:6917:    const row = this.db.prepare('SELECT * FROM group_moderation_profiles WHERE assistant_id=? AND group_hash=?')
+./src/persistence/database.ts:6919:    return mapGroupModerationProfile(row);
+./src/persistence/database.ts:6922:  public listGroupModerationProfiles(assistantId: string): GroupModerationProfile[] {
+./src/persistence/database.ts:6923:    return (this.db.prepare('SELECT * FROM group_moderation_profiles WHERE assistant_id=? ORDER BY updated_at DESC').all(assistantId) as Array<Record<string, unknown>>)
+./src/persistence/database.ts:6924:      .map(mapGroupModerationProfile);
+./src/persistence/database.ts:6927:  public saveGroupModerationDraft(assistantId: string, groupHash: string, rulesText: string, rulesHash: string): GroupModerationProfile {
+./src/persistence/database.ts:6928:    const current = this.getGroupModerationProfile(assistantId, groupHash);
+./src/persistence/database.ts:6931:    this.db.prepare(`UPDATE group_moderation_profiles SET rules_text=?,rules_hash=?,enabled=CASE WHEN ? THEN 0 ELSE enabled END,
+./src/persistence/database.ts:6935:    return this.getGroupModerationProfile(assistantId, groupHash);
+./src/persistence/database.ts:6938:  public markGroupModerationAnalyzing(assistantId: string, groupHash: string): void {
+./src/persistence/database.ts:6939:    this.getGroupModerationProfile(assistantId, groupHash);
+./src/persistence/database.ts:6940:    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=0,analysis_status='ANALYZING',test_status='PENDING',updated_at=?
+./src/persistence/database.ts:6944:  public failGroupModerationAnalysis(assistantId: string, groupHash: string): void {
+./src/persistence/database.ts:6945:    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=0,analysis_status='ANALYSIS_FAILED',test_status='FAILED',updated_at=?
+./src/persistence/database.ts:6949:  public saveCompiledGroupModeration(input: { assistantId:string; groupHash:string; rulesHash:string; compiled:Record<string,unknown>; summary:Record<string,unknown>; provider:string; model:string; inputTokens:number; outputTokens:number }): GroupModerationProfile {
+./src/persistence/database.ts:6951:    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=0,rules_hash=?,compiled_json=?,compiled_summary_json=?,provider=?,model=?,
+./src/persistence/database.ts:6955:    this.db.prepare('DELETE FROM group_moderation_tests WHERE assistant_id=? AND group_hash=?').run(input.assistantId,input.groupHash);
+./src/persistence/database.ts:6956:    return this.getGroupModerationProfile(input.assistantId,input.groupHash);
+./src/persistence/database.ts:6959:  public recordGroupModerationTest(input: { assistantId:string; groupHash:string; rulesHash:string; testType:'AUTOMATIC'|'MANUAL_ALLOWED'|'MANUAL_WARNING'; expected:'ALLOW'|'WARNING'; actual:'ALLOW'|'WARNING'|'ERROR'; category?:string|null; passed:boolean }): void {
+./src/persistence/database.ts:6960:    this.db.prepare(`INSERT INTO group_moderation_tests(assistant_id,group_hash,rules_hash,test_type,expected_result,actual_result,category,passed,created_at)
+./src/persistence/database.ts:6964:  public listGroupModerationTests(assistantId: string, groupHash: string, rulesHash: string): Array<Record<string, unknown>> {
+./src/persistence/database.ts:6966:      FROM group_moderation_tests WHERE assistant_id=? AND group_hash=? AND rules_hash=? ORDER BY id`).all(assistantId,groupHash,rulesHash) as Array<Record<string,unknown>>;
+./src/persistence/database.ts:6969:  public updateGroupModerationTestStatus(assistantId: string, groupHash: string, approved: boolean): GroupModerationProfile {
+./src/persistence/database.ts:6971:    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=0,test_status=?,analysis_status=?,last_tested_at=?,updated_at=?
+./src/persistence/database.ts:6973:    return this.getGroupModerationProfile(assistantId,groupHash);
+./src/persistence/database.ts:6976:  public setGroupModerationEnabled(assistantId: string, groupHash: string, enabled: boolean): GroupModerationProfile {
+./src/persistence/database.ts:6977:    const profile=this.getGroupModerationProfile(assistantId,groupHash);
+./src/persistence/database.ts:6978:    if(enabled && (profile.analysisStatus!=='READY' || profile.testStatus!=='APPROVED' || profile.compiled===null)) throw new Error('MODERATION_TESTS_REQUIRED');
+./src/persistence/database.ts:6980:    this.db.prepare(`UPDATE group_moderation_profiles SET enabled=?,analysis_status=?,activated_at=?,updated_at=? WHERE assistant_id=? AND group_hash=?`)
+./src/persistence/database.ts:6982:    return this.getGroupModerationProfile(assistantId,groupHash);
+./src/persistence/database.ts:6985:  public replaceGroupModerationRecipients(assistantId:string,groupHash:string,recipients:Array<{administratorHash:string;encryptedIdentifier:string}>): void {
+./src/persistence/database.ts:6987:      this.db.prepare('DELETE FROM group_moderation_admin_recipients WHERE assistant_id=? AND group_hash=?').run(assistantId,groupHash);
+./src/persistence/database.ts:6988:      const statement=this.db.prepare(`INSERT INTO group_moderation_admin_recipients(assistant_id,group_hash,administrator_hash,encrypted_identifier,enabled,created_at,updated_at) VALUES(?,?,?,?,1,?,?)`);
+./src/persistence/database.ts:6993:  public listGroupModerationRecipients(assistantId:string,groupHash:string): Array<{administratorHash:string;encryptedIdentifier:string}> {
+./src/persistence/database.ts:6994:    return this.db.prepare(`SELECT administrator_hash AS administratorHash,encrypted_identifier AS encryptedIdentifier FROM group_moderation_admin_recipients
+./src/persistence/database.ts:6998:  public getModerationSettings(assistantId: string): ModerationSettings {
+./src/persistence/database.ts:6999:    this.ensureModerationSettings(assistantId);
+./src/persistence/database.ts:7000:    const row = this.db.prepare('SELECT * FROM assistant_moderation_settings WHERE assistant_id=?').get(assistantId) as Record<string, unknown>;
+./src/persistence/database.ts:7003:      defaultGroupMode: String(row.default_group_mode) as ModerationGroupMode,
+./src/persistence/database.ts:7008:      temporaryEvidenceHours: Number(row.temporary_evidence_hours), warningMode: String(row.warning_mode) as ModerationSettings['warningMode'],
+./src/persistence/database.ts:7015:  public saveModerationSettings(assistantId: string, settings: ModerationSettings): ModerationSettings {
+./src/persistence/database.ts:7016:    this.ensureModerationSettings(assistantId);
+./src/persistence/database.ts:7018:    this.db.prepare(`UPDATE assistant_moderation_settings SET enabled=?,default_group_mode=?,review_threshold=?,warning_threshold=?,
+./src/persistence/database.ts:7029:    return this.getModerationSettings(assistantId);
+./src/persistence/database.ts:7032:  public listModerationGroupSettings(assistantId: string): Array<{ groupHash: string; mode: ModerationGroupMode; enabled: boolean }> {
+./src/persistence/database.ts:7033:    return (this.db.prepare('SELECT group_hash,mode,enabled FROM assistant_group_moderation_settings WHERE assistant_id=? ORDER BY group_hash').all(assistantId) as Array<Record<string, unknown>>)
+./src/persistence/database.ts:7034:      .map((row) => ({ groupHash: String(row.group_hash), mode: String(row.mode) as ModerationGroupMode, enabled: row.enabled === 1 }));
+./src/persistence/database.ts:7037:  public saveModerationGroupSettings(assistantId: string, groupHash: string, mode: ModerationGroupMode): void {
+./src/persistence/database.ts:7039:    this.db.prepare(`INSERT INTO assistant_group_moderation_settings(assistant_id,group_hash,mode,enabled,created_at,updated_at)
+./src/persistence/database.ts:7044:  public listModerationRules(assistantId: string, includeDisabled = true): ModerationRule[] {
+./src/persistence/database.ts:7045:    const rows = this.db.prepare(`SELECT * FROM moderation_rules WHERE assistant_id=? ${includeDisabled ? '' : 'AND enabled=1'} ORDER BY id`).all(assistantId) as Array<Record<string, unknown>>;
+./src/persistence/database.ts:7046:    return rows.map((row) => this.mapModerationRule(row));
+./src/persistence/database.ts:7049:  public getModerationRule(assistantId: string, ruleId: number): ModerationRule | null {
+./src/persistence/database.ts:7050:    const row = this.db.prepare('SELECT * FROM moderation_rules WHERE assistant_id=? AND id=?').get(assistantId, ruleId) as Record<string, unknown> | undefined;
+./src/persistence/database.ts:7051:    return row === undefined ? null : this.mapModerationRule(row);
+./src/persistence/database.ts:7054:  public createModerationRule(assistantId: string, input: Omit<ModerationRule, 'id' | 'assistantId' | 'createdAt' | 'updatedAt'>): ModerationRule {
+./src/persistence/database.ts:7055:    if (input.enabled && input.conditions.filter((condition) => condition.enabled).length === 0) throw new Error('MODERATION_RULE_REQUIRES_CONDITION');
+./src/persistence/database.ts:7058:      const result = this.db.prepare(`INSERT INTO moderation_rules(assistant_id,name,description,category,severity,detection_type,score,
+./src/persistence/database.ts:7063:      this.replaceModerationConditions(ruleId, input.conditions, input.exceptions, now);
+./src/persistence/database.ts:7066:    return this.getModerationRule(assistantId, create()) as ModerationRule;
+./src/persistence/database.ts:7069:  public updateModerationRule(assistantId: string, ruleId: number, input: Omit<ModerationRule, 'id' | 'assistantId' | 'createdAt' | 'updatedAt'>): ModerationRule {
+./src/persistence/database.ts:7070:    if (this.getModerationRule(assistantId, ruleId) === null) throw new Error('MODERATION_RULE_NOT_FOUND');
+./src/persistence/database.ts:7071:    if (input.enabled && input.conditions.filter((condition) => condition.enabled).length === 0) throw new Error('MODERATION_RULE_REQUIRES_CONDITION');
+./src/persistence/database.ts:7074:      this.db.prepare(`UPDATE moderation_rules SET name=?,description=?,category=?,severity=?,detection_type=?,score=?,review_threshold=?,
+./src/persistence/database.ts:7078:      this.db.prepare('DELETE FROM moderation_rule_conditions WHERE rule_id=?').run(ruleId);
+./src/persistence/database.ts:7079:      this.db.prepare('DELETE FROM moderation_rule_exceptions WHERE rule_id=?').run(ruleId);
+./src/persistence/database.ts:7080:      this.replaceModerationConditions(ruleId, input.conditions, input.exceptions, now);
+./src/persistence/database.ts:7083:    return this.getModerationRule(assistantId, ruleId) as ModerationRule;
+./src/persistence/database.ts:7086:  public deleteModerationRule(assistantId: string, ruleId: number): boolean {
+./src/persistence/database.ts:7087:    return this.db.prepare('DELETE FROM moderation_rules WHERE assistant_id=? AND id=?').run(assistantId, ruleId).changes === 1;
+./src/persistence/database.ts:7090:  public listModerationTerms(assistantId: string): Array<Record<string, unknown>> {
+./src/persistence/database.ts:7092:      score,enabled,created_at AS createdAt,updated_at AS updatedAt FROM moderation_terms WHERE assistant_id=? ORDER BY id`).all(assistantId) as Array<Record<string, unknown>>;
+./src/persistence/database.ts:7095:  public createModerationTerm(assistantId: string, input: { ruleId: number | null; term: string; normalizedTerm: string; category: string; severity: ModerationSeverity; matchMode: string; score: number; enabled: boolean }): Record<string, unknown> {
+./src/persistence/database.ts:7097:    const result = this.db.prepare(`INSERT INTO moderation_terms(assistant_id,rule_id,term,normalized_term,category,severity,match_mode,score,enabled,created_at,updated_at)
+./src/persistence/database.ts:7099:    return this.db.prepare('SELECT id,rule_id AS ruleId,term,normalized_term AS normalizedTerm,category,severity,match_mode AS matchMode,score,enabled FROM moderation_terms WHERE id=?').get(result.lastInsertRowid) as Record<string, unknown>;
+./src/persistence/database.ts:7102:  public deleteModerationTerm(assistantId: string, termId: number): boolean {
+./src/persistence/database.ts:7103:    return this.db.prepare('DELETE FROM moderation_terms WHERE assistant_id=? AND id=?').run(assistantId, termId).changes === 1;
+./src/persistence/database.ts:7106:  public createModerationCase(input: { assistantId: string; groupHash: string; participantHash: string; messageHash: string; category: string; matchedRuleIds: number[]; score: number; severity: ModerationSeverity; warningNumber: number; warningSentAt: string | null; adminNotifiedAt: string | null; encryptedEvidence: string | null; evidenceExpiresAt: string | null }): number | null {
+./src/persistence/database.ts:7108:    const result = this.db.prepare(`INSERT OR IGNORE INTO moderation_cases(assistant_id,group_hash,participant_hash,message_hash,category,matched_rule_ids,
+./src/persistence/database.ts:7116:  public listModerationCases(assistantId: string, status?: string): Array<Record<string, unknown>> {
+./src/persistence/database.ts:7117:    this.expireModerationEvidence(assistantId);
+./src/persistence/database.ts:7118:    this.anonymizeExpiredModerationCases(assistantId);
+./src/persistence/database.ts:7122:      updated_at AS updatedAt FROM moderation_cases WHERE assistant_id=? ${status === undefined ? '' : 'AND status=?'} ORDER BY created_at DESC LIMIT 500`)
+./src/persistence/database.ts:7127:  public reviewModerationCase(assistantId: string, caseId: number, decision: 'CONFIRMED' | 'FALSE_POSITIVE' | 'DISMISSED' | 'RESOLVED'): boolean {
+./src/persistence/database.ts:7129:    return this.db.prepare(`UPDATE moderation_cases SET status=?,decision=?,reviewed_at=?,updated_at=? WHERE assistant_id=? AND id=?`)
+./src/persistence/database.ts:7133:  public getModerationEvidence(assistantId: string, caseId: number): { encrypted: string; messageHash: string; expiresAt: string } | null {
+./src/persistence/database.ts:7134:    this.expireModerationEvidence(assistantId);
+./src/persistence/database.ts:7136:      FROM moderation_cases WHERE assistant_id=? AND id=? AND encrypted_temporary_evidence IS NOT NULL`).get(assistantId,caseId) as {encrypted:string;messageHash:string;expiresAt:string}|undefined;
+./src/persistence/database.ts:7140:  public getModerationRecurrence(assistantId: string, groupHash: string, participantHash: string): { activeCount: number; lastWarningAt: string | null; expiresAt: string } | null {
+./src/persistence/database.ts:7141:    const row = this.db.prepare('SELECT active_count,last_warning_at,expires_at FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?')
+./src/persistence/database.ts:7145:      this.db.prepare('DELETE FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?').run(assistantId, groupHash, participantHash);
+./src/persistence/database.ts:7151:  public saveModerationRecurrence(assistantId: string, groupHash: string, participantHash: string, activeCount: number, lastWarningAt: string | null, expiresAt: string): void {
+./src/persistence/database.ts:7153:    this.db.prepare(`INSERT INTO moderation_recurrence(assistant_id,group_hash,participant_hash,active_count,window_started_at,last_warning_at,expires_at,updated_at)
+./src/persistence/database.ts:7159:  public resetModerationRecurrence(assistantId: string, groupHash: string, participantHash: string): void {
+./src/persistence/database.ts:7160:    this.db.prepare('DELETE FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?').run(assistantId,groupHash,participantHash);
+./src/persistence/database.ts:7163:  public decrementModerationRecurrence(assistantId: string, groupHash: string, participantHash: string): void {
+./src/persistence/database.ts:7164:    const recurrence=this.getModerationRecurrence(assistantId,groupHash,participantHash);
+./src/persistence/database.ts:7165:    if(recurrence===null||recurrence.activeCount<=1){this.resetModerationRecurrence(assistantId,groupHash,participantHash);return;}
+./src/persistence/database.ts:7166:    this.db.prepare('UPDATE moderation_recurrence SET active_count=active_count-1,updated_at=? WHERE assistant_id=? AND group_hash=? AND participant_hash=?')
+./src/persistence/database.ts:7170:  public incrementModerationMetric(assistantId: string, field: string): void {
+./src/persistence/database.ts:7174:    if (column === undefined) throw new Error('MODERATION_METRIC_INVALID');
+./src/persistence/database.ts:7176:    this.db.prepare(`INSERT INTO moderation_metrics(assistant_id,local_date,${column},created_at,updated_at) VALUES(?,?,1,?,?)
+./src/persistence/database.ts:7180:  public getModerationMetrics(assistantId: string): Record<string, unknown> {
+./src/persistence/database.ts:7185:      updated_at AS updatedAt FROM moderation_metrics WHERE assistant_id=? AND local_date=?`).get(assistantId,date) as Record<string, unknown> | undefined) ?? {
+./src/persistence/database.ts:7191:  public expireModerationEvidence(assistantId: string): number {
+./src/persistence/database.ts:7193:    return this.db.prepare(`UPDATE moderation_cases SET encrypted_temporary_evidence=NULL,evidence_expires_at=NULL,updated_at=?
+./src/persistence/database.ts:7197:  public anonymizeExpiredModerationCases(assistantId: string): number {
+./src/persistence/database.ts:7198:    const settings=this.getModerationSettings(assistantId);
+./src/persistence/database.ts:7200:    return this.db.prepare(`UPDATE moderation_cases SET participant_hash='expired:'||id,message_hash='expired:'||id,updated_at=?
+./src/persistence/database.ts:7204:  private ensureModerationSettings(assistantId: string): void {
+./src/persistence/database.ts:7207:    this.db.prepare('INSERT OR IGNORE INTO assistant_moderation_settings(assistant_id,created_at,updated_at) VALUES(?,?,?)').run(assistantId,now,now);
+./src/persistence/database.ts:7210:  private mapModerationRule(row: Record<string, unknown>): ModerationRule {
+./src/persistence/database.ts:7212:    const conditions = (this.db.prepare('SELECT * FROM moderation_rule_conditions WHERE rule_id=? ORDER BY id').all(ruleId) as Array<Record<string, unknown>>).map((item) => ({
+./src/persistence/database.ts:7216:    const exceptions = (this.db.prepare('SELECT * FROM moderation_rule_exceptions WHERE rule_id=? ORDER BY id').all(ruleId) as Array<Record<string, unknown>>).map((item) => ({
+./src/persistence/database.ts:7220:      severity:String(row.severity) as ModerationSeverity,detectionType:String(row.detection_type),score:Number(row.score),reviewThreshold:Number(row.review_threshold),
+./src/persistence/database.ts:7225:  private replaceModerationConditions(ruleId: number, conditions: ModerationRule['conditions'], exceptions: ModerationRule['exceptions'], now: string): void {
+./src/persistence/database.ts:7226:    const conditionStatement = this.db.prepare(`INSERT INTO moderation_rule_conditions(rule_id,condition_type,operator,normalized_value,configuration_json,enabled,created_at,updated_at)
+./src/persistence/database.ts:7230:    const exceptionStatement = this.db.prepare(`INSERT INTO moderation_rule_exceptions(rule_id,exception_type,normalized_value,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?)`);
+./src/persistence/database.ts:7235:function mapGroupModerationProfile(row: Record<string, unknown>): GroupModerationProfile {
+./src/persistence/database.ts:7239:    analysisStatus:String(row.analysis_status) as GroupModerationProfile['analysisStatus'],
+./src/persistence/database.ts:7240:    testStatus:String(row.test_status) as GroupModerationProfile['testStatus'],
+./src/domain/types.ts:447:export type ModerationSeverity = 'INFORMATIVA' | 'LEVE' | 'MEDIA' | 'ALTA' | 'CRITICA';
+./src/domain/types.ts:448:export type ModerationAction = 'NO_ACTION' | 'ADMIN_REVIEW' | 'WARNING' | 'WARNING_AND_NOTIFY';
+./src/domain/types.ts:449:export type ModerationGroupMode = 'INHERIT' | 'ENABLED' | 'DISABLED';
+./src/domain/types.ts:451:export type ModerationSettings = {
+./src/domain/types.ts:453:  defaultGroupMode: ModerationGroupMode;
+./src/domain/types.ts:473:export type ModerationCondition = {
+./src/domain/types.ts:482:export type ModerationException = {
+./src/domain/types.ts:489:export type ModerationRule = {
+./src/domain/types.ts:495:  severity: ModerationSeverity;
+./src/domain/types.ts:503:  conditions: ModerationCondition[];
+./src/domain/types.ts:504:  exceptions: ModerationException[];
+./src/domain/types.ts:509:export type ModerationResult = {
+./src/domain/types.ts:511:  matchedRules: Array<{ id: number; name: string; category: string; severity: ModerationSeverity; score: number }>;
+./src/domain/types.ts:514:  severity: ModerationSeverity;
+./src/domain/types.ts:515:  action: ModerationAction;
+./src/admin/server.ts:53:import { LocalModerationEngine } from '../moderation/local-moderation-engine.js';
+./src/admin/server.ts:54:import { normalizeModerationConfigurationValue } from '../moderation/moderation-service.js';
+./src/admin/server.ts:55:import { GroupModerationService } from '../moderation/group-moderation-service.js';
+./src/admin/server.ts:503:const moderationSettingsSchema = z.object({
+./src/admin/server.ts:519:const moderationConditionSchema=z.object({id:z.number().int().nonnegative().default(0),conditionType:z.enum(['EXACT_WORD','EXACT_PHRASE','COMBINED_WORDS','TERM_CONTAINS','REPETITION','FREQUENCY','BLOCKED_DOMAIN','ADVERTISING','PERSONAL_INFO','EXCESSIVE_CAPS','SAFE_REGEX']),operator:z.enum(['ALL','ANY','EXCLUDE']),normalizedValue:z.string().trim().max(500),configuration:z.record(z.string(),z.union([z.string(),z.number(),z.boolean(),z.null()])),enabled:z.boolean()}).strict();
+./src/admin/server.ts:520:const moderationExceptionSchema=z.object({id:z.number().int().nonnegative().default(0),exceptionType:z.enum(['ADMINISTRATOR','EXACT_PHRASE','EXACT_WORD','ALLOWED_DOMAIN']),normalizedValue:z.string().trim().max(500),enabled:z.boolean()}).strict();
+./src/admin/server.ts:521:const moderationRuleSchema=z.object({name:z.string().trim().min(1).max(120),description:z.string().trim().min(1).max(1000),category:z.string().trim().min(1).max(80),severity:z.enum(['INFORMATIVA','LEVE','MEDIA','ALTA','CRITICA']),detectionType:z.string().trim().min(1).max(80),score:z.number().int().min(0).max(20),reviewThreshold:z.number().int().min(1).max(20),warningThreshold:z.number().int().min(1).max(20),adminNotificationThreshold:z.number().int().min(1).max(20),enabled:z.boolean(),appliesToAllGroups:z.boolean(),conditions:z.array(moderationConditionSchema).max(50),exceptions:z.array(moderationExceptionSchema).max(50)}).strict().superRefine((value,context)=>{
+./src/admin/server.ts:525:  for(const [index,condition] of value.conditions.entries()) if(condition.conditionType==='SAFE_REGEX'&&!LocalModerationEngine.validateSafePattern(condition.normalizedValue)) context.addIssue({code:'custom',path:['conditions',index,'normalizedValue'],message:'El patrón avanzado no es seguro.'});
+./src/admin/server.ts:527:const moderationTermSchema=z.object({ruleId:z.number().int().positive().nullable(),term:z.string().trim().min(1).max(200),category:z.string().trim().min(1).max(80),severity:z.enum(['INFORMATIVA','LEVE','MEDIA','ALTA','CRITICA']),matchMode:z.enum(['WHOLE_WORD','EXACT_PHRASE']),score:z.number().int().min(0).max(20),enabled:z.boolean()}).strict();
+./src/admin/server.ts:528:const moderationImportSchema=z.object({rules:z.array(moderationRuleSchema).max(200),terms:z.array(moderationTermSchema).max(1000),settings:moderationSettingsSchema.optional(),confirmed:z.literal(true)}).strict();
+./src/admin/server.ts:590:  const groupModeration = new GroupModerationService(context.database);
+./src/admin/server.ts:1264:  app.get('/api/bots/:botId/moderation', { preHandler: requireSession(sessions) }, async (request) => {
+./src/admin/server.ts:1265:    const botId=parseBotId(request.params); const cases=context.database.listModerationCases(botId);
+./src/admin/server.ts:1267:    const profiles=context.database.listGroupModerationProfiles(botId);
+./src/admin/server.ts:1268:    return {settings:context.database.getModerationSettings(botId),cases,groups:groups.filter((group)=>group.active&&!group.blocked).map((group)=>{const profile=profiles.find((item)=>item.groupHash===group.groupHash)??context.database.getGroupModerationProfile(botId,group.groupHash);return {groupHash:group.groupHash,name:group.name,active:true,enabled:profile.enabled,analysisStatus:profile.analysisStatus,testStatus:profile.testStatus};}),metrics:context.database.getModerationMetrics(botId),
+./src/admin/server.ts:1276:  app.get('/api/bots/:botId/moderation/groups/:groupHash',{preHandler:requireSession(sessions)},async(request,reply)=>{
+./src/admin/server.ts:1280:    const profile=context.database.getGroupModerationProfile(botId,groupHash);const tests=context.database.listGroupModerationTests(botId,groupHash,profile.rulesHash);
+./src/admin/server.ts:1281:    return {group:{groupHash,name:group.name},profile:{...profile,compiled:undefined},tests,recipientHashes:context.database.listGroupModerationRecipients(botId,groupHash).map((item)=>item.administratorHash),
+./src/admin/server.ts:1285:  app.patch('/api/bots/:botId/moderation/groups/:groupHash/draft',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request,reply)=>{
+./src/admin/server.ts:1289:    const previous=context.database.getGroupModerationProfile(botId,groupHash);const profile=groupModeration.saveDraft(botId,groupHash,rulesText);context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_RULES_DRAFT_SAVED',groupHash,result:'disabled'});if(previous.rulesHash!==''&&previous.rulesHash!==profile.rulesHash)context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_RULES_OUTDATED',groupHash,result:'disabled'});return {profile:{...profile,compiled:undefined}};
+./src/admin/server.ts:1292:  app.post('/api/bots/:botId/moderation/groups/:groupHash/analyze',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request,reply)=>{
+./src/admin/server.ts:1295:    context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_RULES_ANALYSIS_STARTED',groupHash,result:'started'});
+./src/admin/server.ts:1296:    try{const result=await groupModeration.analyze(botId,groupHash,provider);context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_RULES_ANALYSIS_COMPLETED',groupHash,result:result.reused?'reused':result.profile.testStatus,itemCount:result.automaticTests.length});return {...result,profile:{...result.profile,compiled:undefined}};}
+./src/admin/server.ts:1297:    catch(error){context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_RULES_ANALYSIS_FAILED',groupHash,result:'failed',errorCode:provider.classifyProviderError(error)});context.logger.error({operation:'GROUP_MODERATION_RULES_ANALYSIS_FAILED',botId,groupHash,errorCode:provider.classifyProviderError(error)},'No fue posible preparar la moderación del grupo');return reply.code(422).send({error:'No fue posible preparar una configuración segura. Revisa el texto e inténtalo nuevamente.',code:'MODERATION_ANALYSIS_FAILED'});}
+./src/admin/server.ts:1300:  app.post('/api/bots/:botId/moderation/groups/:groupHash/test',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request)=>{
+./src/admin/server.ts:1302:    context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_TEST_STARTED',groupHash,result:'started'});const result=groupModeration.test(botId,groupHash,input.text,input.expected);context.database.recordTechnicalEvent({botId,eventType:result.passed?'GROUP_MODERATION_TEST_PASSED':'GROUP_MODERATION_TEST_FAILED',groupHash,result:result.passed?'passed':'failed'});return {actual:result.actual,passed:result.passed,categories:result.result.categories,profile:{...result.profile,compiled:undefined},notice:'El texto no fue guardado y no se utilizó IA.'};
+./src/admin/server.ts:1305:  app.patch('/api/bots/:botId/moderation/groups/:groupHash/activation',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request,reply)=>{
+./src/admin/server.ts:1307:    if(enabled&&context.database.listGroupModerationRecipients(botId,groupHash).length===0)return reply.code(409).send({error:'Selecciona al menos un administrador para los avisos privados.',code:'MODERATION_ADMIN_REQUIRED'});
+./src/admin/server.ts:1308:    try{const profile=context.database.setGroupModerationEnabled(botId,groupHash,enabled);context.database.recordTechnicalEvent({botId,eventType:enabled?'GROUP_MODERATION_ENABLED':'GROUP_MODERATION_DISABLED',groupHash,result:'updated'});return {profile:{...profile,compiled:undefined}};}catch{return reply.code(409).send({error:'Completa y aprueba las pruebas antes de activar la moderación.',code:'MODERATION_TESTS_REQUIRED'});}
+./src/admin/server.ts:1311:  app.patch('/api/bots/:botId/moderation/groups/:groupHash/administrators',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request,reply)=>{
+./src/admin/server.ts:1315:    const recipients=identifiers.map((identifier)=>{const administratorHash=context.anonymizer.identifier(identifier);return {administratorHash,encryptedIdentifier:context.secretVault?.encrypt(identifier,`moderation-recipient:${botId}:${groupHash}:${administratorHash}`).encrypted as string};});
+./src/admin/server.ts:1316:    context.database.replaceGroupModerationRecipients(botId,groupHash,recipients);return {saved:true,recipientHashes:recipients.map((item)=>item.administratorHash)};
+./src/admin/server.ts:1319:  app.patch('/api/bots/:botId/moderation/settings',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request)=>{
+./src/admin/server.ts:1320:    const botId=parseBotId(request.params); const input=moderationSettingsSchema.parse(request.body);
+./src/admin/server.ts:1321:    const previous=context.database.getModerationSettings(botId); const settings=context.database.saveModerationSettings(botId,input);
+./src/admin/server.ts:1322:    context.database.recordTechnicalEvent({botId,eventType:settings.enabled?'MODERATION_ENABLED':'MODERATION_DISABLED',result:'updated'});
+./src/admin/server.ts:1323:    audit(context,previous.enabled===settings.enabled?'moderation_settings_update':settings.enabled?'moderation_enable':'moderation_disable',botId,'ok',botId);
+./src/admin/server.ts:1327:  app.post('/api/bots/:botId/moderation/rules',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request)=>{
+./src/admin/server.ts:1328:    const botId=parseBotId(request.params); const input=moderationRuleSchema.parse(request.body);
+./src/admin/server.ts:1329:    const rule=context.database.createModerationRule(botId,sanitizeModerationRule(input));
+./src/admin/server.ts:1330:    context.database.recordTechnicalEvent({botId,eventType:'MODERATION_RULE_CREATED',result:rule.enabled?'enabled':'draft',itemCount:rule.conditions.length});
+./src/admin/server.ts:1331:    audit(context,'moderation_rule_create',String(rule.id),'ok',botId); return {rule};
+./src/admin/server.ts:1334:  app.put('/api/bots/:botId/moderation/rules/:ruleId',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request)=>{
+./src/admin/server.ts:1336:    const rule=context.database.updateModerationRule(botId,ruleId,sanitizeModerationRule(moderationRuleSchema.parse(request.body)));
+./src/admin/server.ts:1337:    context.database.recordTechnicalEvent({botId,eventType:rule.enabled?'MODERATION_RULE_UPDATED':'MODERATION_RULE_DISABLED',result:'updated'});
+./src/admin/server.ts:1338:    audit(context,'moderation_rule_update',String(ruleId),'ok',botId); return {rule};
+./src/admin/server.ts:1341:  app.delete('/api/bots/:botId/moderation/rules/:ruleId',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request,reply)=>{
+./src/admin/server.ts:1343:    if(!context.database.deleteModerationRule(botId,ruleId)) return reply.code(404).send({error:'Regla no encontrada.'});
+./src/admin/server.ts:1344:    context.database.recordTechnicalEvent({botId,eventType:'MODERATION_RULE_DELETED',result:'deleted'}); audit(context,'moderation_rule_delete',String(ruleId),'ok',botId); return {deleted:true};
+./src/admin/server.ts:1347:  app.post('/api/bots/:botId/moderation/terms',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request)=>{
+./src/admin/server.ts:1348:    const botId=parseBotId(request.params); const input=moderationTermSchema.parse(request.body);
+./src/admin/server.ts:1349:    const term=context.database.createModerationTerm(botId,{...input,normalizedTerm:normalizeModerationConfigurationValue(input.term)});
+./src/admin/server.ts:1350:    context.database.recordTechnicalEvent({botId,eventType:'MODERATION_TERM_CREATED',result:'created'}); audit(context,'moderation_term_create',String(term.id),'ok',botId); return {term};
+./src/admin/server.ts:1353:  app.delete('/api/bots/:botId/moderation/terms/:termId',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request,reply)=>{
+./src/admin/server.ts:1355:    if(!context.database.deleteModerationTerm(botId,termId)) return reply.code(404).send({error:'Término no encontrado.'});
+./src/admin/server.ts:1356:    context.database.recordTechnicalEvent({botId,eventType:'MODERATION_TERM_REMOVED',result:'deleted'}); return {deleted:true};
+./src/admin/server.ts:1359:  app.post('/api/bots/:botId/moderation/test',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request)=>{
+./src/admin/server.ts:1361:    const service=context.multiBotManager?.moderationService(botId);
+./src/admin/server.ts:1362:    const result=service?.test(text)??new LocalModerationEngine().evaluate({assistantId:botId,groupHash:'simulation',participantHash:'simulation',messageHash:randomUUID(),text,isAdministrator:false,simulate:true},
+./src/admin/server.ts:1363:      context.database.getModerationSettings(botId),context.database.listModerationRules(botId,false),context.database.listModerationTerms(botId).map((item)=>({id:Number(item.id),term:String(item.term),normalizedTerm:String(item.normalizedTerm),category:String(item.category),severity:String(item.severity) as 'INFORMATIVA'|'LEVE'|'MEDIA'|'ALTA'|'CRITICA',matchMode:String(item.matchMode),score:Number(item.score),enabled:item.enabled===1})));
+./src/admin/server.ts:1364:    context.database.recordTechnicalEvent({botId,eventType:'MODERATION_RULE_TESTED',result:result.action,itemCount:result.matchedRules.length});
+./src/admin/server.ts:1368:  app.patch('/api/bots/:botId/moderation/cases/:caseId',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request,reply)=>{
+./src/admin/server.ts:1371:    const existing=context.database.listModerationCases(botId).find((item)=>item.id===caseId);
+./src/admin/server.ts:1372:    if(existing===undefined||!context.database.reviewModerationCase(botId,caseId,decision)) return reply.code(404).send({error:'Caso no encontrado.'});
+./src/admin/server.ts:1373:    if(decision==='FALSE_POSITIVE') { context.database.decrementModerationRecurrence(botId,String(existing.groupHash),String(existing.participantHash)); context.database.incrementModerationMetric(botId,'falsePositives'); }
+./src/admin/server.ts:1374:    if(decision==='CONFIRMED') context.database.incrementModerationMetric(botId,'confirmed');
+./src/admin/server.ts:1375:    const eventType=decision==='FALSE_POSITIVE'?'MODERATION_FALSE_POSITIVE':decision==='CONFIRMED'?'MODERATION_CASE_CONFIRMED':decision==='DISMISSED'?'MODERATION_CASE_DISMISSED':'MODERATION_CASE_RESOLVED';
+./src/admin/server.ts:1376:    context.database.recordTechnicalEvent({botId,eventType,result:decision});if(decision==='FALSE_POSITIVE')context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_FALSE_POSITIVE',groupHash:String(existing.groupHash),result:decision});if(decision==='RESOLVED')context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_CASE_RESOLVED',groupHash:String(existing.groupHash),result:decision});audit(context,'moderation_case_review',String(caseId),'ok',botId); return {reviewed:true,decision};
+./src/admin/server.ts:1379:  app.get('/api/bots/:botId/moderation/cases/:caseId/evidence',{preHandler:requireSession(sessions)},async(request,reply)=>{
+./src/admin/server.ts:1381:    const evidence=context.database.getModerationEvidence(botId,caseId);
+./src/admin/server.ts:1384:    const decrypted=context.secretVault.decrypt(evidence.encrypted,`moderation:${botId}:${evidence.messageHash}`);
+./src/admin/server.ts:1385:    return {temporary:true,expiresAt:evidence.expiresAt,text:decrypted.replace(/^moderation-evidence:/u,'')};
+./src/admin/server.ts:1388:  app.get('/api/bots/:botId/moderation/export',{preHandler:requireSession(sessions)},async(request)=>{
+./src/admin/server.ts:1389:    const botId=parseBotId(request.params); context.database.recordTechnicalEvent({botId,eventType:'MODERATION_RULES_EXPORTED',result:'exported'});
+./src/admin/server.ts:1390:    return {version:1,assistantId:botId,settings:context.database.getModerationSettings(botId),
+./src/admin/server.ts:1391:      rules:context.database.listModerationRules(botId).map((rule)=>({ ...moderationRuleForTransfer(rule), enabled:false })),
+./src/admin/server.ts:1392:      terms:context.database.listModerationTerms(botId).map((term)=>({ruleId:null,term:String(term.term),category:String(term.category),severity:String(term.severity),
+./src/admin/server.ts:1396:  app.post('/api/bots/:botId/moderation/import',{preHandler:[requireSession(sessions),requireCsrf(sessions)]},async(request)=>{
+./src/admin/server.ts:1397:    const botId=parseBotId(request.params); const input=moderationImportSchema.parse(request.body); const existingNames=new Set(context.database.listModerationRules(botId).map((rule)=>rule.name.toLocaleLowerCase('es')));
+./src/admin/server.ts:1398:    let importedRules=0; for(const candidate of input.rules){if(existingNames.has(candidate.name.toLocaleLowerCase('es')))continue;context.database.createModerationRule(botId,sanitizeModerationRule({...candidate,enabled:false}));importedRules+=1;}
+./src/admin/server.ts:1399:    let importedTerms=0; for(const term of input.terms){try{context.database.createModerationTerm(botId,{...term,ruleId:null,normalizedTerm:normalizeModerationConfigurationValue(term.term),enabled:false});importedTerms+=1;}catch{continue;}}
+./src/admin/server.ts:1400:    context.database.recordTechnicalEvent({botId,eventType:'MODERATION_RULES_IMPORTED',result:'imported',itemCount:importedRules}); audit(context,'moderation_rules_import',botId,'ok',botId);
+./src/admin/server.ts:3299:  if (route.includes('/moderation')) return 'moderation';
+./src/admin/server.ts:3311:function sanitizeModerationRule(input: z.infer<typeof moderationRuleSchema>): z.infer<typeof moderationRuleSchema> {
+./src/admin/server.ts:3318:        : normalizeModerationConfigurationValue(condition.normalizedValue),
+./src/admin/server.ts:3322:      normalizedValue: normalizeModerationConfigurationValue(exception.normalizedValue),
+./src/admin/server.ts:3327:function moderationRuleForTransfer(rule: ReturnType<AppDatabase['listModerationRules']>[number]): z.infer<typeof moderationRuleSchema> {
+./src/admin/server.ts:3332:    conditions:rule.conditions.map((condition)=>({id:0,conditionType:condition.conditionType as z.infer<typeof moderationConditionSchema>['conditionType'],
+./src/admin/server.ts:3334:    exceptions:rule.exceptions.map((exception)=>({id:0,exceptionType:exception.exceptionType as z.infer<typeof moderationExceptionSchema>['exceptionType'],
+./src/core/assistant-module-visibility-service.ts:14:  | 'moderation'
+./src/core/assistant-module-visibility-service.ts:31:const community: AssistantModuleKey[] = ['automatic-messages', 'polls', 'moderation'];
+./src/core/bot-instance.ts:11:import { ModerationService } from '../moderation/moderation-service.js';
+./src/core/bot-instance.ts:48:  private readonly moderation: ModerationService | null;
+./src/core/bot-instance.ts:85:    this.moderation = bot.groupChannelEnabled
+./src/core/bot-instance.ts:86:      ? new ModerationService(database, this.outboundQueue, logger, bot.id, options.secretVault)
+./src/core/bot-instance.ts:126:      this.moderation ?? undefined,
+./src/core/bot-instance.ts:234:  public moderationService(): ModerationService | null {
+./src/core/bot-instance.ts:235:    return this.moderation;
+./src/core/multi-bot-manager.ts:16:import type { ModerationService } from '../moderation/moderation-service.js';
+./src/core/multi-bot-manager.ts:166:  public moderationService(botId: string): ModerationService | null {
+./src/core/multi-bot-manager.ts:167:    return this.instances.get(botId)?.moderationService() ?? null;
+./src/core/message-processor.ts:15:import type { ModerationService } from '../moderation/moderation-service.js';
+./src/core/message-processor.ts:50:    private readonly moderationService?: ModerationService,
+./src/core/message-processor.ts:96:    if (this.moderationService !== undefined) {
+./src/core/message-processor.ts:97:      const moderation = await this.moderationService.process(message, groupHash, userHash, messageHash);
+./src/core/message-processor.ts:98:      if (moderation.blockNormal) {
+./src/core/message-processor.ts:99:        this.logger.info({ operation:'MODERATION_NORMAL_RESPONSE_SUPPRESSED',reason:'CLEAR_LOCAL_MATCH',...context },'La moderación local evitó una respuesta normal');
+./src/core/message-processor.ts:100:        return moderation.warningSent ? 'responded' : 'ignored';
+./src/moderation/moderation-service.ts:2:import type { IncomingMessage, ModerationResult, ModerationSeverity } from '../domain/types.js';
+./src/moderation/moderation-service.ts:6:import { LocalModerationEngine, normalizeModerationText, type ModerationTermInput } from './local-moderation-engine.js';
+./src/moderation/moderation-service.ts:7:import { GroupModerationService, settingsFor } from './group-moderation-service.js';
+./src/moderation/moderation-service.ts:9:export type ModerationProcessResult = { reviewed: boolean; result: ModerationResult | null; warningSent: boolean; blockNormal: boolean };
+./src/moderation/moderation-service.ts:11:export class ModerationService {
+./src/moderation/moderation-service.ts:12:  private readonly engine = new LocalModerationEngine();
+./src/moderation/moderation-service.ts:13:  private readonly groupModeration: GroupModerationService;
+./src/moderation/moderation-service.ts:22:  ) { this.groupModeration=new GroupModerationService(database); }
+./src/moderation/moderation-service.ts:24:  public async process(message: IncomingMessage, groupHash: string, participantHash: string, messageHash: string): Promise<ModerationProcessResult> {
+./src/moderation/moderation-service.ts:26:    const profile=this.database.getGroupModerationProfile(this.assistantId,groupHash);
+./src/moderation/moderation-service.ts:28:    const legacySettings=this.database.getModerationSettings(this.assistantId);
+./src/moderation/moderation-service.ts:30:    const expiredEvidence = this.database.expireModerationEvidence(this.assistantId);
+./src/moderation/moderation-service.ts:31:    if (expiredEvidence > 0) this.event('MODERATION_EVIDENCE_EXPIRED', 'expired', expiredEvidence);
+./src/moderation/moderation-service.ts:32:    this.database.anonymizeExpiredModerationCases(this.assistantId);
+./src/moderation/moderation-service.ts:34:      const result = this.groupModeration.evaluate(profile,message.body,false,{assistantId:this.assistantId,groupHash,participantHash,messageHash,
+./src/moderation/moderation-service.ts:36:      if (result.duplicate) { this.event('MODERATION_DUPLICATE_SUPPRESSED','duplicate'); return { reviewed:true,result,warningSent:false,blockNormal:false }; }
+./src/moderation/moderation-service.ts:37:      this.database.incrementModerationMetric(this.assistantId,'reviewed');
+./src/moderation/moderation-service.ts:38:      if (result.matchedRules.length === 0) { this.database.incrementModerationMetric(this.assistantId,'allowed'); return { reviewed:true,result,warningSent:false,blockNormal:false }; }
+./src/moderation/moderation-service.ts:39:      this.database.incrementModerationMetric(this.assistantId,'matches');
+./src/moderation/moderation-service.ts:40:      this.event('MODERATION_LOCAL_MATCH','matched',result.matchedRules.length);
+./src/moderation/moderation-service.ts:41:      this.event('GROUP_MODERATION_LOCAL_MATCH','matched',result.matchedRules.length);
+./src/moderation/moderation-service.ts:43:      const recurrence = this.database.getModerationRecurrence(this.assistantId,groupHash,participantHash);
+./src/moderation/moderation-service.ts:48:      if (!shouldWarn && result.action !== 'ADMIN_REVIEW') this.event('MODERATION_WARNING_COOLDOWN_ACTIVE','suppressed');
+./src/moderation/moderation-service.ts:52:      const caseId = this.database.createModerationCase({ assistantId:this.assistantId,groupHash,participantHash,messageHash,
+./src/moderation/moderation-service.ts:57:      this.database.incrementModerationMetric(this.assistantId,'cases');
+./src/moderation/moderation-service.ts:58:      this.event('MODERATION_ADMIN_REVIEW_CREATED','pending');
+./src/moderation/moderation-service.ts:59:      this.event('GROUP_MODERATION_ADMIN_PANEL_CASE_CREATED','pending');
+./src/moderation/moderation-service.ts:60:      this.database.saveModerationRecurrence(this.assistantId,groupHash,participantHash,warningNumber,shouldWarn ? now.toISOString() : recurrence?.lastWarningAt ?? null,expiresAt);
+./src/moderation/moderation-service.ts:61:      if (warningNumber >= 2) this.database.incrementModerationMetric(this.assistantId,'recurrences');
+./src/moderation/moderation-service.ts:65:        this.database.incrementModerationMetric(this.assistantId,'warnings');
+./src/moderation/moderation-service.ts:67:        this.event(warningNumber === 1 ? 'MODERATION_AUTOMATIC_WARNING_SENT' : 'MODERATION_SECOND_WARNING_SENT','sent');
+./src/moderation/moderation-service.ts:68:        this.event(warningNumber === 1 ? 'GROUP_MODERATION_WARNING_SENT' : 'GROUP_MODERATION_SECOND_WARNING_SENT','sent');
+./src/moderation/moderation-service.ts:72:        this.event('MODERATION_ADMIN_NOTIFIED','panel_case');
+./src/moderation/moderation-service.ts:76:      this.database.incrementModerationMetric(this.assistantId,'errors');
+./src/moderation/moderation-service.ts:77:      this.logger.error({ operation:'MODERATION_LOCAL_ERROR',botId:this.assistantId,errorCode:safeErrorCode(error) },'No fue posible revisar un mensaje mediante moderación local');
+./src/moderation/moderation-service.ts:82:  public test(text: string): ModerationResult {
+./src/moderation/moderation-service.ts:83:    const settings = this.database.getModerationSettings(this.assistantId);
+./src/moderation/moderation-service.ts:85:      isAdministrator:false,simulate:true },settings,this.database.listModerationRules(this.assistantId,false),this.terms());
+./src/moderation/moderation-service.ts:88:  private terms(): ModerationTermInput[] {
+./src/moderation/moderation-service.ts:89:    return this.database.listModerationTerms(this.assistantId).map((item) => ({ id:Number(item.id),term:String(item.term),normalizedTerm:String(item.normalizedTerm),
+./src/moderation/moderation-service.ts:90:      category:String(item.category),severity:String(item.severity) as ModerationSeverity,matchMode:String(item.matchMode),score:Number(item.score),enabled:item.enabled===1 }));
+./src/moderation/moderation-service.ts:94:    const recipients=this.database.listGroupModerationRecipients(this.assistantId,groupHash);
+./src/moderation/moderation-service.ts:98:        const identifier=this.vault.decrypt(recipient.encryptedIdentifier,`moderation-recipient:${this.assistantId}:${groupHash}:${recipient.administratorHash}`);
+./src/moderation/moderation-service.ts:100:        this.event('GROUP_MODERATION_ADMIN_WHATSAPP_SENT','sent');
+./src/moderation/moderation-service.ts:101:      }catch{this.event('GROUP_MODERATION_ADMIN_WHATSAPP_FAILED','failed');}
+./src/moderation/moderation-service.ts:113:    try { return this.vault.encrypt(`moderation-evidence:${redactEvidence(text).slice(0,600)}`,`moderation:${this.assistantId}:${messageHash}`).encrypted; }
+./src/moderation/moderation-service.ts:123:export function normalizeModerationConfigurationValue(value: string): string { return normalizeModerationText(value).slice(0,500); }
+./src/moderation/moderation-service.ts:124:function notReviewed(): ModerationProcessResult { return { reviewed:false,result:null,warningSent:false,blockNormal:false }; }
+./src/moderation/moderation-service.ts:125:function safeErrorCode(error: unknown): string { return error instanceof Error && /^[A-Z0-9_]{3,80}$/u.test(error.message) ? error.message : 'MODERATION_LOCAL_FAILURE'; }
+./src/moderation/local-moderation-engine.ts:1:import type { ModerationAction, ModerationResult, ModerationRule, ModerationSettings, ModerationSeverity } from '../domain/types.js';
+./src/moderation/local-moderation-engine.ts:3:export type ModerationTermInput = {
+./src/moderation/local-moderation-engine.ts:8:  severity: ModerationSeverity;
+./src/moderation/local-moderation-engine.ts:14:export type ModerationEvaluationInput = {
+./src/moderation/local-moderation-engine.ts:24:export class LocalModerationEngine {
+./src/moderation/local-moderation-engine.ts:30:    input: ModerationEvaluationInput,
+./src/moderation/local-moderation-engine.ts:31:    settings: ModerationSettings,
+./src/moderation/local-moderation-engine.ts:32:    rules: ModerationRule[],
+./src/moderation/local-moderation-engine.ts:33:    terms: ModerationTermInput[],
+./src/moderation/local-moderation-engine.ts:35:  ): ModerationResult {
+./src/moderation/local-moderation-engine.ts:41:    const normalized = normalizeModerationText(input.text);
+./src/moderation/local-moderation-engine.ts:43:    const matchedRules: ModerationResult['matchedRules'] = [];
+./src/moderation/local-moderation-engine.ts:87:  private conditionMatches(type: string, value: string, configuration: Record<string, unknown>, normalized: string, input: ModerationEvaluationInput, now: number): boolean {
+./src/moderation/local-moderation-engine.ts:91:    if (conditionType === 'EXACT_PHRASE' || conditionType === 'TERM_CONTAINS') return normalized.includes(normalizeModerationText(value));
+./src/moderation/local-moderation-engine.ts:92:    if (conditionType === 'COMBINED_WORDS') return value.split('|').map(normalizeModerationText).filter(Boolean).every((word) => containsWholeWord(normalized, word));
+./src/moderation/local-moderation-engine.ts:97:    if (conditionType === 'SAFE_REGEX') return LocalModerationEngine.validateSafePattern(value) && new RegExp(value, 'iu').test(input.text.slice(0, 4000));
+./src/moderation/local-moderation-engine.ts:103:  private repetitionMatches(input: ModerationEvaluationInput, normalized: string, now: number, count: number, windowSeconds: number): boolean {
+./src/moderation/local-moderation-engine.ts:111:  private frequencyMatches(input: ModerationEvaluationInput, now: number, count: number, windowSeconds: number): boolean {
+./src/moderation/local-moderation-engine.ts:126:export function normalizeModerationText(value: string): string {
+./src/moderation/local-moderation-engine.ts:130:function emptyResult(duplicate: boolean): ModerationResult {
+./src/moderation/local-moderation-engine.ts:134:function exceptionMatches(type: string, value: string, normalized: string, input: ModerationEvaluationInput): boolean {
+./src/moderation/local-moderation-engine.ts:136:  if (type === 'EXACT_PHRASE') return normalized.includes(normalizeModerationText(value));
+./src/moderation/local-moderation-engine.ts:143:  const escaped = normalizeModerationText(term).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+./src/moderation/local-moderation-engine.ts:172:function maximumSeverity(values: ModerationSeverity[]): ModerationSeverity {
+./src/moderation/local-moderation-engine.ts:173:  const order: ModerationSeverity[] = ['INFORMATIVA','LEVE','MEDIA','ALTA','CRITICA'];
+./src/moderation/local-moderation-engine.ts:177:function selectAction(score: number, severity: ModerationSeverity, settings: ModerationSettings, rules: ModerationRule[], ids: number[]): ModerationAction {
+./src/moderation/group-moderation-service.ts:4:import type { ModerationResult, ModerationRule, ModerationSettings, ModerationSeverity } from '../domain/types.js';
+./src/moderation/group-moderation-service.ts:5:import type { AppDatabase, GroupModerationProfile } from '../persistence/database.js';
+./src/moderation/group-moderation-service.ts:6:import { LocalModerationEngine, normalizeModerationText } from './local-moderation-engine.js';
+./src/moderation/group-moderation-service.ts:13:export type CompiledGroupModeration=z.infer<typeof compiledSchema>;
+./src/moderation/group-moderation-service.ts:15:export class GroupModerationService {
+./src/moderation/group-moderation-service.ts:16:  private readonly engine=new LocalModerationEngine();
+./src/moderation/group-moderation-service.ts:21:  public saveDraft(assistantId:string,groupHash:string,rulesText:string):GroupModerationProfile {
+./src/moderation/group-moderation-service.ts:23:    if(normalized.length<20)throw new Error('MODERATION_RULES_TOO_SHORT');
+./src/moderation/group-moderation-service.ts:24:    return this.database.saveGroupModerationDraft(assistantId,groupHash,normalized,this.rulesHash(normalized));
+./src/moderation/group-moderation-service.ts:27:  public async analyze(assistantId:string,groupHash:string,provider:AIProvider):Promise<{profile:GroupModerationProfile;reused:boolean;automaticTests:Array<{expected:string;actual:string;passed:boolean;category:string|null}>}> {
+./src/moderation/group-moderation-service.ts:28:    const profile=this.database.getGroupModerationProfile(assistantId,groupHash);
+./src/moderation/group-moderation-service.ts:29:    if(profile.rulesText.length<20)throw new Error('MODERATION_RULES_REQUIRED');
+./src/moderation/group-moderation-service.ts:31:      return {profile,reused:true,automaticTests:this.database.listGroupModerationTests(assistantId,groupHash,profile.rulesHash).filter((item)=>item.testType==='AUTOMATIC').map(mapTest)};
+./src/moderation/group-moderation-service.ts:34:    this.database.markGroupModerationAnalyzing(assistantId,groupHash);
+./src/moderation/group-moderation-service.ts:45:      let saved=this.database.saveCompiledGroupModeration({assistantId,groupHash,rulesHash:profile.rulesHash,compiled:compiled as unknown as Record<string,unknown>,summary:summaryFor(compiled),
+./src/moderation/group-moderation-service.ts:51:    }catch(error){this.database.failGroupModerationAnalysis(assistantId,groupHash);throw error;}
+./src/moderation/group-moderation-service.ts:54:  public test(assistantId:string,groupHash:string,text:string,expected:'ALLOW'|'WARNING'): {result:ModerationResult;actual:'ALLOW'|'WARNING';passed:boolean;profile:GroupModerationProfile} {
+./src/moderation/group-moderation-service.ts:55:    let profile=this.database.getGroupModerationProfile(assistantId,groupHash);
+./src/moderation/group-moderation-service.ts:57:    if(profile.rulesHash!==this.rulesHash(profile.rulesText))throw new Error('MODERATION_ANALYSIS_OUTDATED');
+./src/moderation/group-moderation-service.ts:60:    this.database.recordGroupModerationTest({assistantId,groupHash,rulesHash:profile.rulesHash,testType:expected==='ALLOW'?'MANUAL_ALLOWED':'MANUAL_WARNING',expected,actual,category:result.categories[0]??null,passed});
+./src/moderation/group-moderation-service.ts:61:    const automatic=this.database.listGroupModerationTests(assistantId,groupHash,profile.rulesHash).filter((item)=>item.testType==='AUTOMATIC');
+./src/moderation/group-moderation-service.ts:68:  public evaluate(profile:GroupModerationProfile,text:string,simulate:boolean,input?:{assistantId:string;groupHash:string;participantHash:string;messageHash:string;isAdministrator:boolean}):ModerationResult {
+./src/moderation/group-moderation-service.ts:74:  private runAutomaticTests(profile:GroupModerationProfile,compiled:CompiledGroupModeration):Array<{expected:string;actual:string;passed:boolean;category:string|null}>{
+./src/moderation/group-moderation-service.ts:77:      this.database.recordGroupModerationTest({assistantId:profile.assistantId,groupHash:profile.groupHash,rulesHash:profile.rulesHash,testType:'AUTOMATIC',expected:test.expected,actual,category:test.category??result.categories[0]??null,passed});
+./src/moderation/group-moderation-service.ts:82:  private refreshApproval(profile:GroupModerationProfile,automaticPassed:boolean):GroupModerationProfile {
+./src/moderation/group-moderation-service.ts:83:    const tests=this.database.listGroupModerationTests(profile.assistantId,profile.groupHash,profile.rulesHash);
+./src/moderation/group-moderation-service.ts:86:    return this.database.updateGroupModerationTestStatus(profile.assistantId,profile.groupHash,automaticPassed&&manualAllowed&&manualWarning);
+./src/moderation/group-moderation-service.ts:90:export function settingsFor(profile:GroupModerationProfile):ModerationSettings{return {enabled:true,defaultGroupMode:'ENABLED',reviewThreshold:2,warningThreshold:3,adminNotificationThreshold:5,recurrenceWindowDays:profile.recurrenceWindowDays,warningCooldownMinutes:0,publicWarningLimit:20,publicWarningWindowMinutes:60,temporaryEvidenceEnabled:false,temporaryEvidenceHours:1,warningMode:'GROUP_GENERAL',automaticAIReviewEnabled:false,manualAIReviewEnabled:false,automaticBanEnabled:false,automaticDeletionEnabled:false,firstWarningMessage:profile.firstWarningMessage,secondWarningMessage:profile.secondWarningMessage,repeatedWarningMessage:profile.secondWarningMessage};}
+./src/moderation/group-moderation-service.ts:92:function toRules(assistantId:string,compiled:CompiledGroupModeration):ModerationRule[]{return compiled.rules.map((rule,index)=>({id:index+1,assistantId,name:rule.name,description:'Regla preparada desde el texto administrativo.',category:rule.category,severity:rule.severity as ModerationSeverity,score:rule.score,reviewThreshold:2,warningThreshold:3,adminNotificationThreshold:5,detectionType:'LOCAL_COMPILED',enabled:true,appliesToAllGroups:false,conditions:rule.conditions.map((condition,conditionIndex)=>({id:conditionIndex+1,conditionType:condition.type,operator:condition.operator,normalizedValue:normalizeModerationText(condition.value),configuration:condition.configuration,enabled:true})),exceptions:rule.exceptions.map((exception,exceptionIndex)=>({id:exceptionIndex+1,exceptionType:exception.type,normalizedValue:normalizeModerationText(exception.value),enabled:true})),createdAt:'',updatedAt:''}));}
+./src/moderation/group-moderation-service.ts:93:function parseCompiled(text:string):CompiledGroupModeration{const candidate=text.trim().replace(/^```(?:json)?\s*/iu,'').replace(/\s*```$/u,'');return compiledSchema.parse(JSON.parse(candidate));}
+./src/moderation/group-moderation-service.ts:94:function validateCompiledSafety(compiled:CompiledGroupModeration):void{if(!compiled.tests.some((test)=>test.expected==='ALLOW')||!compiled.tests.some((test)=>test.expected==='WARNING'))throw new Error('MODERATION_COMPILATION_TESTS_MISSING');for(const rule of compiled.rules){if(rule.severity==='CRITICA'&&!compiled.tests.some((test)=>test.expected==='WARNING'&&test.category===rule.category))throw new Error('MODERATION_CRITICAL_TEST_MISSING');for(const condition of rule.conditions)if(condition.type==='BLOCKED_DOMAIN'&&!/^[a-z0-9.-]+$/iu.test(condition.value))throw new Error('MODERATION_COMPILATION_UNSAFE');}}
+./src/moderation/group-moderation-service.ts:97:function toTestResult(result:ModerationResult):'ALLOW'|'WARNING'{return result.action==='WARNING'||result.action==='WARNING_AND_NOTIFY'?'WARNING':'ALLOW';}
+./src/moderation/group-moderation-service.ts:99:function summaryFor(compiled:CompiledGroupModeration):Record<string,unknown>{const conditions=compiled.rules.flatMap((rule)=>rule.conditions);return {...compiled.summary,interpretedRules:compiled.rules.length,categoryCount:new Set(compiled.rules.map((rule)=>rule.category)).size,preparedConditions:conditions.length,spamPatterns:conditions.filter((condition)=>['REPETITION','FREQUENCY','ADVERTISING'].includes(condition.type)).length,privacyPatterns:conditions.filter((condition)=>condition.type==='PERSONAL_INFO').length,exceptionCount:compiled.rules.reduce((total,rule)=>total+rule.exceptions.length,0),generatedTestCount:compiled.tests.length};}
+./public/multibot-panel.js:13:  moderation: null,
+./public/multibot-panel.js:323:  if (visible.has('moderation')) loaders.push(loadModeration());
+./public/multibot-panel.js:327:async function loadModeration() {
+./public/multibot-panel.js:328:  if (!panelState.selectedBotId || !panelState.visibleModules.includes('moderation')) return;
+./public/multibot-panel.js:329:  const data = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation`);
+./public/multibot-panel.js:330:  panelState.moderation = data;
+./public/multibot-panel.js:331:  await renderSimpleModeration(data);
+./public/multibot-panel.js:332:  const legacyModerationAvailable = [
+./public/multibot-panel.js:333:    '#moderation-summary-cards',
+./public/multibot-panel.js:334:    '#moderation-state-notice',
+./public/multibot-panel.js:335:    '#moderation-settings-form',
+./public/multibot-panel.js:336:    '#moderation-warning-form',
+./public/multibot-panel.js:337:    '#moderation-groups-list',
+./public/multibot-panel.js:338:    '#moderation-rules-list',
+./public/multibot-panel.js:339:    '#moderation-terms-list',
+./public/multibot-panel.js:340:    '#moderation-statistics-cards',
+./public/multibot-panel.js:342:  if (!legacyModerationAvailable || data.settings === undefined) return;
+./public/multibot-panel.js:343:  setCardGrid('#moderation-summary-cards', [
+./public/multibot-panel.js:351:  const notice = document.querySelector('#moderation-state-notice');
+./public/multibot-panel.js:353:  fillModerationSettings(data.settings);
+./public/multibot-panel.js:354:  renderModerationGroups(data.groups);
+./public/multibot-panel.js:355:  renderModerationRules(data.rules);
+./public/multibot-panel.js:356:  renderModerationTerms(data.terms);
+./public/multibot-panel.js:357:  renderModerationCases(data.cases, data.groups);
+./public/multibot-panel.js:358:  setCardGrid('#moderation-statistics-cards', [
+./public/multibot-panel.js:366:async function renderSimpleModeration(data) {
+./public/multibot-panel.js:367:  const selector=document.querySelector('#moderation-group-selector');selector.replaceChildren();
+./public/multibot-panel.js:369:  if(!data.groups.some((group)=>group.groupHash===panelState.moderationGroupHash))panelState.moderationGroupHash=data.groups[0]?.groupHash||'';
+./public/multibot-panel.js:370:  selector.value=panelState.moderationGroupHash;
+./public/multibot-panel.js:371:  renderModerationCases(data.cases,data.groups);
+./public/multibot-panel.js:372:  if(panelState.moderationGroupHash)await loadModerationGroup();else document.querySelector('#moderation-group-status').textContent='No hay grupos activos disponibles.';
+./public/multibot-panel.js:375:async function loadModerationGroup(){
+./public/multibot-panel.js:376:  const data=await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}`);panelState.moderationGroup=data;
+./public/multibot-panel.js:377:  const profile=data.profile;document.querySelector('#moderation-rules-text-form').elements.rulesText.value=profile.rulesText;
+./public/multibot-panel.js:379:  const progress=document.querySelector('#moderation-progress');progress.replaceChildren();labels.forEach(([key,label])=>progress.append(node('span',`${data.progress[key]?'✓':'•'} ${label}`,`progress-step ${data.progress[key]?'complete':''}`)));
+./public/multibot-panel.js:380:  document.querySelector('#moderation-group-status').textContent=profile.enabled?'Moderación activa. Los mensajes nuevos se analizan localmente.':data.progress.ready&&data.recipientHashes.length>0?'Todo está aprobado. Ya puedes activar la moderación.':data.progress.ready?'Las pruebas están aprobadas. Selecciona al menos un administrador para poder activar.':'Moderación desactivada mientras completas la preparación.';
+./public/multibot-panel.js:381:  setCardGrid('#moderation-simple-summary',[['Estado',profile.enabled?'Activa':'Desactivada'],['Preparación',moderationStatusLabel(profile.analysisStatus)],['Pruebas',profile.testStatus==='APPROVED'?'Aprobadas':'Pendientes'],['Uso diario de IA','0 tokens'],['Último análisis',safeDate(profile.lastAnalyzedAt)],['Tokens de preparación',profile.inputTokens+profile.outputTokens]]);
+./public/multibot-panel.js:382:  const values=profile.summary||{};document.querySelector('#moderation-analysis-summary').textContent=profile.summary?`Configuración preparada\nReglas interpretadas: ${values.interpretedRules||0}\nCategorías detectadas: ${values.categoryCount||0}\nCondiciones preparadas: ${values.preparedConditions||0}\nPatrones de spam: ${values.spamPatterns||0}\nPatrones de privacidad: ${values.privacyPatterns||0}\nExcepciones: ${values.exceptionCount||0}\nPruebas preparadas: ${values.generatedTestCount||0}`:'Guarda las reglas y prepara la moderación para ver un resumen.';
+./public/multibot-panel.js:383:  const toggle=document.querySelector('#moderation-toggle');toggle.textContent=profile.enabled?'Desactivar moderación':'Activar moderación';toggle.classList.toggle('danger',profile.enabled);toggle.disabled=!profile.enabled&&(!data.progress.ready||data.recipientHashes.length===0);
+./public/multibot-panel.js:384:  renderModerationAdministrators(data.recipientHashes);
+./public/multibot-panel.js:387:function renderModerationAdministrators(selectedHashes){
+./public/multibot-panel.js:388:  const target=document.querySelector('#moderation-admin-recipients');target.replaceChildren();const administrators=panelState.moderation.administrators||[];
+./public/multibot-panel.js:393:function moderationStatusLabel(status){return ({DRAFT:'Borrador',OUTDATED:'Requiere nuevo análisis',ANALYZING:'Analizando',ANALYSIS_FAILED:'Análisis fallido',PENDING_TESTS:'Pruebas pendientes',READY:'Lista para activar',ACTIVE:'Activa'})[status]||status;}
+./public/multibot-panel.js:395:function fillModerationSettings(settings) {
+./public/multibot-panel.js:396:  const form = document.querySelector('#moderation-settings-form');
+./public/multibot-panel.js:401:  const warnings = document.querySelector('#moderation-warning-form');
+./public/multibot-panel.js:405:function renderModerationGroups(groups) {
+./public/multibot-panel.js:406:  const target = document.querySelector('#moderation-groups-list'); target.replaceChildren();
+./public/multibot-panel.js:413:      try { await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(group.groupHash)}`,{method:'PATCH',body:JSON.stringify({mode:select.value})}); await loadModeration(); notify('Moderación del grupo actualizada.'); }
+./public/multibot-panel.js:419:function renderModerationRules(rules) {
+./public/multibot-panel.js:420:  const target=document.querySelector('#moderation-rules-list'); target.replaceChildren();
+./public/multibot-panel.js:425:    actions.append(actionButton('Editar','secondary',()=>editModerationRule(rule)),actionButton(rule.enabled?'Desactivar':'Activar','secondary',async()=>{
+./public/multibot-panel.js:426:      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/rules/${rule.id}`,{method:'PUT',body:JSON.stringify({...moderationRulePayload(rule),enabled:!rule.enabled})}); await loadModeration();
+./public/multibot-panel.js:427:    }),actionButton('Eliminar','danger',async()=>{if(!window.confirm('¿Eliminar esta regla?'))return;await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/rules/${rule.id}`,{method:'DELETE'});await loadModeration();}));
+./public/multibot-panel.js:432:function moderationRulePayload(rule) {
+./public/multibot-panel.js:438:function editModerationRule(rule) {
+./public/multibot-panel.js:439:  const form=document.querySelector('#moderation-rule-form'); form.elements.ruleId.value=rule.id; form.elements.name.value=rule.name;
+./public/multibot-panel.js:444:  showModerationPane('rules'); form.scrollIntoView({behavior:'smooth',block:'start'});
+./public/multibot-panel.js:447:function renderModerationTerms(terms) {
+./public/multibot-panel.js:448:  const target=document.querySelector('#moderation-terms-list');target.replaceChildren();
+./public/multibot-panel.js:450:  terms.forEach((term)=>{const item=createListItem(term.term,`${term.category} · ${term.severity} · ${term.matchMode}`);item.append(actionButton('Eliminar','danger',async()=>{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/terms/${term.id}`,{method:'DELETE'});await loadModeration();}));target.append(item);});
+./public/multibot-panel.js:453:function renderModerationCases(cases,groups) {
+./public/multibot-panel.js:454:  const pending=document.querySelector('#moderation-pending-cases');const history=document.querySelector('#moderation-history');pending.replaceChildren();history.replaceChildren();
+./public/multibot-panel.js:456:    if(item.status==='PENDING'){const actions=node('div',undefined,'actions');actions.append(actionButton('Ver evidencia temporal','secondary',async()=>{const evidence=await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/cases/${item.id}/evidence`);window.alert(`Evidencia temporal cifrada hasta ${safeDate(evidence.expiresAt)}:\n\n${evidence.text}`);}));[['CONFIRMED','Confirmar incumplimiento'],['FALSE_POSITIVE','Falso positivo'],['DISMISSED','Descartar'],['RESOLVED','Resolver']].forEach(([decision,label])=>actions.append(actionButton(label,decision==='FALSE_POSITIVE'?'secondary':'',async()=>{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/cases/${item.id}`,{method:'PATCH',body:JSON.stringify({decision})});await loadModeration();})));card.append(actions);}target.append(card);};
+./public/multibot-panel.js:461:function showModerationPane(name) {
+./public/multibot-panel.js:462:  document.querySelectorAll('[data-moderation-pane]').forEach((pane)=>pane.classList.toggle('hidden',pane.dataset.moderationPane!==name));
+./public/multibot-panel.js:463:  document.querySelectorAll('[data-moderation-tab]').forEach((button)=>button.classList.toggle('active',button.dataset.moderationTab===name));
+./public/multibot-panel.js:466:function bindSimpleModeration(){
+./public/multibot-panel.js:467:  document.querySelectorAll('[data-moderation-tab]').forEach((button)=>button.addEventListener('click',()=>showModerationPane(button.dataset.moderationTab)));
+./public/multibot-panel.js:468:  showModerationPane('configuration');
+./public/multibot-panel.js:469:  document.querySelector('#moderation-group-selector').addEventListener('change',async(event)=>{panelState.moderationGroupHash=event.currentTarget.value;try{await loadModerationGroup();}catch(error){notify(error.message,true);}});
+./public/multibot-panel.js:470:  document.querySelector('#moderation-rules-text-form').addEventListener('submit',async(event)=>{event.preventDefault();const rulesText=event.currentTarget.elements.rulesText.value;try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/draft`,{method:'PATCH',body:JSON.stringify({rulesText})});await loadModerationGroup();notify('Reglas guardadas. La moderación permanece desactivada hasta aprobar las pruebas.');}catch(error){notify(error.message,true);}});
+./public/multibot-panel.js:471:  document.querySelector('#moderation-discard-rules').addEventListener('click',()=>{document.querySelector('#moderation-rules-text-form').elements.rulesText.value=panelState.moderationGroup?.profile.rulesText||'';notify('Cambios sin guardar descartados.');});
+./public/multibot-panel.js:472:  document.querySelector('#moderation-analyze').addEventListener('click',async(event)=>{const button=event.currentTarget;button.disabled=true;button.textContent='Preparando…';try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/analyze`,{method:'POST',body:'{}'});await loadModerationGroup();showModerationPane('tests');notify('Moderación preparada. Completa las dos pruebas manuales.');}catch(error){notify(error.message,true);}finally{button.disabled=false;button.textContent='Analizar y preparar moderación';}});
+./public/multibot-panel.js:473:  const bindTest=(selector,expected)=>document.querySelector(selector).addEventListener('submit',async(event)=>{event.preventDefault();const form=event.currentTarget;try{const response=await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/test`,{method:'POST',body:JSON.stringify({text:form.elements.text.value,expected})});document.querySelector('#moderation-test-result').textContent=`${response.notice}\nResultado: ${response.actual==='ALLOW'?'Permitido':'Advertencia'}\nPrueba: ${response.passed?'Aprobada':'No aprobada'}${response.categories.length?`\nMotivo general: ${response.categories.join(', ')}`:''}`;form.reset();await loadModerationGroup();}catch(error){notify(error.message,true);}});
+./public/multibot-panel.js:474:  bindTest('#moderation-allowed-test','ALLOW');bindTest('#moderation-warning-test','WARNING');
+./public/multibot-panel.js:475:  document.querySelector('#moderation-toggle').addEventListener('click',async()=>{const enabled=!panelState.moderationGroup.profile.enabled;try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/activation`,{method:'PATCH',body:JSON.stringify({enabled})});await loadModeration();notify(enabled?'Moderación activada para este grupo.':'Moderación desactivada para este grupo.');}catch(error){notify(error.message,true);}});
+./public/multibot-panel.js:476:  document.querySelector('#moderation-save-admins').addEventListener('click',async()=>{const identifiers=[...document.querySelectorAll('#moderation-admin-recipients input:checked')].map((input)=>input.value);try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/administrators`,{method:'PATCH',body:JSON.stringify({identifiers})});await loadModerationGroup();notify('Destinatarios guardados de forma cifrada.');}catch(error){notify(error.message,true);}});
+./public/multibot-panel.js:1640:  if(document.querySelector('#moderation-settings-form')===null){
+./public/multibot-panel.js:1641:    bindSimpleModeration();
+./public/multibot-panel.js:1643:  document.querySelectorAll('[data-moderation-tab]').forEach((button)=>button.addEventListener('click',()=>showModerationPane(button.dataset.moderationTab)));
+./public/multibot-panel.js:1644:  showModerationPane('summary');
+./public/multibot-panel.js:1645:  document.querySelector('#moderation-settings-form').addEventListener('submit',async(event)=>{
+./public/multibot-panel.js:1646:    event.preventDefault();const form=event.currentTarget;const current=panelState.moderation.settings;
+./public/multibot-panel.js:1653:    try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/settings`,{method:'PATCH',body:JSON.stringify(payload)});await loadModeration();notify('Configuración de moderación guardada.');}catch(error){notify(error.message,true);}
+./public/multibot-panel.js:1655:  document.querySelector('#moderation-warning-form').addEventListener('submit',async(event)=>{
+./public/multibot-panel.js:1656:    event.preventDefault();const form=event.currentTarget;const settings={...panelState.moderation.settings,firstWarningMessage:form.elements.firstWarningMessage.value,
+./public/multibot-panel.js:1658:    try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/settings`,{method:'PATCH',body:JSON.stringify(settings)});await loadModeration();notify('Mensajes de advertencia guardados.');}catch(error){notify(error.message,true);}
+./public/multibot-panel.js:1660:  document.querySelector('#moderation-rule-form').addEventListener('submit',async(event)=>{
+./public/multibot-panel.js:1667:    try{const ruleId=form.elements.ruleId.value;await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/rules${ruleId?`/${ruleId}`:''}`,{method:ruleId?'PUT':'POST',body:JSON.stringify(payload)});form.reset();form.elements.ruleId.value='';form.elements.score.value=3;form.elements.reviewThreshold.value=3;form.elements.warningThreshold.value=4;form.elements.adminNotificationThreshold.value=4;await loadModeration();notify('Regla guardada.');}catch(error){notify(error.message,true);}
+./public/multibot-panel.js:1669:  document.querySelector('#moderation-rule-cancel').addEventListener('click',()=>{const form=document.querySelector('#moderation-rule-form');form.reset();form.elements.ruleId.value='';});
+./public/multibot-panel.js:1670:  document.querySelector('#moderation-term-form').addEventListener('submit',async(event)=>{
+./public/multibot-panel.js:1672:    try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/terms`,{method:'POST',body:JSON.stringify(payload)});form.reset();form.elements.category.value='RESPETO';form.elements.score.value=1;await loadModeration();notify('Término agregado.');}catch(error){notify(error.message,true);}
+./public/multibot-panel.js:1674:  document.querySelector('#moderation-test-form').addEventListener('submit',async(event)=>{
+./public/multibot-panel.js:1675:    event.preventDefault();const form=event.currentTarget;try{const response=await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/test`,{method:'POST',body:JSON.stringify({text:form.elements.text.value})});
+./public/multibot-panel.js:1676:      document.querySelector('#moderation-test-result').textContent=[response.notice,`Resultado: ${response.result.allowed?'Permitido':'Detectado'}`,`Acción: ${response.result.action}`,`Puntuación: ${response.result.totalScore}`,`Categorías: ${response.result.categories.join(', ')||'Ninguna'}`,`Reglas: ${response.result.matchedRules.map((rule)=>rule.name).join(', ')||'Ninguna'}`].join('\n');form.elements.text.value='';}catch(error){notify(error.message,true);}
+./public/multibot-panel.js:1678:  document.querySelector('#moderation-export').addEventListener('click',async()=>{try{const data=await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/export`);document.querySelector('#moderation-import-export').value=JSON.stringify(data,null,2);notify('Configuración exportada sin incidentes ni datos personales.');}catch(error){notify(error.message,true);}});
+./public/multibot-panel.js:1679:  document.querySelector('#moderation-import').addEventListener('click',async()=>{try{const parsed=JSON.parse(document.querySelector('#moderation-import-export').value);await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/import`,{method:'POST',body:JSON.stringify({rules:parsed.rules||[],terms:parsed.terms||[],...(parsed.settings?{settings:parsed.settings}:{}),confirmed:true})});await loadModeration();notify('Configuración importada como borrador.');}catch(error){notify(error.message,true);}});
+./public/index.html:64:              <option value="moderation" data-bot-only data-module="moderation">Moderación y reglas</option>
+./public/index.html:97:                <button data-section="moderation" data-module="moderation" class="bot-only hidden">Moderación y reglas</button>
+./public/index.html:926:        <section id="section-moderation" class="panel-section hidden">
+./public/index.html:929:          <div class="card inset moderation-workspace">
+./public/index.html:930:            <label>Grupo que deseas configurar<select id="moderation-group-selector"></select></label>
+./public/index.html:931:            <div id="moderation-progress" class="moderation-progress" aria-label="Progreso de configuración"></div>
+./public/index.html:932:            <div id="moderation-group-status" class="info-callout"></div>
+./public/index.html:934:          <div class="moderation-tabs" role="tablist" aria-label="Secciones de moderación">
+./public/index.html:935:            <button type="button" data-moderation-tab="configuration">Configuración</button>
+./public/index.html:936:            <button type="button" data-moderation-tab="group-rules">Reglas del grupo</button>
+./public/index.html:937:            <button type="button" data-moderation-tab="tests">Pruebas</button>
+./public/index.html:938:            <button type="button" data-moderation-tab="cases">Casos pendientes</button>
+./public/index.html:939:            <button type="button" data-moderation-tab="history">Historial</button>
+./public/index.html:941:          <div data-moderation-pane="configuration" class="card inset">
+./public/index.html:943:            <div id="moderation-simple-summary" class="status-grid"></div>
+./public/index.html:944:            <label>Administradores que recibirán un aviso privado en una reincidencia<div id="moderation-admin-recipients" class="checkbox-stack"></div></label>
+./public/index.html:945:            <div class="actions"><button id="moderation-save-admins" type="button" class="secondary">Guardar destinatarios</button><button id="moderation-toggle" type="button">Activar moderación</button></div>
+./public/index.html:948:          <div data-moderation-pane="group-rules" class="card inset hidden">
+./public/index.html:950:            <form id="moderation-rules-text-form"><label>Normas y situaciones que requieren advertencia<textarea name="rulesText" maxlength="20000" rows="14" required placeholder="Ejemplo: Tratar a todas las personas con respeto. No permitir insultos, amenazas, discriminación, publicidad repetida ni compartir datos personales."></textarea></label><div class="actions"><button type="submit">Guardar borrador</button><button id="moderation-discard-rules" type="button" class="secondary">Descartar cambios</button></div></form>
+./public/index.html:951:            <div class="actions spacious-actions"><button id="moderation-analyze" type="button">Analizar y preparar moderación</button></div>
+./public/index.html:952:            <div id="moderation-analysis-summary" class="preview"></div>
+./public/index.html:954:          <div data-moderation-pane="tests" class="card inset hidden">
+./public/index.html:956:            <form id="moderation-allowed-test"><label>Mensaje que debe permitirse<textarea name="text" maxlength="4000" required></textarea></label><button type="submit">Probar mensaje permitido</button></form>
+./public/index.html:957:            <form id="moderation-warning-test"><label>Mensaje que debe generar advertencia<textarea name="text" maxlength="4000" required></textarea></label><button type="submit">Probar advertencia</button></form>
+./public/index.html:958:            <div id="moderation-test-result" class="preview"></div>
+./public/index.html:960:          <div data-moderation-pane="cases" class="card inset hidden"><h3>Casos pendientes</h3><p class="muted">Toda decisión es humana.</p><div id="moderation-pending-cases" class="stack"></div></div>
+./public/index.html:961:          <div data-moderation-pane="history" class="card inset hidden"><h3>Historial</h3><div id="moderation-history" class="stack"></div></div>
+./public/styles.css:300:.moderation-tabs {
+./public/styles.css:307:#moderation-summary-cards {
+./public/styles.css:311:#moderation-summary-cards .status-card {
+./public/styles.css:315:#moderation-state-notice {
+./public/styles.css:320:#moderation-settings-form {
+./public/styles.css:324:#moderation-settings-form + h3 {
+./public/styles.css:328:#moderation-groups-list {
+./public/styles.css:333:.moderation-tabs button {
+./public/styles.css:338:.moderation-tabs button.active {
+./public/styles.css:343:[data-moderation-pane] {
+./public/styles.css:346:.moderation-workspace {
+./public/styles.css:351:.moderation-progress {
+./public/styles.css:378:#moderation-allowed-test + #moderation-warning-test {
+./public/styles.css:842:  .moderation-tabs,
+./public/styles.css:843:  #moderation-summary-cards {
+./public/styles.css:863:  .moderation-tabs,
+./public/styles.css:864:  #moderation-summary-cards {
+./public/friendly-panel.js:42:      { section: 'moderation', label: 'Moderación y reglas', description: 'Protección y revisión humana', icon: '◇' },
+./public/friendly-panel.js:127:  moderation: {
+./public/friendly-panel.js:544:function simplifyModeration() {
+./public/friendly-panel.js:553:  for (const button of queryAll('#section-moderation [data-moderation-tab]')) {
+./public/friendly-panel.js:554:    const label = labels[button.dataset.moderationTab];
+./public/friendly-panel.js:604:  simplifyModeration();
+
+## moderación
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+./tests/admin-server.test.ts:580:  it('administra moderación local solo en asistentes con canal grupal', async () => {
+./tests/moderation-ui.test.ts:3:describe('panel de moderación simplificada',()=>{
+./tests/moderation-ui.test.ts:11:    expect(html).toContain('id="moderation-rules-text-form"');expect(html).toContain('Analizar y preparar moderación');expect(html).toContain('id="moderation-toggle"');
+./tests/answer-cache.test.ts:110:      content: 'Los conflictos internos se canalizan mediante el equipo de moderación de la comunidad.',
+./tests/group-moderation-service.test.ts:20:describe('moderación simplificada por grupo',()=>{
+./tests/panel-usability.test.ts:65:  it('abre la administración sin mantener visible la tarjeta general ni ejecutar la vista antigua de moderación', () => {
+./tests/moderation.test.ts:12:describe('moderación local aislada por asistente', () => {
+./tests/moderation.test.ts:147:    expect(client.sentMessages.at(-1)?.text).toContain('caso de moderación pendiente');
+./src/persistence/database.ts:1956:      'Moderación automática',
+./src/admin/server.ts:1270:        lastEvent:cases[0]?.createdAt??null,aiConsumption:'0 tokens durante la moderación diaria.'},
+./src/admin/server.ts:1297:    catch(error){context.database.recordTechnicalEvent({botId,eventType:'GROUP_MODERATION_RULES_ANALYSIS_FAILED',groupHash,result:'failed',errorCode:provider.classifyProviderError(error)});context.logger.error({operation:'GROUP_MODERATION_RULES_ANALYSIS_FAILED',botId,groupHash,errorCode:provider.classifyProviderError(error)},'No fue posible preparar la moderación del grupo');return reply.code(422).send({error:'No fue posible preparar una configuración segura. Revisa el texto e inténtalo nuevamente.',code:'MODERATION_ANALYSIS_FAILED'});}
+./src/admin/server.ts:1308:    try{const profile=context.database.setGroupModerationEnabled(botId,groupHash,enabled);context.database.recordTechnicalEvent({botId,eventType:enabled?'GROUP_MODERATION_ENABLED':'GROUP_MODERATION_DISABLED',groupHash,result:'updated'});return {profile:{...profile,compiled:undefined}};}catch{return reply.code(409).send({error:'Completa y aprueba las pruebas antes de activar la moderación.',code:'MODERATION_TESTS_REQUIRED'});}
+./src/core/automatic-message-defaults.ts:9:    '📌 Reglas de la Comunidad Neurodivergente – Autismo y TDAH\n\n1. Mantengamos un trato respetuoso, amable y sin burlas.\n\n2. No se permite discriminación por autismo, TDAH, discapacidad, género, nacionalidad, origen, apariencia, situación económica, religión u otra condición personal.\n\n3. No se permite xenofobia, racismo, discursos de odio, acoso, amenazas ni hostigamiento.\n\n4. No se permite compartir contenido sexual, pornográfico, erótico o explícito.\n\n5. No se permite contenido inapropiado o peligroso para menores de edad.\n\n6. No se permite material con violencia gráfica, crueldad, autolesiones ni instrucciones que puedan poner en riesgo a una persona.\n\n7. No se permite promover drogas, alcohol, armas, desafíos peligrosos ni actividades ilegales.\n\n8. No se permite pedir, publicar o difundir información privada de otras personas, como números, direcciones, fotografías o documentos, sin autorización.\n\n9. No se permiten estafas, cadenas, spam, publicidad reiterada ni enlaces sospechosos.\n\n10. Las consultas de salud reciben solamente orientación general. El grupo y el chatbot no reemplazan la atención médica, psicológica o profesional.\n\n11. Ante un conflicto, evita discutir públicamente y contacta a una persona administradora.\n\n12. Las decisiones de moderación corresponden a los administradores humanos del grupo.\n\nGracias por ayudar a mantener una comunidad segura, respetuosa e inclusiva. 💙',
+./src/core/message-processor.ts:99:        this.logger.info({ operation:'MODERATION_NORMAL_RESPONSE_SUPPRESSED',reason:'CLEAR_LOCAL_MATCH',...context },'La moderación local evitó una respuesta normal');
+./src/moderation/moderation-service.ts:77:      this.logger.error({ operation:'MODERATION_LOCAL_ERROR',botId:this.assistantId,errorCode:safeErrorCode(error) },'No fue posible revisar un mensaje mediante moderación local');
+./src/moderation/moderation-service.ts:99:        await this.outbound.send(identifier,`⚠️ Hay un caso de moderación pendiente para revisión en el panel local. Referencia anónima: ${caseId}. No se tomó ninguna medida automática.`);
+./src/moderation/moderation-service.ts:119:    this.logger.info({ operation:eventType,botId:this.assistantId,result,...(itemCount===undefined?{}:{itemCount}) },'Evento seguro de moderación local');
+./src/moderation/group-moderation-service.ts:103:Usa solo detecciones locales deterministas. No generes expresiones regulares ni código. No inventes números, nombres, contactos ni datos personales. Incluye al menos una prueba ALLOW inocua y una WARNING por cada categoría crítica. Las infracciones deben alcanzar score 3 o más. Evita falsos positivos mediante frases exactas y excepciones. No propongas expulsar, borrar mensajes ni usar IA durante la moderación diaria.`;
+./docs/MODERACION_SIMPLIFICADA_POR_GRUPO.md:1:# Moderación simplificada por grupo
+./docs/MODERACION_SIMPLIFICADA_POR_GRUPO.md:7:3. Pulsar **Analizar y preparar moderación**. Esta es la única etapa que utiliza el proveedor de IA.
+./docs/MODERACION_SIMPLIFICADA_POR_GRUPO.md:10:6. Activar la moderación del grupo.
+./docs/MODERACION_SIMPLIFICADA_POR_GRUPO.md:16:Los mensajes se evalúan con reglas estructuradas almacenadas localmente. No se realizan llamadas de IA y los contadores de IA de moderación permanecen en cero.
+./docs/MODERACION_LOCAL_POR_REGLAS.md:1:# Moderación local por reglas
+./docs/MODERACION_LOCAL_POR_REGLAS.md:5:El módulo **Moderación y reglas** analiza únicamente mensajes nuevos de grupos mediante condiciones ejecutadas en el servidor local. No llama a Groq, no usa la cola de IA, no consume tokens y continúa funcionando aunque el proveedor de IA esté desactivado. Nunca expulsa participantes ni elimina mensajes automáticamente.
+./docs/MODERACION_LOCAL_POR_REGLAS.md:12:2. Abrir **Moderación y reglas**.
+./docs/MODERACION_LOCAL_POR_REGLAS.md:49:Los umbrales se configuran por asistente y por regla. Una coincidencia en revisión puede continuar hacia la respuesta normal de Neurobot. Una coincidencia clara detiene la respuesta de IA para evitar contestar y consumir tokens sobre un mensaje que requiere moderación.
+./docs/MODULOS_POR_TIPO_DE_ASISTENTE.md:3:## Moderación y reglas
+./docs/MODULOS_POR_TIPO_DE_ASISTENTE.md:9:La moderación es local, está aislada por asistente, nace desactivada y nunca expulsa ni elimina mensajes automáticamente. Consulte [Moderación local por reglas](MODERACION_LOCAL_POR_REGLAS.md).
+./public/multibot-panel.js:352:  notice.textContent = data.settings.enabled ? 'Moderación local activada para mensajes nuevos.' : 'Moderación desactivada. Las reglas permanecen guardadas.';
+./public/multibot-panel.js:362:    ['Revisiones con IA', data.metrics.aiReviews], ['Tokens de moderación', data.metrics.aiTokens],
+./public/multibot-panel.js:380:  document.querySelector('#moderation-group-status').textContent=profile.enabled?'Moderación activa. Los mensajes nuevos se analizan localmente.':data.progress.ready&&data.recipientHashes.length>0?'Todo está aprobado. Ya puedes activar la moderación.':data.progress.ready?'Las pruebas están aprobadas. Selecciona al menos un administrador para poder activar.':'Moderación desactivada mientras completas la preparación.';
+./public/multibot-panel.js:382:  const values=profile.summary||{};document.querySelector('#moderation-analysis-summary').textContent=profile.summary?`Configuración preparada\nReglas interpretadas: ${values.interpretedRules||0}\nCategorías detectadas: ${values.categoryCount||0}\nCondiciones preparadas: ${values.preparedConditions||0}\nPatrones de spam: ${values.spamPatterns||0}\nPatrones de privacidad: ${values.privacyPatterns||0}\nExcepciones: ${values.exceptionCount||0}\nPruebas preparadas: ${values.generatedTestCount||0}`:'Guarda las reglas y prepara la moderación para ver un resumen.';
+./public/multibot-panel.js:383:  const toggle=document.querySelector('#moderation-toggle');toggle.textContent=profile.enabled?'Desactivar moderación':'Activar moderación';toggle.classList.toggle('danger',profile.enabled);toggle.disabled=!profile.enabled&&(!data.progress.ready||data.recipientHashes.length===0);
+./public/multibot-panel.js:413:      try { await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(group.groupHash)}`,{method:'PATCH',body:JSON.stringify({mode:select.value})}); await loadModeration(); notify('Moderación del grupo actualizada.'); }
+./public/multibot-panel.js:470:  document.querySelector('#moderation-rules-text-form').addEventListener('submit',async(event)=>{event.preventDefault();const rulesText=event.currentTarget.elements.rulesText.value;try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/draft`,{method:'PATCH',body:JSON.stringify({rulesText})});await loadModerationGroup();notify('Reglas guardadas. La moderación permanece desactivada hasta aprobar las pruebas.');}catch(error){notify(error.message,true);}});
+./public/multibot-panel.js:472:  document.querySelector('#moderation-analyze').addEventListener('click',async(event)=>{const button=event.currentTarget;button.disabled=true;button.textContent='Preparando…';try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/analyze`,{method:'POST',body:'{}'});await loadModerationGroup();showModerationPane('tests');notify('Moderación preparada. Completa las dos pruebas manuales.');}catch(error){notify(error.message,true);}finally{button.disabled=false;button.textContent='Analizar y preparar moderación';}});
+./public/multibot-panel.js:475:  document.querySelector('#moderation-toggle').addEventListener('click',async()=>{const enabled=!panelState.moderationGroup.profile.enabled;try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/activation`,{method:'PATCH',body:JSON.stringify({enabled})});await loadModeration();notify(enabled?'Moderación activada para este grupo.':'Moderación desactivada para este grupo.');}catch(error){notify(error.message,true);}});
+./public/multibot-panel.js:1653:    try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/settings`,{method:'PATCH',body:JSON.stringify(payload)});await loadModeration();notify('Configuración de moderación guardada.');}catch(error){notify(error.message,true);}
+./public/index.html:64:              <option value="moderation" data-bot-only data-module="moderation">Moderación y reglas</option>
+./public/index.html:97:                <button data-section="moderation" data-module="moderation" class="bot-only hidden">Moderación y reglas</button>
+./public/index.html:927:          <div class="section-heading"><div><p class="eyebrow">Protección local por grupo</p><h2>Moderación y reglas</h2></div></div>
+./public/index.html:934:          <div class="moderation-tabs" role="tablist" aria-label="Secciones de moderación">
+./public/index.html:945:            <div class="actions"><button id="moderation-save-admins" type="button" class="secondary">Guardar destinatarios</button><button id="moderation-toggle" type="button">Activar moderación</button></div>
+./public/index.html:949:            <h3>Reglas de este grupo</h3><p>Copia y pega aquí las normas completas de este grupo. La inteligencia artificial las analizará una sola vez para preparar una moderación local. Los mensajes del grupo no se enviarán posteriormente a la inteligencia artificial.</p>
+./public/index.html:951:            <div class="actions spacious-actions"><button id="moderation-analyze" type="button">Analizar y preparar moderación</button></div>
+./public/friendly-panel.js:42:      { section: 'moderation', label: 'Moderación y reglas', description: 'Protección y revisión humana', icon: '◇' },
+./public/friendly-panel.js:129:    description: 'Selecciona un grupo, carga sus reglas, realiza las pruebas y activa la moderación después de revisar los resultados.',
+./README.md:372:Los asistentes con canal grupal disponen de [moderación simplificada por grupo](docs/MODERACION_SIMPLIFICADA_POR_GRUPO.md): la IA prepara las reglas una sola vez cuando el administrador lo solicita y la revisión diaria es completamente local, sin expulsión ni eliminación automática.
+./README.md:378:- No modifica automáticamente Comunidades, canales ni participantes; la moderación disponible se limita a advertencias locales y revisión humana.
+./README.md:379:- Neurobot no atiende consultas privadas; solo puede enviar avisos privados de reincidencia a administradores seleccionados expresamente en la moderación del grupo.
+
+## warning
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+./tests/admin-server.test.ts:586:      reviewThreshold:3,warningThreshold:4,adminNotificationThreshold:4,enabled:true,appliesToAllGroups:true,
+./tests/admin-server.test.ts:592:    expect(simulation.json()).toMatchObject({simulation:true,result:{action:'WARNING_AND_NOTIFY',totalScore:4}});
+./tests/moderation-ui.test.ts:18:    expect(styles).toContain('.moderation-progress');expect(styles).toContain('.progress-step.complete');expect(html).toContain('id="moderation-allowed-test"');expect(html).toContain('id="moderation-warning-test"');expect(html).toContain('Los textos se procesan solo en memoria');
+./tests/group-moderation-service.test.ts:18:const compiled={version:1 as const,rules:[{name:'Respeto',category:'INSULTOS',severity:'MEDIA' as const,score:3,conditions:[{type:'EXACT_PHRASE' as const,value:'frase ofensiva',operator:'ANY' as const,configuration:{}}],exceptions:[]}],tests:[{text:'Gracias por compartir',expected:'ALLOW' as const,category:'RESPETO'},{text:'frase ofensiva',expected:'WARNING' as const,category:'INSULTOS'}],summary:{categories:['Insultos'],protectedBehaviors:['Trato respetuoso'],exceptions:[]}};
+./tests/group-moderation-service.test.ts:31:    expect(service.test('neurobot','grupo-seguro-0000001','frase ofensiva','WARNING').passed).toBe(true);
+./tests/moderation.test.ts:53:    expect(engine.evaluate(simulation('tomamos sol'),settings,[rule],[]).action).toBe('WARNING_AND_NOTIFY');
+./tests/moderation.test.ts:78:    expect(engine.evaluate(simulation('mi correo es persona@ejemplo.test'),settings,[personal],[]).action).toBe('WARNING_AND_NOTIFY');
+./tests/moderation.test.ts:93:    expect(engine.evaluate({...simulation('repetido'),messageHash:'3',simulate:false},settings,[rule],[]).action).toBe('WARNING_AND_NOTIFY');
+./tests/moderation.test.ts:106:      compiled:{version:1,rules:[{name:'Respeto',category:'RESPETO',severity:'ALTA',score:4,conditions:[{type:'EXACT_WORD',value:'prohibida',operator:'ANY',configuration:{}}],exceptions:[]}],tests:[{text:'mensaje amable',expected:'ALLOW',category:'RESPETO'},{text:'prohibida',expected:'WARNING',category:'RESPETO'}],summary:{categories:['Respeto'],protectedBehaviors:['Convivencia'],exceptions:[]}},summary:{categories:['Respeto'],protectedBehaviors:['Convivencia'],exceptions:[]}});
+./tests/moderation.test.ts:107:    for(const test of [{type:'AUTOMATIC' as const,expected:'ALLOW' as const},{type:'AUTOMATIC' as const,expected:'WARNING' as const},{type:'MANUAL_ALLOWED' as const,expected:'ALLOW' as const},{type:'MANUAL_WARNING' as const,expected:'WARNING' as const}])database.recordGroupModerationTest({assistantId:'neurobot',groupHash:'grupo',rulesHash,testType:test.type,expected:test.expected,actual:test.expected,passed:true});
+./tests/moderation.test.ts:128:    expect(result).toMatchObject({reviewed:true,warningSent:true,blockNormal:true});
+./tests/moderation.test.ts:131:    expect(database.getModerationMetrics('neurobot')).toMatchObject({warningsSent:1,aiReviews:0,aiTokens:0});
+./tests/moderation.test.ts:159:      severity:'MEDIA',warningNumber:0,warningSentAt:null,adminNotifiedAt:null,encryptedEvidence:'v1.cifrada',evidenceExpiresAt:new Date(Date.now()-1000).toISOString()});
+./tests/moderation.test.ts:165:    expect(result.action).toBe('WARNING_AND_NOTIFY');expect(database.listModerationCases('neurobot')).toHaveLength(before);expect(client.sentMessages).toHaveLength(0);
+./tests/moderation.test.ts:176:    reviewThreshold:3,warningThreshold:4,adminNotificationThreshold:4,enabled:true,appliesToAllGroups:true,
+./src/persistence/database.ts:119:  firstWarningMessage: string;
+./src/persistence/database.ts:120:  secondWarningMessage: string;
+./src/persistence/database.ts:1565:            warning_threshold INTEGER NOT NULL DEFAULT 4 CHECK (warning_threshold BETWEEN 1 AND 20),
+./src/persistence/database.ts:1568:            warning_cooldown_minutes INTEGER NOT NULL DEFAULT 10 CHECK (warning_cooldown_minutes BETWEEN 1 AND 1440),
+./src/persistence/database.ts:1569:            public_warning_limit INTEGER NOT NULL DEFAULT 3 CHECK (public_warning_limit BETWEEN 1 AND 20),
+./src/persistence/database.ts:1570:            public_warning_window_minutes INTEGER NOT NULL DEFAULT 30 CHECK (public_warning_window_minutes BETWEEN 1 AND 1440),
+./src/persistence/database.ts:1573:            warning_mode TEXT NOT NULL DEFAULT 'GROUP_MENTION' CHECK (warning_mode IN ('GROUP_GENERAL','GROUP_MENTION','ADMIN_ONLY')),
+./src/persistence/database.ts:1578:            first_warning_message TEXT NOT NULL DEFAULT '⚠️ Advertencia automática: este mensaje podría incumplir las normas de esta comunidad. Por favor, revisa las reglas y evita repetir este tipo de contenido. Esta advertencia fue generada automáticamente y puede ser revisada por la administración.',
+./src/persistence/database.ts:1579:            second_warning_message TEXT NOT NULL DEFAULT '⚠️ Segunda advertencia automática: se detectó nuevamente un posible incumplimiento de las normas de la comunidad. La administración será informada para revisar la situación. Esta advertencia fue generada automáticamente y no implica una expulsión automática.',
+./src/persistence/database.ts:1580:            repeated_warning_message TEXT NOT NULL DEFAULT '⚠️ Aviso automático: se han detectado posibles incumplimientos reiterados. La situación será revisada por la administración.',
+./src/persistence/database.ts:1603:            warning_threshold INTEGER NOT NULL DEFAULT 4 CHECK (warning_threshold BETWEEN 1 AND 20),
+./src/persistence/database.ts:1659:            warning_number INTEGER NOT NULL DEFAULT 0,
+./src/persistence/database.ts:1661:            warning_sent_at TEXT,
+./src/persistence/database.ts:1679:            last_warning_at TEXT,
+./src/persistence/database.ts:1690:            warnings_sent INTEGER NOT NULL DEFAULT 0,
+./src/persistence/database.ts:1767:            first_warning_message TEXT NOT NULL DEFAULT '⚠️ Advertencia automática: este mensaje podría incumplir las reglas de esta comunidad. Por favor, revisa las normas y evita repetir este tipo de contenido. Esta advertencia fue generada automáticamente y puede ser revisada por la administración.',
+./src/persistence/database.ts:1768:            second_warning_message TEXT NOT NULL DEFAULT '⚠️ Segunda advertencia automática: se detectó nuevamente un posible incumplimiento de las reglas. La administración será informada para revisar la situación. Esta advertencia fue generada automáticamente y no implica una expulsión automática.',
+./src/persistence/database.ts:1784:            test_type TEXT NOT NULL CHECK (test_type IN ('AUTOMATIC','MANUAL_ALLOWED','MANUAL_WARNING')),
+./src/persistence/database.ts:1785:            expected_result TEXT NOT NULL CHECK (expected_result IN ('ALLOW','WARNING')),
+./src/persistence/database.ts:1786:            actual_result TEXT NOT NULL CHECK (actual_result IN ('ALLOW','WARNING','ERROR')),
+./src/persistence/database.ts:1812:            first_warning_message='⚠️ Advertencia automática: este mensaje podría incumplir las reglas de esta comunidad. Por favor, revisa las normas y evita repetir este tipo de contenido. Esta advertencia fue generada automáticamente y puede ser revisada por la administración.',
+./src/persistence/database.ts:1813:            second_warning_message='⚠️ Segunda advertencia automática: se detectó nuevamente un posible incumplimiento de las reglas. La administración será informada para revisar la situación. Esta advertencia fue generada automáticamente y no implica una expulsión automática.',
+./src/persistence/database.ts:2313:      professional_warning:
+./src/persistence/database.ts:6959:  public recordGroupModerationTest(input: { assistantId:string; groupHash:string; rulesHash:string; testType:'AUTOMATIC'|'MANUAL_ALLOWED'|'MANUAL_WARNING'; expected:'ALLOW'|'WARNING'; actual:'ALLOW'|'WARNING'|'ERROR'; category?:string|null; passed:boolean }): void {
+./src/persistence/database.ts:7004:      reviewThreshold: Number(row.review_threshold), warningThreshold: Number(row.warning_threshold),
+./src/persistence/database.ts:7006:      warningCooldownMinutes: Number(row.warning_cooldown_minutes), publicWarningLimit: Number(row.public_warning_limit),
+./src/persistence/database.ts:7007:      publicWarningWindowMinutes: Number(row.public_warning_window_minutes), temporaryEvidenceEnabled: row.temporary_evidence_enabled === 1,
+./src/persistence/database.ts:7008:      temporaryEvidenceHours: Number(row.temporary_evidence_hours), warningMode: String(row.warning_mode) as ModerationSettings['warningMode'],
+./src/persistence/database.ts:7010:      firstWarningMessage: String(row.first_warning_message), secondWarningMessage: String(row.second_warning_message),
+./src/persistence/database.ts:7011:      repeatedWarningMessage: String(row.repeated_warning_message),
+./src/persistence/database.ts:7018:    this.db.prepare(`UPDATE assistant_moderation_settings SET enabled=?,default_group_mode=?,review_threshold=?,warning_threshold=?,
+./src/persistence/database.ts:7019:      admin_notification_threshold=?,recurrence_window_days=?,warning_cooldown_minutes=?,public_warning_limit=?,
+./src/persistence/database.ts:7020:      public_warning_window_minutes=?,temporary_evidence_enabled=?,temporary_evidence_hours=?,warning_mode=?,
+./src/persistence/database.ts:7022:      first_warning_message=?,second_warning_message=?,repeated_warning_message=?,updated_at=? WHERE assistant_id=?`).run(
+./src/persistence/database.ts:7023:      settings.enabled ? 1 : 0, settings.defaultGroupMode, settings.reviewThreshold, settings.warningThreshold,
+./src/persistence/database.ts:7024:      settings.adminNotificationThreshold, settings.recurrenceWindowDays, settings.warningCooldownMinutes,
+./src/persistence/database.ts:7025:      settings.publicWarningLimit, settings.publicWarningWindowMinutes, settings.temporaryEvidenceEnabled ? 1 : 0,
+./src/persistence/database.ts:7026:      settings.temporaryEvidenceHours, settings.warningMode, settings.firstWarningMessage, settings.secondWarningMessage,
+./src/persistence/database.ts:7027:      settings.repeatedWarningMessage, now, assistantId,
+./src/persistence/database.ts:7059:        review_threshold,warning_threshold,admin_notification_threshold,enabled,applies_to_all_groups,created_at,updated_at)
+./src/persistence/database.ts:7061:        input.reviewThreshold,input.warningThreshold,input.adminNotificationThreshold,input.enabled ? 1 : 0,input.appliesToAllGroups ? 1 : 0,now,now);
+./src/persistence/database.ts:7075:        warning_threshold=?,admin_notification_threshold=?,enabled=?,applies_to_all_groups=?,updated_at=? WHERE assistant_id=? AND id=?`).run(
+./src/persistence/database.ts:7076:        input.name,input.description,input.category,input.severity,input.detectionType,input.score,input.reviewThreshold,input.warningThreshold,
+./src/persistence/database.ts:7106:  public createModerationCase(input: { assistantId: string; groupHash: string; participantHash: string; messageHash: string; category: string; matchedRuleIds: number[]; score: number; severity: ModerationSeverity; warningNumber: number; warningSentAt: string | null; adminNotifiedAt: string | null; encryptedEvidence: string | null; evidenceExpiresAt: string | null }): number | null {
+./src/persistence/database.ts:7109:      score,severity,warning_number,status,warning_sent_at,admin_notified_at,encrypted_temporary_evidence,evidence_expires_at,created_at,updated_at)
+./src/persistence/database.ts:7111:      JSON.stringify(input.matchedRuleIds),input.score,input.severity,input.warningNumber,input.warningSentAt,input.adminNotifiedAt,input.encryptedEvidence,
+./src/persistence/database.ts:7120:      matched_rule_ids AS matchedRuleIds,score,severity,warning_number AS warningNumber,status,warning_sent_at AS warningSentAt,
+./src/persistence/database.ts:7140:  public getModerationRecurrence(assistantId: string, groupHash: string, participantHash: string): { activeCount: number; lastWarningAt: string | null; expiresAt: string } | null {
+./src/persistence/database.ts:7141:    const row = this.db.prepare('SELECT active_count,last_warning_at,expires_at FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?')
+./src/persistence/database.ts:7142:      .get(assistantId, groupHash, participantHash) as { active_count: number; last_warning_at: string | null; expires_at: string } | undefined;
+./src/persistence/database.ts:7148:    return { activeCount: row.active_count, lastWarningAt: row.last_warning_at, expiresAt: row.expires_at };
+./src/persistence/database.ts:7151:  public saveModerationRecurrence(assistantId: string, groupHash: string, participantHash: string, activeCount: number, lastWarningAt: string | null, expiresAt: string): void {
+./src/persistence/database.ts:7153:    this.db.prepare(`INSERT INTO moderation_recurrence(assistant_id,group_hash,participant_hash,active_count,window_started_at,last_warning_at,expires_at,updated_at)
+./src/persistence/database.ts:7155:      last_warning_at=excluded.last_warning_at,expires_at=excluded.expires_at,updated_at=excluded.updated_at`)
+./src/persistence/database.ts:7156:      .run(assistantId,groupHash,participantHash,activeCount,now,lastWarningAt,expiresAt,now);
+./src/persistence/database.ts:7171:    const columns: Record<string,string> = { reviewed:'messages_reviewed',allowed:'messages_allowed',matches:'matches_detected',warnings:'warnings_sent',
+./src/persistence/database.ts:7183:      warnings_sent AS warningsSent,recurrences_detected AS recurrencesDetected,admin_cases_created AS adminCasesCreated,
+./src/persistence/database.ts:7186:      messagesReviewed:0,messagesAllowed:0,matchesDetected:0,warningsSent:0,recurrencesDetected:0,adminCasesCreated:0,
+./src/persistence/database.ts:7221:      warningThreshold:Number(row.warning_threshold),adminNotificationThreshold:Number(row.admin_notification_threshold),enabled:row.enabled===1,
+./src/persistence/database.ts:7244:    inputTokens:Number(row.input_tokens??0),outputTokens:Number(row.output_tokens??0),firstWarningMessage:String(row.first_warning_message),
+./src/persistence/database.ts:7245:    secondWarningMessage:String(row.second_warning_message),recurrenceWindowDays:Number(row.recurrence_window_days),
+./src/domain/types.ts:448:export type ModerationAction = 'NO_ACTION' | 'ADMIN_REVIEW' | 'WARNING' | 'WARNING_AND_NOTIFY';
+./src/domain/types.ts:455:  warningThreshold: number;
+./src/domain/types.ts:458:  warningCooldownMinutes: number;
+./src/domain/types.ts:459:  publicWarningLimit: number;
+./src/domain/types.ts:460:  publicWarningWindowMinutes: number;
+./src/domain/types.ts:463:  warningMode: 'GROUP_GENERAL' | 'GROUP_MENTION' | 'ADMIN_ONLY';
+./src/domain/types.ts:468:  firstWarningMessage: string;
+./src/domain/types.ts:469:  secondWarningMessage: string;
+./src/domain/types.ts:470:  repeatedWarningMessage: string;
+./src/domain/types.ts:499:  warningThreshold: number;
+./src/admin/server.ts:354:    professional_warning: z.string().trim().min(1).max(1000).optional(),
+./src/admin/server.ts:505:  warningThreshold:z.number().int().min(1).max(20),adminNotificationThreshold:z.number().int().min(1).max(20),
+./src/admin/server.ts:506:  recurrenceWindowDays:z.number().int().min(1).max(90),warningCooldownMinutes:z.number().int().min(1).max(1440),
+./src/admin/server.ts:507:  publicWarningLimit:z.number().int().min(1).max(20),publicWarningWindowMinutes:z.number().int().min(1).max(1440),
+./src/admin/server.ts:509:  warningMode:z.enum(['GROUP_GENERAL','GROUP_MENTION','ADMIN_ONLY']),automaticAIReviewEnabled:z.literal(false),manualAIReviewEnabled:z.literal(false),
+./src/admin/server.ts:510:  automaticBanEnabled:z.literal(false),automaticDeletionEnabled:z.literal(false),firstWarningMessage:z.string().trim().min(40).max(1000),
+./src/admin/server.ts:511:  secondWarningMessage:z.string().trim().min(40).max(1000),repeatedWarningMessage:z.string().trim().min(20).max(1000),
+./src/admin/server.ts:513:  if(value.reviewThreshold>value.warningThreshold) context.addIssue({code:'custom',path:['reviewThreshold'],message:'El umbral de revisión no puede superar al de advertencia.'});
+./src/admin/server.ts:514:  const first=value.firstWarningMessage.toLocaleLowerCase('es');
+./src/admin/server.ts:515:  for(const phrase of ['advertencia automática','podría incumplir','generada automáticamente','revisada por la administración']) if(!first.includes(phrase)) context.addIssue({code:'custom',path:['firstWarningMessage'],message:`La primera advertencia debe incluir “${phrase}”.`});
+./src/admin/server.ts:516:  const second=value.secondWarningMessage.toLocaleLowerCase('es');
+./src/admin/server.ts:517:  for(const phrase of ['segunda advertencia automática','administración','generada automáticamente','no implica una expulsión automática']) if(!second.includes(phrase)) context.addIssue({code:'custom',path:['secondWarningMessage'],message:`La segunda advertencia debe incluir “${phrase}”.`});
+./src/admin/server.ts:521:const moderationRuleSchema=z.object({name:z.string().trim().min(1).max(120),description:z.string().trim().min(1).max(1000),category:z.string().trim().min(1).max(80),severity:z.enum(['INFORMATIVA','LEVE','MEDIA','ALTA','CRITICA']),detectionType:z.string().trim().min(1).max(80),score:z.number().int().min(0).max(20),reviewThreshold:z.number().int().min(1).max(20),warningThreshold:z.number().int().min(1).max(20),adminNotificationThreshold:z.number().int().min(1).max(20),enabled:z.boolean(),appliesToAllGroups:z.boolean(),conditions:z.array(moderationConditionSchema).max(50),exceptions:z.array(moderationExceptionSchema).max(50)}).strict().superRefine((value,context)=>{
+./src/admin/server.ts:1282:      progress:{rulesSaved:profile.rulesText.length>=20,analyzed:profile.compiled!==null&&!['DRAFT','OUTDATED','ANALYSIS_FAILED'].includes(profile.analysisStatus),automaticTestsPassed:tests.some((item)=>item.testType==='AUTOMATIC')&&tests.filter((item)=>item.testType==='AUTOMATIC').every((item)=>item.passed===1),manualAllowedPassed:tests.some((item)=>item.testType==='MANUAL_ALLOWED'&&item.passed===1),manualWarningPassed:tests.some((item)=>item.testType==='MANUAL_WARNING'&&item.passed===1),ready:profile.testStatus==='APPROVED'}};
+./src/admin/server.ts:1301:    const botId=parseBotId(request.params);const groupHash=z.object({groupHash:z.string().length(20)}).parse(request.params).groupHash;const input=z.object({text:z.string().min(1).max(4000),expected:z.enum(['ALLOW','WARNING'])}).strict().parse(request.body);
+./src/admin/server.ts:3330:    score:rule.score,reviewThreshold:rule.reviewThreshold,warningThreshold:rule.warningThreshold,
+./src/core/rule-based-response-provider.ts:31:        text: this.withWarning(command.response, command.healthRelated),
+./src/core/rule-based-response-provider.ts:47:      text: this.withWarning(command.response, command.healthRelated),
+./src/core/rule-based-response-provider.ts:62:  private withWarning(text: string, healthRelated: boolean): string {
+./src/core/rule-based-response-provider.ts:64:    const warning = this.database.getSetting(
+./src/core/rule-based-response-provider.ts:65:      'professional_warning',
+./src/core/rule-based-response-provider.ts:68:    return `${text}\n\n${warning}`;
+./src/core/message-processor.ts:100:        return moderation.warningSent ? 'responded' : 'ignored';
+./src/moderation/moderation-service.ts:9:export type ModerationProcessResult = { reviewed: boolean; result: ModerationResult | null; warningSent: boolean; blockNormal: boolean };
+./src/moderation/moderation-service.ts:14:  private readonly groupWarnings = new Map<string, number[]>();
+./src/moderation/moderation-service.ts:36:      if (result.duplicate) { this.event('MODERATION_DUPLICATE_SUPPRESSED','duplicate'); return { reviewed:true,result,warningSent:false,blockNormal:false }; }
+./src/moderation/moderation-service.ts:38:      if (result.matchedRules.length === 0) { this.database.incrementModerationMetric(this.assistantId,'allowed'); return { reviewed:true,result,warningSent:false,blockNormal:false }; }
+./src/moderation/moderation-service.ts:42:      if (result.action === 'NO_ACTION') return { reviewed:true,result,warningSent:false,blockNormal:false };
+./src/moderation/moderation-service.ts:44:      const warningNumber = (recurrence?.activeCount ?? 0) + 1;
+./src/moderation/moderation-service.ts:47:      const shouldWarn = result.action !== 'ADMIN_REVIEW' && settings.warningMode !== 'ADMIN_ONLY' && this.canWarn(groupHash,recurrence?.lastWarningAt ?? null,settings.warningCooldownMinutes,settings.publicWarningLimit,settings.publicWarningWindowMinutes,now);
+./src/moderation/moderation-service.ts:48:      if (!shouldWarn && result.action !== 'ADMIN_REVIEW') this.event('MODERATION_WARNING_COOLDOWN_ACTIVE','suppressed');
+./src/moderation/moderation-service.ts:49:      const notify = warningNumber >= 2;
+./src/moderation/moderation-service.ts:54:        severity:result.severity,warningNumber,warningSentAt:shouldWarn ? now.toISOString() : null,adminNotifiedAt:notify ? now.toISOString() : null,
+./src/moderation/moderation-service.ts:56:      if (caseId === null) return { reviewed:true,result:{...result,duplicate:true},warningSent:false,blockNormal:false };
+./src/moderation/moderation-service.ts:60:      this.database.saveModerationRecurrence(this.assistantId,groupHash,participantHash,warningNumber,shouldWarn ? now.toISOString() : recurrence?.lastWarningAt ?? null,expiresAt);
+./src/moderation/moderation-service.ts:61:      if (warningNumber >= 2) this.database.incrementModerationMetric(this.assistantId,'recurrences');
+./src/moderation/moderation-service.ts:63:        const warning = warningNumber === 1 ? settings.firstWarningMessage : warningNumber === 2 ? settings.secondWarningMessage : settings.repeatedWarningMessage;
+./src/moderation/moderation-service.ts:64:        await this.outbound.send(message.chatId,warning);
+./src/moderation/moderation-service.ts:65:        this.database.incrementModerationMetric(this.assistantId,'warnings');
+./src/moderation/moderation-service.ts:66:        this.groupWarnings.set(groupHash,[...(this.groupWarnings.get(groupHash) ?? []).filter((time) => now.getTime()-time<=settings.publicWarningWindowMinutes*60_000),now.getTime()]);
+./src/moderation/moderation-service.ts:67:        this.event(warningNumber === 1 ? 'MODERATION_AUTOMATIC_WARNING_SENT' : 'MODERATION_SECOND_WARNING_SENT','sent');
+./src/moderation/moderation-service.ts:68:        this.event(warningNumber === 1 ? 'GROUP_MODERATION_WARNING_SENT' : 'GROUP_MODERATION_SECOND_WARNING_SENT','sent');
+./src/moderation/moderation-service.ts:74:      return { reviewed:true,result,warningSent:shouldWarn,blockNormal:result.action === 'WARNING' || result.action === 'WARNING_AND_NOTIFY' };
+./src/moderation/moderation-service.ts:105:  private canWarn(groupHash: string,lastWarningAt: string|null,cooldownMinutes: number,limit: number,windowMinutes: number,now: Date): boolean {
+./src/moderation/moderation-service.ts:106:    if (lastWarningAt !== null && now.getTime()-Date.parse(lastWarningAt)<cooldownMinutes*60_000) return false;
+./src/moderation/moderation-service.ts:107:    const recent=(this.groupWarnings.get(groupHash)??[]).filter((time)=>now.getTime()-time<=windowMinutes*60_000);
+./src/moderation/moderation-service.ts:108:    this.groupWarnings.set(groupHash,recent); return recent.length<limit;
+./src/moderation/moderation-service.ts:124:function notReviewed(): ModerationProcessResult { return { reviewed:false,result:null,warningSent:false,blockNormal:false }; }
+./src/moderation/local-moderation-engine.ts:181:  const warning = Math.min(settings.warningThreshold, ...matched.map((rule) => rule.warningThreshold));
+./src/moderation/local-moderation-engine.ts:183:  if (severity === 'CRITICA' || (score >= warning && score >= notify)) return 'WARNING_AND_NOTIFY';
+./src/moderation/local-moderation-engine.ts:184:  if (score >= warning) return 'WARNING';
+./src/moderation/group-moderation-service.ts:11:const compiledSchema=z.object({version:z.literal(1),rules:z.array(ruleSchema).min(1).max(80),tests:z.array(z.object({text:z.string().min(1).max(500),expected:z.enum(['ALLOW','WARNING']),category:z.string().max(60).optional()}).strict()).min(2).max(80),summary:z.object({categories:z.array(z.string().max(60)).max(30),protectedBehaviors:z.array(z.string().max(140)).max(30),exceptions:z.array(z.string().max(140)).max(30)}).strict()}).strict();
+./src/moderation/group-moderation-service.ts:48:      const automaticPassed=automaticTests.length>=2&&automaticTests.some((item)=>item.expected==='ALLOW'&&item.passed)&&automaticTests.some((item)=>item.expected==='WARNING'&&item.passed)&&automaticTests.every((item)=>item.passed);
+./src/moderation/group-moderation-service.ts:54:  public test(assistantId:string,groupHash:string,text:string,expected:'ALLOW'|'WARNING'): {result:ModerationResult;actual:'ALLOW'|'WARNING';passed:boolean;profile:GroupModerationProfile} {
+./src/moderation/group-moderation-service.ts:60:    this.database.recordGroupModerationTest({assistantId,groupHash,rulesHash:profile.rulesHash,testType:expected==='ALLOW'?'MANUAL_ALLOWED':'MANUAL_WARNING',expected,actual,category:result.categories[0]??null,passed});
+./src/moderation/group-moderation-service.ts:85:    const manualWarning=tests.some((item)=>item.testType==='MANUAL_WARNING'&&item.passed===1);
+./src/moderation/group-moderation-service.ts:86:    return this.database.updateGroupModerationTestStatus(profile.assistantId,profile.groupHash,automaticPassed&&manualAllowed&&manualWarning);
+./src/moderation/group-moderation-service.ts:90:export function settingsFor(profile:GroupModerationProfile):ModerationSettings{return {enabled:true,defaultGroupMode:'ENABLED',reviewThreshold:2,warningThreshold:3,adminNotificationThreshold:5,recurrenceWindowDays:profile.recurrenceWindowDays,warningCooldownMinutes:0,publicWarningLimit:20,publicWarningWindowMinutes:60,temporaryEvidenceEnabled:false,temporaryEvidenceHours:1,warningMode:'GROUP_GENERAL',automaticAIReviewEnabled:false,manualAIReviewEnabled:false,automaticBanEnabled:false,automaticDeletionEnabled:false,firstWarningMessage:profile.firstWarningMessage,secondWarningMessage:profile.secondWarningMessage,repeatedWarningMessage:profile.secondWarningMessage};}
+./src/moderation/group-moderation-service.ts:92:function toRules(assistantId:string,compiled:CompiledGroupModeration):ModerationRule[]{return compiled.rules.map((rule,index)=>({id:index+1,assistantId,name:rule.name,description:'Regla preparada desde el texto administrativo.',category:rule.category,severity:rule.severity as ModerationSeverity,score:rule.score,reviewThreshold:2,warningThreshold:3,adminNotificationThreshold:5,detectionType:'LOCAL_COMPILED',enabled:true,appliesToAllGroups:false,conditions:rule.conditions.map((condition,conditionIndex)=>({id:conditionIndex+1,conditionType:condition.type,operator:condition.operator,normalizedValue:normalizeModerationText(condition.value),configuration:condition.configuration,enabled:true})),exceptions:rule.exceptions.map((exception,exceptionIndex)=>({id:exceptionIndex+1,exceptionType:exception.type,normalizedValue:normalizeModerationText(exception.value),enabled:true})),createdAt:'',updatedAt:''}));}
+./src/moderation/group-moderation-service.ts:94:function validateCompiledSafety(compiled:CompiledGroupModeration):void{if(!compiled.tests.some((test)=>test.expected==='ALLOW')||!compiled.tests.some((test)=>test.expected==='WARNING'))throw new Error('MODERATION_COMPILATION_TESTS_MISSING');for(const rule of compiled.rules){if(rule.severity==='CRITICA'&&!compiled.tests.some((test)=>test.expected==='WARNING'&&test.category===rule.category))throw new Error('MODERATION_CRITICAL_TEST_MISSING');for(const condition of rule.conditions)if(condition.type==='BLOCKED_DOMAIN'&&!/^[a-z0-9.-]+$/iu.test(condition.value))throw new Error('MODERATION_COMPILATION_UNSAFE');}}
+./src/moderation/group-moderation-service.ts:97:function toTestResult(result:ModerationResult):'ALLOW'|'WARNING'{return result.action==='WARNING'||result.action==='WARNING_AND_NOTIFY'?'WARNING':'ALLOW';}
+./src/moderation/group-moderation-service.ts:102:{"version":1,"rules":[{"name":"...","category":"...","severity":"LEVE|MEDIA|ALTA|CRITICA","score":1,"conditions":[{"type":"EXACT_WORD|EXACT_PHRASE|COMBINED_WORDS|BLOCKED_DOMAIN|PERSONAL_INFO|EXCESSIVE_CAPS|ADVERTISING|REPETITION|FREQUENCY","value":"...","operator":"ANY|ALL","configuration":{}}],"exceptions":[{"type":"EXACT_WORD|EXACT_PHRASE|ALLOWED_DOMAIN","value":"..."}]}],"tests":[{"text":"texto artificial","expected":"ALLOW|WARNING","category":"..."}],"summary":{"categories":["..."],"protectedBehaviors":["..."],"exceptions":["..."]}}.
+./src/moderation/group-moderation-service.ts:103:Usa solo detecciones locales deterministas. No generes expresiones regulares ni código. No inventes números, nombres, contactos ni datos personales. Incluye al menos una prueba ALLOW inocua y una WARNING por cada categoría crítica. Las infracciones deben alcanzar score 3 o más. Evita falsos positivos mediante frases exactas y excepciones. No propongas expulsar, borrar mensajes ni usar IA durante la moderación diaria.`;
+./public/multibot-panel.js:202:  const warning = document.querySelector('#assistant-context-warning');
+./public/multibot-panel.js:204:  warning.textContent = mixedMode
+./public/multibot-panel.js:207:  warning.classList.toggle('hidden', !mixedMode);
+./public/multibot-panel.js:336:    '#moderation-warning-form',
+./public/multibot-panel.js:347:    ['Advertencias', data.metrics.warningsSent], ['Reincidencias', data.metrics.recurrencesDetected],
+./public/multibot-panel.js:360:    ['Coincidencias', data.metrics.matchesDetected], ['Advertencias', data.metrics.warningsSent],
+./public/multibot-panel.js:378:  const labels=[['rulesSaved','1. Reglas guardadas'],['analyzed','2. Análisis preparado'],['automaticTestsPassed','3. Pruebas automáticas'],['manualAllowedPassed','4. Mensaje permitido'],['manualWarningPassed','5. Advertencia']];
+./public/multibot-panel.js:401:  const warnings = document.querySelector('#moderation-warning-form');
+./public/multibot-panel.js:402:  ['firstWarningMessage', 'secondWarningMessage', 'repeatedWarningMessage'].forEach((name) => { warnings.elements[name].value = settings[name]; });
+./public/multibot-panel.js:434:    reviewThreshold:rule.reviewThreshold,warningThreshold:rule.warningThreshold,adminNotificationThreshold:rule.adminNotificationThreshold,
+./public/multibot-panel.js:441:  form.elements.reviewThreshold.value=rule.reviewThreshold;form.elements.warningThreshold.value=rule.warningThreshold;form.elements.adminNotificationThreshold.value=rule.adminNotificationThreshold;
+./public/multibot-panel.js:474:  bindTest('#moderation-allowed-test','ALLOW');bindTest('#moderation-warning-test','WARNING');
+./public/multibot-panel.js:1648:      warningMode:form.elements.warningMode.value,reviewThreshold:Number(form.elements.reviewThreshold.value),warningThreshold:Number(form.elements.warningThreshold.value),
+./public/multibot-panel.js:1650:      warningCooldownMinutes:Number(form.elements.warningCooldownMinutes.value),publicWarningLimit:Number(form.elements.publicWarningLimit.value),
+./public/multibot-panel.js:1651:      publicWarningWindowMinutes:Number(form.elements.publicWarningWindowMinutes.value),temporaryEvidenceEnabled:form.elements.temporaryEvidenceEnabled.checked,
+./public/multibot-panel.js:1655:  document.querySelector('#moderation-warning-form').addEventListener('submit',async(event)=>{
+./public/multibot-panel.js:1656:    event.preventDefault();const form=event.currentTarget;const settings={...panelState.moderation.settings,firstWarningMessage:form.elements.firstWarningMessage.value,
+./public/multibot-panel.js:1657:      secondWarningMessage:form.elements.secondWarningMessage.value,repeatedWarningMessage:form.elements.repeatedWarningMessage.value};
+./public/multibot-panel.js:1664:      detectionType:type,score:Number(form.elements.score.value),reviewThreshold:Number(form.elements.reviewThreshold.value),warningThreshold:Number(form.elements.warningThreshold.value),
+./public/multibot-panel.js:1667:    try{const ruleId=form.elements.ruleId.value;await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/rules${ruleId?`/${ruleId}`:''}`,{method:ruleId?'PUT':'POST',body:JSON.stringify(payload)});form.reset();form.elements.ruleId.value='';form.elements.score.value=3;form.elements.reviewThreshold.value=3;form.elements.warningThreshold.value=4;form.elements.adminNotificationThreshold.value=4;await loadModeration();notify('Regla guardada.');}catch(error){notify(error.message,true);}
+./public/app.js:536:  target.classList.toggle('warning-text', lines > recommended);
+./public/app.js:618:  form.elements.professional_warning.value = settings.professional_warning || '';
+./public/app.js:639:    professional_warning: form.elements.professional_warning.value,
+./public/app.js:979:    target.classList.toggle('warning-text', lines > definition.maxLines);
+./public/index.html:114:            <p id="assistant-context-warning" class="info-callout hidden"></p>
+./public/index.html:819:                name="professional_warning"
+./public/index.html:957:            <form id="moderation-warning-test"><label>Mensaje que debe generar advertencia<textarea name="text" maxlength="4000" required></textarea></label><button type="submit">Probar advertencia</button></form>
+./public/index.html:1337:          <div id="factory-reset-details" class="warning-details hidden">
+./public/styles.css:378:#moderation-allowed-test + #moderation-warning-test {
+./public/styles.css:635:.warning-text {
+./public/styles.css:688:.warning-details {
+./public/styles.css:695:.warning-details p,
+./public/styles.css:696:.warning-details ul {
+
+## advertencia
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+./tests/response-provider.test.ts:41:  it('agrega advertencia profesional a respuestas de salud', () => {
+./tests/moderation.test.ts:97:describe('incidentes y advertencias locales', () => {
+./tests/moderation.test.ts:126:  it('envía una advertencia neutral, crea caso y consume cero tokens', async () => {
+./tests/moderation.test.ts:141:  it('una reincidencia crea segunda advertencia y aviso administrativo', async () => {
+./tests/moderation.test.ts:145:    expect(client.sentMessages.some((sent)=>sent.text.includes('Segunda advertencia automática'))).toBe(true);
+./src/persistence/database.ts:1578:            first_warning_message TEXT NOT NULL DEFAULT '⚠️ Advertencia automática: este mensaje podría incumplir las normas de esta comunidad. Por favor, revisa las reglas y evita repetir este tipo de contenido. Esta advertencia fue generada automáticamente y puede ser revisada por la administración.',
+./src/persistence/database.ts:1579:            second_warning_message TEXT NOT NULL DEFAULT '⚠️ Segunda advertencia automática: se detectó nuevamente un posible incumplimiento de las normas de la comunidad. La administración será informada para revisar la situación. Esta advertencia fue generada automáticamente y no implica una expulsión automática.',
+./src/persistence/database.ts:1767:            first_warning_message TEXT NOT NULL DEFAULT '⚠️ Advertencia automática: este mensaje podría incumplir las reglas de esta comunidad. Por favor, revisa las normas y evita repetir este tipo de contenido. Esta advertencia fue generada automáticamente y puede ser revisada por la administración.',
+./src/persistence/database.ts:1768:            second_warning_message TEXT NOT NULL DEFAULT '⚠️ Segunda advertencia automática: se detectó nuevamente un posible incumplimiento de las reglas. La administración será informada para revisar la situación. Esta advertencia fue generada automáticamente y no implica una expulsión automática.',
+./src/persistence/database.ts:1812:            first_warning_message='⚠️ Advertencia automática: este mensaje podría incumplir las reglas de esta comunidad. Por favor, revisa las normas y evita repetir este tipo de contenido. Esta advertencia fue generada automáticamente y puede ser revisada por la administración.',
+./src/persistence/database.ts:1813:            second_warning_message='⚠️ Segunda advertencia automática: se detectó nuevamente un posible incumplimiento de las reglas. La administración será informada para revisar la situación. Esta advertencia fue generada automáticamente y no implica una expulsión automática.',
+./src/admin/server.ts:513:  if(value.reviewThreshold>value.warningThreshold) context.addIssue({code:'custom',path:['reviewThreshold'],message:'El umbral de revisión no puede superar al de advertencia.'});
+./src/admin/server.ts:515:  for(const phrase of ['advertencia automática','podría incumplir','generada automáticamente','revisada por la administración']) if(!first.includes(phrase)) context.addIssue({code:'custom',path:['firstWarningMessage'],message:`La primera advertencia debe incluir “${phrase}”.`});
+./src/admin/server.ts:517:  for(const phrase of ['segunda advertencia automática','administración','generada automáticamente','no implica una expulsión automática']) if(!second.includes(phrase)) context.addIssue({code:'custom',path:['secondWarningMessage'],message:`La segunda advertencia debe incluir “${phrase}”.`});
+./docs/MODERACION_SIMPLIFICADA_POR_GRUPO.md:8:4. Revisar el resumen y completar las dos pruebas manuales: un mensaje permitido y uno que debe generar advertencia.
+./docs/MODERACION_SIMPLIFICADA_POR_GRUPO.md:20:- Primera detección: advertencia neutral en el grupo.
+./docs/MODERACION_SIMPLIFICADA_POR_GRUPO.md:21:- Reincidencia: segunda advertencia, caso anónimo en el panel y aviso privado a los administradores seleccionados.
+./docs/MODERACION_LOCAL_POR_REGLAS.md:18:Al desactivarlo se conservan reglas y estadísticas, pero los mensajes nuevos dejan de analizarse. Nunca se revisa historial ni se generan advertencias retroactivas.
+./docs/MODERACION_LOCAL_POR_REGLAS.md:46:- 4 puntos o más: advertencia;
+./docs/MODERACION_LOCAL_POR_REGLAS.md:47:- gravedad crítica: advertencia segura y caso prioritario.
+./docs/MODERACION_LOCAL_POR_REGLAS.md:51:## Advertencias y reincidencia
+./docs/MODERACION_LOCAL_POR_REGLAS.md:53:La primera advertencia utiliza lenguaje neutral: indica que es automática, que el mensaje **podría** incumplir las reglas y que la administración puede revisarla. La segunda informa una reincidencia y crea aviso administrativo. Desde la tercera coincidencia se prioriza el caso y se limita la repetición pública.
+./docs/MODERACION_LOCAL_POR_REGLAS.md:58:- una advertencia por persona cada 10 minutos;
+./docs/MODERACION_LOCAL_POR_REGLAS.md:59:- tres advertencias públicas por grupo cada 30 minutos;
+./docs/MODERACION_LOCAL_POR_REGLAS.md:82:Las métricas muestran mensajes revisados, permitidos, coincidencias, advertencias, casos, falsos positivos y errores locales. `aiReviews` y `aiTokens` permanecen en cero por restricción de base de datos.
+./public/multibot-panel.js:347:    ['Advertencias', data.metrics.warningsSent], ['Reincidencias', data.metrics.recurrencesDetected],
+./public/multibot-panel.js:360:    ['Coincidencias', data.metrics.matchesDetected], ['Advertencias', data.metrics.warningsSent],
+./public/multibot-panel.js:378:  const labels=[['rulesSaved','1. Reglas guardadas'],['analyzed','2. Análisis preparado'],['automaticTestsPassed','3. Pruebas automáticas'],['manualAllowedPassed','4. Mensaje permitido'],['manualWarningPassed','5. Advertencia']];
+./public/multibot-panel.js:473:  const bindTest=(selector,expected)=>document.querySelector(selector).addEventListener('submit',async(event)=>{event.preventDefault();const form=event.currentTarget;try{const response=await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/test`,{method:'POST',body:JSON.stringify({text:form.elements.text.value,expected})});document.querySelector('#moderation-test-result').textContent=`${response.notice}\nResultado: ${response.actual==='ALLOW'?'Permitido':'Advertencia'}\nPrueba: ${response.passed?'Aprobada':'No aprobada'}${response.categories.length?`\nMotivo general: ${response.categories.join(', ')}`:''}`;form.reset();await loadModerationGroup();}catch(error){notify(error.message,true);}});
+./public/multibot-panel.js:1658:    try{await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/settings`,{method:'PATCH',body:JSON.stringify(settings)});await loadModeration();notify('Mensajes de advertencia guardados.');}catch(error){notify(error.message,true);}
+./public/app.js:534:    lines > recommended ? ` · Advertencia: supera las ${recommended} líneas recomendadas` : ''
+./public/app.js:976:        ? ` · Advertencia: supera las ${definition.maxLines} líneas recomendadas`
+./public/index.html:818:              >Advertencia profesional<textarea
+./public/index.html:946:            <p class="muted">La primera detección genera una advertencia en el grupo. Una reincidencia genera otra advertencia, un caso en el panel y un aviso privado. Nunca se expulsa a personas ni se eliminan mensajes automáticamente.</p>
+./public/index.html:950:            <form id="moderation-rules-text-form"><label>Normas y situaciones que requieren advertencia<textarea name="rulesText" maxlength="20000" rows="14" required placeholder="Ejemplo: Tratar a todas las personas con respeto. No permitir insultos, amenazas, discriminación, publicidad repetida ni compartir datos personales."></textarea></label><div class="actions"><button type="submit">Guardar borrador</button><button id="moderation-discard-rules" type="button" class="secondary">Descartar cambios</button></div></form>
+./public/index.html:957:            <form id="moderation-warning-test"><label>Mensaje que debe generar advertencia<textarea name="text" maxlength="4000" required></textarea></label><button type="submit">Probar advertencia</button></form>
+./README.md:30:## Advertencia importante
+./README.md:56:- Palabras clave configurables con prioridad, respuesta de respaldo y advertencia profesional.
+./README.md:378:- No modifica automáticamente Comunidades, canales ni participantes; la moderación disponible se limita a advertencias locales y revisión humana.
+
+## welcome batch
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+
+## bienvenidos nuevos integrantes
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+
+## automation test
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+
+## probar automatizaciones
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+
+## group_participants_changed
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+
+## daily-summary
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+
+## weekly-summary
+./.github/workflows/agent-community-audit.yml:43:            for term in 'daily summary' 'weekly summary' 'resumen diario' 'resumen semanal' 'chat history' 'historial' 'moderation' 'moderación' 'warning' 'advertencia' 'welcome batch' 'bienvenidos nuevos integrantes' 'automation test' 'probar automatizaciones' 'group_participants_changed' 'daily-summary' 'weekly-summary'; do
+

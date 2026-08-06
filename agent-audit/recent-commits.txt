@@ -1,0 +1,60 @@
+46c3c39 ci: publish temporary community audit snapshot
+4deb337 ci: add temporary community audit bundle
+e55cc02 Run GitHub CLI verification automatically
+40c9531 Configure GitHub CLI workflow
+8907385 ci: apply final community panel lint cleanup
+65488ef ci: apply deep community TypeScript fixes before validation
+4e097e1 ci: handle multiline HTML closing tags
+8a6da8e ci: repair transformed community UI before formatting
+56f569d ci: preserve deep cleanup output before formatting
+bd3057d ci: run deep community cleanup from pull request
+8321143 ci: reuse verified runner for deep community cleanup
+2ab6ccb ci: add temporary deep community cleanup runner
+1f80dff ci: add temporary deep community cleanup inspection
+a3af058 ci: add temporary final community audit
+827461f ci: add temporary community test alignment
+b0c820b ci: add second temporary community fixer
+bba9226 ci: add temporary community refactor fixer
+d5d41bf ci: add temporary community refactor validation
+3f4c879 ci: add temporary community refactor runner
+8495ef6 ci: add temporary community boundary inspection
+e145587 ci: add temporary community refactor audit
+5b96f95 update
+b13a702 chore: completar validación del panel minimalista
+5053e46 chore: retirar función comercial obsoleta en la validación
+9d79916 chore: validar panel minimalista mediante revisión
+2b19301 chore: ejecutar validación del panel minimalista v2
+6cb386d chore: validar rediseño minimalista del panel
+d57c5bc chore: preparar rediseño minimalista del panel
+53a44b3 chore: retirar activador temporal del inicio consolidado
+162f7d7 chore: retirar script temporal del inicio consolidado
+272d57d chore: retirar flujo temporal del inicio consolidado
+f323f71 feat: consolidar inicio y corregir carga del panel
+cfc58c4 chore: actualizar prueba de navegación consolidada
+2b06774 chore: retirar función de navegación obsoleta
+d227d37 chore: corregir prueba del inicio consolidado
+a4f3f60 chore: preparar validación del inicio consolidado
+ce089f3 chore: validar consolidación del módulo de inicio
+b0ff2a1 chore: preparar consolidación del módulo de inicio
+996a4d7 test: adaptar comprobación de controles desplegables seguros
+3a6ea81 fix: usar comprobación de clic compatible con lint
+7bcdfc4 test: evitar bucles visuales y proteger el panel minimalista
+d95ca81 fix: evitar bloqueo del panel y aplicar refinamientos pendientes
+348531e revert: retirar prueba de modernización visual
+3cedb31 revert: retirar modernización visual reciente
+beb9f6e chore: retirar activador temporal de validación visual
+2986e9e chore: activar validación de la interfaz moderna
+dde807d test: proteger la modernización visual del panel
+5821b1a feat: modernizar visualmente el panel administrativo
+fb1c5db feat: refinar panel minimalista de comunidad
+5d45e6b chore: preparar validación con flujo registrado
+1c1df97 chore: reutilizar flujo validado para refinamiento final
+140b4c9 chore: asegurar ejecución de validación del panel
+c3c9495 chore: preparar validación del refinamiento del panel
+457cc0d chore: agregar validación temporal del refinamiento del panel
+065df1d test: cubrir refinamiento minimalista del panel
+a7d9fb4 style: ordenar panel minimalista
+980ba6b feat: agregar refinamiento minimalista del panel
+840bcfd chore: retirar activador temporal del panel minimalista
+7fe7ad8 chore: retirar validación temporal del panel minimalista
+094d889 feat: activar panel minimalista de comunidad
