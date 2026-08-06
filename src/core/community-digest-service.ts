@@ -181,7 +181,8 @@ export class CommunityDigestService {
     now = this.now(),
   ): Promise<string> {
     const messages = await this.loadMessages(period, groupId, now);
-    const title = period === 'daily' ? 'Historial diario anonimizado' : 'Historial semanal anonimizado';
+    const title =
+      period === 'daily' ? 'Historial diario anonimizado' : 'Historial semanal anonimizado';
     const lines = messages.map((message) => {
       const timestamp = new Date(message.timestampMs).toISOString();
       return `[${timestamp}] ${sanitizeBody(message.body)}`;
@@ -193,7 +194,9 @@ export class CommunityDigestService {
       `Generado: ${now.toISOString()}`,
       'Los nombres, números, correos y otros identificadores no se incluyen.',
       '',
-      ...(lines.length > 0 ? lines : ['No se encontraron mensajes para el período seleccionado.']),
+      ...(lines.length > 0
+        ? lines
+        : ['No se encontraron mensajes para el período seleccionado.']),
       '',
     ].join('\n');
   }
@@ -233,7 +236,9 @@ export class CommunityDigestService {
           errorCode: 'NO_MESSAGES_IN_PERIOD',
         };
       }
-      if (!this.provider.isConfigured()) return failed(period, 'AI_NOT_CONFIGURED', messages.length);
+      if (!this.provider.isConfigured()) {
+        return failed(period, 'AI_NOT_CONFIGURED', messages.length);
+      }
       const summary = await this.generate(period, messages);
       const heading = period === 'daily' ? '📝 Resumen del día' : '🗓️ Resumen semanal';
       await this.client.sendMessage(groupId, `${heading}\n\n${summary}`.slice(0, 4000));
@@ -360,7 +365,7 @@ function insideTolerance(
   sendTime: string,
   toleranceMinutes: number,
 ): boolean {
-  const [hours, minutes] = sendTime.split(':').map(Number);
+  const [hours = 0, minutes = 0] = sendTime.split(':').map(Number);
   const target = hours * 60 + minutes;
   const direct = Math.abs(minuteOfDay - target);
   return Math.min(direct, 1440 - direct) <= toleranceMinutes;

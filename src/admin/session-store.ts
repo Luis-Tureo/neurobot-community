@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 export type PanelSession = {
   username: string;
@@ -6,13 +6,38 @@ export type PanelSession = {
   expiresAt: number;
 };
 
+type SessionBucket = Map<string, PanelSession>;
+
 export class SessionStore {
-  private readonly sessions = new Map<string, PanelSession>();
+  private static readonly sharedKeys = new Set<string>();
+  private static readonly sharedBuckets = new Map<string, SessionBucket>();
+  private readonly sessions: SessionBucket;
+  private readonly registryKey: string;
+
+  public static enableSharedSecret(secret: string): void {
+    const key = SessionStore.keyFor(secret);
+    SessionStore.sharedKeys.add(key);
+    if (!SessionStore.sharedBuckets.has(key)) SessionStore.sharedBuckets.set(key, new Map());
+  }
+
+  public static disableSharedSecret(secret: string): void {
+    const key = SessionStore.keyFor(secret);
+    SessionStore.sharedKeys.delete(key);
+    SessionStore.sharedBuckets.delete(key);
+  }
 
   public constructor(
     private readonly secret: string,
     private readonly ttlMs = 8 * 60 * 60 * 1000,
-  ) {}
+  ) {
+    this.registryKey = SessionStore.keyFor(secret);
+    this.sessions = SessionStore.sharedKeys.has(this.registryKey)
+      ? SessionStore.sharedBuckets.get(this.registryKey) ?? new Map<string, PanelSession>()
+      : new Map<string, PanelSession>();
+    if (SessionStore.sharedKeys.has(this.registryKey)) {
+      SessionStore.sharedBuckets.set(this.registryKey, this.sessions);
+    }
+  }
 
   public create(username: string, now = Date.now()): { token: string; session: PanelSession } {
     this.cleanup(now);
@@ -69,6 +94,10 @@ export class SessionStore {
     const expected = Buffer.from(this.sign(value));
     const actual = Buffer.from(signature);
     return expected.length === actual.length && timingSafeEqual(expected, actual);
+  }
+
+  private static keyFor(secret: string): string {
+    return createHash('sha256').update(secret).digest('hex');
   }
 }
 

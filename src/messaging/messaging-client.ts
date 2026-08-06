@@ -28,6 +28,14 @@ export type InteractiveMenuPayload = {
 
 export type SelectableMenuPayload = Omit<InteractiveMenuPayload, 'kind'>;
 
+export type RecentGroupMessage = {
+  id: string;
+  body: string;
+  timestampMs: number;
+  fromMe: boolean;
+  participantId: string | null;
+};
+
 export interface MessagingClient {
   setEvents(events: MessagingClientEvents): void;
   initialize(): Promise<void>;
@@ -35,6 +43,7 @@ export interface MessagingClient {
   sendMessage(chatId: string, text: string, replyToMessageId?: string): Promise<void>;
   sendMessageWithMentions?(chatId: string, text: string, mentionIds: string[]): Promise<void>;
   resolveWelcomeParticipants?(participantIds: string[]): Promise<WelcomeParticipant[]>;
+  fetchRecentGroupMessages?(chatId: string, limit: number): Promise<RecentGroupMessage[]>;
   sendMedia?(chatId: string, absolutePath: string, caption: string): Promise<void>;
   sendInteractiveMenu?(chatId: string, payload: InteractiveMenuPayload): Promise<boolean>;
   sendSelectableMenu?(chatId: string, payload: SelectableMenuPayload): Promise<boolean>;

@@ -1,1 +1,0 @@
-Ejecutar rediseño minimalista del panel administrativo.
