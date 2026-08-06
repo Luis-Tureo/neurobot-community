@@ -25,51 +25,24 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: Apply and preserve deep cleanup
+      - name: Apply pending community cleanup fixes
         shell: bash
         run: |
           set -euo pipefail
           if grep -q "export type BotMode = 'community' | 'business' | 'mixed'" src/domain/types.ts; then
             python scripts/deep-clean-community-only.py
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -A
-            git commit -m "refactor: remove commercial domain and panel modules"
-            git push origin HEAD:agent/refactor-neurobot-community
-          else
-            echo "La limpieza profunda ya está aplicada."
           fi
-      - name: Repair transformed community UI
-        shell: bash
-        run: |
-          set -euo pipefail
+          if [ -f scripts/fix-community-typecheck-deep.py ]; then
+            python scripts/fix-community-typecheck-deep.py
+          fi
           if [ -f scripts/fix-community-ui-deep.py ]; then
-            python - <<'PY'
-          from pathlib import Path
-
-          path = Path('scripts/fix-community-ui-deep.py')
-          text = path.read_text(encoding='utf-8')
-          old = """        end = text.find(f'</{tag}>', marker_index)
-                  if end < 0:
-                      raise RuntimeError(f'No se encontró </{tag}> para {marker}')
-                  end += len(tag) + 3
-          """
-          new = """        closing = re.search(rf'</{re.escape(tag)}\\s*>', text[marker_index:])
-                  if closing is None:
-                      raise RuntimeError(f'No se encontró cierre de {tag} para {marker}')
-                  end = marker_index + closing.end()
-          """
-          if old not in text:
-              raise SystemExit('No se encontró el analizador HTML que debía corregirse.')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
-          PY
             python scripts/fix-community-ui-deep.py
           fi
       - name: Format transformed sources
         run: |
           npx prettier --write \
             src/domain/types.ts src/core/profile-presets.ts src/persistence/database.ts \
-            src/core/multi-bot-manager.ts src/core/bot-instance.ts src/admin/server.ts \
+            src/core/multi-bot-manager.ts src/core/bot-instance.ts src/admin/server.ts src/index.ts \
             public/index.html public/multibot-panel.js tests
       - name: Commit corrected sources
         shell: bash
@@ -79,7 +52,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "fix: repair community-only panel after deep cleanup"
+            git commit -m "fix: complete community-only TypeScript cleanup"
             git push origin HEAD:agent/refactor-neurobot-community
           fi
       - name: Install dependencies
