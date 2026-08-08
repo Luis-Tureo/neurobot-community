@@ -44,7 +44,11 @@ export class AnswerCacheService {
         return right.score - left.score;
       })[0];
     if (equivalent === undefined) return null;
-    return this.use(equivalent.answer, isFrequentlyAsked(equivalent.answer) ? 'FAQ' : 'EQUIVALENT');
+    return this.use(
+      equivalent.answer,
+      isFrequentlyAsked(equivalent.answer) ? 'FAQ' : 'EQUIVALENT',
+      question,
+    );
   }
 
   public saveGenerated(
@@ -121,8 +125,21 @@ export class AnswerCacheService {
     return false;
   }
 
-  private use(answer: CachedAnswer, kind: CacheMatch['kind']): CacheMatch {
+  private use(
+    answer: CachedAnswer,
+    kind: CacheMatch['kind'],
+    matchedQuestion?: string,
+  ): CacheMatch {
     this.database.recordCachedAnswerHit(this.botId, answer.id);
+    const usedAnswer =
+      matchedQuestion !== undefined
+        ? this.database.addCachedAnswerVariant(
+            this.botId,
+            answer.id,
+            matchedQuestion.trim(),
+            hashNormalizedQuestion(normalizeQuestionForCache(matchedQuestion)),
+          )
+        : answer;
     this.event(
       kind === 'FAQ'
         ? 'LOCAL_FAQ_RESPONSE'
@@ -131,7 +148,7 @@ export class AnswerCacheService {
           : 'ANSWER_CACHE_EQUIVALENT_HIT',
       'HIT',
     );
-    return { answer, kind };
+    return { answer: usedAnswer, kind };
   }
 
   private event(eventType: string, result: string): void {

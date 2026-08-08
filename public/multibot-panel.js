@@ -1,3 +1,5 @@
+import { confirmAction, requestInputs, showMessage, showToast } from './ui-feedback.js';
+
 const panelState = {
   csrfToken: null,
   selectedBotId: null,
@@ -7,7 +9,7 @@ const panelState = {
   bots: [],
   cachedAnswers: [],
   aiSettings: null,
-  aiCredentialConfigured: false,
+  aiCurrentProvider: null,
   menus: [],
   menuOptions: [],
   catalogCategories: [],
@@ -56,17 +58,14 @@ async function panelApi(path, options = {}) {
   if (!response.ok) {
     const error = new Error(payload.error || 'La solicitud no pudo completarse.');
     error.code = payload.code;
+    error.status = response.status;
     throw error;
   }
   return payload;
 }
 
 function notify(message, error = false) {
-  const notice = document.querySelector('#notice');
-  notice.textContent = message;
-  notice.classList.toggle('error', error);
-  notice.classList.remove('hidden');
-  window.setTimeout(() => notice.classList.add('hidden'), 5000);
+  showToast(message, error ? 'error' : 'success');
 }
 
 function recordPanelEvent(eventType, assistantId) {
@@ -106,6 +105,18 @@ function safeDate(value) {
   return value ? new Date(value).toLocaleString('es-CL') : 'Sin registro';
 }
 
+function aiProviderActionLabel(action) {
+  return (
+    {
+      PROVIDER_ADDED: 'IA agregada',
+      PROVIDER_REPLACED: 'IA reemplazada',
+      TOKEN_CHANGED: 'Token actualizado',
+      ACTIVATED: 'IA activada',
+      DEACTIVATED: 'IA desactivada',
+    }[action] || 'Configuración actualizada'
+  );
+}
+
 function botModeLabel(mode) {
   return { community: 'Comunidad', business: 'Negocio', mixed: 'Mixto' }[mode] || mode;
 }
@@ -141,7 +152,6 @@ function setBotNavigationAvailable(available) {
     option.hidden = !available;
     option.disabled = !available;
   });
-  document.querySelector('#assistant-context')?.classList.toggle('hidden', !available);
 }
 
 function applyBotCapabilities(capabilities) {
@@ -192,24 +202,6 @@ function setGlobalContext(section = 'bots', activate = true) {
   recordPanelEvent('GLOBAL_PANEL_OPENED');
 }
 
-function updateAssistantContext() {
-  if (!panelState.bot || !panelState.profile) return;
-  document.querySelector('#assistant-context-name').textContent = panelState.profile.botName;
-  document.querySelector('#assistant-context-detail').textContent = [
-    botModeLabel(panelState.bot.mode),
-    ...(panelState.bot.lifecycleStatus === 'ACTIVE'
-      ? []
-      : [lifecycleLabels[panelState.bot.lifecycleStatus] || panelState.bot.lifecycleStatus]),
-    panelState.bot.phoneNumber || 'Sin número vinculado',
-  ].join(' · ');
-  const warning = document.querySelector('#assistant-context-warning');
-  const mixedMode = panelState.bot.operatingMode === 'BUSINESS_MIXED';
-  warning.textContent = mixedMode
-    ? 'Este asistente utiliza un mismo número con reglas diferentes para grupos y chats privados.'
-    : '';
-  warning.classList.toggle('hidden', !mixedMode);
-}
-
 function setCardGrid(selector, cards) {
   const target = document.querySelector(selector);
   if (!target) return;
@@ -258,7 +250,8 @@ async function loadBots() {
     );
     heading.append(title, lifecycle);
 
-    const info = node('dl', undefined, 'bot-facts');
+    const info = node('table', undefined, 'bot-facts');
+    const infoBody = node('tbody');
     const phoneText = bot.phoneNumber || 'Sin vincular';
     const statusText = botConnectionLabels[bot.whatsappStatus] || bot.whatsappStatus;
     const facts = [
@@ -278,10 +271,13 @@ async function loadBots() {
       ['Última conexión', safeDate(bot.lastConnectedAt)],
     ];
     facts.forEach(([label, value]) => {
-      const fact = node('div', undefined, 'bot-fact');
-      fact.append(node('dt', label), node('dd', value));
-      info.append(fact);
+      const row = node('tr');
+      const headingCell = node('th', label);
+      headingCell.scope = 'row';
+      row.append(headingCell, node('td', value));
+      infoBody.append(row);
     });
+    info.append(infoBody);
 
     const conflictNotice = bot.connectorConflict
       ? node(
@@ -456,11 +452,9 @@ async function loadModerationGroup() {
   );
   document.querySelector('#moderation-group-status').textContent = profile.enabled
     ? 'Moderación activa. Los mensajes nuevos se analizan localmente.'
-    : data.progress.ready && data.recipientHashes.length > 0
-      ? 'Todo está aprobado. Ya puedes activar la moderación.'
-      : data.progress.ready
-        ? 'Las pruebas están aprobadas. Selecciona al menos un administrador para poder activar.'
-        : 'Moderación desactivada mientras completas la preparación.';
+    : data.progress.ready
+      ? 'Todo está aprobado. Los administradores del grupo se detectan automáticamente.'
+      : 'Moderación desactivada mientras completas la preparación.';
   setCardGrid('#moderation-simple-summary', [
     ['Estado', profile.enabled ? 'Activa' : 'Desactivada'],
     ['Preparación', moderationStatusLabel(profile.analysisStatus)],
@@ -473,25 +467,7 @@ async function loadModerationGroup() {
   const toggle = document.querySelector('#moderation-toggle');
   toggle.textContent = profile.enabled ? 'Desactivar moderación' : 'Activar moderación';
   toggle.classList.toggle('danger', profile.enabled);
-  toggle.disabled = !profile.enabled && (!data.progress.ready || data.recipientHashes.length === 0);
-  renderModerationAdministrators(data.recipientHashes);
-}
-
-function renderModerationAdministrators(selectedHashes) {
-  const target = document.querySelector('#moderation-admin-recipients');
-  target.replaceChildren();
-  const administrators = panelState.moderation.administrators || [];
-  target.add(new window.Option('Selecciona un administrador', ''));
-  if (!administrators.length) {
-    target.disabled = true;
-    return;
-  }
-  target.disabled = false;
-  administrators.forEach((administrator) => {
-    const option = new window.Option(administrator.label, administrator.identifier);
-    option.selected = selectedHashes.includes(administrator.hash);
-    target.add(option);
-  });
+  toggle.disabled = !profile.enabled && !data.progress.ready;
 }
 
 function moderationStatusLabel(status) {
@@ -591,7 +567,13 @@ function renderModerationRules(rules) {
         await loadModeration();
       }),
       actionButton('Eliminar', 'danger', async () => {
-        if (!window.confirm('¿Eliminar esta regla?')) return;
+        if (
+          !(await confirmAction('¿Eliminar esta regla?', {
+            title: 'Eliminar regla',
+            confirmLabel: 'Eliminar',
+          }))
+        )
+          return;
         await panelApi(
           `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/rules/${rule.id}`,
           { method: 'DELETE' },
@@ -687,8 +669,9 @@ function renderModerationCases(cases, groups) {
           const evidence = await panelApi(
             `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/cases/${item.id}/evidence`,
           );
-          window.alert(
+          await showMessage(
             `Evidencia temporal cifrada hasta ${safeDate(evidence.expiresAt)}:\n\n${evidence.text}`,
+            { title: 'Evidencia temporal' },
           );
         }),
       );
@@ -820,20 +803,6 @@ function bindSimpleModeration() {
       notify(error.message, true);
     }
   });
-  document.querySelector('#moderation-save-admins').addEventListener('click', async () => {
-    const recipient = document.querySelector('#moderation-admin-recipients').value;
-    const identifiers = recipient ? [recipient] : [];
-    try {
-      await panelApi(
-        `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/administrators`,
-        { method: 'PATCH', body: JSON.stringify({ identifiers }) },
-      );
-      await loadModerationGroup();
-      notify('Destinatarios guardados de forma cifrada.');
-    } catch (error) {
-      notify(error.message, true);
-    }
-  });
 }
 
 async function loadBotSummary(refreshForms = true) {
@@ -850,7 +819,6 @@ async function loadBotSummary(refreshForms = true) {
   document.querySelector('#application-title').textContent = result.profile.headerText;
   document.querySelector('#application-subtitle').textContent =
     `${result.profile.organizationName} · ${result.profile.botName}`;
-  updateAssistantContext();
   document.querySelectorAll('[data-community-channel]').forEach((element) => {
     element.classList.toggle('hidden', !result.bot.groupChannelEnabled);
   });
@@ -1008,6 +976,63 @@ function renderBotGroups(groups) {
   });
 }
 
+function enableInlineCachedAnswerEditing(answer, answerText, editor, saveStatus) {
+  let saveTimer = null;
+  let saveQueue = Promise.resolve();
+
+  const persist = (closeAfterSave = false) => {
+    if (saveTimer !== null) {
+      window.clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    const value = editor.value.trim();
+    saveQueue = saveQueue.then(async () => {
+      if (value === '') {
+        saveStatus.textContent = 'La respuesta no puede estar vacía.';
+        editor.classList.add('invalid');
+        return;
+      }
+      editor.classList.remove('invalid');
+      if (value !== answer.answer) {
+        saveStatus.textContent = 'Guardando…';
+        try {
+          await panelApi(
+            `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers/${answer.id}`,
+            { method: 'PATCH', body: JSON.stringify({ action: 'edit', answer: value }) },
+          );
+          answer.answer = value;
+          answerText.textContent = value;
+          saveStatus.textContent = 'Guardado';
+        } catch (error) {
+          saveStatus.textContent = 'No se pudo guardar.';
+          notify(error.message, true);
+          return;
+        }
+      }
+      if (closeAfterSave) {
+        editor.classList.add('hidden');
+        answerText.classList.remove('hidden');
+      }
+    });
+  };
+
+  editor.addEventListener('input', () => {
+    editor.classList.remove('invalid');
+    saveStatus.textContent = 'Editando…';
+    if (saveTimer !== null) window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => persist(), 600);
+  });
+  editor.addEventListener('blur', () => persist(true));
+
+  return () => {
+    answerText.classList.add('hidden');
+    editor.classList.remove('hidden');
+    editor.focus();
+    editor.setSelectionRange(editor.value.length, editor.value.length);
+    saveStatus.textContent = 'Editando…';
+  };
+}
+
 async function loadCachedAnswers(search = '') {
   if (!panelState.selectedBotId) return;
   const suffix = search ? `?search=${encodeURIComponent(search)}` : '';
@@ -1020,15 +1045,43 @@ async function loadCachedAnswers(search = '') {
   result.answers.forEach((answer) => {
     const row = node('tr');
     const question = node('td', undefined, 'question-cell');
+    const answerText = node('p', answer.answer, 'cached-answer-text');
+    const editor = node('textarea', undefined, 'cached-answer-editor hidden');
+    editor.value = answer.answer;
+    editor.rows = 5;
+    editor.maxLength = 8000;
+    editor.setAttribute('aria-label', `Editar respuesta para: ${answer.canonicalQuestion}`);
+    const saveStatus = node('small', '', 'inline-save-status');
+    saveStatus.setAttribute('aria-live', 'polite');
+    const startEditing = enableInlineCachedAnswerEditing(answer, answerText, editor, saveStatus);
+    question.append(node('strong', answer.canonicalQuestion), answerText, editor, saveStatus);
+
+    const semanticallyRepeated = answer.variants.length > 0;
+    const repeated = answer.hitCount > 0 || semanticallyRepeated;
+    const repeatedLabel = semanticallyRepeated ? 'Sí · similar' : repeated ? 'Sí' : 'No';
+    const repeatedCell = node('td');
+    const repeatedBadge = node(
+      'span',
+      repeatedLabel,
+      `status-badge repeat-status ${repeated ? 'repeated' : 'inactive'}`,
+    );
+    if (semanticallyRepeated) {
+      repeatedBadge.title = `Preguntas similares detectadas: ${answer.variants.join(' · ')}`;
+    }
+    repeatedCell.append(repeatedBadge);
+
+    const actionsCell = node('td', undefined, 'history-actions-cell');
     const actions = node('div', undefined, 'actions history-actions');
     actions.append(
-      actionButton('Editar respuesta', 'secondary', async () => {
-        const edited = window.prompt('Edita la respuesta:', answer.answer);
-        if (edited === null || edited.trim() === '') return;
-        await cachedAnswerAction(answer.id, { action: 'edit', answer: edited });
-      }),
-      actionButton('Eliminar historial', 'danger', async () => {
-        if (!window.confirm('¿Eliminar esta pregunta y su respuesta del historial?')) return;
+      actionButton('Editar', 'history-edit-action', startEditing),
+      actionButton('Eliminar', 'danger', async () => {
+        if (
+          !(await confirmAction('¿Eliminar esta pregunta y su respuesta del historial?', {
+            title: 'Eliminar historial',
+            confirmLabel: 'Eliminar',
+          }))
+        )
+          return;
         await panelApi(
           `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers/${answer.id}`,
           { method: 'DELETE' },
@@ -1037,34 +1090,25 @@ async function loadCachedAnswers(search = '') {
         notify('Respuesta eliminada.');
       }),
     );
-    question.append(actions, node('strong', answer.canonicalQuestion), node('p', answer.answer));
-    if (answer.variants.length > 0)
-      question.append(node('small', `Variantes: ${answer.variants.join(' · ')}`, 'muted'));
+    actionsCell.append(actions);
     row.append(
       question,
       node('td', answer.category),
       node('td', String(answer.hitCount), 'numeric-cell'),
+      repeatedCell,
       node('td', answer.status),
       node('td', safeDate(answer.updatedAt)),
+      actionsCell,
     );
     target.append(row);
   });
   if (result.answers.length === 0) {
     const row = node('tr');
     const cell = node('td', 'Todavía no hay preguntas registradas.', 'empty-table-cell');
-    cell.colSpan = 5;
+    cell.colSpan = 7;
     row.append(cell);
     target.append(row);
   }
-}
-
-async function cachedAnswerAction(id, payload) {
-  await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify(payload),
-  });
-  await loadCachedAnswers();
-  notify('Respuesta guardada actualizada.');
 }
 
 async function loadMenus() {
@@ -1097,7 +1141,13 @@ async function loadMenus() {
     if (!menu.isInitial)
       actions.append(
         actionButton('Eliminar', 'danger', async () => {
-          if (!window.confirm('¿Eliminar este menú y sus opciones?')) return;
+          if (
+            !(await confirmAction('¿Eliminar este menú y sus opciones?', {
+              title: 'Eliminar menú',
+              confirmLabel: 'Eliminar',
+            }))
+          )
+            return;
           await panelApi(
             `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/menus/${menu.id}`,
             { method: 'DELETE' },
@@ -1120,7 +1170,13 @@ async function loadMenus() {
     actions.append(
       actionButton('Editar', 'secondary', () => fillMenuOption(option)),
       actionButton('Eliminar', 'danger', async () => {
-        if (!window.confirm('¿Eliminar esta opción?')) return;
+        if (
+          !(await confirmAction('¿Eliminar esta opción?', {
+            title: 'Eliminar opción',
+            confirmLabel: 'Eliminar',
+          }))
+        )
+          return;
         await panelApi(
           `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/menu-options/${option.id}`,
           { method: 'DELETE' },
@@ -1201,7 +1257,13 @@ async function loadCatalog() {
     actions.append(
       actionButton('Editar', 'secondary', () => fillCatalogItem(itemData)),
       actionButton('Eliminar', 'danger', async () => {
-        if (!window.confirm('¿Eliminar este producto o servicio?')) return;
+        if (
+          !(await confirmAction('¿Eliminar este producto o servicio?', {
+            title: 'Eliminar elemento',
+            confirmLabel: 'Eliminar',
+          }))
+        )
+          return;
         await panelApi(
           `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/catalog/items/${itemData.id}`,
           { method: 'DELETE' },
@@ -1271,7 +1333,13 @@ async function loadMedia() {
     );
     card.append(
       actionButton('Eliminar', 'danger', async () => {
-        if (!window.confirm('¿Mover esta imagen a la papelera recuperable?')) return;
+        if (
+          !(await confirmAction('¿Mover esta imagen a la papelera recuperable?', {
+            title: 'Eliminar imagen',
+            confirmLabel: 'Mover a papelera',
+          }))
+        )
+          return;
         await panelApi(
           `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/media/${asset.id}`,
           { method: 'DELETE' },
@@ -1398,20 +1466,29 @@ async function loadRequests() {
 async function loadAI() {
   if (!panelState.selectedBotId) return;
   const result = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai`);
-  const settings = result.settings;
-  panelState.aiSettings = settings;
-  panelState.aiCredentialConfigured = result.credential.configured;
-  const form = document.querySelector('#ai-settings-form');
-  form.elements.enabled.value = settings.enabled ? 'yes' : 'no';
-  form.elements.provider.value = result.credential.configured ? 'groq' : '';
-  const credentialForm = document.querySelector('#ai-credential-form');
-  credentialForm.elements.mode.value = 'per_bot';
-  credentialForm.elements.apiKey.value = '';
-  credentialForm.classList.add('hidden');
-  const addProviderButton = document.querySelector('#add-ai-provider');
-  addProviderButton.textContent = result.credential.configured
-    ? 'Cambiar token'
-    : 'Agregar nueva IA';
+  const currentProvider = result.currentProvider;
+  panelState.aiSettings = result.settings;
+  panelState.aiCurrentProvider = currentProvider;
+  const providerForm = document.querySelector('#ai-provider-form');
+  providerForm.elements.displayName.value = currentProvider.name || 'Groq';
+  providerForm.elements.apiKey.value = '';
+  providerForm.elements.enabled.value = currentProvider.enabled ? 'yes' : 'no';
+  document.querySelector('#ai-token-help').textContent = currentProvider.configured
+    ? 'El token está configurado. Déjalo vacío para conservarlo o escribe uno nuevo para cambiarlo.'
+    : 'Agrega el token para poder activar la inteligencia artificial.';
+  const providerHistory = document.querySelector('#ai-provider-history');
+  providerHistory.replaceChildren();
+  result.providerHistory.forEach((change) => {
+    providerHistory.append(
+      createListItem(
+        aiProviderActionLabel(change.action),
+        `${change.displayName} · ${safeDate(change.createdAt)}`,
+      ),
+    );
+  });
+  if (result.providerHistory.length === 0) {
+    providerHistory.append(emptyState('Aún no hay cambios de inteligencia artificial.'));
+  }
   const statisticsTarget = document.querySelector('#statistics-events');
   statisticsTarget.replaceChildren();
   result.recentEvents.forEach((event) => {
@@ -1424,6 +1501,44 @@ async function loadAI() {
   if (result.recentEvents.length === 0) {
     statisticsTarget.append(emptyState('No hay eventos agregados recientes.'));
   }
+}
+
+async function saveAIProviderWithCompatibility(payload) {
+  const botId = encodeURIComponent(panelState.selectedBotId);
+  try {
+    await panelApi(`/api/bots/${botId}/ai/provider`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    return;
+  } catch (error) {
+    if (error.status !== 404) throw error;
+  }
+
+  if (payload.apiKey) {
+    await panelApi(`/api/bots/${botId}/ai-key`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        mode: 'per_bot',
+        provider: 'groq',
+        operation: panelState.aiCurrentProvider?.configured ? 'replace_token' : 'add',
+        apiKey: payload.apiKey,
+      }),
+    });
+  }
+  if (!panelState.aiSettings) throw new Error('No fue posible cargar la configuración de IA.');
+  const { profileId, updatedAt, ...editableSettings } = panelState.aiSettings;
+  void profileId;
+  void updatedAt;
+  await panelApi(`/api/bots/${botId}/ai/settings`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      ...editableSettings,
+      enabled: payload.enabled,
+      provider: payload.enabled ? 'groq' : 'disabled',
+      confirmIncreasedLimits: true,
+    }),
+  });
 }
 
 function replaceSelectOptions(select, items, valueField, labelField, emptyLabel, labelResolver) {
@@ -1456,8 +1571,9 @@ async function changeBotNumber() {
   const bot = panelState.bot;
   if (!bot) return;
   if (bot.phoneNumber) {
-    const confirmed = window.confirm(
+    const confirmed = await confirmAction(
       `¿Cambiar el número ${bot.phoneNumber}? La sesión actual se guardará en una copia recuperable.`,
+      { title: 'Cambiar número', confirmLabel: 'Cambiar número' },
     );
     if (!confirmed) return;
     await panelApi(`/api/bots/${encodeURIComponent(bot.id)}/unlink`, {
@@ -1495,19 +1611,30 @@ async function toggleBot(bot) {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function transferCommercialConfiguration(bot) {
-  if (
-    !window.confirm(
-      'Se copiarán menús, productos, imágenes y horarios a Neurobot. No se copiarán el número, la sesión ni los grupos. El borrador quedará en la papelera. ¿Continuar?',
-    )
-  )
-    return;
-  const confirmationPhrase = window.prompt('Escribe exactamente: TRANSFERIR A NEUROBOT');
-  if (confirmationPhrase === null) return;
-  const password = window.prompt('Escribe la contraseña actual del panel:');
-  if (!password) return;
+  const input = await requestInputs({
+    title: 'Transferir a Neurobot',
+    message:
+      'Se copiarán menús, productos, imágenes y horarios. El número, la sesión y los grupos no se copiarán. El borrador quedará en la papelera.',
+    confirmLabel: 'Transferir',
+    tone: 'danger',
+    fields: [
+      {
+        name: 'confirmationPhrase',
+        label: 'Escribe exactamente: TRANSFERIR A NEUROBOT',
+        placeholder: 'TRANSFERIR A NEUROBOT',
+      },
+      {
+        name: 'password',
+        label: 'Contraseña actual del panel',
+        type: 'password',
+        autocomplete: 'current-password',
+      },
+    ],
+  });
+  if (input === null) return;
   await panelApi(`/api/bots/${encodeURIComponent(bot.id)}/transfer-commercial-to-neurobot`, {
     method: 'POST',
-    body: JSON.stringify({ password, confirmationPhrase }),
+    body: JSON.stringify(input),
   });
   await loadBots();
   await selectBot('neurobot', 'status');
@@ -1515,16 +1642,30 @@ async function transferCommercialConfiguration(bot) {
 }
 
 async function sendBotToTrash(bot) {
-  const phone = bot.phoneNumber ? `\nNúmero vinculado: ${bot.phoneNumber}` : '';
-  const confirmationName = window.prompt(
-    `Para enviar este asistente a la papelera, escribe exactamente: ${bot.botName}${phone}`,
-  );
-  if (confirmationName === null) return;
-  const password = window.prompt('Escribe la contraseña actual del panel:');
-  if (!password) return;
+  const phone = bot.phoneNumber ? ` Número vinculado: ${bot.phoneNumber}.` : '';
+  const input = await requestInputs({
+    title: 'Enviar asistente a la papelera',
+    message: `Podrás restaurarlo durante 30 días.${phone}`,
+    confirmLabel: 'Enviar a papelera',
+    tone: 'danger',
+    fields: [
+      {
+        name: 'confirmationName',
+        label: `Escribe exactamente: ${bot.botName}`,
+        placeholder: bot.botName,
+      },
+      {
+        name: 'password',
+        label: 'Contraseña actual del panel',
+        type: 'password',
+        autocomplete: 'current-password',
+      },
+    ],
+  });
+  if (input === null) return;
   await panelApi(`/api/bots/${encodeURIComponent(bot.id)}/trash`, {
     method: 'POST',
-    body: JSON.stringify({ password, confirmationName }),
+    body: JSON.stringify(input),
   });
   if (panelState.selectedBotId === bot.id) setGlobalContext('bots');
   await Promise.all([loadBots(), loadTrash()]);
@@ -1564,17 +1705,16 @@ async function loadTrash() {
     );
     actions.append(
       actionButton('Eliminar definitivamente', 'danger', async () => {
-        const expected = `ELIMINAR PERMANENTEMENTE ${assistant.botName}`;
-        const phone = assistant.phoneNumber ? `\nNúmero vinculado: ${assistant.phoneNumber}` : '';
-        const confirmationPhrase = window.prompt(
-          `Esta acción no se puede deshacer.${phone}\nEscribe exactamente: ${expected}`,
-        );
-        if (confirmationPhrase === null) return;
-        const password = window.prompt('Escribe la contraseña actual del panel:');
-        if (!password) return;
+        if (
+          !(await confirmAction('¿Está seguro de eliminar este asistente?', {
+            title: 'Eliminar asistente',
+            confirmLabel: 'Eliminar definitivamente',
+          }))
+        )
+          return;
         await panelApi(`/api/bots/${encodeURIComponent(assistant.id)}/permanent`, {
           method: 'DELETE',
-          body: JSON.stringify({ password, confirmationPhrase }),
+          body: JSON.stringify({ confirmed: true }),
         });
         await loadTrash();
         notify('Asistente eliminado. Se creó un respaldo final de seguridad.');
@@ -1643,7 +1783,7 @@ function configureForms() {
   });
   document.querySelector('#section-select').addEventListener('change', (event) => {
     const section = event.currentTarget.value;
-    if (['bots', 'trash', 'administrators'].includes(section)) {
+    if (['bots', 'trash'].includes(section)) {
       setGlobalContext(section, false);
       if (section === 'trash') void loadTrash().catch((error) => notify(error.message, true));
     } else if (panelState.selectedBotId) {
@@ -1904,63 +2044,22 @@ function configureForms() {
     }
   });
 
-  document.querySelector('#ai-credential-form').addEventListener('submit', async (event) => {
+  document.querySelector('#ai-provider-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const apiKey = form.elements.apiKey.value.trim();
     const payload = {
-      mode: form.elements.mode.value,
+      displayName: form.elements.displayName.value.trim(),
+      enabled: form.elements.enabled.value === 'yes',
       ...(apiKey ? { apiKey } : {}),
     };
     try {
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai-key`, {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      });
+      await saveAIProviderWithCompatibility(payload);
       form.elements.apiKey.value = '';
-      await loadAI();
-      notify('Groq fue agregada correctamente.');
+      await Promise.all([loadAI(), loadBotSummary(false), loadBots()]);
+      notify('Configuración de inteligencia artificial guardada.');
     } catch (error) {
       form.elements.apiKey.value = '';
-      notify(error.message, true);
-    }
-  });
-  document.querySelector('#add-ai-provider').addEventListener('click', () => {
-    const credentialForm = document.querySelector('#ai-credential-form');
-    credentialForm.classList.remove('hidden');
-    credentialForm.elements.apiKey.focus();
-  });
-  document.querySelector('#cancel-ai-provider').addEventListener('click', () => {
-    const credentialForm = document.querySelector('#ai-credential-form');
-    credentialForm.reset();
-    credentialForm.elements.mode.value = 'per_bot';
-    credentialForm.classList.add('hidden');
-  });
-  document.querySelector('#ai-settings-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const enabled = form.elements.enabled.value === 'yes';
-    const provider = form.elements.provider.value;
-    if (enabled && (provider !== 'groq' || !panelState.aiCredentialConfigured)) {
-      notify('Agrega una inteligencia artificial y su token antes de activarla.', true);
-      return;
-    }
-    const payload = {
-      ...panelState.aiSettings,
-      enabled,
-      provider: enabled ? provider : 'disabled',
-      confirmIncreasedLimits: true,
-    };
-    try {
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/settings`, {
-        method: 'PATCH',
-        body: JSON.stringify(payload),
-      });
-      await loadAI();
-      notify(
-        enabled ? 'Inteligencia artificial activada.' : 'Inteligencia artificial desactivada.',
-      );
-    } catch (error) {
       notify(error.message, true);
     }
   });
@@ -2254,7 +2353,7 @@ async function runMultibotInitialization() {
     ) {
       await selectBot(route[1], route[2] || 'status');
     } else {
-      const globalSection = ['trash', 'administrators'].includes(route[0]) ? route[0] : 'bots';
+      const globalSection = route[0] === 'trash' ? 'trash' : 'bots';
       setGlobalContext(globalSection);
       if (globalSection === 'trash') await loadTrash();
     }

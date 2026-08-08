@@ -9,7 +9,7 @@ describe('persistencia SQLite', () => {
     database.migrate();
     database.migrate();
     expect(database.getMigrationVersions()).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
     ]);
     expect(database.getBotProfile('neurobot')).toMatchObject({
       botName: 'Neurobot',
@@ -44,6 +44,27 @@ describe('persistencia SQLite', () => {
     database.close();
   });
 
+  it('guarda el historial de cambios de proveedor sin almacenar tokens', () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    database.saveBotAIProviderConfiguration('neurobot', 'Mi IA');
+    database.recordAIProviderChange('neurobot', 'groq', 'PROVIDER_ADDED', 'Mi IA');
+    database.recordAIProviderChange('neurobot', 'groq', 'TOKEN_CHANGED', 'Mi IA');
+
+    expect(database.listAIProviderChanges('neurobot')).toMatchObject([
+      { provider: 'groq', displayName: 'Mi IA', action: 'TOKEN_CHANGED' },
+      { provider: 'groq', displayName: 'Mi IA', action: 'PROVIDER_ADDED' },
+    ]);
+    expect(database.getBotEncryptedCredential('neurobot')).toMatchObject({
+      displayName: 'Mi IA',
+      encryptedApiKey: null,
+    });
+    expect(JSON.stringify(database.listAIProviderChanges('neurobot'))).not.toContain(
+      'token-secreto',
+    );
+    database.close();
+  });
+
   it('persiste configuración, grupos, administradores y silencios', () => {
     const database = new AppDatabase(':memory:');
     database.migrate();
@@ -51,9 +72,6 @@ describe('persistencia SQLite', () => {
     database.upsertDetectedGroup('grupo@g.us', 'Grupo Uno');
     expect(database.setGroupAuthorized('grupo@g.us', true)).toBe(true);
     expect(database.isGroupAuthorized('grupo@g.us')).toBe(true);
-    expect(database.addAdministrator('56912345678@c.us')).toBe(true);
-    expect(database.addAdministrator('56912345678@c.us')).toBe(false);
-    expect(database.isAdministrator('56912345678@c.us')).toBe(true);
     database.setSilence('grupo@g.us', new Date(Date.now() + 60_000));
     expect(database.getSilenceRemainingMs('grupo@g.us')).toBeGreaterThan(0);
     expect(database.getSetting('bot_enabled', true)).toBe(false);
@@ -203,6 +221,15 @@ describe('persistencia SQLite', () => {
     expect(database.restoreCommandDefault('ayuda')).toMatchObject({ custom: false });
     expect(database.restoreAutomaticTemplate('WELCOME')).toBe(true);
     expect(database.getAutomaticTemplateCustomization().WELCOME).toBe(false);
+    database.restoreAllAutomaticTemplates();
+    expect(database.getAutomaticTemplateCustomization()).toMatchObject({
+      WELCOME: false,
+      DAILY_RULES: false,
+      GREETING_MONDAY: false,
+      GREETING_WEEKDAY: false,
+      GREETING_FRIDAY: false,
+      GREETING_WEEKEND: false,
+    });
     database.close();
   });
 

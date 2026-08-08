@@ -29,6 +29,7 @@ describe('interfaz de mensajes automáticos', () => {
     expect(script).not.toContain('.manual-automatic-send');
     expect(script).toContain("headers['x-csrf-token']");
     expect(script).toContain("method: 'PATCH'");
+    expect(script).toContain('/api/automatic-messages/templates/restore-all');
   });
 
   it('concentra la programación por fecha de encuestas dentro de este módulo', () => {
@@ -37,10 +38,31 @@ describe('interfaz de mensajes automáticos', () => {
       html.indexOf('id="section-polls"'),
     );
     expect(automaticSection).toContain('Encuestas por fecha');
-    expect(automaticSection).toContain('id="poll-override-form"');
     expect(automaticSection).toContain('id="poll-overrides-list"');
-    expect(automaticSection.indexOf('id="poll-override-form"')).toBeLessThan(
+    expect(automaticSection).not.toContain('Programar encuesta');
+    expect(automaticSection.indexOf('Encuestas por fecha')).toBeGreaterThan(
       automaticSection.indexOf('id="automatic-messages-form"'),
     );
+  });
+
+  it('ofrece una sola restauración de textos junto al guardado general', () => {
+    const automaticSection = html.slice(
+      html.indexOf('id="section-automatic-messages"'),
+      html.indexOf('id="section-polls"'),
+    );
+    expect(automaticSection.match(/Restaurar texto predeterminado/gu)).toHaveLength(1);
+    expect(automaticSection).toContain('id="restore-automatic-defaults"');
+    expect(automaticSection).toContain('Guardar automatizaciones');
+    expect(script).not.toContain('¿Restaurar solamente esta plantilla?');
+    expect(script).toContain('¿Está seguro de restaurar los textos predeterminados?');
+    expect(script).toContain('configuration.welcome.template.trim() ||');
+    expect(script).toContain('result.defaultConfiguration.welcome.template');
+    expect(script).toContain('if (error.status !== 404) throw error;');
+  });
+
+  it('reemplaza una encuesta ya programada sin mostrar un checkbox técnico', () => {
+    expect(html).not.toContain('Reemplazar la programación existente para esta fecha');
+    expect(html).not.toContain('name="replaceConfirmed"');
+    expect(script).toContain('replaceConfirmed: true');
   });
 });

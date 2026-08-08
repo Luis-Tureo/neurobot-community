@@ -1,3 +1,5 @@
+import { confirmAction, showToast } from './ui-feedback.js';
+
 const state = {
   csrfToken: null,
   commands: [],
@@ -45,10 +47,7 @@ const elements = {
 };
 
 function showNotice(message, error = false) {
-  elements.notice.textContent = message;
-  elements.notice.classList.toggle('error', error);
-  elements.notice.classList.remove('hidden');
-  window.setTimeout(() => elements.notice.classList.add('hidden'), 5000);
+  showToast(message, error ? 'error' : 'success');
 }
 
 async function api(path, options = {}) {
@@ -63,6 +62,7 @@ async function api(path, options = {}) {
   if (!response.ok) {
     const error = new Error(payload.error || 'La solicitud no pudo completarse.');
     error.code = payload.code;
+    error.status = response.status;
     error.status = response.status;
     throw error;
   }
@@ -252,9 +252,10 @@ async function loadGroups() {
         }),
         groupActionButton('Eliminar registro local', 'danger', async () => {
           if (
-            !window.confirm(
+            !(await confirmAction(
               '¿Eliminar definitivamente este registro local y sus estados asociados?',
-            )
+              { title: 'Eliminar registro local', confirmLabel: 'Eliminar' },
+            ))
           ) {
             return false;
           }
@@ -415,10 +416,19 @@ document.querySelector('#run-group-cleanup').addEventListener('click', async () 
     const preview = await api('/api/groups/cleanup-preview');
     renderCleanupPreview(preview);
     const description = `${preview.archiveCandidates.length} registro(s) se archivarán y ${preview.deleteCandidates.length} podrían eliminarse.`;
-    if (!window.confirm(`${description} ¿Confirmas la limpieza segura?`)) return;
+    if (
+      !(await confirmAction(`${description} ¿Confirmas la limpieza segura?`, {
+        title: 'Limpiar registros de grupos',
+        confirmLabel: 'Continuar',
+      }))
+    )
+      return;
     const deleteExpired =
       preview.deleteCandidates.length > 0 &&
-      window.confirm('¿Eliminar también los registros cuya retención ya venció?');
+      (await confirmAction('¿Eliminar también los registros cuya retención ya venció?', {
+        title: 'Registros vencidos',
+        confirmLabel: 'Eliminar vencidos',
+      }));
     const result = await api('/api/groups/cleanup', {
       method: 'POST',
       body: JSON.stringify({ confirmed: true, deleteExpired }),
@@ -473,7 +483,13 @@ async function loadCommands() {
       remove.className = 'danger';
       remove.textContent = 'Eliminar';
       remove.addEventListener('click', async () => {
-        if (!confirm('¿Eliminar este comando personalizado?')) return;
+        if (
+          !(await confirmAction('¿Eliminar este comando personalizado?', {
+            title: 'Eliminar comando',
+            confirmLabel: 'Eliminar',
+          }))
+        )
+          return;
         try {
           await api(`/api/commands/${command.id}`, { method: 'DELETE' });
           await loadCommands();
@@ -532,7 +548,14 @@ document
   .elements.name.addEventListener('input', updateCommandMetrics);
 document.querySelector('#restore-command-default').addEventListener('click', async () => {
   if (state.editingCommandId === null) return;
-  if (!window.confirm('¿Restaurar el texto breve predeterminado de este comando?')) return;
+  if (
+    !(await confirmAction('¿Restaurar el texto breve predeterminado de este comando?', {
+      title: 'Restaurar texto',
+      confirmLabel: 'Restaurar',
+      tone: 'default',
+    }))
+  )
+    return;
   try {
     const result = await api(`/api/commands/${state.editingCommandId}/restore-default`, {
       method: 'POST',
@@ -589,48 +612,6 @@ document.querySelector('#command-form').addEventListener('submit', async (event)
   }
 });
 
-async function loadAdministrators() {
-  const { administrators } = await api('/api/administrators');
-  const target = document.querySelector('#administrators-list');
-  target.replaceChildren();
-  if (!administrators.length) {
-    target.append(empty('No hay administradores configurados.'));
-    return;
-  }
-  administrators.forEach((administrator) => {
-    const item = listItem(administrator.masked, `ID anónimo: ${administrator.key}`);
-    const remove = document.createElement('button');
-    remove.className = 'danger';
-    remove.textContent = 'Eliminar';
-    remove.addEventListener('click', async () => {
-      try {
-        await api(`/api/administrators/${administrator.key}`, { method: 'DELETE' });
-        await loadAdministrators();
-      } catch (error) {
-        showNotice(error.message, true);
-      }
-    });
-    item.append(remove);
-    target.append(item);
-  });
-}
-
-document.querySelector('#administrator-form').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  try {
-    await api('/api/administrators', {
-      method: 'POST',
-      body: JSON.stringify({ number: form.elements.number.value }),
-    });
-    form.reset();
-    await loadAdministrators();
-    showNotice('Administrador agregado.');
-  } catch (error) {
-    showNotice(error.message, true);
-  }
-});
-
 async function loadSettings() {
   const { settings } = await api('/api/settings');
   const form = document.querySelector('#settings-form');
@@ -681,11 +662,11 @@ document.querySelector('#settings-form').addEventListener('submit', async (event
 
 const automaticMessagesForm = document.querySelector('#automatic-messages-form');
 const automaticTemplateDefinitions = [
-  { field: 'greeting_monday', key: 'monday', maxLines: 5 },
-  { field: 'greeting_weekday', key: 'weekday', maxLines: 5 },
-  { field: 'greeting_friday', key: 'friday', maxLines: 5 },
-  { field: 'greeting_weekend', key: 'weekend', maxLines: 5 },
-  { field: 'rules_template', key: 'rules', maxLines: 8 },
+  { field: 'greeting_monday', maxLines: 5 },
+  { field: 'greeting_weekday', maxLines: 5 },
+  { field: 'greeting_friday', maxLines: 5 },
+  { field: 'greeting_weekend', maxLines: 5 },
+  { field: 'rules_template', maxLines: 8 },
 ];
 
 initializeAutomaticTemplateTools();
@@ -695,23 +676,29 @@ async function loadAutomaticMessages() {
   const configuration = result.configuration;
   state.automaticConfiguration = configuration;
   state.automaticDefaults = result.defaultConfiguration;
-  automaticMessagesForm.elements.welcome_template.value = configuration.welcome.template;
+  automaticMessagesForm.elements.welcome_template.value =
+    configuration.welcome.template.trim() || result.defaultConfiguration.welcome.template;
   automaticMessagesForm.elements.greeting_enabled.checked = configuration.dailyGreeting.enabled;
   automaticMessagesForm.elements.greeting_time.value = configuration.dailyGreeting.sendTime;
   automaticMessagesForm.elements.greeting_tolerance.value =
     configuration.dailyGreeting.toleranceMinutes;
   automaticMessagesForm.elements.greeting_monday.value =
-    configuration.dailyGreeting.templates.monday;
+    configuration.dailyGreeting.templates.monday.trim() ||
+    result.defaultConfiguration.dailyGreeting.templates.monday;
   automaticMessagesForm.elements.greeting_weekday.value =
-    configuration.dailyGreeting.templates.weekday;
+    configuration.dailyGreeting.templates.weekday.trim() ||
+    result.defaultConfiguration.dailyGreeting.templates.weekday;
   automaticMessagesForm.elements.greeting_friday.value =
-    configuration.dailyGreeting.templates.friday;
+    configuration.dailyGreeting.templates.friday.trim() ||
+    result.defaultConfiguration.dailyGreeting.templates.friday;
   automaticMessagesForm.elements.greeting_weekend.value =
-    configuration.dailyGreeting.templates.weekend;
+    configuration.dailyGreeting.templates.weekend.trim() ||
+    result.defaultConfiguration.dailyGreeting.templates.weekend;
   automaticMessagesForm.elements.rules_enabled.checked = configuration.dailyRules.enabled;
   automaticMessagesForm.elements.rules_time.value = configuration.dailyRules.sendTime;
   automaticMessagesForm.elements.rules_tolerance.value = configuration.dailyRules.toleranceMinutes;
-  automaticMessagesForm.elements.rules_template.value = configuration.dailyRules.template;
+  automaticMessagesForm.elements.rules_template.value =
+    configuration.dailyRules.template.trim() || result.defaultConfiguration.dailyRules.template;
 
   const deliveries = document.querySelector('#automatic-deliveries');
   deliveries.replaceChildren();
@@ -764,13 +751,31 @@ automaticMessagesForm.addEventListener('submit', async (event) => {
       template: form.elements.rules_template.value,
     },
   };
+  const pollDate = form.elements.localDate?.value || '';
+  const pollTemplateId = Number(form.elements.templateId?.value);
+  if (pollDate && (!Number.isInteger(pollTemplateId) || pollTemplateId <= 0)) {
+    showNotice('Selecciona una encuesta para la fecha indicada.', true);
+    return;
+  }
   try {
     await api(botScopedPath('/api/automatic-messages'), {
       method: 'PATCH',
       body: JSON.stringify(payload),
     });
+    if (pollDate) {
+      await api(botScopedPath('/api/polls/overrides'), {
+        method: 'PUT',
+        body: JSON.stringify({
+          localDate: pollDate,
+          templateId: pollTemplateId,
+          replaceConfirmed: true,
+        }),
+      });
+      form.elements.localDate.value = '';
+      await loadPolls();
+    }
     await loadAutomaticMessages();
-    showNotice('Automatizaciones guardadas.');
+    showNotice(pollDate ? 'Automatizaciones y encuesta guardadas.' : 'Automatizaciones guardadas.');
   } catch (error) {
     showNotice(error.message, true);
   }
@@ -803,26 +808,39 @@ function initializeAutomaticTemplateTools() {
     const metrics = document.createElement('span');
     metrics.className = 'template-metrics muted';
     metrics.dataset.templateMetrics = definition.field;
-    const restore = document.createElement('button');
-    restore.type = 'button';
-    restore.className = 'secondary';
-    restore.textContent = 'Restaurar texto predeterminado';
-    restore.addEventListener('click', async () => {
-      if (!window.confirm('¿Restaurar solamente esta plantilla?')) return;
-      try {
-        await api(botScopedPath(`/api/automatic-messages/templates/${definition.key}/restore`), {
-          method: 'POST',
-        });
-        await loadAutomaticMessages();
-        showNotice('Plantilla restaurada.');
-      } catch (error) {
-        showNotice(error.message, true);
-      }
-    });
-    tools.append(metrics, restore);
+    tools.append(metrics);
     field.closest('label').append(tools);
   });
 }
+
+document.querySelector('#restore-automatic-defaults').addEventListener('click', async () => {
+  if (
+    !(await confirmAction('¿Está seguro de restaurar los textos predeterminados?', {
+      title: 'Restaurar automatizaciones',
+      confirmLabel: 'Restaurar textos',
+      tone: 'default',
+    }))
+  )
+    return;
+  try {
+    try {
+      await api(botScopedPath('/api/automatic-messages/templates/restore-all'), {
+        method: 'POST',
+      });
+    } catch (error) {
+      if (error.status !== 404) throw error;
+      for (const key of ['welcome', 'monday', 'weekday', 'friday', 'weekend', 'rules']) {
+        await api(botScopedPath(`/api/automatic-messages/templates/${key}/restore`), {
+          method: 'POST',
+        });
+      }
+    }
+    await loadAutomaticMessages();
+    showNotice('Textos predeterminados restaurados.');
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+});
 
 function updateAutomaticTemplateMetrics() {
   automaticTemplateDefinitions.forEach((definition) => {
@@ -844,45 +862,18 @@ function automaticTaskLabel(taskType) {
   return 'Reglas diarias';
 }
 
-const pollConfigurationForm = document.querySelector('#poll-configuration-form');
 const pollTemplateForm = document.querySelector('#poll-template-form');
-const pollOverrideForm = document.querySelector('#poll-override-form');
 
 async function loadPolls() {
   const result = await api(botScopedPath('/api/polls'));
   state.pollData = result;
   state.pollTemplates = result.templates;
-  pollConfigurationForm.elements.enabled.checked = result.configuration.enabled;
-  pollConfigurationForm.elements.sendTime.value = result.configuration.sendTime;
-  pollConfigurationForm.elements.toleranceMinutes.value = result.configuration.toleranceMinutes;
-  pollConfigurationForm.elements.selectionMode.value = result.configuration.selectionMode;
-  renderPollScheduleSummary(result);
   renderPollTemplates(result.templates);
   renderHiddenPollTemplates(result.hiddenTemplates || []);
   fillPollSelects(result);
   renderPollOverrides(result.overrides);
   renderPollHistory(result.history);
   updatePollTemplatePreview();
-}
-
-function renderPollScheduleSummary(result) {
-  const target = document.querySelector('#poll-schedule-summary');
-  target.replaceChildren();
-  const last = result.history.find((entry) => entry.status === 'SENT');
-  [
-    ['Programador', result.schedulerStarted ? 'Registrado' : 'Detenido'],
-    ['Próxima', result.nextScheduledAt || 'Desactivada'],
-    ['Último envío', last ? `${last.localDate} · ${last.groupName}` : 'Sin envíos'],
-  ].forEach(([label, value]) => {
-    const card = document.createElement('div');
-    card.className = 'status-card';
-    const caption = document.createElement('span');
-    caption.textContent = label;
-    const content = document.createElement('strong');
-    content.textContent = value;
-    card.append(caption, content);
-    target.append(card);
-  });
 }
 
 function renderPollTemplates(templates) {
@@ -923,13 +914,14 @@ function renderPollTemplates(templates) {
           state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
         const automationState = state.pollData?.configuration.enabled ? 'Activa' : 'Desactivada';
         const nextSchedule = state.pollData?.nextScheduledAt || 'Sin próxima programación';
-        const confirmed = window.confirm(
+        const confirmed = await confirmAction(
           `Eliminar encuesta de este asistente\n\n` +
             `Encuesta: ${template.question}\nAsistente: ${assistantName}\nCategoría: ${template.category}\n` +
             `Automatización: ${automationState}\nPróxima programación: ${nextSchedule}\n\n` +
             'Esta encuesta dejará de aparecer y no se utilizará en las automatizaciones de este asistente. ' +
             'No se eliminará de otros asistentes ni del catálogo general. ' +
             'También será retirada de las automatizaciones futuras de este asistente.',
+          { title: 'Eliminar encuesta', confirmLabel: 'Eliminar encuesta' },
         );
         if (!confirmed) return;
         try {
@@ -948,9 +940,10 @@ function renderPollTemplates(templates) {
       remove.textContent = 'Eliminar permanentemente';
       remove.addEventListener('click', async () => {
         if (
-          !window.confirm(
+          !(await confirmAction(
             '¿Eliminar permanentemente esta encuesta personalizada de este asistente?',
-          )
+            { title: 'Eliminar encuesta', confirmLabel: 'Eliminar permanentemente' },
+          ))
         )
           return;
         try {
@@ -989,7 +982,14 @@ function renderHiddenPollTemplates(templates) {
     restore.className = 'secondary';
     restore.textContent = 'Restaurar';
     restore.addEventListener('click', async () => {
-      if (!window.confirm('Esta encuesta volverá a estar disponible para este asistente.')) return;
+      if (
+        !(await confirmAction('Esta encuesta volverá a estar disponible para este asistente.', {
+          title: 'Restaurar encuesta',
+          confirmLabel: 'Restaurar',
+          tone: 'default',
+        }))
+      )
+        return;
       try {
         await api(botScopedPath(`/api/polls/templates/${template.id}/restore`), { method: 'POST' });
         await loadPolls();
@@ -1016,7 +1016,7 @@ function fillPollSelects(result) {
     value: String(template.id),
     label: template.question,
   }));
-  replaceOptions(pollOverrideForm.elements.templateId, templateOptions, true);
+  replaceOptions(automaticMessagesForm.elements.templateId, templateOptions, true);
 }
 
 function replaceOptions(select, options, preserve = false) {
@@ -1095,27 +1095,6 @@ function openPollTemplateEditor(template = null) {
   pollTemplateForm.elements.question.focus();
 }
 
-pollConfigurationForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  try {
-    await api(botScopedPath('/api/polls/configuration'), {
-      method: 'PATCH',
-      body: JSON.stringify({
-        enabled: form.elements.enabled.checked,
-        sendTime: form.elements.sendTime.value,
-        timezone: state.selectedBotTimezone,
-        toleranceMinutes: Number(form.elements.toleranceMinutes.value),
-        selectionMode: form.elements.selectionMode.value,
-      }),
-    });
-    await loadPolls();
-    showNotice('Programación de encuestas guardada.');
-  } catch (error) {
-    showNotice(error.message, true);
-  }
-});
-
 document
   .querySelector('#new-poll-template')
   .addEventListener('click', () => openPollTemplateEditor());
@@ -1158,14 +1137,16 @@ pollTemplateForm.addEventListener('submit', async (event) => {
 });
 
 document.querySelector('#restore-poll-defaults').addEventListener('click', async () => {
-  const assistantName =
-    state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
   if (
-    !window.confirm(
-      `¿Restaurar las encuestas predeterminadas eliminadas solamente para ${assistantName}?`,
-    )
+    !(await confirmAction('¿Está seguro de restaurar las encuestas predeterminadas?', {
+      title: 'Restaurar encuestas',
+      confirmLabel: 'Restaurar',
+      tone: 'default',
+    }))
   )
     return;
+  const button = document.querySelector('#restore-poll-defaults');
+  button.disabled = true;
   try {
     const result = await api(botScopedPath('/api/polls/templates/restore-defaults'), {
       method: 'POST',
@@ -1173,31 +1154,13 @@ document.querySelector('#restore-poll-defaults').addEventListener('click', async
     await loadPolls();
     showNotice(
       result.restored > 0
-        ? `Se restauraron ${result.restored} encuestas predeterminadas para ${assistantName}.`
+        ? `Se restauraron ${result.restored} encuestas predeterminadas.`
         : 'No hay encuestas predeterminadas para restaurar en este asistente.',
     );
   } catch (error) {
     showNotice(error.message, true);
-  }
-});
-
-pollOverrideForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  try {
-    await api(botScopedPath('/api/polls/overrides'), {
-      method: 'PUT',
-      body: JSON.stringify({
-        localDate: form.elements.localDate.value,
-        templateId: Number(form.elements.templateId.value),
-        replaceConfirmed: form.elements.replaceConfirmed.checked,
-      }),
-    });
-    form.elements.replaceConfirmed.checked = false;
-    await loadPolls();
-    showNotice('Encuesta programada para la fecha seleccionada.');
-  } catch (error) {
-    showNotice(`${error.message}${error.code ? ` (${error.code})` : ''}`, true);
+  } finally {
+    button.disabled = false;
   }
 });
 
@@ -1239,17 +1202,7 @@ function empty(message) {
   return paragraph;
 }
 async function loadAll() {
-  let administratorsError = null;
-  try {
-    await loadAdministrators();
-  } catch (error) {
-    administratorsError = error;
-  }
-
-  // La lista de asistentes no depende de que el módulo de administradores termine correctamente.
   window.dispatchEvent(new window.CustomEvent('multibot-panel-load'));
-
-  if (administratorsError) showNotice(administratorsError.message, true);
 }
 
 window.addEventListener('bot-services-load', (event) => {

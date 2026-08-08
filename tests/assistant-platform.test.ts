@@ -112,6 +112,36 @@ describe('plataforma de asistentes', () => {
     });
   });
 
+  it('elimina definitivamente un asistente archivado aunque otro conector lo referencie', () => {
+    database.claimWhatsAppIdentity({
+      botId: 'neurobot',
+      normalizedPhoneHash: 'phone-hash-delete',
+      whatsappIdentityHash: 'identity-hash-delete',
+      maskedNumber: '+56••••1111',
+    });
+    const duplicate = database.createBot({
+      id: 'duplicado-referencia',
+      mode: 'business',
+      connectorType: 'WHATSAPP_WEB',
+      sessionPath: 'data/sessions/duplicado-referencia',
+      profile: businessProfile(),
+    });
+    database.claimWhatsAppIdentity({
+      botId: duplicate.id,
+      normalizedPhoneHash: 'phone-hash-delete',
+      whatsappIdentityHash: 'identity-hash-delete',
+      maskedNumber: '+56••••1111',
+    });
+    expect(database.getConnectorConflict(duplicate.id)?.existingBotId).toBe('neurobot');
+
+    database.sendBotToTrash('neurobot', 'actor-hash');
+    database.permanentlyDeleteBot('neurobot', 'actor-hash', 'database-backup.db');
+
+    expect(database.getBot('neurobot')).toBeNull();
+    expect(database.getConnectorConflict(duplicate.id)).toBeNull();
+    expect(database.getBot(duplicate.id)).not.toBeNull();
+  });
+
   it('transfiere datos comerciales sin copiar la identidad ni la sesión', () => {
     const source = database.createBot({
       id: 'borrador-transferible',

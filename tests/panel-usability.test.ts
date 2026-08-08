@@ -108,8 +108,29 @@ describe('interfaz simplificada del panel', () => {
     ]) {
       expect(panel).toContain(label);
     }
-    expect(panel).toContain('bot-facts');
+    expect(panel).toContain("node('table', undefined, 'bot-facts')");
+    expect(panel).toContain("node('th', label)");
+    expect(panel).toContain("node('td', value)");
     expect(panel).not.toContain('bot.maskedNumber');
+  });
+
+  it('solicita una sola confirmación al eliminar definitivamente un asistente', () => {
+    const permanentDeletion = panel.slice(
+      panel.indexOf("actionButton('Eliminar definitivamente'"),
+      panel.indexOf(
+        'card.append(actions)',
+        panel.indexOf("actionButton('Eliminar definitivamente'"),
+      ),
+    );
+    expect(permanentDeletion).toContain("confirmAction('¿Está seguro de eliminar este asistente?'");
+    expect(permanentDeletion).toContain('body: JSON.stringify({ confirmed: true })');
+    expect(permanentDeletion).not.toContain('ELIMINAR PERMANENTEMENTE');
+    expect(permanentDeletion).not.toContain('window.prompt');
+  });
+
+  it('usa avisos y confirmaciones visuales en lugar de diálogos nativos', () => {
+    expect(panel).toContain("from './ui-feedback.js'");
+    expect(panel).not.toMatch(/window\.(alert|confirm|prompt)/u);
   });
 
   it('retira módulos y opciones eliminados', () => {
@@ -118,6 +139,9 @@ describe('interfaz simplificada del panel', () => {
       'data-section="maintenance"',
       'id="profile-preview"',
       'profile-logo-file',
+      'value="administrators"',
+      'id="section-administrators"',
+      'id="administrator-form"',
     ]) {
       expect(html).not.toContain(removed);
     }

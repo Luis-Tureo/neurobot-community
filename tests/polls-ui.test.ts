@@ -7,11 +7,10 @@ describe('interfaz de encuestas', () => {
   const labScript = readFileSync(resolve('public', 'automation-lab.js'), 'utf8');
   const index = readFileSync(resolve('src', 'index.ts'), 'utf8');
 
-  it('incluye configuración, banco e historial', () => {
+  it('incluye banco e historial sin la tarjeta de estado general', () => {
     for (const text of [
       'data-section="polls"',
       'id="section-polls"',
-      'Activar encuestas diarias',
       'Banco de encuestas',
       'Historial de envíos',
       'Encuestas eliminadas de este asistente',
@@ -19,6 +18,16 @@ describe('interfaz de encuestas', () => {
     ]) {
       expect(html).toContain(text);
     }
+    for (const removed of [
+      'id="poll-configuration-form"',
+      'id="poll-schedule-summary"',
+      'Activar encuestas diarias',
+      'Guardar programación',
+    ]) {
+      expect(html).not.toContain(removed);
+    }
+    expect(script).not.toContain('pollConfigurationForm');
+    expect(script).not.toContain('renderPollScheduleSummary');
     const pollsSection = html.slice(
       html.indexOf('id="section-polls"'),
       html.indexOf('</section>', html.indexOf('id="section-polls"')),
@@ -34,6 +43,12 @@ describe('interfaz de encuestas', () => {
     expect(script).toContain('renderHiddenPollTemplates');
     expect(script).toContain('/restore');
     expect(script).toContain('No se eliminará de otros asistentes ni del catálogo general');
+    expect(script).toContain('¿Está seguro de restaurar las encuestas predeterminadas?');
+    expect(script).toContain('button.disabled = true');
+    expect(script).toContain('button.disabled = false');
+    expect(html).toMatch(
+      /<article class="card inset" data-collapsible>[\s\S]*?<h3>Encuestas eliminadas de este asistente<\/h3>/u,
+    );
   });
 
   it('delega la prueba segura al Centro de pruebas y conserva grupos autorizados', () => {

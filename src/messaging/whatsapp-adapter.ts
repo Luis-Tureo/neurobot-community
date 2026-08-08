@@ -41,6 +41,7 @@ type BrowserChatSnapshot = {
   isGroup: boolean;
   isCommunityAnnouncement?: boolean;
   participantIds?: string[] | null;
+  administratorIds?: string[] | null;
   adapterError?: { name: string; message: string };
 };
 
@@ -76,6 +77,10 @@ export class WhatsAppWebAdapter implements MessagingClient {
   private readonly selectableMenuPolls = new Map<
     string,
     { chatId: string; options: Set<string>; expiresAt: number }
+  >();
+  private readonly groupAdministratorCache = new Map<
+    string,
+    { identifiers: string[]; expiresAt: number }
   >();
 
   public constructor(
@@ -122,7 +127,11 @@ export class WhatsAppWebAdapter implements MessagingClient {
     await client.sendMessage(chatId, text, options);
   }
 
-  public async sendMessageWithMentions(chatId: string, text: string, mentionIds: string[]): Promise<void> {
+  public async sendMessageWithMentions(
+    chatId: string,
+    text: string,
+    mentionIds: string[],
+  ): Promise<void> {
     const client = this.requireReadyClient();
     const mentions = [...new Set(mentionIds.filter(isParticipantId))];
     await client.sendMessage(chatId, text, { mentions });
@@ -131,10 +140,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
   public async resolveWelcomeParticipants(participantIds: string[]): Promise<WelcomeParticipant[]> {
     const client = this.requireReadyClient();
     const sourceIds = [...new Set(participantIds.filter(isParticipantId))];
-    const canonicalIdentities = await this.resolveCanonicalParticipantIdentities(
-      client,
-      sourceIds,
-    );
+    const canonicalIdentities = await this.resolveCanonicalParticipantIdentities(client, sourceIds);
     const resolved = new Map<string, WelcomeParticipant>();
 
     for (const sourceId of sourceIds) {
@@ -162,7 +168,10 @@ export class WhatsAppWebAdapter implements MessagingClient {
           participantId: canonicalId,
         };
         const current = resolved.get(canonicalId);
-        if (current === undefined || (current.displayName === null && candidate.displayName !== null)) {
+        if (
+          current === undefined ||
+          (current.displayName === null && candidate.displayName !== null)
+        ) {
           resolved.set(canonicalId, candidate);
         }
       } catch (error) {
@@ -275,10 +284,15 @@ export class WhatsAppWebAdapter implements MessagingClient {
             ? rawName.trim().slice(0, 200)
             : 'Grupo sin nombre';
         let rawParticipantIds = readGroupParticipantIds(chat);
-        if (rawParticipantIds === null && source === 'MINIMAL_CHAT_SNAPSHOT') {
+        let rawAdministratorIds = readGroupAdministratorIds(chat);
+        if (
+          source === 'MINIMAL_CHAT_SNAPSHOT' &&
+          (rawParticipantIds === null || rawAdministratorIds === null)
+        ) {
           try {
             const detailedChat = await client.getChatById(id);
             rawParticipantIds = readGroupParticipantIds(detailedChat);
+            rawAdministratorIds = readGroupAdministratorIds(detailedChat);
           } catch (error) {
             this.logger.warn(
               {
@@ -292,12 +306,26 @@ export class WhatsAppWebAdapter implements MessagingClient {
           }
         }
         const participantIds = await this.resolveGroupParticipantIds(client, rawParticipantIds);
+        const resolvedAdministratorIds = await this.resolveGroupParticipantIds(
+          client,
+          rawAdministratorIds,
+        );
+        const administratorIds =
+          resolvedAdministratorIds?.filter((identifier) => !this.isOwnIdentifier(identifier)) ??
+          resolvedAdministratorIds;
+        if (administratorIds !== null) {
+          this.groupAdministratorCache.set(id, {
+            identifiers: administratorIds,
+            expiresAt: Date.now() + 60_000,
+          });
+        }
         groups.push({
           id,
           name,
           source,
           botIsMember: this.resolveBotMembership(participantIds),
           participantIds,
+          administratorIds,
         });
       } catch (error) {
         this.skippedChats += 1;
@@ -340,6 +368,26 @@ export class WhatsAppWebAdapter implements MessagingClient {
 
   public getOwnIdentifier(): string | null {
     return getSerializedId(this.client?.info?.wid);
+  }
+
+  public async getGroupAdministratorIds(chatId: string): Promise<string[]> {
+    if (!isSupportedGroupId(chatId)) return [];
+    const cached = this.groupAdministratorCache.get(chatId);
+    if (cached !== undefined && cached.expiresAt > Date.now()) return [...cached.identifiers];
+    const client = this.requireReadyClient();
+    const chat = await client.getChatById(chatId);
+    const identifiers = await this.resolveGroupParticipantIds(
+      client,
+      readGroupAdministratorIds(chat),
+    );
+    const administrators = [
+      ...new Set((identifiers ?? []).filter((identifier) => !this.isOwnIdentifier(identifier))),
+    ];
+    this.groupAdministratorCache.set(chatId, {
+      identifiers: administrators,
+      expiresAt: Date.now() + 60_000,
+    });
+    return administrators;
   }
 
   private async readChats(
@@ -406,6 +454,25 @@ export class WhatsAppWebAdapter implements MessagingClient {
                     (participantId): participantId is string => typeof participantId === 'string',
                   )
               : null;
+            const administratorIds = Array.isArray(participantModels)
+              ? participantModels
+                  .filter(
+                    (participant) =>
+                      typeof participant === 'object' &&
+                      participant !== null &&
+                      (Reflect.get(participant, 'isAdmin') === true ||
+                        Reflect.get(participant, 'isSuperAdmin') === true),
+                  )
+                  .map((participant) => {
+                    const participantId = Reflect.get(participant, 'id');
+                    return typeof participantId === 'object' && participantId !== null
+                      ? Reflect.get(participantId, '_serialized')
+                      : null;
+                  })
+                  .filter(
+                    (participantId): participantId is string => typeof participantId === 'string',
+                  )
+              : null;
             const rawName = Reflect.get(chat, 'formattedTitle') ?? Reflect.get(chat, 'name');
             return {
               id: serializedId,
@@ -421,6 +488,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
                 (Reflect.get(groupMetadata, 'isParentGroup') === true ||
                   Reflect.get(groupMetadata, 'isCommunity') === true),
               participantIds,
+              administratorIds,
             };
           } catch (error) {
             return {
@@ -625,7 +693,11 @@ export class WhatsAppWebAdapter implements MessagingClient {
       void this.processSelectableMenuVote(vote, generation).catch((error: unknown) => {
         this.logger.error(
           {
-            ...serializeError(error, 'MENU_SELECTION_PROCESSING_FAILED', this.options.developmentMode),
+            ...serializeError(
+              error,
+              'MENU_SELECTION_PROCESSING_FAILED',
+              this.options.developmentMode,
+            ),
             operation: 'selectableMenuVoteFailed',
             clientGeneration: generation,
           },
@@ -715,7 +787,9 @@ export class WhatsAppWebAdapter implements MessagingClient {
             participantIds,
             ...(participants.length === 0 ? {} : { participants }),
             ...(eventId === null ? {} : { eventId }),
-            ...(Number.isFinite(notification.timestamp) ? { timestamp: notification.timestamp } : {}),
+            ...(Number.isFinite(notification.timestamp)
+              ? { timestamp: notification.timestamp }
+              : {}),
             source: 'group_join',
             subtype,
           });
@@ -929,11 +1003,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
       }
 
       const author = getSerializedId(readUnknown(message, 'author'));
-      participantId = isGroup
-        ? isParticipantId(author)
-          ? author
-          : null
-        : privateIdentifier;
+      participantId = isGroup ? (isParticipantId(author) ? author : null) : privateIdentifier;
       const messageIdentity = this.messageIdentityResolver.resolve(message, {
         groupId: chatId,
         participantId,
@@ -986,11 +1056,14 @@ export class WhatsAppWebAdapter implements MessagingClient {
         'El evento canónico registró el mensaje para deduplicación',
       );
 
-      const administratorIdentity = await this.resolveAdministratorIdentity(
+      const participantIdentity = await this.resolveAdministratorIdentity(
         client,
         participantId,
         body,
       );
+      const administratorId = isGroup
+        ? await this.resolveGroupAdministratorIdentity(chatId, participantId)
+        : null;
       const botMention = this.detectBotMention(readUnknown(message, 'mentionedIds'));
       const isReplyToBot = await this.detectReplyToBot(message);
 
@@ -1001,8 +1074,8 @@ export class WhatsAppWebAdapter implements MessagingClient {
           : { replyToMessageId: messageIdentity.replyToMessageId }),
         chatId,
         participantId: participantId ?? `unknown:${messageIdentity.deduplicationId}`,
-        administratorId: administratorIdentity.administratorId,
-        participantIdentityStatus: administratorIdentity.status,
+        administratorId,
+        participantIdentityStatus: participantIdentity.status,
         messageType,
         groupIdSource,
         body,
@@ -1078,10 +1151,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
     );
   }
 
-  private async processSelectableMenuVote(
-    vote: unknown,
-    clientGeneration: number,
-  ): Promise<void> {
+  private async processSelectableMenuVote(vote: unknown, clientGeneration: number): Promise<void> {
     this.cleanupSelectableMenuPolls();
     if (this.events === null || typeof vote !== 'object' || vote === null) return;
     const parentMessage = readUnknown(vote, 'parentMessage');
@@ -1107,15 +1177,15 @@ export class WhatsAppWebAdapter implements MessagingClient {
       return;
     }
     const interactedAt = readUnknown(vote, 'interractedAtTs');
-    const timestamp = typeof interactedAt === 'number' && Number.isFinite(interactedAt)
-      ? interactedAt
-      : Date.now();
+    const timestamp =
+      typeof interactedAt === 'number' && Number.isFinite(interactedAt) ? interactedAt : Date.now();
     const identity = `menu-vote:${this.hash(`${parentMessageId}:${voter}:${timestamp}:${selectedName}`)}`;
-    const administratorIdentity = await this.resolveAdministratorIdentity(
+    const participantIdentity = await this.resolveAdministratorIdentity(
       this.requireClient(),
       voter,
       selectedName,
     );
+    const administratorId = await this.resolveGroupAdministratorIdentity(registered.chatId, voter);
     this.logger.info(
       {
         operation: 'selectableMenuOptionReceived',
@@ -1130,8 +1200,8 @@ export class WhatsAppWebAdapter implements MessagingClient {
       id: identity,
       chatId: registered.chatId,
       participantId: voter,
-      administratorId: administratorIdentity.administratorId,
-      participantIdentityStatus: administratorIdentity.status,
+      administratorId,
+      participantIdentityStatus: participantIdentity.status,
       messageType: 'poll_vote',
       groupIdSource: 'from',
       body: selectedName,
@@ -1189,6 +1259,41 @@ export class WhatsAppWebAdapter implements MessagingClient {
     return { administratorId: null, status: 'lid_unresolved' };
   }
 
+  private async resolveGroupAdministratorIdentity(
+    groupId: string,
+    participantId: string | null,
+  ): Promise<string | null> {
+    if (participantId === null) return null;
+    try {
+      const participantAliases = new Set(whatsappIdentityAliases(participantId));
+      const canonical = await this.resolveCanonicalParticipantIdentities(this.requireClient(), [
+        participantId,
+      ]);
+      const canonicalParticipant = canonical.get(normalizeParticipantId(participantId));
+      if (canonicalParticipant !== undefined) {
+        for (const alias of whatsappIdentityAliases(canonicalParticipant)) {
+          participantAliases.add(alias);
+        }
+      }
+      const administrators = await this.getGroupAdministratorIds(groupId);
+      return (
+        administrators.find((identifier) =>
+          whatsappIdentityAliases(identifier).some((alias) => participantAliases.has(alias)),
+        ) ?? null
+      );
+    } catch (error) {
+      this.logger.warn(
+        {
+          ...serializeError(error, 'GROUP_ADMINISTRATORS_FETCH_FAILED', false),
+          operation: 'resolveGroupAdministrator',
+          groupHash: this.hash(groupId),
+        },
+        'No fue posible comprobar si el participante administra el grupo',
+      );
+      return null;
+    }
+  }
+
   private async resolveGroupParticipantIds(
     client: WhatsAppClient,
     participantIds: string[] | null,
@@ -1215,10 +1320,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
     const canonicalIdentities = new Map<string, string>();
 
     for (const identifier of sourceIds) {
-      canonicalIdentities.set(
-        identifier,
-        canonicalPhoneIdentity(identifier) ?? identifier,
-      );
+      canonicalIdentities.set(identifier, canonicalPhoneIdentity(identifier) ?? identifier);
     }
 
     const lids = sourceIds.filter((identifier) => classifyWhatsAppId(identifier) === 'lid');
@@ -1299,7 +1401,10 @@ export class WhatsAppWebAdapter implements MessagingClient {
         participantId: canonicalId,
       };
       const current = canonicalParticipants.get(canonicalId);
-      if (current === undefined || (current.displayName === null && candidate.displayName !== null)) {
+      if (
+        current === undefined ||
+        (current.displayName === null && candidate.displayName !== null)
+      ) {
         canonicalParticipants.set(canonicalId, candidate);
       }
     }
@@ -1479,6 +1584,35 @@ function readGroupParticipantIds(chat: object): string[] | null {
         if (typeof participant !== 'object' || participant === null) return null;
         return getSerializedId(Reflect.get(participant, 'id'));
       })
+      .filter(isParticipantId);
+  } catch {
+    return null;
+  }
+}
+
+function readGroupAdministratorIds(chat: object): string[] | null {
+  try {
+    const direct = Reflect.get(chat, 'administratorIds');
+    if (Array.isArray(direct)) {
+      return direct.map((entry) => getSerializedId(entry)).filter(isParticipantId);
+    }
+    const participants = Reflect.get(chat, 'participants');
+    const metadata = Reflect.get(chat, 'groupMetadata');
+    const candidates = Array.isArray(participants)
+      ? participants
+      : typeof metadata === 'object' && metadata !== null
+        ? Reflect.get(metadata, 'participants')
+        : null;
+    if (!Array.isArray(candidates)) return null;
+    return candidates
+      .filter(
+        (participant) =>
+          typeof participant === 'object' &&
+          participant !== null &&
+          (Reflect.get(participant, 'isAdmin') === true ||
+            Reflect.get(participant, 'isSuperAdmin') === true),
+      )
+      .map((participant) => getSerializedId(Reflect.get(participant, 'id')))
       .filter(isParticipantId);
   } catch {
     return null;

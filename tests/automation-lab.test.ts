@@ -17,8 +17,10 @@ describe('centro de pruebas de automatizaciones', () => {
     ]) {
       expect(script).toContain(label);
     }
-    expect(script).toContain('Probar todas en orden');
     expect(script).toContain('automation-test-list');
+    expect(script).not.toContain('Probar todas en orden');
+    expect(script).not.toContain('lab-all');
+    expect(script).not.toContain('lab-poll');
     expect(script).not.toContain('Grupo de prueba');
     expect(script).not.toContain("id: 'moderation'");
   });
@@ -28,6 +30,9 @@ describe('centro de pruebas de automatizaciones', () => {
     expect(html).toContain('<script type="module" src="/automation-lab.js"></script>');
     expect(styles).toContain('.automation-test-list');
     expect(styles).toContain('.automation-test-item');
+    expect(styles).toContain('.automation-lab > .section-heading');
+    expect(styles).toContain('@apply mb-5;');
+    expect(styles).not.toContain('.automation-lab-toolbar');
     expect(html).not.toContain('id="poll-test-form"');
     expect(script).not.toContain("query('#section-ai')");
     expect(script).not.toContain('name="maxMessages"');

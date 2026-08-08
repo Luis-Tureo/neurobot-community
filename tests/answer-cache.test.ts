@@ -191,11 +191,16 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     'cuáles son las normas',
   ])('reutiliza una FAQ equivalente para: %s', async (question) => {
     const { database, provider, service } = setup();
-    addFaq(database, '¿Cuáles son las normas de la comunidad?', 'Estas son las normas oficiales.');
+    const faq = addFaq(
+      database,
+      '¿Cuáles son las normas de la comunidad?',
+      'Estas son las normas oficiales.',
+    );
     expect((await service.answerQuestion(question, 'group', 'user')).text).toBe(
       'Estas son las normas oficiales.',
     );
     expect(provider.calls).toBe(0);
+    expect(database.getCachedAnswer('neurobot', faq.id)?.variants).toContain(question);
     database.close();
   });
 

@@ -26,6 +26,8 @@ import type {
   CachedAnswer,
   CachedAnswerSourceType,
   CachedAnswerStatus,
+  AIProviderChange,
+  AIProviderChangeAction,
   AISettings,
   AIProviderStatus,
   AIProviderHealthState,
@@ -69,8 +71,6 @@ import type {
   ScheduledDeliveryRecord,
   ScheduledDeliveryStatus,
 } from '../domain/types.js';
-import { canonicalPhoneIdentity } from '../messaging/identifiers.js';
-
 type CommandRow = {
   id: number;
   name: string;
@@ -1840,6 +1840,38 @@ export class AppDatabase {
         version: 21,
         sql: `UPDATE bots SET deletion_locked=0 WHERE deletion_locked<>0;`,
       },
+      {
+        version: 22,
+        sql: `
+          CREATE TABLE bot_ai_provider_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            provider TEXT NOT NULL CHECK (provider IN ('groq')),
+            action TEXT NOT NULL CHECK (action IN (
+              'PROVIDER_ADDED', 'PROVIDER_REPLACED', 'TOKEN_CHANGED', 'ACTIVATED', 'DEACTIVATED'
+            )),
+            created_at TEXT NOT NULL
+          );
+          CREATE INDEX idx_bot_ai_provider_history
+            ON bot_ai_provider_history(bot_id, created_at DESC, id DESC);
+        `,
+      },
+      {
+        version: 23,
+        sql: `
+          ALTER TABLE bot_ai_credentials
+            ADD COLUMN display_name TEXT NOT NULL DEFAULT 'Groq';
+          ALTER TABLE bot_ai_provider_history
+            ADD COLUMN display_name TEXT NOT NULL DEFAULT 'Groq';
+        `,
+      },
+      {
+        version: 24,
+        sql: `
+          DROP TABLE IF EXISTS group_moderation_admin_recipients;
+          DROP TABLE IF EXISTS administrators;
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -2915,6 +2947,16 @@ export class AppDatabase {
     return true;
   }
 
+  public restoreAllAutomaticTemplates(botId = 'neurobot'): void {
+    const configuration = this.getAutomaticMessageConfiguration(botId);
+    configuration.welcome.template = DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.welcome.template;
+    configuration.dailyRules.template = DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyRules.template;
+    configuration.dailyGreeting.templates = {
+      ...DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyGreeting.templates,
+    };
+    this.saveAutomaticMessageConfiguration(configuration, botId);
+  }
+
   public claimScheduledDelivery(
     taskType: AutomaticMessageType,
     groupId: string,
@@ -3910,13 +3952,41 @@ export class AppDatabase {
       throw new Error('ASSISTANT_NOT_ARCHIVED');
     const now = new Date().toISOString();
     const operation = this.db.transaction(() => {
+      this.db.pragma('defer_foreign_keys = ON');
+      this.db
+        .prepare(
+          `DELETE FROM knowledge_entries
+           WHERE profile_id IN (SELECT id FROM assistant_profiles WHERE bot_id=?)`,
+        )
+        .run(botId);
+      this.db
+        .prepare(
+          `DELETE FROM linked_groups
+           WHERE profile_id IN (SELECT id FROM assistant_profiles WHERE bot_id=?)`,
+        )
+        .run(botId);
+      this.db
+        .prepare(
+          `DELETE FROM blocked_groups
+           WHERE profile_id IN (SELECT id FROM assistant_profiles WHERE bot_id=?)`,
+        )
+        .run(botId);
+      this.db.prepare('DELETE FROM bot_poll_send_history WHERE bot_id=?').run(botId);
+      this.db
+        .prepare(
+          `UPDATE assistant_connectors
+           SET linked_assistant_id=NULL, updated_at=?
+           WHERE linked_assistant_id=?`,
+        )
+        .run(now, botId);
       this.db
         .prepare(
           `INSERT INTO assistant_deletion_audit(assistant_id,action,created_at,safe_actor_hash,backup_reference,result)
          VALUES (?, 'ASSISTANT_PERMANENTLY_DELETED', ?, ?, ?, 'ok')`,
         )
         .run(botId, now, actorHash, backupReference);
-      this.db.prepare('DELETE FROM bots WHERE id=?').run(botId);
+      const deleted = this.db.prepare('DELETE FROM bots WHERE id=?').run(botId);
+      if (deleted.changes !== 1) throw new Error('ASSISTANT_DELETE_FAILED');
     });
     operation();
   }
@@ -4581,13 +4651,101 @@ export class AppDatabase {
   public getBotEncryptedCredential(botId: string): {
     mode: 'global' | 'per_bot';
     encryptedApiKey: string | null;
+    displayName: string;
   } {
     const row = this.db
-      .prepare('SELECT credential_mode, encrypted_api_key FROM bot_ai_credentials WHERE bot_id = ?')
+      .prepare(
+        'SELECT credential_mode, encrypted_api_key, display_name FROM bot_ai_credentials WHERE bot_id = ?',
+      )
       .get(botId) as
-      { credential_mode: 'global' | 'per_bot'; encrypted_api_key: string | null } | undefined;
+      | {
+          credential_mode: 'global' | 'per_bot';
+          encrypted_api_key: string | null;
+          display_name: string;
+        }
+      | undefined;
     if (row === undefined) throw new Error('La configuración de credenciales no existe.');
-    return { mode: row.credential_mode, encryptedApiKey: row.encrypted_api_key };
+    return {
+      mode: row.credential_mode,
+      encryptedApiKey: row.encrypted_api_key,
+      displayName: row.display_name,
+    };
+  }
+
+  public saveBotAIProviderConfiguration(
+    botId: string,
+    displayName: string,
+    credential?: { encryptedApiKey: string; fingerprint: string },
+  ): void {
+    const normalizedName = validatePlainText(displayName, 'nombre de la IA', 80);
+    const now = new Date().toISOString();
+    const result =
+      credential === undefined
+        ? this.db
+            .prepare(
+              `UPDATE bot_ai_credentials SET display_name = ?, updated_at = ? WHERE bot_id = ?`,
+            )
+            .run(normalizedName, now, botId)
+        : this.db
+            .prepare(
+              `UPDATE bot_ai_credentials SET display_name = ?, credential_mode = 'per_bot',
+                 encrypted_api_key = ?, key_fingerprint = ?, updated_at = ? WHERE bot_id = ?`,
+            )
+            .run(normalizedName, credential.encryptedApiKey, credential.fingerprint, now, botId);
+    if (result.changes !== 1) throw new Error('La configuración de credenciales no existe.');
+  }
+
+  public recordAIProviderChange(
+    botId: string,
+    provider: 'groq',
+    action: AIProviderChangeAction,
+    displayName = 'Groq',
+  ): AIProviderChange {
+    const createdAt = new Date().toISOString();
+    const normalizedName = validatePlainText(displayName, 'nombre de la IA', 80);
+    const result = this.db
+      .prepare(
+        `INSERT INTO bot_ai_provider_history(bot_id, provider, display_name, action, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(botId, provider, normalizedName, action, createdAt);
+    return {
+      id: Number(result.lastInsertRowid),
+      botId,
+      provider,
+      displayName: normalizedName,
+      action,
+      createdAt,
+    };
+  }
+
+  public listAIProviderChanges(botId: string, limit = 50): AIProviderChange[] {
+    const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 200);
+    return (
+      this.db
+        .prepare(
+          `SELECT id, bot_id, provider, display_name, action, created_at
+           FROM bot_ai_provider_history
+           WHERE bot_id = ?
+           ORDER BY created_at DESC, id DESC
+           LIMIT ?`,
+        )
+        .all(botId, safeLimit) as Array<{
+        id: number;
+        bot_id: string;
+        provider: 'groq';
+        display_name: string;
+        action: AIProviderChangeAction;
+        created_at: string;
+      }>
+    ).map((row) => ({
+      id: row.id,
+      botId: row.bot_id,
+      provider: row.provider,
+      displayName: row.display_name,
+      action: row.action,
+      createdAt: row.created_at,
+    }));
   }
 
   public listMenus(botId: string): MenuDefinition[] {
@@ -7459,49 +7617,6 @@ export class AppDatabase {
     return { archived, deleted, orphanedSchedules };
   }
 
-  public addAdministrator(participantId: string): boolean {
-    const normalized = requireAdministratorId(participantId);
-    const result = this.db
-      .prepare('INSERT OR IGNORE INTO administrators(participant_id, created_at) VALUES (?, ?)')
-      .run(normalized, new Date().toISOString());
-    return result.changes === 1;
-  }
-
-  public removeAdministrator(participantId: string): boolean {
-    const normalized = canonicalPhoneIdentity(participantId);
-    if (normalized === null) return false;
-    return (
-      this.db.prepare('DELETE FROM administrators WHERE participant_id = ?').run(normalized)
-        .changes === 1
-    );
-  }
-
-  public isAdministrator(participantId: string): boolean {
-    const normalized = canonicalPhoneIdentity(participantId);
-    if (normalized === null) return false;
-    return (
-      this.db.prepare('SELECT 1 FROM administrators WHERE participant_id = ?').get(normalized) !==
-      undefined
-    );
-  }
-
-  public getAdministratorCount(): number {
-    const row = this.db.prepare('SELECT COUNT(*) AS count FROM administrators').get() as {
-      count: number;
-    };
-    return row.count;
-  }
-
-  public listAdministrators(): string[] {
-    return (
-      this.db
-        .prepare('SELECT participant_id FROM administrators ORDER BY created_at')
-        .all() as Array<{
-        participant_id: string;
-      }>
-    ).map((row) => row.participant_id);
-  }
-
   public listCommands(): CommandRecord[] {
     return (
       this.db.prepare('SELECT * FROM commands ORDER BY priority DESC, name').all() as CommandRow[]
@@ -7942,49 +8057,6 @@ export class AppDatabase {
         groupHash,
       );
     return this.getGroupModerationProfile(assistantId, groupHash);
-  }
-
-  public replaceGroupModerationRecipients(
-    assistantId: string,
-    groupHash: string,
-    recipients: Array<{ administratorHash: string; encryptedIdentifier: string }>,
-  ): void {
-    const now = new Date().toISOString();
-    const replace = this.db.transaction(() => {
-      this.db
-        .prepare(
-          'DELETE FROM group_moderation_admin_recipients WHERE assistant_id=? AND group_hash=?',
-        )
-        .run(assistantId, groupHash);
-      const statement = this.db.prepare(
-        `INSERT INTO group_moderation_admin_recipients(assistant_id,group_hash,administrator_hash,encrypted_identifier,enabled,created_at,updated_at) VALUES(?,?,?,?,1,?,?)`,
-      );
-      for (const recipient of recipients)
-        statement.run(
-          assistantId,
-          groupHash,
-          recipient.administratorHash,
-          recipient.encryptedIdentifier,
-          now,
-          now,
-        );
-    });
-    replace();
-  }
-
-  public listGroupModerationRecipients(
-    assistantId: string,
-    groupHash: string,
-  ): Array<{ administratorHash: string; encryptedIdentifier: string }> {
-    return this.db
-      .prepare(
-        `SELECT administrator_hash AS administratorHash,encrypted_identifier AS encryptedIdentifier FROM group_moderation_admin_recipients
-      WHERE assistant_id=? AND group_hash=? AND enabled=1 ORDER BY created_at`,
-      )
-      .all(assistantId, groupHash) as Array<{
-      administratorHash: string;
-      encryptedIdentifier: string;
-    }>;
   }
 
   public getModerationSettings(assistantId: string): ModerationSettings {
@@ -9304,12 +9376,6 @@ function validatePollPlainText(value: string, field: string, maximumLength: numb
   if (/[<>]|```/u.test(normalized) || normalized.includes('\u0000')) {
     throw new Error(`La ${field} debe contener solamente texto plano.`);
   }
-  return normalized;
-}
-
-function requireAdministratorId(value: string): string {
-  const normalized = canonicalPhoneIdentity(value);
-  if (normalized === null) throw new Error('El identificador del administrador no es válido.');
   return normalized;
 }
 

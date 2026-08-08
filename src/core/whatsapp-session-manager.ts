@@ -30,4 +30,19 @@ export class WhatsAppSessionManager {
     await mkdir(source, { recursive: true });
     return destination;
   }
+
+  public async archiveIfPresent(bot: BotRecord): Promise<string | null> {
+    try {
+      return await this.archive(bot);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        'code' in error &&
+        (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ) {
+        return null;
+      }
+      throw error;
+    }
+  }
 }

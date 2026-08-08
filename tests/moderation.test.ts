@@ -214,19 +214,9 @@ describe('incidentes y advertencias locales', () => {
       });
     database.updateGroupModerationTestStatus('neurobot', 'grupo', true);
     database.setGroupModerationEnabled('neurobot', 'grupo', true);
-    const vault = new SecretVault('x'.repeat(32));
-    const administratorHash = 'administrador-seguro';
     const administratorId = '56900000000@c.us';
-    database.replaceGroupModerationRecipients('neurobot', 'grupo', [
-      {
-        administratorHash,
-        encryptedIdentifier: vault.encrypt(
-          administratorId,
-          `moderation-recipient:neurobot:grupo:${administratorHash}`,
-        ).encrypted,
-      },
-    ]);
     client = new SimulatedMessagingClient();
+    client.groupAdministrators.set('grupo-real@g.us', [administratorId]);
     const outbound = new OutboundMessageQueueService(
       client,
       database,
@@ -234,7 +224,13 @@ describe('incidentes y advertencias locales', () => {
       'neurobot',
       async () => undefined,
     );
-    service = new ModerationService(database, outbound, createLogger('silent'), 'neurobot', vault);
+    service = new ModerationService(
+      database,
+      outbound,
+      createLogger('silent'),
+      'neurobot',
+      new SecretVault('x'.repeat(32)),
+    );
   });
   afterEach(() => database.close());
 

@@ -32,8 +32,8 @@ describe('panel sin módulo administrativo de información', () => {
   });
 
   it('integra identidad dentro de inteligencia artificial', () => {
-    expect(html).toContain('>Identidad e inteligencia artificial</option>');
-    expect(html).toContain('<span aria-hidden="true">✦</span> Identidad e IA');
+    expect(html).toContain('>Inteligencia Artificial</option>');
+    expect(html).toContain('<span aria-hidden="true">✦</span> Inteligencia Artificial');
     expect(html).toContain('<button type="submit">Guardar identidad</button>');
     expect(html).not.toContain('value="profile"');
     expect(html).not.toContain('data-section="profile"');

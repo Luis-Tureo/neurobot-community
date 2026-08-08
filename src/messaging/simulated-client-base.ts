@@ -23,8 +23,10 @@ export class SimulatedMessagingClient implements MessagingClient {
   public readonly sentMessages: SentMessage[] = [];
   public readonly sentPolls: SentPoll[] = [];
   public readonly sentMedia: SentMedia[] = [];
-  public readonly sentInteractiveMenus: Array<{ chatId: string; payload: InteractiveMenuPayload }> = [];
-  public readonly sentSelectableMenus: Array<{ chatId: string; payload: SelectableMenuPayload }> = [];
+  public readonly sentInteractiveMenus: Array<{ chatId: string; payload: InteractiveMenuPayload }> =
+    [];
+  public readonly sentSelectableMenus: Array<{ chatId: string; payload: SelectableMenuPayload }> =
+    [];
   public interactiveSupported = false;
   public selectableMenusSupported = true;
   public initializeCalls = 0;
@@ -38,6 +40,7 @@ export class SimulatedMessagingClient implements MessagingClient {
   public listGroupsFailures: unknown[] = [];
   public readonly ownIdentifiers = new Set<string>();
   public readonly welcomeParticipants = new Map<string, WelcomeParticipant>();
+  public readonly groupAdministrators = new Map<string, string[]>();
   private events: MessagingClientEvents | null = null;
 
   public setEvents(events: MessagingClientEvents): void {
@@ -63,7 +66,11 @@ export class SimulatedMessagingClient implements MessagingClient {
     });
   }
 
-  public async sendMessageWithMentions(chatId: string, text: string, mentionIds: string[]): Promise<void> {
+  public async sendMessageWithMentions(
+    chatId: string,
+    text: string,
+    mentionIds: string[],
+  ): Promise<void> {
     if (this.failSending) throw new Error('Fallo simulado');
     this.sentMessages.push({ chatId, text, mentionIds: [...mentionIds] });
   }
@@ -72,6 +79,10 @@ export class SimulatedMessagingClient implements MessagingClient {
     return participantIds
       .map((participantId) => this.welcomeParticipants.get(participantId))
       .filter((participant): participant is WelcomeParticipant => participant !== undefined);
+  }
+
+  public async getGroupAdministratorIds(chatId: string): Promise<string[]> {
+    return [...(this.groupAdministrators.get(chatId) ?? [])];
   }
 
   public async sendPoll(chatId: string, poll: NativePoll): Promise<void> {
@@ -153,7 +164,9 @@ export class SimulatedMessagingClient implements MessagingClient {
     await this.events?.onGroupChanged?.(event);
   }
 
-  public async emitMessage(message: Parameters<MessagingClientEvents['onMessage']>[0]): Promise<void> {
+  public async emitMessage(
+    message: Parameters<MessagingClientEvents['onMessage']>[0],
+  ): Promise<void> {
     await this.events?.onMessage(message);
   }
 }

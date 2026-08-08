@@ -5,20 +5,37 @@ const script = readFileSync('public/multibot-panel.js', 'utf8');
 const css = readFileSync('src/admin/panel.css', 'utf8');
 
 describe('módulo mínimo de inteligencia artificial', () => {
-  it('permite activar y agregar una IA antes de mostrar su token', () => {
-    expect(html).toContain('<h2>Identidad e inteligencia artificial</h2>');
+  it('usa un único formulario para configurar nombre, token y funcionamiento', () => {
+    expect(html).toContain('<h2>Inteligencia Artificial</h2>');
     expect(html).toContain('name="botName"');
     expect(html).toContain('name="activationAlias"');
     expect(html).toContain('Prompt de comportamiento');
-    expect(html).toContain('¿Activar inteligencia artificial?');
-    expect(html).toContain('<option value="no">No</option>');
-    expect(html).toContain('<option value="yes">Sí</option>');
-    expect(html).toContain('id="add-ai-provider"');
-    expect(html).toContain('class="card inset ai-minimal-card hidden"');
+    expect(html).toContain('id="ai-provider-form"');
+    expect(html).toContain('name="displayName"');
     expect(html).toContain('name="apiKey"');
-    expect(html).toContain('Agregar IA');
-    expect(script).toContain("credentialForm.classList.remove('hidden')");
-    expect(script).toContain('panelState.aiCredentialConfigured');
+    expect(html).toContain('name="enabled"');
+    expect(html).toContain('Activada');
+    expect(html).toContain('Desactivada');
+    expect(html).toContain('Guardar configuración');
+    expect(html).toContain('Historial de cambios de IA');
+    expect(html).toContain('id="ai-provider-history"');
+    expect(html).toContain('class="card inset ai-provider-history-card" data-collapsible');
+    expect(script).toContain('/ai/provider');
+    expect(script).toContain('saveAIProviderWithCompatibility');
+    expect(script).toContain('if (error.status !== 404) throw error;');
+    expect(script).toContain('/ai-key');
+    expect(script).toContain('/ai/settings');
+    for (const removed of [
+      'id="ai-current-provider"',
+      'id="toggle-ai-provider"',
+      'id="change-ai-token"',
+      'id="add-ai-provider"',
+      'id="ai-credential-form"',
+      'openAICredentialForm',
+      'panelState.aiCredentialConfigured',
+    ]) {
+      expect(`${html}\n${script}`).not.toContain(removed);
+    }
   });
 
   it('retira límites, métricas y configuraciones técnicas', () => {
@@ -39,9 +56,11 @@ describe('módulo mínimo de inteligencia artificial', () => {
     expect(script).not.toContain('/api/ai/global-limits');
   });
 
-  it('mantiene una disposición adaptable de dos tarjetas', () => {
-    expect(css).toContain('.ai-minimal-grid');
-    expect(css).toContain('.ai-minimal-card');
+  it('mantiene una disposición adaptable para la gestión de IA', () => {
+    expect(css).toContain('.ai-provider-form');
+    expect(css).toContain('.ai-provider-form .actions');
+    expect(css).toContain('.ai-provider-history-card');
+    expect(css).toContain('padding: 0.75rem 1rem;');
     expect(css).toContain('@media (max-width: 640px)');
   });
 

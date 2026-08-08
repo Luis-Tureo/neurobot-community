@@ -54,10 +54,6 @@ function createModule() {
       </div>
       <button id="lab-refresh" class="secondary" type="button">Actualizar</button>
     </div>
-    <div class="automation-lab-toolbar card inset">
-      <label>Encuesta<select id="lab-poll"></select></label>
-      <button id="lab-all" type="button">Probar todas en orden</button>
-    </div>
     <ol id="lab-list" class="automation-test-list"></ol>`;
   reference.insertAdjacentElement('afterend', section);
   bindModule();
@@ -106,7 +102,7 @@ function definitions() {
     {
       id: 'poll',
       title: 'Encuesta diaria',
-      description: 'Envía la encuesta seleccionada sin consumir la del día.',
+      description: 'Envía una encuesta activa sin consumir la del día.',
       run: sendPollTest,
     },
     {
@@ -190,9 +186,9 @@ function automaticTest(kind) {
 }
 
 function sendPollTest() {
-  const templateId = Number(query('#lab-poll')?.value);
+  const templateId = Number(polls[0]?.id);
   if (!Number.isInteger(templateId) || templateId <= 0)
-    throw new Error('Selecciona una encuesta disponible.');
+    throw new Error('No hay encuestas activas disponibles.');
   return api(botPath('/api/polls/send-test'), {
     method: 'POST',
     body: JSON.stringify({
@@ -223,27 +219,10 @@ async function loadModule() {
     ]);
     authorizedGroups = automaticData.authorizedGroups || digestData.authorizedGroups || [];
     polls = (pollData.templates || []).filter((item) => item.enabled);
-    fillPolls();
     renderTests();
   } catch (error) {
     showNotice(error.message, true);
   }
-}
-
-function replaceOptions(select, items, value, label) {
-  const previous = select.value;
-  select.replaceChildren();
-  items.forEach((item) => select.add(new window.Option(label(item), value(item))));
-  if ([...select.options].some((option) => option.value === previous)) select.value = previous;
-}
-
-function fillPolls() {
-  replaceOptions(
-    query('#lab-poll'),
-    polls,
-    (item) => String(item.id),
-    (item) => item.question,
-  );
 }
 
 function bindModule() {
@@ -252,16 +231,6 @@ function bindModule() {
     void loadModule();
   });
   query('#lab-refresh')?.addEventListener('click', () => void loadModule());
-  query('#lab-all')?.addEventListener('click', async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    for (const test of definitions()) {
-      const testButton = query('button', query(`[data-test-id="${test.id}"]`));
-      if (testButton) await execute(test, testButton);
-    }
-    button.disabled = false;
-    showNotice('La secuencia terminó. Revisa el resultado de cada prueba.');
-  });
   query('#section-select')?.addEventListener('change', (event) => {
     if (event.target.value === 'automation-lab') {
       activateModule();

@@ -96,9 +96,8 @@ describe('descubrimiento tolerante de grupos', () => {
     expect(database.listBotGroups('neurobot', (identifier) => identifier)).toHaveLength(0);
   });
 
-  it('exige un administrador autorizado y reactiva el grupo al recuperarlo', async () => {
+  it('identifica automáticamente los administradores informados por WhatsApp', async () => {
     const client = new SimulatedMessagingClient();
-    database.addAdministrator('56912345678@c.us');
     database.upsertDetectedGroup('normal@g.us', 'Grupo normal');
     database.setGroupAuthorized('normal@g.us', true);
     client.groups = [
@@ -107,6 +106,7 @@ describe('descubrimiento tolerante de grupos', () => {
         name: 'Grupo normal',
         botIsMember: true,
         participantIds: ['persona@lid'],
+        administratorIds: [],
       },
     ];
     const service = new GroupDiscoveryService(
@@ -127,6 +127,7 @@ describe('descubrimiento tolerante de grupos', () => {
     client.groups[0] = {
       ...client.groups[0]!,
       participantIds: ['persona@lid', '56912345678@c.us'],
+      administratorIds: ['56912345678@c.us'],
     };
     await service.refreshNow();
     expect(database.getGroupById('normal@g.us')).toMatchObject({

@@ -8,7 +8,7 @@ import { canonicalPhoneIdentity, normalizeWhatsAppIdentity } from '../messaging/
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import type { SecretVault } from '../security/secret-vault.js';
-import type { ModerationService } from '../moderation/moderation-service.js';
+import { ModerationService } from '../moderation/moderation-service.js';
 import { AutomaticMessageService } from './automatic-message-service.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ConversationFlowService } from './conversation-flow-service.js';
@@ -44,6 +44,7 @@ export class BotInstance {
   private readonly pollScheduler: PollScheduler;
   private readonly aiQueue: AIRequestQueueService;
   private readonly outboundQueue: OutboundMessageQueueService;
+  private readonly moderation: ModerationService | null;
   private latestQr: string | null = null;
   private adminPhone: string | null = null;
   private readonly communityServicesEnabled: boolean;
@@ -80,6 +81,9 @@ export class BotInstance {
     );
     this.aiQueue = new AIRequestQueueService(database, logger, bot.id);
     this.outboundQueue = new OutboundMessageQueueService(client, database, logger, bot.id);
+    this.moderation = bot.groupChannelEnabled
+      ? new ModerationService(database, this.outboundQueue, logger, bot.id, options.secretVault)
+      : null;
     const query = new AssistantQueryService(database, provider, logger, bot.id, this.aiQueue);
     if (bot.capabilities.communitySingleTurnMode) database.clearConversationStates(bot.id);
     const flow =
@@ -125,6 +129,7 @@ export class BotInstance {
       bot.id,
       flow,
       this.outboundQueue,
+      this.moderation ?? undefined,
     );
     client.setEvents({
       onMessage: async (message) => {
@@ -251,7 +256,7 @@ export class BotInstance {
   }
 
   public moderationService(): ModerationService | null {
-    return null;
+    return this.moderation;
   }
 
   public async stop(): Promise<void> {

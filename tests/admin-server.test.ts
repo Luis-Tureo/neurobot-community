@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Response as InjectResponse } from 'light-my-request';
+import { AIProviderFactory } from '../src/ai/ai-provider-factory.js';
 import { buildAdminServer } from '../src/admin/server.js';
 import { AutomaticMessageService } from '../src/core/automatic-message-service.js';
 import { ConnectionManager } from '../src/core/connection-manager.js';
@@ -10,6 +11,7 @@ import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { Anonymizer } from '../src/security/anonymizer.js';
 import { hashPassword } from '../src/security/password.js';
+import { SecretVault } from '../src/security/secret-vault.js';
 
 type Authentication = { cookie: string; csrf: string };
 
@@ -37,6 +39,14 @@ describe('API administrativa', () => {
       { developmentMode: false, manualRetryDelaysMs: [0] },
     );
     const anonymizer = new Anonymizer('x'.repeat(32));
+    const secretVault = new SecretVault('clave-de-cifrado-para-pruebas');
+    const aiProviderFactory = new AIProviderFactory(
+      database,
+      secretVault,
+      undefined,
+      'llama-test',
+      'groq',
+    );
     const automaticMessages = new AutomaticMessageService(database, client, logger, anonymizer, {
       retryDelayMs: 0,
       sleep: async () => undefined,
@@ -51,6 +61,8 @@ describe('API administrativa', () => {
       applicationVersion: '0.1.0-test',
       developmentMode: false,
       automaticMessages,
+      secretVault,
+      aiProviderFactory,
     });
   });
 
@@ -108,13 +120,13 @@ describe('API administrativa', () => {
   });
 
   it('detecta, autoriza y desautoriza grupos mediante identificadores anónimos', async () => {
-    database.addAdministrator('56912345678@c.us');
     client.groups = [
       {
         id: 'secret-group@g.us',
         name: 'Grupo de prueba',
         botIsMember: true,
         participantIds: ['56912345678@c.us'],
+        administratorIds: ['56912345678@c.us'],
       },
     ];
     const auth = await login(app);
@@ -188,30 +200,14 @@ describe('API administrativa', () => {
     expect(deletion.statusCode).toBe(400);
   });
 
-  it('gestiona administradores sin mostrar números completos', async () => {
+  it('retira la administración manual de administradores de WhatsApp', async () => {
     const auth = await login(app);
-    const created = await injectAuthenticated(app, auth, {
+    const response = await injectAuthenticated(app, auth, {
       method: 'POST',
       url: '/api/administrators',
       payload: { number: '+56912345678' },
     });
-    expect(created.statusCode).toBe(201);
-    expect(created.body).not.toContain('56912345678');
-    const list = await app.inject({
-      method: 'GET',
-      url: '/api/administrators',
-      headers: { cookie: auth.cookie },
-    });
-    const administrator = list.json().administrators[0];
-    expect(administrator.masked).toMatch(/^\*+5678$/);
-    expect(
-      (
-        await injectAuthenticated(app, auth, {
-          method: 'DELETE',
-          url: `/api/administrators/${administrator.key}`,
-        })
-      ).statusCode,
-    ).toBe(200);
+    expect(response.statusCode).toBe(404);
   });
 
   it('reinicia la conexión y registra auditoría', async () => {
@@ -262,6 +258,27 @@ describe('API administrativa', () => {
     expect(database.getAutomaticMessageConfiguration()).toMatchObject({
       welcome: { enabled: true },
       dailyGreeting: { sendTime: '09:10' },
+    });
+
+    configuration.welcome.template = 'Bienvenida personalizada para restaurar';
+    configuration.dailyRules.template = 'Reglas personalizadas para restaurar';
+    expect(
+      (
+        await injectAuthenticated(app, auth, {
+          method: 'PATCH',
+          url: '/api/automatic-messages',
+          payload: configuration,
+        })
+      ).statusCode,
+    ).toBe(200);
+    const restoredDefaults = await injectAuthenticated(app, auth, {
+      method: 'POST',
+      url: '/api/automatic-messages/templates/restore-all',
+    });
+    expect(restoredDefaults.statusCode).toBe(200);
+    expect(database.getAutomaticMessageConfiguration()).toMatchObject({
+      welcome: { template: read.json().defaultConfiguration.welcome.template },
+      dailyRules: { template: read.json().defaultConfiguration.dailyRules.template },
     });
 
     const legacyConfiguration = structuredClone(configuration);
@@ -607,6 +624,82 @@ describe('API administrativa', () => {
       headers: { cookie: auth.cookie },
     });
     expect(initial.statusCode).toBe(404);
+  });
+
+  it('gestiona la IA actual y conserva un historial de cambios sin exponer tokens', async () => {
+    const auth = await login(app);
+    const initialResponse = await app.inject({
+      method: 'GET',
+      url: '/api/bots/neurobot/ai',
+      headers: { cookie: auth.cookie },
+    });
+    expect(initialResponse.statusCode).toBe(200);
+    const initial = initialResponse.json();
+    expect(initial.currentProvider).toMatchObject({
+      id: 'groq',
+      name: 'Groq',
+      configured: false,
+      enabled: false,
+    });
+    expect(initial.providerHistory).toEqual([]);
+
+    const activationWithoutToken = await injectAuthenticated(app, auth, {
+      method: 'PUT',
+      url: '/api/bots/neurobot/ai/provider',
+      payload: { displayName: 'Asistente IA', enabled: true },
+    });
+    expect(activationWithoutToken.statusCode).toBe(409);
+
+    const addedAndActivated = await injectAuthenticated(app, auth, {
+      method: 'PUT',
+      url: '/api/bots/neurobot/ai/provider',
+      payload: {
+        displayName: 'Asistente IA',
+        apiKey: 'token-de-prueba-00000001',
+        enabled: true,
+      },
+    });
+    expect(addedAndActivated.statusCode).toBe(200);
+
+    const changedAndDisabled = await injectAuthenticated(app, auth, {
+      method: 'PUT',
+      url: '/api/bots/neurobot/ai/provider',
+      payload: {
+        displayName: 'Asistente IA',
+        apiKey: 'token-de-prueba-00000002',
+        enabled: false,
+      },
+    });
+    expect(changedAndDisabled.statusCode).toBe(200);
+
+    const renamedAndActivated = await injectAuthenticated(app, auth, {
+      method: 'PUT',
+      url: '/api/bots/neurobot/ai/provider',
+      payload: { displayName: 'IA Comunidad', enabled: true },
+    });
+    expect(renamedAndActivated.statusCode).toBe(200);
+
+    const current = (
+      await app.inject({
+        method: 'GET',
+        url: '/api/bots/neurobot/ai',
+        headers: { cookie: auth.cookie },
+      })
+    ).json();
+    expect(current.currentProvider).toMatchObject({
+      name: 'IA Comunidad',
+      configured: true,
+      enabled: true,
+    });
+    expect(current.providerHistory.map((change: { action: string }) => change.action)).toEqual([
+      'ACTIVATED',
+      'PROVIDER_REPLACED',
+      'DEACTIVATED',
+      'TOKEN_CHANGED',
+      'ACTIVATED',
+      'PROVIDER_ADDED',
+    ]);
+    expect(JSON.stringify(current)).not.toContain('token-de-prueba');
   });
 });
 

@@ -43,6 +43,7 @@ export interface MessagingClient {
   sendMessage(chatId: string, text: string, replyToMessageId?: string): Promise<void>;
   sendMessageWithMentions?(chatId: string, text: string, mentionIds: string[]): Promise<void>;
   resolveWelcomeParticipants?(participantIds: string[]): Promise<WelcomeParticipant[]>;
+  getGroupAdministratorIds?(chatId: string): Promise<string[]>;
   fetchRecentGroupMessages?(chatId: string, limit: number): Promise<RecentGroupMessage[]>;
   sendMedia?(chatId: string, absolutePath: string, caption: string): Promise<void>;
   sendInteractiveMenu?(chatId: string, payload: InteractiveMenuPayload): Promise<boolean>;

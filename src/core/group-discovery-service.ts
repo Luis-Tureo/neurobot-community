@@ -82,7 +82,12 @@ export class GroupDiscoveryService {
       const botId = this.options.botId ?? 'neurobot';
       const changed = this.database.deleteBotGroupRecord(botId, event.groupId);
       if (changed) {
-        this.record('GROUP_LOCAL_RECORD_DELETED', 'bot_not_member', event.groupId, 'BOT_NOT_MEMBER');
+        this.record(
+          'GROUP_LOCAL_RECORD_DELETED',
+          'bot_not_member',
+          event.groupId,
+          'BOT_NOT_MEMBER',
+        );
       }
     }
     return this.refreshNow();
@@ -176,13 +181,9 @@ export class GroupDiscoveryService {
             continue;
           }
           const hasAuthorizedAdmin =
-            botId !== 'neurobot' || group.participantIds == null
+            botId !== 'neurobot' || group.administratorIds == null
               ? null
-              : this.database.getAdministratorCount() === 0
-                ? null
-                : group.participantIds.some((participantId) =>
-                    this.database.isAdministrator(participantId),
-                  );
+              : group.administratorIds.length > 0;
           const result =
             botId === 'neurobot'
               ? this.database.synchronizeDetectedGroup(group, hasAuthorizedAdmin, now)
@@ -229,7 +230,14 @@ export class GroupDiscoveryService {
             this.record('GROUP_AUTO_ACTIVATED', 'active', group.id, undefined, undefined, source);
           }
           if (result.autoDeactivated) {
-            this.record('GROUP_AUTO_DEACTIVATED', 'inactive', group.id, 'BOT_NOT_MEMBER', undefined, source);
+            this.record(
+              'GROUP_AUTO_DEACTIVATED',
+              'inactive',
+              group.id,
+              'BOT_NOT_MEMBER',
+              undefined,
+              source,
+            );
           }
         }
         const missingResult =
@@ -261,7 +269,14 @@ export class GroupDiscoveryService {
           );
         }
         for (const groupId of missingResult.archivedGroupIds) {
-          this.record('GROUP_AUTO_DEACTIVATED', 'confirmed_missing', groupId, 'GROUP_NOT_FOUND', undefined, source);
+          this.record(
+            'GROUP_AUTO_DEACTIVATED',
+            'confirmed_missing',
+            groupId,
+            'GROUP_NOT_FOUND',
+            undefined,
+            source,
+          );
           this.record(
             'GROUP_NOT_FOUND',
             'confirmed_missing',

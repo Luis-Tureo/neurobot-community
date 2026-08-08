@@ -11,7 +11,7 @@ describe('panel de respuestas guardadas y consumo', () => {
     expect(html).toContain('id="section-cached-answers"');
   });
 
-  it('muestra el historial en una tabla y conserva acciones administrativas', () => {
+  it('muestra repetición y acciones administrativas en columnas separadas', () => {
     expect(html).toContain('class="data-table"');
     expect(html).toContain('<tbody id="cached-answers-list"></tbody>');
     expect(html).not.toContain('id="cached-answer-search"');
@@ -19,11 +19,16 @@ describe('panel de respuestas guardadas y consumo', () => {
     expect(html).not.toContain(
       'Revisa preguntas, respuestas, repeticiones y estado en una vista ordenada.',
     );
-    for (const label of ['Editar respuesta', 'Eliminar historial']) {
+    for (const label of ['Editar', 'Eliminar']) {
       expect(javascript).toContain(label);
     }
-    expect(html).not.toContain('<th>Acciones</th>');
-    expect(javascript).toContain('question.append(actions');
+    expect(html).toContain('<th>Repetida</th>');
+    expect(html).toContain('<th>Acciones</th>');
+    expect(javascript).toContain("'history-actions-cell'");
+    expect(javascript).toContain("actionButton('Editar', 'history-edit-action'");
+    expect(javascript).toContain("'cached-answer-editor hidden'");
+    expect(javascript).toContain("editor.addEventListener('input'");
+    expect(javascript).toContain("editor.addEventListener('blur'");
     for (const removed of [
       'Aprobar',
       'Desactivar',
@@ -35,6 +40,14 @@ describe('panel de respuestas guardadas y consumo', () => {
     ]) {
       expect(javascript).not.toContain(`actionButton('${removed}'`);
     }
+  });
+
+  it('alinea las acciones arriba y distingue editar con color verde', () => {
+    const css = readFileSync(resolve('src/admin/panel.css'), 'utf8');
+    expect(css).toMatch(/#cached-answers-list td:last-child\s*\{\s*vertical-align: top;/u);
+    expect(css).toContain('button.history-edit-action');
+    expect(css).toContain('background: #d1fae5;');
+    expect(css).toContain('button.history-edit-action:not(:disabled):hover');
   });
 
   it('mantiene el módulo de IA sin cuotas ni restablecimientos técnicos', () => {

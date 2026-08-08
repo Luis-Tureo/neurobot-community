@@ -49,12 +49,7 @@ import { verifyPassword } from '../security/password.js';
 import { LocalModerationEngine } from '../moderation/local-moderation-engine.js';
 import { normalizeModerationConfigurationValue } from '../moderation/moderation-service.js';
 import { GroupModerationService } from '../moderation/group-moderation-service.js';
-import {
-  assertPlainText,
-  maskPhoneNumber,
-  normalizeBotIdentifier,
-  normalizeParticipantId,
-} from '../utils/text.js';
+import { assertPlainText, normalizeBotIdentifier } from '../utils/text.js';
 import { LoginAttemptGate, SessionStore, type PanelSession } from './session-store.js';
 
 const COOKIE_NAME = 'panel_session';
@@ -200,8 +195,7 @@ const restoreAssistantSchema = z.object({ confirmed: z.literal(true) }).strict()
 
 const permanentlyDeleteAssistantSchema = z
   .object({
-    password: z.string().min(1).max(200),
-    confirmationPhrase: z.string().trim().min(1).max(240),
+    confirmed: z.literal(true),
   })
   .strict();
 
@@ -1026,21 +1020,8 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           .code(404)
           .send({ error: 'El asistente no está en la papelera.', code: 'ASSISTANT_NOT_ARCHIVED' });
       }
-      const input = permanentlyDeleteAssistantSchema.parse(request.body);
-      const expectedPhrase = `ELIMINAR PERMANENTEMENTE ${bot.botName}`;
-      if (input.confirmationPhrase !== expectedPhrase) {
-        return reply.code(400).send({
-          error: 'La frase de confirmación no coincide.',
-          code: 'CONFIRMATION_PHRASE_MISMATCH',
-        });
-      }
+      permanentlyDeleteAssistantSchema.parse(request.body);
       const session = getSession(request, sessions) as PanelSession;
-      const passwordHash = context.database.getPanelPasswordHash(session.username);
-      if (passwordHash === null || !(await verifyPassword(input.password, passwordHash))) {
-        return reply
-          .code(401)
-          .send({ error: 'La contraseña actual no es válida.', code: 'INVALID_PASSWORD' });
-      }
       await context.multiBotManager?.stop(botId);
       const backupRoot = join(
         dirname(context.database.getPath()),
@@ -1053,7 +1034,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       await context.database.backupTo(databaseBackup);
       let sessionBackup: string | null = null;
       if (context.sessionManager !== undefined) {
-        sessionBackup = await context.sessionManager.archive(bot);
+        sessionBackup = await context.sessionManager.archiveIfPresent(bot);
       }
       const backupReference = [
         basename(databaseBackup),
@@ -1431,6 +1412,9 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     const botId = parseBotId(request.params);
     const profile = context.database.getBotProfile(botId);
     const provider = context.aiProviderFactory?.forBot(botId);
+    const settings = context.database.getAISettings(profile.id);
+    const credential = context.database.getBotEncryptedCredential(botId);
+    const configured = provider?.isConfigured() ?? false;
     const period = localPeriod(new Date(), profile.timezone);
     const queue = context.multiBotManager?.aiQueue(botId)?.snapshot() ?? {
       processing: 0,
@@ -1439,14 +1423,13 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       metrics: context.database.getAIQueueMetrics(botId, period.date),
       providerHealth: context.database.getAIProviderQueueHealth(botId),
     };
-    if (provider?.isConfigured() !== true)
-      queue.providerHealth = { ...queue.providerHealth, state: 'NOT_CONFIGURED' };
+    if (!configured) queue.providerHealth = { ...queue.providerHealth, state: 'NOT_CONFIGURED' };
     return {
       developmentMode: context.developmentMode,
-      settings: context.database.getAISettings(profile.id),
+      settings,
       status: context.database.getAIProviderStatus(
         profile.id,
-        provider?.isConfigured() ?? false,
+        configured,
         provider?.getModelInformation().model ?? 'disabled',
       ),
       usage: context.database.getAIUsageSummary(profile.id, period.date, period.month),
@@ -1454,12 +1437,111 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       queue,
       recentEvents: context.database.listRecentAIUsageEvents(profile.id),
       credential: {
-        mode: context.database.getBotEncryptedCredential(botId).mode,
-        configured: provider?.isConfigured() ?? false,
+        mode: credential.mode,
+        configured,
         encryptionAvailable: context.secretVault?.isConfigured() ?? false,
       },
+      currentProvider: {
+        id: 'groq',
+        name: credential.displayName,
+        configured,
+        enabled: configured && settings.enabled && settings.provider === 'groq',
+      },
+      providerHistory: context.database.listAIProviderChanges(botId),
     };
   });
+
+  app.put(
+    '/api/bots/:botId/ai/provider',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request, reply) => {
+      if (!isSecureCredentialRequest(request))
+        return reply
+          .code(403)
+          .send({ error: 'Las claves solo pueden configurarse mediante HTTPS o localhost.' });
+      const botId = parseBotId(request.params);
+      const profile = context.database.getBotProfile(botId);
+      const input = z
+        .object({
+          displayName: z.string().trim().min(1).max(80),
+          apiKey: z.string().trim().min(16).max(500).optional(),
+          enabled: z.boolean(),
+        })
+        .strict()
+        .parse(request.body);
+      const previousCredential = context.database.getBotEncryptedCredential(botId);
+      const previousSettings = context.database.getAISettings(profile.id);
+      const wasConfigured = context.aiProviderFactory?.forBot(botId).isConfigured() ?? false;
+      const secretVault = context.secretVault;
+      if (input.apiKey === undefined && input.enabled && !wasConfigured) {
+        return reply.code(409).send({
+          error: 'Agrega el token de la inteligencia artificial antes de activarla.',
+        });
+      }
+      if (input.apiKey !== undefined && secretVault?.isConfigured() !== true) {
+        return reply.code(409).send({
+          error: 'APP_ENCRYPTION_KEY debe estar configurada para guardar una clave por bot.',
+        });
+      }
+
+      if (input.apiKey === undefined) {
+        context.database.saveBotAIProviderConfiguration(botId, input.displayName);
+      } else {
+        if (secretVault === undefined) {
+          return reply.code(409).send({
+            error: 'APP_ENCRYPTION_KEY debe estar configurada para guardar una clave por bot.',
+          });
+        }
+        const encrypted = secretVault.encrypt(input.apiKey, `bot:${botId}:groq`);
+        context.database.saveBotAIProviderConfiguration(botId, input.displayName, {
+          encryptedApiKey: encrypted.encrypted,
+          fingerprint: encrypted.fingerprint,
+        });
+        context.database.recordAIProviderChange(
+          botId,
+          'groq',
+          !wasConfigured
+            ? 'PROVIDER_ADDED'
+            : previousCredential.displayName !== input.displayName
+              ? 'PROVIDER_REPLACED'
+              : 'TOKEN_CHANGED',
+          input.displayName,
+        );
+      }
+      if (input.apiKey === undefined && previousCredential.displayName !== input.displayName) {
+        context.database.recordAIProviderChange(
+          botId,
+          'groq',
+          'PROVIDER_REPLACED',
+          input.displayName,
+        );
+      }
+
+      const settings = context.database.saveAISettings({
+        ...previousSettings,
+        enabled: input.enabled,
+        provider: input.enabled ? 'groq' : 'disabled',
+        updatedAt: new Date().toISOString(),
+      });
+      if (previousSettings.enabled !== settings.enabled) {
+        context.database.recordAIProviderChange(
+          botId,
+          'groq',
+          settings.enabled ? 'ACTIVATED' : 'DEACTIVATED',
+          input.displayName,
+        );
+      }
+      audit(context, 'bot_ai_provider_save', botId, 'ok', botId);
+      return {
+        provider: {
+          id: 'groq',
+          name: input.displayName,
+          configured: input.apiKey !== undefined || wasConfigured,
+          enabled: settings.enabled,
+        },
+      };
+    },
+  );
 
   app.patch(
     '/api/bots/:botId/ai/queue-settings',
@@ -1569,11 +1651,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           lastEvent: cases[0]?.createdAt ?? null,
           aiConsumption: '0 tokens durante la moderación diaria.',
         },
-        administrators: context.database.listAdministrators().map((identifier) => ({
-          identifier,
-          hash: context.anonymizer.identifier(identifier),
-          label: identifier.replace(/@(?:c|lid)\.us$/u, ''),
-        })),
         safety: {
           automaticAIReviewEnabled: false,
           manualAIReviewEnabled: false,
@@ -1602,9 +1679,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         group: { groupHash, name: group.name },
         profile: { ...profile, compiled: undefined },
         tests,
-        recipientHashes: context.database
-          .listGroupModerationRecipients(botId, groupHash)
-          .map((item) => item.administratorHash),
         progress: {
           rulesSaved: profile.rulesText.length >= 20,
           analyzed:
@@ -1763,11 +1837,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         .object({ groupHash: z.string().length(20) })
         .parse(request.params).groupHash;
       const enabled = z.object({ enabled: z.boolean() }).strict().parse(request.body).enabled;
-      if (enabled && context.database.listGroupModerationRecipients(botId, groupHash).length === 0)
-        return reply.code(409).send({
-          error: 'Selecciona al menos un administrador para los avisos privados.',
-          code: 'MODERATION_ADMIN_REQUIRED',
-        });
       try {
         const profile = context.database.setGroupModerationEnabled(botId, groupHash, enabled);
         context.database.recordTechnicalEvent({
@@ -1783,40 +1852,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           code: 'MODERATION_TESTS_REQUIRED',
         });
       }
-    },
-  );
-
-  app.patch(
-    '/api/bots/:botId/moderation/groups/:groupHash/administrators',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const groupHash = z
-        .object({ groupHash: z.string().length(20) })
-        .parse(request.params).groupHash;
-      const identifiers = z
-        .object({ identifiers: z.array(z.string().min(5).max(100)).max(20) })
-        .strict()
-        .parse(request.body).identifiers;
-      if (context.secretVault?.isConfigured() !== true)
-        return reply.code(409).send({ error: 'El cifrado local no está disponible.' });
-      const available = new Set(context.database.listAdministrators());
-      if (identifiers.some((identifier) => !available.has(identifier)))
-        return reply
-          .code(400)
-          .send({ error: 'Selecciona solamente administradores configurados.' });
-      const recipients = identifiers.map((identifier) => {
-        const administratorHash = context.anonymizer.identifier(identifier);
-        return {
-          administratorHash,
-          encryptedIdentifier: context.secretVault?.encrypt(
-            identifier,
-            `moderation-recipient:${botId}:${groupHash}:${administratorHash}`,
-          ).encrypted as string,
-        };
-      });
-      context.database.replaceGroupModerationRecipients(botId, groupHash, recipients);
-      return { saved: true, recipientHashes: recipients.map((item) => item.administratorHash) };
     },
   );
 
@@ -2173,6 +2208,12 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const botId = parseBotId(request.params);
       const profile = context.database.getBotProfile(botId);
       const input = aiSettingsSchema.parse(request.body);
+      const previousSettings = context.database.getAISettings(profile.id);
+      if (input.enabled && context.aiProviderFactory?.forBot(botId).isConfigured() !== true) {
+        return reply.code(409).send({
+          error: 'Configura el token de la inteligencia artificial antes de activarla.',
+        });
+      }
       if (exceedsSafeDefaults(input) && !input.confirmIncreasedLimits) {
         return reply.code(409).send({
           error: 'Confirma explícitamente el aumento sobre los límites seguros iniciales.',
@@ -2186,6 +2227,15 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         profileId: profile.id,
         updatedAt: new Date().toISOString(),
       });
+      if (previousSettings.enabled !== settings.enabled) {
+        const displayName = context.database.getBotEncryptedCredential(botId).displayName;
+        context.database.recordAIProviderChange(
+          botId,
+          'groq',
+          settings.enabled ? 'ACTIVATED' : 'DEACTIVATED',
+          displayName,
+        );
+      }
       audit(context, 'bot_ai_settings_update', botId, 'ok', botId);
       return { settings };
     },
@@ -2358,12 +2408,22 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const input = z
         .object({
           mode: z.enum(['global', 'per_bot']),
+          provider: z.literal('groq').default('groq'),
+          operation: z.enum(['add', 'replace_provider', 'replace_token']).default('replace_token'),
           apiKey: z.string().min(16).max(500).optional(),
         })
         .strict()
         .parse(request.body);
       if (input.mode === 'global') {
+        const wasConfigured = context.aiProviderFactory?.forBot(botId).isConfigured() ?? false;
+        const displayName = context.database.getBotEncryptedCredential(botId).displayName;
         context.database.setBotEncryptedCredential(botId, 'global', null, null);
+        context.database.recordAIProviderChange(
+          botId,
+          input.provider,
+          wasConfigured ? 'PROVIDER_REPLACED' : 'PROVIDER_ADDED',
+          displayName,
+        );
         audit(context, 'bot_ai_key_mode_global', botId, 'ok', botId);
         return {
           configured: context.aiProviderFactory?.forBot(botId).isConfigured() ?? false,
@@ -2375,12 +2435,24 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           error: 'APP_ENCRYPTION_KEY debe estar configurada para guardar una clave por bot.',
         });
       }
+      const wasConfigured = context.aiProviderFactory?.forBot(botId).isConfigured() ?? false;
+      const displayName = context.database.getBotEncryptedCredential(botId).displayName;
       const encrypted = context.secretVault.encrypt(input.apiKey, `bot:${botId}:groq`);
       context.database.setBotEncryptedCredential(
         botId,
         'per_bot',
         encrypted.encrypted,
         encrypted.fingerprint,
+      );
+      context.database.recordAIProviderChange(
+        botId,
+        input.provider,
+        !wasConfigured
+          ? 'PROVIDER_ADDED'
+          : input.operation === 'replace_provider'
+            ? 'PROVIDER_REPLACED'
+            : 'TOKEN_CHANGED',
+        displayName,
       );
       audit(context, 'bot_ai_key_replace', botId, 'ok', botId);
       return { configured: true, mode: 'per_bot' };
@@ -3419,44 +3491,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     },
   );
 
-  app.get('/api/administrators', { preHandler: requireSession(sessions) }, async () => ({
-    administrators: context.database.listAdministrators().map((participantId) => ({
-      key: context.anonymizer.identifier(participantId),
-      masked: maskPhoneNumber(participantId),
-    })),
-  }));
-
-  app.post(
-    '/api/administrators',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const number = z.object({ number: z.string().trim() }).parse(request.body).number;
-      const participantId = normalizeParticipantId(number);
-      if (!context.database.addAdministrator(participantId)) {
-        return reply.code(409).send({ error: 'El administrador ya existe.' });
-      }
-      const key = context.anonymizer.identifier(participantId);
-      audit(context, 'administrator_add', key, 'ok');
-      return reply.code(201).send({ key, masked: maskPhoneNumber(participantId) });
-    },
-  );
-
-  app.delete(
-    '/api/administrators/:key',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const key = z.object({ key: z.string().length(20) }).parse(request.params).key;
-      const participantId = context.database
-        .listAdministrators()
-        .find((item) => context.anonymizer.identifier(item) === key);
-      if (participantId === undefined || !context.database.removeAdministrator(participantId)) {
-        return reply.code(404).send({ error: 'Administrador no encontrado.' });
-      }
-      audit(context, 'administrator_remove', key, 'ok');
-      return { deleted: true };
-    },
-  );
-
   app.get('/api/settings', { preHandler: requireSession(sessions) }, async () => ({
     settings: context.database.listSettings(),
   }));
@@ -3515,6 +3549,18 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       })),
     };
   });
+
+  app.post(
+    '/api/automatic-messages/templates/restore-all',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request) => {
+      const botId = parseBotIdQuery(request.query, context);
+      context.database.restoreAllAutomaticTemplates(botId);
+      automaticMessagesFor(context, botId)?.reconfigure();
+      audit(context, 'automatic_templates_restore_all', 'all', 'ok', botId);
+      return { restored: true };
+    },
+  );
 
   app.post(
     '/api/automatic-messages/templates/:key/restore',

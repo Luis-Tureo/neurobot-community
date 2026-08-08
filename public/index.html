@@ -49,12 +49,11 @@
             <optgroup label="Panel general" data-global-only>
               <option value="bots">Mis asistentes</option>
               <option value="trash">Papelera</option>
-              <option value="administrators">Administradores</option>
             </optgroup>
             <optgroup label="Configuración principal" data-bot-only>
               <option value="status" data-bot-only>Inicio</option>
               <option value="state-metrics" data-bot-only>Estado y estadísticas</option>
-              <option value="ai" data-bot-only>Identidad e inteligencia artificial</option>
+              <option value="ai" data-bot-only>Inteligencia Artificial</option>
               <option value="menus" data-bot-only data-module="menus">Menú de respuestas</option>
               <option value="catalog" data-bot-only data-module="catalog">
                 Productos y servicios
@@ -88,9 +87,6 @@
               <button data-section="trash" class="global-only">
                 <span aria-hidden="true">♲</span> Papelera
               </button>
-              <button data-section="administrators" class="global-only">
-                <span aria-hidden="true">⚿</span> Administradores
-              </button>
 
               <p class="nav-group-title bot-only hidden">Configuración principal</p>
               <button data-section="status" class="bot-only hidden">
@@ -100,7 +96,7 @@
                 <span aria-hidden="true">▤</span> Estado y estadísticas
               </button>
               <button data-section="ai" class="bot-only hidden">
-                <span aria-hidden="true">✦</span> Identidad e IA
+                <span aria-hidden="true">✦</span> Inteligencia Artificial
               </button>
 
               <p class="nav-group-title bot-only hidden">Contenido</p>
@@ -145,19 +141,6 @@
           </aside>
 
           <div class="panel-main">
-            <section
-              id="assistant-context"
-              class="assistant-context card hidden"
-              aria-live="polite"
-            >
-              <div>
-                <p class="eyebrow">Asistente seleccionado</p>
-                <h2 id="assistant-context-name">Asistente</h2>
-                <p id="assistant-context-detail" class="muted"></p>
-                <p id="assistant-context-warning" class="info-callout hidden"></p>
-              </div>
-            </section>
-
             <section id="section-bots" class="panel-section">
               <div class="section-heading">
                 <div>
@@ -335,7 +318,7 @@
             </section>
 
             <section id="section-ai" class="panel-section hidden">
-              <div class="section-heading"><h2>Identidad e inteligencia artificial</h2></div>
+              <div class="section-heading"><h2>Inteligencia Artificial</h2></div>
               <div class="card inset hidden">
                 <label>Plantilla inicial<select id="profile-template"></select></label>
                 <button id="apply-profile-template" class="secondary" type="button">
@@ -837,8 +820,10 @@
                       <th>Pregunta y respuesta</th>
                       <th>Categoría</th>
                       <th>Consultas</th>
+                      <th>Repetida</th>
                       <th>Estado</th>
                       <th>Actualización</th>
+                      <th>Acciones</th>
                     </tr>
                   </thead>
                   <tbody id="cached-answers-list"></tbody>
@@ -847,71 +832,41 @@
             </section>
 
             <section id="ai-provider-content" class="hidden">
-              <div class="ai-minimal-grid">
-                <form id="ai-settings-form" class="card inset ai-minimal-card">
-                  <h3>Configuración</h3>
-                  <label
-                    >¿Activar inteligencia artificial?
-                    <select name="enabled" required>
-                      <option value="no">No</option>
-                      <option value="yes">Sí</option>
-                    </select>
-                  </label>
-                  <label
-                    >Inteligencia artificial
-                    <select name="provider">
-                      <option value="">Sin IA agregada</option>
-                      <option value="groq">Groq</option>
-                    </select>
-                  </label>
-                  <div class="actions ai-settings-actions">
-                    <button type="submit">Guardar</button>
-                    <button id="add-ai-provider" class="secondary" type="button">
-                      Agregar nueva IA
-                    </button>
-                  </div>
-                </form>
-                <form id="ai-credential-form" class="card inset ai-minimal-card hidden">
-                  <h3>Agregar inteligencia artificial</h3>
-                  <input name="mode" type="hidden" value="per_bot" />
-                  <label
-                    >Nombre de la IA
-                    <select name="provider" required>
-                      <option value="groq">Groq</option>
-                    </select>
-                  </label>
-                  <label>
-                    Token
-                    <input
-                      name="apiKey"
-                      type="password"
-                      autocomplete="new-password"
-                      minlength="16"
-                      maxlength="500"
-                      placeholder="Pega aquí el token del proveedor"
-                      required
-                    />
-                  </label>
-                  <div class="actions">
-                    <button type="submit">Agregar IA</button>
-                    <button id="cancel-ai-provider" class="secondary" type="button">
-                      Cancelar
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </section>
-
-            <section id="section-administrators" class="panel-section hidden">
-              <p class="eyebrow">Identidad verificada por número</p>
-              <h2>Administradores de WhatsApp</h2>
-              <form id="administrator-form" class="inline-form">
-                <label
-                  >Número internacional<input name="number" placeholder="+56912345678" required
-                /></label>
-                <button type="submit">Agregar</button>
+              <form id="ai-provider-form" class="card inset ai-provider-form">
+                <h3>Configuración de inteligencia artificial</h3>
+                <label>
+                  Nombre de la IA
+                  <input name="displayName" maxlength="80" placeholder="Ej.: Groq" required />
+                </label>
+                <label>
+                  Token o nuevo token
+                  <input
+                    name="apiKey"
+                    type="password"
+                    autocomplete="new-password"
+                    minlength="16"
+                    maxlength="500"
+                    placeholder="Pega el token para agregarlo o cambiarlo"
+                  />
+                </label>
+                <p id="ai-token-help" class="muted">
+                  Agrega el token para poder activar la inteligencia artificial.
+                </p>
+                <label>
+                  Funcionamiento
+                  <select name="enabled" required>
+                    <option value="yes">Activada</option>
+                    <option value="no">Desactivada</option>
+                  </select>
+                </label>
+                <div class="actions">
+                  <button type="submit">Guardar configuración</button>
+                </div>
               </form>
-              <div id="administrators-list" class="list"></div>
+              <article class="card inset ai-provider-history-card" data-collapsible>
+                <div class="section-heading"><h3>Historial de cambios de IA</h3></div>
+                <div id="ai-provider-history" class="list" aria-live="polite"></div>
+              </article>
             </section>
 
             <section id="section-settings" class="panel-section hidden">
@@ -1050,26 +1005,17 @@
                 Configura cada automatización por separado. Las pruebas se ejecutan desde Centro de
                 pruebas.
               </p>
-              <article class="card inset poll-date-schedule bot-only hidden" data-module="polls">
-                <div class="section-heading">
-                  <div><h3>Encuestas por fecha</h3></div>
-                </div>
-                <form id="poll-override-form">
-                  <div class="form-row">
-                    <label>Fecha futura<input name="localDate" type="date" required /></label>
-                    <label>Encuesta<select name="templateId" required></select></label>
-                  </div>
-                  <label class="toggle"
-                    ><input name="replaceConfirmed" type="checkbox" /> Reemplazar la programación
-                    existente para esta fecha</label
-                  >
-                  <div class="actions">
-                    <button type="submit">Programar encuesta</button>
-                  </div>
-                </form>
-                <div id="poll-overrides-list" class="list"></div>
-              </article>
               <form id="automatic-messages-form" class="automatic-messages-layout">
+                <article class="card inset poll-date-schedule bot-only hidden" data-module="polls">
+                  <div class="section-heading">
+                    <div><h3>Encuestas por fecha</h3></div>
+                  </div>
+                  <div class="form-row">
+                    <label>Fecha futura<input name="localDate" type="date" /></label>
+                    <label>Encuesta<select name="templateId"></select></label>
+                  </div>
+                  <div id="poll-overrides-list" class="list"></div>
+                </article>
                 <article class="card inset automatic-card" data-collapsible data-open="true">
                   <div class="section-heading">
                     <div>
@@ -1186,8 +1132,10 @@
                 </article>
 
                 <div class="automatic-save-bar">
-                  <p>Guarda todos los cambios realizados en las automatizaciones.</p>
                   <button type="submit">Guardar automatizaciones</button>
+                  <button id="restore-automatic-defaults" class="secondary" type="button">
+                    Restaurar texto predeterminado
+                  </button>
                 </div>
               </form>
               <h3 class="subsection-title">Últimos resultados por grupo</h3>
@@ -1206,34 +1154,6 @@
                 Envía encuestas nativas solamente a grupos activos y no bloqueados. No se guardan
                 votantes ni sus respuestas.
               </p>
-
-              <article class="card inset">
-                <h3>Estado general</h3>
-                <form id="poll-configuration-form">
-                  <label class="toggle"
-                    ><input name="enabled" type="checkbox" /> Activar encuestas diarias</label
-                  >
-                  <div class="form-row">
-                    <label>Hora<input name="sendTime" type="time" step="60" required /></label>
-                    <label
-                      >Tolerancia (minutos)<input
-                        name="toleranceMinutes"
-                        type="number"
-                        min="0"
-                        max="180"
-                        required
-                    /></label>
-                    <label
-                      >Modo<select name="selectionMode">
-                        <option value="SAME_FOR_ALL">Misma encuesta para todos</option>
-                        <option value="PER_GROUP">Encuesta diferente por grupo</option>
-                      </select></label
-                    >
-                  </div>
-                  <div id="poll-schedule-summary" class="status-grid compact"></div>
-                  <button type="submit">Guardar programación</button>
-                </form>
-              </article>
 
               <article class="card inset">
                 <div class="section-heading">
@@ -1286,7 +1206,7 @@
                 <div id="poll-templates-list" class="list"></div>
               </article>
 
-              <article class="card inset">
+              <article class="card inset" data-collapsible>
                 <div class="section-heading">
                   <div>
                     <h3>Encuestas eliminadas de este asistente</h3>
