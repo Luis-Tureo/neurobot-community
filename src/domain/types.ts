@@ -231,6 +231,13 @@ export type PollConfiguration = {
   timezone: string;
   toleranceMinutes: number;
   selectionMode: PollSelectionMode;
+  weeklySchedule: PollWeeklySchedule[];
+};
+
+export type PollWeeklySchedule = {
+  weekday: number;
+  sendTime: string;
+  templateIds: number[];
 };
 
 export type PollSendHistoryRecord = {

@@ -20,9 +20,16 @@ describe('centro de pruebas de automatizaciones', () => {
     expect(script).toContain('automation-test-list');
     expect(script).not.toContain('Probar todas en orden');
     expect(script).not.toContain('lab-all');
+    expect(script).not.toContain('>Actualizar</button>');
+    expect(script).toContain("query('#lab-refresh', existing)?.remove()");
     expect(script).not.toContain('lab-poll');
     expect(script).not.toContain('Grupo de prueba');
     expect(script).not.toContain("id: 'moderation'");
+    expect(script).toContain('Grupos para las pruebas');
+    expect(script).toContain('Selecciona uno o más grupos.');
+    expect(script).toContain('selectedGroupKeys');
+    expect(script).toContain('for (const groupKey of groupKeys)');
+    expect(script).toContain('await test.run(groupKey)');
   });
 
   it('carga el módulo separado y sus estilos consolidados', () => {
@@ -30,6 +37,10 @@ describe('centro de pruebas de automatizaciones', () => {
     expect(html).toContain('<script type="module" src="/automation-lab.js"></script>');
     expect(styles).toContain('.automation-test-list');
     expect(styles).toContain('.automation-test-item');
+    expect(styles).toContain('.lab-group-selector');
+    expect(styles).toContain('.lab-group-menu summary');
+    expect(styles).toContain(".lab-group-option input[type='checkbox']");
+    expect(styles).toContain('.lab-group-option:has(input:checked)');
     expect(styles).toContain('.automation-lab > .section-heading');
     expect(styles).toContain('@apply mb-5;');
     expect(styles).not.toContain('.automation-lab-toolbar');

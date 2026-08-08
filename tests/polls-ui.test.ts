@@ -14,10 +14,10 @@ describe('interfaz de encuestas', () => {
       'Banco de encuestas',
       'Historial de envíos',
       'Encuestas eliminadas de este asistente',
-      'America/Santiago',
     ]) {
       expect(html).toContain(text);
     }
+    expect(html).not.toContain('polls-navigation');
     for (const removed of [
       'id="poll-configuration-form"',
       'id="poll-schedule-summary"',
@@ -36,6 +36,7 @@ describe('interfaz de encuestas', () => {
   });
 
   it('distingue predeterminadas, personalizadas y permite ocultar o restaurar por asistente', () => {
+    expect(script).toContain("edit.className = 'poll-edit-action'");
     expect(script).toContain("remove.textContent = 'Eliminar'");
     expect(script).toContain('poll-remove-button');
     expect(script).toContain('Predeterminada');
@@ -49,6 +50,19 @@ describe('interfaz de encuestas', () => {
     expect(html).toMatch(
       /<article class="card inset" data-collapsible>[\s\S]*?<h3>Encuestas eliminadas de este asistente<\/h3>/u,
     );
+    const pollSection = html.slice(html.indexOf('id="section-polls"'));
+    expect(pollSection).not.toContain('name="category"');
+    expect(pollSection).not.toContain('name="disabledUntil"');
+    expect(pollSection).not.toContain('name="favorite"');
+    expect(pollSection).not.toContain('name="allowMultipleAnswers"');
+    expect(pollSection).not.toContain('id="poll-template-preview"');
+    expect(pollSection).toContain('Guardar encuesta');
+    expect(pollSection).not.toContain('Guardar plantilla');
+    expect(script).toContain('openPollTemplateEditor(template, item)');
+    expect(script).toContain('container.append(pollTemplateForm)');
+    expect(script).toContain("container.classList.add('poll-item-editing')");
+    expect(script).toContain("editingItem?.classList.remove('poll-item-editing')");
+    expect(script).toContain("textContent = 'Guardar encuesta'");
   });
 
   it('delega la prueba segura al Centro de pruebas y conserva grupos autorizados', () => {

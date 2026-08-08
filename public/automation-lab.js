@@ -2,6 +2,7 @@ let botId = null;
 let csrfToken = null;
 let polls = [];
 let authorizedGroups = [];
+let selectedGroupKeys = new Set();
 
 const query = (selector, root = document) => root.querySelector(selector);
 const queryAll = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -38,7 +39,11 @@ async function api(path, options = {}) {
 }
 
 function createModule() {
-  if (query('#section-automation-lab')) return;
+  const existing = query('#section-automation-lab');
+  if (existing) {
+    query('#lab-refresh', existing)?.remove();
+    return;
+  }
   const reference = query('#section-automatic-messages');
   if (!reference?.parentElement) return;
 
@@ -52,8 +57,18 @@ function createModule() {
         <h2>Centro de pruebas</h2>
         <p class="muted">Ejecuta una prueba a la vez y revisa su resultado antes de continuar.</p>
       </div>
-      <button id="lab-refresh" class="secondary" type="button">Actualizar</button>
     </div>
+    <fieldset class="lab-group-selector" aria-describedby="lab-group-help">
+      <legend>Grupos para las pruebas</legend>
+      <p id="lab-group-help" class="muted">Selecciona uno o más grupos.</p>
+      <details class="lab-group-menu">
+        <summary>
+          <span id="lab-group-selection" aria-live="polite">Seleccionar grupos</span>
+          <span class="lab-group-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div id="lab-group-options" class="lab-group-options"></div>
+      </details>
+    </fieldset>
     <ol id="lab-list" class="automation-test-list"></ol>`;
   reference.insertAdjacentElement('afterend', section);
   bindModule();
@@ -73,10 +88,58 @@ function activateModule() {
   if (selector) selector.value = 'automation-lab';
 }
 
-function selectedGroup() {
-  const group = authorizedGroups[0];
-  if (!group) throw new Error('No hay grupos autorizados para ejecutar pruebas.');
-  return group.key;
+function selectedGroups() {
+  const availableKeys = new Set(authorizedGroups.map((group) => group.key));
+  const groupKeys = [...selectedGroupKeys].filter((key) => availableKeys.has(key));
+  if (groupKeys.length === 0) {
+    throw new Error('Selecciona al menos un grupo para ejecutar la prueba.');
+  }
+  return groupKeys;
+}
+
+function renderGroupSelector() {
+  const target = query('#lab-group-options');
+  const summary = query('#lab-group-selection');
+  if (!target || !summary) return;
+  target.replaceChildren();
+  const availableKeys = new Set(authorizedGroups.map((group) => group.key));
+  selectedGroupKeys = new Set([...selectedGroupKeys].filter((key) => availableKeys.has(key)));
+  if (authorizedGroups.length === 0) {
+    const message = document.createElement('p');
+    message.className = 'muted';
+    message.textContent = 'No hay grupos autorizados disponibles.';
+    target.append(message);
+    summary.textContent = 'Sin grupos disponibles';
+    return;
+  }
+  authorizedGroups.forEach((group) => {
+    const option = document.createElement('label');
+    option.className = 'lab-group-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = group.key;
+    checkbox.checked = selectedGroupKeys.has(group.key);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) selectedGroupKeys.add(group.key);
+      else selectedGroupKeys.delete(group.key);
+      updateGroupSelectionSummary();
+    });
+    const name = document.createElement('span');
+    name.textContent = group.name || 'Grupo sin nombre';
+    option.append(checkbox, name);
+    target.append(option);
+  });
+  updateGroupSelectionSummary();
+}
+
+function updateGroupSelectionSummary() {
+  const summary = query('#lab-group-selection');
+  if (!summary) return;
+  const count = selectedGroupKeys.size;
+  summary.textContent =
+    count === 0
+      ? 'Seleccionar grupos'
+      : `${count} grupo${count === 1 ? '' : 's'} seleccionado${count === 1 ? '' : 's'}`;
 }
 
 function definitions() {
@@ -85,37 +148,37 @@ function definitions() {
       id: 'welcome',
       title: 'Bienvenida agrupada',
       description: 'Envía una bienvenida marcada como prueba.',
-      run: () => automaticTest('welcome'),
+      run: (groupKey) => automaticTest('welcome', groupKey),
     },
     {
       id: 'greeting',
       title: 'Saludo diario',
       description: 'Envía el saludo correspondiente al día actual.',
-      run: () => automaticTest('greeting'),
+      run: (groupKey) => automaticTest('greeting', groupKey),
     },
     {
       id: 'rules',
       title: 'Reglas diarias',
       description: 'Envía las reglas configuradas al grupo.',
-      run: () => automaticTest('rules'),
+      run: (groupKey) => automaticTest('rules', groupKey),
     },
     {
       id: 'poll',
       title: 'Encuesta diaria',
       description: 'Envía una encuesta activa sin consumir la del día.',
-      run: sendPollTest,
+      run: (groupKey) => sendPollTest(groupKey),
     },
     {
       id: 'daily-digest',
       title: 'Resumen diario',
       description: 'Analiza hasta 24 horas y envía un resumen.',
-      run: () => sendDigestTest('daily'),
+      run: (groupKey) => sendDigestTest('daily', groupKey),
     },
     {
       id: 'weekly-digest',
       title: 'Resumen semanal',
       description: 'Analiza hasta siete días y envía un resumen.',
-      run: () => sendDigestTest('weekly'),
+      run: (groupKey) => sendDigestTest('weekly', groupKey),
     },
   ];
 }
@@ -153,16 +216,27 @@ function renderTests() {
 
 async function execute(test, button) {
   const result = query('.automation-test-result', button.closest('li'));
-  button.disabled = true;
-  result.textContent = 'Ejecutando…';
-  result.className = 'automation-test-result pending';
   try {
-    const data = await test.run();
-    result.textContent = data?.status
-      ? `${data.status}${data.errorCode ? ` · ${data.errorCode}` : ''}`
-      : data?.result?.action
-        ? `Acción simulada: ${data.result.action}`
-        : 'Prueba completada';
+    const groupKeys = selectedGroups();
+    button.disabled = true;
+    result.textContent = `Ejecutando en ${groupKeys.length} grupo${groupKeys.length === 1 ? '' : 's'}…`;
+    result.className = 'automation-test-result pending';
+    let completed = 0;
+    const failures = [];
+    for (const groupKey of groupKeys) {
+      try {
+        await test.run(groupKey);
+        completed += 1;
+      } catch (error) {
+        failures.push(error.message);
+      }
+    }
+    if (failures.length > 0) {
+      result.textContent = `${completed} de ${groupKeys.length} envíos completados · ${failures[0]}`;
+      result.className = 'automation-test-result failed';
+      return false;
+    }
+    result.textContent = `Prueba enviada a ${completed} grupo${completed === 1 ? '' : 's'}`;
     result.className = 'automation-test-result success';
     return true;
   } catch (error) {
@@ -174,25 +248,25 @@ async function execute(test, button) {
   }
 }
 
-function automaticTest(kind) {
+function automaticTest(kind, groupKey) {
   return api(botPath(`/api/automatic-messages/send/${kind}`), {
     method: 'POST',
     body: JSON.stringify({
-      groupKey: selectedGroup(),
+      groupKey,
       confirmed: true,
       fictitiousName: 'Integrante de prueba',
     }),
   });
 }
 
-function sendPollTest() {
+function sendPollTest(groupKey) {
   const templateId = Number(polls[0]?.id);
   if (!Number.isInteger(templateId) || templateId <= 0)
     throw new Error('No hay encuestas activas disponibles.');
   return api(botPath('/api/polls/send-test'), {
     method: 'POST',
     body: JSON.stringify({
-      groupKey: selectedGroup(),
+      groupKey,
       templateId,
       countsAsDaily: false,
       confirmed: true,
@@ -200,10 +274,10 @@ function sendPollTest() {
   });
 }
 
-function sendDigestTest(period) {
+function sendDigestTest(period, groupKey) {
   return api(botPath('/api/automatic-messages/digests/send-test'), {
     method: 'POST',
-    body: JSON.stringify({ groupKey: selectedGroup(), period, confirmed: true }),
+    body: JSON.stringify({ groupKey, period, confirmed: true }),
   });
 }
 
@@ -219,6 +293,7 @@ async function loadModule() {
     ]);
     authorizedGroups = automaticData.authorizedGroups || digestData.authorizedGroups || [];
     polls = (pollData.templates || []).filter((item) => item.enabled);
+    renderGroupSelector();
     renderTests();
   } catch (error) {
     showNotice(error.message, true);
@@ -230,7 +305,6 @@ function bindModule() {
     activateModule();
     void loadModule();
   });
-  query('#lab-refresh')?.addEventListener('click', () => void loadModule());
   query('#section-select')?.addEventListener('change', (event) => {
     if (event.target.value === 'automation-lab') {
       activateModule();

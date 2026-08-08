@@ -388,8 +388,8 @@
                 <label class="identity-behavior-prompt"
                   >Prompt de comportamiento<textarea
                     name="objective"
-                    maxlength="1200"
-                    rows="8"
+                    rows="12"
+                    data-auto-grow
                     required
                   ></textarea>
                 </label>
@@ -807,6 +807,9 @@
                   <p class="eyebrow">Consultas respondidas</p>
                   <h2>Historial de preguntas</h2>
                 </div>
+                <button type="button" id="refresh-cached-answers" class="secondary">
+                  Actualizar historial
+                </button>
               </div>
               <div
                 class="table-shell"
@@ -832,7 +835,36 @@
             </section>
 
             <section id="ai-provider-content" class="hidden">
-              <form id="ai-provider-form" class="card inset ai-provider-form">
+              <article class="card inset ai-provider-summary" aria-live="polite">
+                <div>
+                  <p class="eyebrow">Inteligencia artificial actual</p>
+                  <div class="ai-provider-current-line">
+                    <strong id="ai-provider-current-name">Sin IA configurada</strong>
+                  </div>
+                </div>
+                <div class="ai-token-display-line" style="font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+                  <span class="muted">Token: </span>
+                  <span id="ai-provider-token-status">No hay token configurado</span>
+                </div>
+                <div class="ai-provider-summary-actions">
+                  <button id="toggle-ai-enabled" class="ai-enable-action" type="button">
+                    Activar IA
+                  </button>
+                  <button id="test-ai-connection" class="secondary" type="button">
+                    Probar conexión
+                  </button>
+                  <button
+                    id="open-ai-provider-form"
+                    class="secondary"
+                    type="button"
+                    aria-controls="ai-provider-form"
+                    aria-expanded="false"
+                  >
+                    Cambiar IA
+                  </button>
+                </div>
+              </article>
+              <form id="ai-provider-form" class="card inset ai-provider-form hidden">
                 <h3>Configuración de inteligencia artificial</h3>
                 <label>
                   Nombre de la IA
@@ -852,14 +884,10 @@
                 <p id="ai-token-help" class="muted">
                   Agrega el token para poder activar la inteligencia artificial.
                 </p>
-                <label>
-                  Funcionamiento
-                  <select name="enabled" required>
-                    <option value="yes">Activada</option>
-                    <option value="no">Desactivada</option>
-                  </select>
-                </label>
                 <div class="actions">
+                  <button id="cancel-ai-provider-form" class="secondary" type="button">
+                    Cancelar
+                  </button>
                   <button type="submit">Guardar configuración</button>
                 </div>
               </form>
@@ -999,22 +1027,20 @@
                   <p class="eyebrow">Programación segura</p>
                   <h2>Automatizaciones</h2>
                 </div>
-                <span class="timezone-badge">America/Santiago</span>
               </div>
               <p class="muted">
                 Configura cada automatización por separado. Las pruebas se ejecutan desde Centro de
                 pruebas.
               </p>
               <form id="automatic-messages-form" class="automatic-messages-layout">
-                <article class="card inset poll-date-schedule bot-only hidden" data-module="polls">
+                <article
+                  class="card inset poll-weekly-schedule bot-only hidden"
+                  data-module="polls"
+                >
                   <div class="section-heading">
-                    <div><h3>Encuestas por fecha</h3></div>
+                    <div><h3>Programación semanal de encuestas</h3></div>
                   </div>
-                  <div class="form-row">
-                    <label>Fecha futura<input name="localDate" type="date" /></label>
-                    <label>Encuesta<select name="templateId"></select></label>
-                  </div>
-                  <div id="poll-overrides-list" class="list"></div>
+                  <div id="poll-weekly-schedule" class="poll-weekly-grid"></div>
                 </article>
                 <article class="card inset automatic-card" data-collapsible data-open="true">
                   <div class="section-heading">
@@ -1088,10 +1114,6 @@
                       required
                     ></textarea>
                   </label>
-                  <div class="preview">
-                    <span>Vista previa del día</span>
-                    <p id="greeting-preview"></p>
-                  </div>
                 </article>
 
                 <article class="card inset automatic-card" data-collapsible>
@@ -1125,10 +1147,6 @@
                       required
                     ></textarea>
                   </label>
-                  <div class="preview">
-                    <span>Vista previa</span>
-                    <p id="rules-preview"></p>
-                  </div>
                 </article>
 
                 <div class="automatic-save-bar">
@@ -1148,7 +1166,6 @@
                   <p class="eyebrow">Participación diaria</p>
                   <h2>Encuestas</h2>
                 </div>
-                <span class="timezone-badge">America/Santiago</span>
               </div>
               <p class="muted">
                 Envía encuestas nativas solamente a grupos activos y no bloqueados. No se guardan
@@ -1168,41 +1185,27 @@
                     </button>
                   </div>
                 </div>
-                <form id="poll-template-form" class="hidden">
-                  <input name="id" type="hidden" />
-                  <label>Pregunta<input name="question" maxlength="200" required /> </label>
-                  <div class="form-row">
-                    <label>Categoría<select name="category" required></select></label>
-                    <label>Excluir hasta<input name="disabledUntil" type="datetime-local" /></label>
-                  </div>
-                  <label
-                    >Opciones, una por línea<textarea
-                      name="options"
-                      maxlength="1212"
-                      rows="8"
-                      required
-                    ></textarea>
-                  </label>
-                  <p class="muted">El orden de las líneas será el orden de las alternativas.</p>
-                  <div class="checks">
-                    <label><input name="enabled" type="checkbox" checked /> Activa</label>
-                    <label><input name="favorite" type="checkbox" /> Favorita</label>
+                <div id="poll-template-editor-host">
+                  <form id="poll-template-form" class="poll-template-editor hidden">
+                    <input name="id" type="hidden" />
+                    <label>Pregunta<input name="question" maxlength="200" required /> </label>
                     <label
-                      ><input name="allowMultipleAnswers" type="checkbox" /> Permitir varias
-                      respuestas</label
-                    >
-                  </div>
-                  <div class="preview">
-                    <span>Vista previa</span>
-                    <p id="poll-template-preview"></p>
-                  </div>
-                  <div class="actions">
-                    <button type="submit">Guardar plantilla</button>
-                    <button id="cancel-poll-template" class="secondary" type="button">
-                      Cancelar
-                    </button>
-                  </div>
-                </form>
+                      >Opciones, una por línea<textarea
+                        name="options"
+                        maxlength="1212"
+                        rows="8"
+                        required
+                      ></textarea>
+                    </label>
+                    <p class="muted">El orden de las líneas será el orden de las alternativas.</p>
+                    <div class="actions">
+                      <button type="submit">Guardar encuesta</button>
+                      <button id="cancel-poll-template" class="secondary" type="button">
+                        Cancelar
+                      </button>
+                    </div>
+                  </form>
+                </div>
                 <div id="poll-templates-list" class="list"></div>
               </article>
 

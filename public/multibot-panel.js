@@ -900,6 +900,7 @@ function fillProfile(profile) {
     if (!input) return;
     input.value = Array.isArray(value) ? value.join('\n') : (value ?? '');
   });
+  resizeAutoGrowTextarea(form.elements.objective);
   const fixedNeurobotIdentity = panelState.selectedBotId === 'neurobot';
   const botName = form.elements.botName;
   const activationAlias = form.elements.activationAlias;
@@ -912,6 +913,12 @@ function fillProfile(profile) {
   document
     .querySelector('#neurobot-alias-help')
     ?.classList.toggle('hidden', !fixedNeurobotIdentity);
+}
+
+function resizeAutoGrowTextarea(textarea) {
+  textarea.style.height = 'auto';
+  const newHeight = Math.min(Math.max(textarea.scrollHeight, 280), 440);
+  textarea.style.height = `${newHeight}px`;
 }
 
 async function loadWhatsApp() {
@@ -1035,79 +1042,86 @@ function enableInlineCachedAnswerEditing(answer, answerText, editor, saveStatus)
 
 async function loadCachedAnswers(search = '') {
   if (!panelState.selectedBotId) return;
-  const suffix = search ? `?search=${encodeURIComponent(search)}` : '';
-  const result = await panelApi(
-    `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers${suffix}`,
-  );
-  panelState.cachedAnswers = result.answers;
   const target = document.querySelector('#cached-answers-list');
-  target.replaceChildren();
-  result.answers.forEach((answer) => {
-    const row = node('tr');
-    const question = node('td', undefined, 'question-cell');
-    const answerText = node('p', answer.answer, 'cached-answer-text');
-    const editor = node('textarea', undefined, 'cached-answer-editor hidden');
-    editor.value = answer.answer;
-    editor.rows = 5;
-    editor.maxLength = 8000;
-    editor.setAttribute('aria-label', `Editar respuesta para: ${answer.canonicalQuestion}`);
-    const saveStatus = node('small', '', 'inline-save-status');
-    saveStatus.setAttribute('aria-live', 'polite');
-    const startEditing = enableInlineCachedAnswerEditing(answer, answerText, editor, saveStatus);
-    question.append(node('strong', answer.canonicalQuestion), answerText, editor, saveStatus);
-
-    const semanticallyRepeated = answer.variants.length > 0;
-    const repeated = answer.hitCount > 0 || semanticallyRepeated;
-    const repeatedLabel = semanticallyRepeated ? 'Sí · similar' : repeated ? 'Sí' : 'No';
-    const repeatedCell = node('td');
-    const repeatedBadge = node(
-      'span',
-      repeatedLabel,
-      `status-badge repeat-status ${repeated ? 'repeated' : 'inactive'}`,
+  if (target) target.classList.add('loading-pulse');
+  try {
+    const suffix = search ? `?search=${encodeURIComponent(search)}` : '';
+    const result = await panelApi(
+      `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers${suffix}`,
     );
-    if (semanticallyRepeated) {
-      repeatedBadge.title = `Preguntas similares detectadas: ${answer.variants.join(' · ')}`;
-    }
-    repeatedCell.append(repeatedBadge);
+    panelState.cachedAnswers = result.answers;
+    if (target) {
+      target.replaceChildren();
+      result.answers.forEach((answer) => {
+        const row = node('tr');
+        const question = node('td', undefined, 'question-cell');
+        const answerText = node('p', answer.answer, 'cached-answer-text');
+        const editor = node('textarea', undefined, 'cached-answer-editor hidden');
+        editor.value = answer.answer;
+        editor.rows = 5;
+        editor.maxLength = 8000;
+        editor.setAttribute('aria-label', `Editar respuesta para: ${answer.canonicalQuestion}`);
+        const saveStatus = node('small', '', 'inline-save-status');
+        saveStatus.setAttribute('aria-live', 'polite');
+        const startEditing = enableInlineCachedAnswerEditing(answer, answerText, editor, saveStatus);
+        question.append(node('strong', answer.canonicalQuestion), answerText, editor, saveStatus);
 
-    const actionsCell = node('td', undefined, 'history-actions-cell');
-    const actions = node('div', undefined, 'actions history-actions');
-    actions.append(
-      actionButton('Editar', 'history-edit-action', startEditing),
-      actionButton('Eliminar', 'danger', async () => {
-        if (
-          !(await confirmAction('¿Eliminar esta pregunta y su respuesta del historial?', {
-            title: 'Eliminar historial',
-            confirmLabel: 'Eliminar',
-          }))
-        )
-          return;
-        await panelApi(
-          `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers/${answer.id}`,
-          { method: 'DELETE' },
+        const semanticallyRepeated = answer.variants.length > 0;
+        const repeated = answer.hitCount > 0 || semanticallyRepeated;
+        const repeatedLabel = semanticallyRepeated ? 'Sí · similar' : repeated ? 'Sí' : 'No';
+        const repeatedCell = node('td');
+        const repeatedBadge = node(
+          'span',
+          repeatedLabel,
+          `status-badge repeat-status ${repeated ? 'repeated' : 'inactive'}`,
         );
-        await loadCachedAnswers();
-        notify('Respuesta eliminada.');
-      }),
-    );
-    actionsCell.append(actions);
-    row.append(
-      question,
-      node('td', answer.category),
-      node('td', String(answer.hitCount), 'numeric-cell'),
-      repeatedCell,
-      node('td', answer.status),
-      node('td', safeDate(answer.updatedAt)),
-      actionsCell,
-    );
-    target.append(row);
-  });
-  if (result.answers.length === 0) {
-    const row = node('tr');
-    const cell = node('td', 'Todavía no hay preguntas registradas.', 'empty-table-cell');
-    cell.colSpan = 7;
-    row.append(cell);
-    target.append(row);
+        if (semanticallyRepeated) {
+          repeatedBadge.title = `Preguntas similares detectadas: ${answer.variants.join(' · ')}`;
+        }
+        repeatedCell.append(repeatedBadge);
+
+        const actionsCell = node('td', undefined, 'history-actions-cell');
+        const actions = node('div', undefined, 'actions history-actions');
+        actions.append(
+          actionButton('Editar', 'history-edit-action', startEditing),
+          actionButton('Eliminar', 'danger', async () => {
+            if (
+              !(await confirmAction('¿Eliminar esta pregunta y su respuesta del historial?', {
+                title: 'Eliminar historial',
+                confirmLabel: 'Eliminar',
+              }))
+            )
+              return;
+            await panelApi(
+              `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers/${answer.id}`,
+              { method: 'DELETE' },
+            );
+            await loadCachedAnswers();
+            notify('Respuesta eliminada.');
+          }),
+        );
+        actionsCell.append(actions);
+        row.append(
+          question,
+          node('td', answer.category),
+          node('td', String(answer.hitCount), 'numeric-cell'),
+          repeatedCell,
+          node('td', answer.status),
+          node('td', safeDate(answer.updatedAt)),
+          actionsCell,
+        );
+        target.append(row);
+      });
+      if (result.answers.length === 0) {
+        const row = node('tr');
+        const cell = node('td', 'Todavía no hay preguntas registradas.', 'empty-table-cell');
+        cell.colSpan = 7;
+        row.append(cell);
+        target.append(row);
+      }
+    }
+  } finally {
+    if (target) target.classList.remove('loading-pulse');
   }
 }
 
@@ -1469,13 +1483,36 @@ async function loadAI() {
   const currentProvider = result.currentProvider;
   panelState.aiSettings = result.settings;
   panelState.aiCurrentProvider = currentProvider;
+  document.querySelector('#ai-provider-current-name').textContent =
+    currentProvider.name || 'Sin IA configurada';
+  const toggleButton = document.querySelector('#toggle-ai-enabled');
+  toggleButton.textContent = currentProvider.enabled ? 'Desactivar IA' : 'Activar IA';
+  toggleButton.classList.toggle('danger-primary', currentProvider.enabled);
+  toggleButton.classList.toggle('ai-enable-action', !currentProvider.enabled);
+  toggleButton.setAttribute('aria-pressed', String(currentProvider.enabled));
   const providerForm = document.querySelector('#ai-provider-form');
   providerForm.elements.displayName.value = currentProvider.name || 'Groq';
   providerForm.elements.apiKey.value = '';
-  providerForm.elements.enabled.value = currentProvider.enabled ? 'yes' : 'no';
   document.querySelector('#ai-token-help').textContent = currentProvider.configured
     ? 'El token está configurado. Déjalo vacío para conservarlo o escribe uno nuevo para cambiarlo.'
     : 'Agrega el token para poder activar la inteligencia artificial.';
+  const tokenStatus = document.querySelector('#ai-provider-token-status');
+  if (tokenStatus) {
+    if (currentProvider.configured && currentProvider.maskedToken) {
+      const code = document.createElement('code');
+      code.className = 'masked-token-code';
+      code.textContent = currentProvider.maskedToken;
+      tokenStatus.replaceChildren(code);
+    } else if (currentProvider.configured) {
+      const code = document.createElement('code');
+      code.className = 'masked-token-code';
+      code.textContent = '••••••••••••••••';
+      tokenStatus.replaceChildren(code);
+    } else {
+      tokenStatus.textContent = 'No hay token configurado';
+    }
+  }
+  setAIProviderEditorOpen(false);
   const providerHistory = document.querySelector('#ai-provider-history');
   providerHistory.replaceChildren();
   result.providerHistory.forEach((change) => {
@@ -1501,6 +1538,23 @@ async function loadAI() {
   if (result.recentEvents.length === 0) {
     statisticsTarget.append(emptyState('No hay eventos agregados recientes.'));
   }
+}
+
+function setAIProviderEditorOpen(open) {
+  const form = document.querySelector('#ai-provider-form');
+  const summary = document.querySelector('.ai-provider-summary');
+  const button = document.querySelector('#open-ai-provider-form');
+  form.classList.toggle('hidden', !open);
+  if (summary) summary.classList.toggle('hidden', open);
+  button.setAttribute('aria-expanded', String(open));
+  if (open) form.elements.displayName.focus();
+}
+
+function resetAIProviderEditor() {
+  const currentProvider = panelState.aiCurrentProvider;
+  const form = document.querySelector('#ai-provider-form');
+  form.elements.displayName.value = currentProvider?.name || 'Groq';
+  form.elements.apiKey.value = '';
 }
 
 async function saveAIProviderWithCompatibility(payload) {
@@ -1762,6 +1816,54 @@ function configureForms() {
     aiSection.append(...aiProviderContent.children);
     aiProviderContent.remove();
   }
+  document.querySelectorAll('textarea[data-auto-grow]').forEach((textarea) => {
+    textarea.addEventListener('input', () => resizeAutoGrowTextarea(textarea));
+  });
+  document
+    .querySelector('#open-ai-provider-form')
+    .addEventListener('click', () => setAIProviderEditorOpen(true));
+  document.querySelector('#cancel-ai-provider-form').addEventListener('click', () => {
+    resetAIProviderEditor();
+    setAIProviderEditorOpen(false);
+  });
+  document.querySelector('#test-ai-connection')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    if (!panelState.selectedBotId) return;
+    button.disabled = true;
+    try {
+      const result = await panelApi(
+        `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/test-connection`,
+        { method: 'POST', body: '{}' },
+      );
+      if (result.connection === 'successful') {
+        notify('Conexión con la API de Groq exitosa.');
+      } else {
+        notify('No se pudo conectar con la API de Groq. Verifica el token.', true);
+      }
+    } catch (error) {
+      notify(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  document.querySelector('#toggle-ai-enabled').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const enabled = !panelState.aiCurrentProvider?.enabled;
+    button.disabled = true;
+    try {
+      await saveAIProviderWithCompatibility({
+        displayName: panelState.aiCurrentProvider?.name || 'Groq',
+        enabled,
+      });
+      await Promise.all([loadAI(), loadBotSummary(false), loadBots()]);
+      notify(`Inteligencia artificial ${enabled ? 'activada' : 'desactivada'}.`);
+    } catch (error) {
+      await loadAI().catch(() => {});
+      notify(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  });
   document.querySelector('#section-moderation')?.remove();
   document
     .querySelector('#back-to-assistants')
@@ -2050,14 +2152,15 @@ function configureForms() {
     const apiKey = form.elements.apiKey.value.trim();
     const payload = {
       displayName: form.elements.displayName.value.trim(),
-      enabled: form.elements.enabled.value === 'yes',
+      enabled: Boolean(panelState.aiCurrentProvider?.enabled),
       ...(apiKey ? { apiKey } : {}),
     };
     try {
       await saveAIProviderWithCompatibility(payload);
       form.elements.apiKey.value = '';
       await Promise.all([loadAI(), loadBotSummary(false), loadBots()]);
-      notify('Configuración de inteligencia artificial guardada.');
+      notify('Configuración actualizada.');
+      setAIProviderEditorOpen(false);
     } catch (error) {
       form.elements.apiKey.value = '';
       notify(error.message, true);
@@ -2290,6 +2393,22 @@ function configureForms() {
   document.querySelector('#refresh-bot-groups').addEventListener('click', () => {
     void loadWhatsApp().catch((error) => notify(error.message, true));
   });
+  const refreshCachedAnswersBtn = document.querySelector('#refresh-cached-answers');
+  if (refreshCachedAnswersBtn) {
+    refreshCachedAnswersBtn.addEventListener('click', async () => {
+      try {
+        refreshCachedAnswersBtn.disabled = true;
+        refreshCachedAnswersBtn.textContent = '🔄 Actualizando...';
+        await loadCachedAnswers();
+        notify('Historial de preguntas actualizado.');
+      } catch (error) {
+        notify(error.message, true);
+      } finally {
+        refreshCachedAnswersBtn.disabled = false;
+        refreshCachedAnswersBtn.textContent = 'Actualizar historial';
+      }
+    });
+  }
 }
 
 function clearMenu() {

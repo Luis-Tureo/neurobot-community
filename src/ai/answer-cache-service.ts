@@ -75,6 +75,69 @@ export class AnswerCacheService {
     return saved;
   }
 
+  public saveLocalAnswer(
+    question: string,
+    responseMessage: string,
+    category = 'General',
+    reason = 'LOCAL_RESPONSE',
+  ): CachedAnswer | null {
+    if (!isSafeQuestionToLog(question)) return null;
+    const normalized = normalizeQuestionForCache(question);
+    const hash = hashNormalizedQuestion(normalized);
+    const existing = this.database.getCachedAnswerByHash(this.botId, hash);
+    if (existing !== null) return existing;
+    const saved = this.database.saveCachedAnswer({
+      botId: this.botId,
+      canonicalQuestion: question.trim(),
+      normalizedQuestionHash: hash,
+      answer: responseMessage,
+      category,
+      knowledgeSourceIds: [],
+      knowledgeVersion: '',
+      promptVersion: 'community-v1',
+      status: 'AUTO_VERIFIED',
+      sourceType: 'ADMIN_FAQ',
+      confidence: 1,
+    });
+    this.event('LOCAL_ANSWER_RECORDED', reason);
+    return saved;
+  }
+
+  public saveUnanswered(
+    question: string,
+    responseMessage: string,
+    category = 'General',
+    reason = 'UNANSWERED',
+  ): CachedAnswer | null {
+    if (!isSafeQuestionToLog(question)) return null;
+    const normalized = normalizeQuestionForCache(question);
+    const hash = hashNormalizedQuestion(normalized);
+    const existing = this.database.getCachedAnswerByHash(this.botId, hash);
+    if (
+      existing !== null &&
+      ['ADMIN_APPROVED', 'ADMIN_EDITED', 'DISABLED'].includes(existing.status)
+    ) {
+      return existing;
+    }
+    const saved = this.database.saveCachedAnswer({
+      botId: this.botId,
+      canonicalQuestion: question.trim(),
+      normalizedQuestionHash: hash,
+      answer: responseMessage,
+      category,
+      knowledgeSourceIds: [],
+      knowledgeVersion: '',
+      promptVersion: 'community-v1',
+      status: 'INVALIDATED',
+      sourceType: 'AI_GENERATED',
+      confidence: 0,
+      invalidatedAt: new Date().toISOString(),
+      invalidationReason: reason,
+    });
+    this.event('UNANSWERED_QUESTION_RECORDED', reason);
+    return saved;
+  }
+
   public async singleFlight<T>(
     question: string,
     operation: () => Promise<T>,
@@ -180,21 +243,47 @@ export function hashNormalizedQuestion(normalizedQuestion: string): string {
 
 export function isCommunityGreeting(question: string): boolean {
   const normalized = normalizeQuestionForCache(question).replace(/\s*,\s*/gu, ' ');
-  return new Set([
-    'hola',
-    'holi',
-    'buenos dias',
-    'buen dia',
-    'buenas',
-    'buenas tardes',
-    'buenas noches',
-    'hola neurobot',
-    'hola bot',
-    'quien eres',
-    'para que sirves',
-    'que puedes hacer',
-    'como funcionas',
-  ]).has(normalized);
+  if (
+    new Set([
+      'hola',
+      'holi',
+      'buenos dias',
+      'buen dia',
+      'buenas',
+      'buenas tardes',
+      'buenas noches',
+      'hola neurobot',
+      'hola bot',
+      'quien eres',
+      'para que sirves',
+      'que puedes hacer',
+      'como funcionas',
+      'de que se trata este grupo',
+      'de que trata este grupo',
+      'de que es este grupo',
+      'de que trata el grupo',
+      'de que es el grupo',
+      'de que se trata la comunidad',
+      'de que trata la comunidad',
+      'de que es la comunidad',
+      'de que se trata este chat',
+      'de que trata este chat',
+      'de que se trata',
+      'de que trata',
+      'cual es el objetivo de este grupo',
+      'cual es el objetivo del grupo',
+      'cual es el proposito de este grupo',
+      'cual es el proposito del grupo',
+      'para que es este grupo',
+      'para que sirve este grupo',
+      'que hacen en este grupo',
+    ]).has(normalized)
+  ) {
+    return true;
+  }
+  return /^(?:de\s+qu[eé]\s+(?:se\s+trata|trata|es)|cu[aá]l\s+es\s+el\s+(?:objetivo|prop[oó]sito)\s+de)\s+(?:este\s+grupo|el\s+grupo|la\s+comunidad|este\s+chat)$/iu.test(
+    normalized,
+  );
 }
 
 export function containsRestrictedClinicalAcronym(question: string): boolean {
@@ -216,6 +305,14 @@ export function hasReviewedAcronymSource(
   );
 }
 
+export function isSafeQuestionToLog(question: string): boolean {
+  if (!question || question.trim().length < 3) return false;
+  if (/[\w.+-]+@[\w.-]+\.[a-z]{2,}/iu.test(question)) return false;
+  if (/\b(?:\+?\d[\s.-]?){6,}\b/u.test(question)) return false;
+  if (/\b(?:me llamo|soy|vivo en|direcci[oó]n|rut|pasaporte|mi rut|mi direcci[oó]n|mi pasaporte|mi clave|mi contrase[nñ]a|mi tel[eé]fono)\b/iu.test(question)) return false;
+  return true;
+}
+
 export function isSafeReusableAnswer(question: string, answer: string): boolean {
   const combined = `${question}\n${answer}`;
   if (containsRestrictedClinicalAcronym(question)) return false;
@@ -227,7 +324,7 @@ export function isSafeReusableAnswer(question: string, answer: string): boolean 
     return false;
   if (/[\w.+-]+@[\w.-]+\.[a-z]{2,}/iu.test(combined)) return false;
   if (/\b(?:\+?\d[\s.-]?){6,}\b/u.test(combined)) return false;
-  if (/\b(?:mi|me llamo|soy|vivo en|direcci[oó]n|rut|pasaporte)\b/iu.test(question)) return false;
+  if (/\b(?:me llamo|soy|vivo en|direcci[oó]n|rut|pasaporte|mi rut|mi direcci[oó]n|mi pasaporte|mi clave|mi contrase[nñ]a|mi tel[eé]fono)\b/iu.test(question)) return false;
   return !hasIncorrectTlpExpansion(answer);
 }
 

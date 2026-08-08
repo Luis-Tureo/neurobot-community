@@ -33,7 +33,7 @@ const environmentSchema = z.object({
   CHROME_EXECUTABLE_PATH: optionalTrimmedString,
   AI_PROVIDER: z.enum(['groq', 'disabled']).default('groq'),
   GROQ_API_KEY: optionalTrimmedString,
-  GROQ_MODEL: z.string().trim().min(1).max(120).default('llama-3.1-8b-instant'),
+  GROQ_MODEL: z.string().trim().min(1).max(120).default('openai/gpt-oss-20b'),
   APP_ENCRYPTION_KEY: optionalTrimmedString,
 });
 

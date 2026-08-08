@@ -1064,7 +1064,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
       const administratorId = isGroup
         ? await this.resolveGroupAdministratorIdentity(chatId, participantId)
         : null;
-      const botMention = this.detectBotMention(readUnknown(message, 'mentionedIds'));
+      const botMention = this.detectBotMention(message);
       const isReplyToBot = await this.detectReplyToBot(message);
 
       const incoming: IncomingMessage = {
@@ -1436,12 +1436,32 @@ export class WhatsAppWebAdapter implements MessagingClient {
     }
   }
 
-  private detectBotMention(value: unknown): { detected: boolean; token?: string } {
-    if (!Array.isArray(value) || this.botIdentifiers.size === 0) return { detected: false };
-    for (const entry of value) {
+  private detectBotMention(message: object): { detected: boolean; token?: string } {
+    if (this.botIdentifiers.size === 0) return { detected: false };
+    const candidates: unknown[] = [];
+    const directKeys = [
+      'mentionedIds',
+      'mentionedJidList',
+      'mentionedLidList',
+      'mentions',
+      'mentionedJids',
+    ];
+    for (const key of directKeys) {
+      const val = readUnknown(message, key);
+      if (Array.isArray(val)) candidates.push(...val);
+    }
+    const data = readUnknown(message, '_data');
+    if (typeof data === 'object' && data !== null) {
+      for (const key of directKeys) {
+        const val = readUnknown(data, key);
+        if (Array.isArray(val)) candidates.push(...val);
+      }
+    }
+    for (const entry of candidates) {
       const id = getSerializedId(entry);
-      if (id === null) continue;
-      if (this.isOwnIdentifier(id)) return { detected: true, token: mentionToken(id) };
+      if (id !== null && this.isOwnIdentifier(id)) {
+        return { detected: true, token: mentionToken(id) };
+      }
     }
     return { detected: false };
   }

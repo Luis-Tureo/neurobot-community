@@ -9,7 +9,7 @@ describe('persistencia SQLite', () => {
     database.migrate();
     database.migrate();
     expect(database.getMigrationVersions()).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
     ]);
     expect(database.getBotProfile('neurobot')).toMatchObject({
       botName: 'Neurobot',
@@ -40,7 +40,21 @@ describe('persistencia SQLite', () => {
       timezone: 'America/Santiago',
       toleranceMinutes: 30,
       selectionMode: 'SAME_FOR_ALL',
+      weeklySchedule: [],
     });
+    database.close();
+  });
+
+  it('guarda prompts de comportamiento extensos sin truncarlos', () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    const profile = database.getBotProfile('neurobot');
+    const objective = `INSTRUCCIONES\n${'Comportamiento detallado del asistente.\n'.repeat(8_000)}`;
+
+    const saved = database.saveAssistantProfile({ ...profile, objective });
+
+    expect(saved.objective).toBe(objective.trim());
+    expect(database.getBotProfile('neurobot').objective).toBe(objective.trim());
     database.close();
   });
 

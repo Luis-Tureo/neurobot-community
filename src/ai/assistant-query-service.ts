@@ -88,6 +88,7 @@ export class AssistantQueryService {
     if (this.botId === 'neurobot' && isCommunityGreeting(question)) {
       this.log('COMMUNITY_GREETING_LOCAL_RESPONSE', 'LOCAL_RESPONSE', groupHash, userHash);
       this.log('AI_CALL_NOT_REQUIRED', 'GREETING', groupHash, userHash);
+      this.answerCache.saveLocalAnswer(question, profile.communityGreetingMessage, 'Presentación', 'COMMUNITY_GREETING');
       return { text: profile.communityGreetingMessage, code: 'COMMUNITY_GREETING' };
     }
     const cached = this.answerCache.find(profile.id, question, now);
@@ -107,12 +108,14 @@ export class AssistantQueryService {
     if (isMedicalQuestion(question)) {
       this.log('AI_SCOPE_REJECTED', 'MEDICAL_SCOPE', groupHash, userHash);
       this.log('AI_CALL_NOT_REQUIRED', 'MEDICAL_SCOPE', groupHash, userHash);
+      this.answerCache.saveUnanswered(question, profile.medicalMessage, 'Salud y medicina', 'MEDICAL_SCOPE_REJECTED');
       return { text: profile.medicalMessage, code: 'MEDICAL_SCOPE_REJECTED' };
     }
     if (isClearlyOutOfScope(question, profile)) {
       this.log('AI_SCOPE_REJECTED', 'OUT_OF_SCOPE', groupHash, userHash);
       this.log('OUT_OF_SCOPE_LOCAL_RESPONSE', 'OUT_OF_SCOPE', groupHash, userHash);
       this.log('AI_CALL_NOT_REQUIRED', 'OUT_OF_SCOPE', groupHash, userHash);
+      this.answerCache.saveUnanswered(question, profile.outOfScopeMessage, 'Fuera de ámbito', 'OUT_OF_SCOPE');
       return { text: profile.outOfScopeMessage, code: 'OUT_OF_SCOPE' };
     }
 
@@ -126,6 +129,7 @@ export class AssistantQueryService {
     if (fragments.length === 0) {
       this.log('KNOWLEDGE_NOT_FOUND', 'NO_MATCH', groupHash, userHash);
       this.log('AI_CALL_NOT_REQUIRED', 'NO_INFORMATION', groupHash, userHash);
+      this.answerCache.saveUnanswered(question, profile.noInformationMessage, 'Sin información', 'KNOWLEDGE_NOT_FOUND');
       return { text: profile.noInformationMessage, code: 'KNOWLEDGE_NOT_FOUND' };
     }
     if (
@@ -134,15 +138,18 @@ export class AssistantQueryService {
     ) {
       this.log('KNOWLEDGE_NOT_FOUND', 'UNREVIEWED_CLINICAL_ACRONYM', groupHash, userHash);
       this.log('AI_CALL_NOT_REQUIRED', 'UNREVIEWED_CLINICAL_ACRONYM', groupHash, userHash);
+      this.answerCache.saveUnanswered(question, profile.noInformationMessage, 'Acrónimo clínico', 'UNREVIEWED_CLINICAL_ACRONYM');
       return { text: profile.noInformationMessage, code: 'KNOWLEDGE_NOT_FOUND' };
     }
     const direct = directKnowledgeAnswer(question, fragments, settings);
     if (direct !== null) {
       this.log('KNOWLEDGE_DIRECT_RESPONSE', 'LOCAL_RESPONSE', groupHash, userHash);
       this.log('AI_CALL_NOT_REQUIRED', 'KNOWLEDGE_DIRECT', groupHash, userHash);
+      this.answerCache.saveLocalAnswer(question, direct, fragments[0]?.category ?? 'General', 'KNOWLEDGE_DIRECT');
       return { text: direct, code: 'KNOWLEDGE_DIRECT' };
     }
     if (!settings.enabled || settings.provider === 'disabled' || !this.provider.isConfigured()) {
+      this.answerCache.saveUnanswered(question, profile.aiErrorMessage, 'Error de proveedor', 'AI_DISABLED');
       return { text: profile.aiErrorMessage, code: 'AI_DISABLED' };
     }
     this.logger.info(
@@ -187,6 +194,7 @@ export class AssistantQueryService {
           if (!decision.allowed) {
             this.log(limitEvent(decision.code), decision.code, groupHash, userHash);
             this.log('AI_LIMIT_REACHED', decision.code, groupHash, userHash);
+            this.answerCache.saveUnanswered(question, profile.limitMessage, 'Límite diario', decision.code);
             return { text: profile.limitMessage, code: 'LIMIT_REACHED' };
           }
           this.log('AI_QUOTA_RESERVED', 'RESERVED', groupHash, userHash);
@@ -263,6 +271,7 @@ export class AssistantQueryService {
         providerCode === 'AI_PROVIDER_RATE_LIMITED'
           ? 'Hay mucha actividad en el servicio de inteligencia artificial. Intenta nuevamente en unos minutos.'
           : 'No pude consultar la inteligencia artificial en este momento. Intenta nuevamente en 1 minuto.';
+      this.answerCache.saveUnanswered(question, text, 'Error de IA', providerCode);
       return { text, code: 'AI_ERROR' };
     }
   }

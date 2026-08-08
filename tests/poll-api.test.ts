@@ -6,8 +6,8 @@ import { GroupDiscoveryService } from '../src/core/group-discovery-service.js';
 import { PollRepository } from '../src/core/poll-repository.js';
 import { PollScheduler } from '../src/core/poll-scheduler.js';
 import { PollSender } from '../src/core/poll-sender.js';
-import { PollService } from '../src/core/poll-service.js';
 import { PollTemplateSelector } from '../src/core/poll-template-selector.js';
+import { PollService } from '../src/core/poll-service.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
@@ -92,12 +92,14 @@ describe('API administrativa de encuestas', () => {
     });
     expect(view.json().templates).toHaveLength(36);
     expect(view.body).not.toContain('grupo-secreto@g.us');
+    const templateId = Number(view.json().templates[0].id);
     const configuration = {
       enabled: true,
       sendTime: '14:10',
       timezone: 'America/Santiago',
       toleranceMinutes: 20,
       selectionMode: 'PER_GROUP',
+      weeklySchedule: [{ weekday: 1, sendTime: '14:10', templateIds: [templateId] }],
     };
     expect(
       (

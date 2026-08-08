@@ -74,7 +74,7 @@ const profileFieldsSchema = z
     description: z.string().trim().min(1).max(1000),
     organizationType: organizationTypeSchema,
     industry: z.string().trim().min(1).max(160),
-    objective: z.string().trim().min(1).max(1200),
+    objective: z.string().trim().min(1),
     allowedTopics: z.array(z.string().trim().min(1).max(180)).max(30),
     excludedTopics: z.array(z.string().trim().min(1).max(180)).max(30),
     tone: z.string().trim().min(1).max(300),
@@ -517,6 +517,17 @@ const pollConfigurationSchema = z
     timezone: z.string().trim().min(1).max(80),
     toleranceMinutes: z.number().int().min(0).max(180),
     selectionMode: z.enum(['SAME_FOR_ALL', 'PER_GROUP']),
+    weeklySchedule: z
+      .array(
+        z
+          .object({
+            weekday: z.number().int().min(0).max(6),
+            sendTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u),
+            templateIds: z.array(z.number().int().positive()).min(1),
+          })
+          .strict(),
+      )
+      .max(7),
   })
   .strict();
 
@@ -1424,6 +1435,22 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       providerHealth: context.database.getAIProviderQueueHealth(botId),
     };
     if (!configured) queue.providerHealth = { ...queue.providerHealth, state: 'NOT_CONFIGURED' };
+    let maskedToken: string | null = null;
+    if (credential.mode === 'global' && process.env.GROQ_API_KEY) {
+      maskedToken = maskApiKey(process.env.GROQ_API_KEY);
+    } else if (
+      credential.mode === 'per_bot' &&
+      credential.encryptedApiKey &&
+      context.secretVault?.isConfigured()
+    ) {
+      try {
+        const rawKey = context.secretVault.decrypt(credential.encryptedApiKey, `bot:${botId}:groq`);
+        maskedToken = maskApiKey(rawKey);
+      } catch {
+        maskedToken = null;
+      }
+    }
+
     return {
       developmentMode: context.developmentMode,
       settings,
@@ -1446,6 +1473,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         name: credential.displayName,
         configured,
         enabled: configured && settings.enabled && settings.provider === 'groq',
+        maskedToken,
       },
       providerHistory: context.database.listAIProviderChanges(botId),
     };
@@ -1532,12 +1560,36 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         );
       }
       audit(context, 'bot_ai_provider_save', botId, 'ok', botId);
+      let maskedToken: string | null = null;
+      if (input.apiKey) {
+        maskedToken = maskApiKey(input.apiKey);
+      } else {
+        const currentCred = context.database.getBotEncryptedCredential(botId);
+        if (currentCred.mode === 'global' && process.env.GROQ_API_KEY) {
+          maskedToken = maskApiKey(process.env.GROQ_API_KEY);
+        } else if (
+          currentCred.mode === 'per_bot' &&
+          currentCred.encryptedApiKey &&
+          context.secretVault?.isConfigured()
+        ) {
+          try {
+            const rawKey = context.secretVault.decrypt(
+              currentCred.encryptedApiKey,
+              `bot:${botId}:groq`,
+            );
+            maskedToken = maskApiKey(rawKey);
+          } catch {
+            maskedToken = null;
+          }
+        }
+      }
       return {
         provider: {
           id: 'groq',
           name: input.displayName,
           configured: input.apiKey !== undefined || wasConfigured,
           enabled: settings.enabled,
+          maskedToken,
         },
       };
     },
@@ -3663,7 +3715,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           code: 'AUTHORIZED_GROUP_NOT_FOUND',
         });
       }
-      const gateKey = `${request.ip}:${botId}:${kind}`;
+      const gateKey = `${request.ip}:${botId}:${kind}:${input.groupKey}`;
       const now = Date.now();
       for (const [key, expiresAt] of manualAutomaticSendGate) {
         if (expiresAt <= now) manualAutomaticSendGate.delete(key);
@@ -4013,7 +4065,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       for (const [key, expiresAt] of manualPollSendGate) {
         if (expiresAt <= now) manualPollSendGate.delete(key);
       }
-      const gateKey = `${request.ip}:${botId}:poll-test`;
+      const gateKey = `${request.ip}:${botId}:poll-test:${input.groupKey}`;
       if ((manualPollSendGate.get(gateKey) ?? 0) > now) {
         return reply.code(429).send({
           error: 'Espera unos segundos antes de repetir la prueba.',
@@ -4329,6 +4381,18 @@ function isSecureCredentialRequest(request: FastifyRequest): boolean {
     hostname === '::1' ||
     hostname === '[::1]'
   );
+}
+
+function maskApiKey(apiKey: string | null | undefined): string | null {
+  if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length === 0) return null;
+  const trimmed = apiKey.trim();
+  if (trimmed.length <= 8) {
+    return '••••••••' + trimmed.slice(-2);
+  }
+  if (trimmed.startsWith('gsk_')) {
+    return 'gsk_••••••••' + trimmed.slice(-4);
+  }
+  return '••••••••••••' + trimmed.slice(-4);
 }
 
 function recordGroupTechnical(

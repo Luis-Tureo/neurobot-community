@@ -55,4 +55,11 @@ describe('panel de respuestas guardadas y consumo', () => {
     expect(html).not.toContain('name="globalDailyTokenLimit"');
     expect(javascript).not.toContain('RESTABLECER CONTADORES');
   });
+
+  it('incluye el botón de actualizar historial de preguntas', () => {
+    expect(html).toContain('id="refresh-cached-answers"');
+    expect(html).toContain('Actualizar historial');
+    expect(javascript).toContain("querySelector('#refresh-cached-answers')");
+    expect(javascript).toContain('Historial de preguntas actualizado.');
+  });
 });

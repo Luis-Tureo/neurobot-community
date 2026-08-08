@@ -17,8 +17,8 @@ import { MessageProcessor } from './message-processor.js';
 import { PollRepository } from './poll-repository.js';
 import { PollScheduler } from './poll-scheduler.js';
 import { PollSender } from './poll-sender.js';
-import { PollService } from './poll-service.js';
 import { PollTemplateSelector } from './poll-template-selector.js';
+import { PollService } from './poll-service.js';
 import { OutboundMessageQueueService } from './outbound-message-queue-service.js';
 
 export type BotInstanceOptions = {

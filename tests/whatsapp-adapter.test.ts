@@ -479,6 +479,24 @@ describe('adaptador de WhatsApp', () => {
     expect(received[0]?.id).toBe('same-event-id');
   });
 
+  it('detecta menciones del bot mediante mentionedJidList y objeto _data', async () => {
+    const { adapter, fake, received } = createSubject();
+    await adapter.initialize();
+    fake.emit('ready');
+    fake.emit(
+      'message',
+      rawMessage({
+        id: { _serialized: 'native-mention-id' },
+        author: '56987654321@c.us',
+        body: '@56900000000 hola',
+        mentionedJidList: ['56900000000@c.us'],
+      }),
+    );
+    await vi.waitFor(() => expect(received).toHaveLength(1));
+    expect(received[0]?.mentionsBot).toBe(true);
+    expect(received[0]?.botMentionToken).toBe('@56900000000');
+  });
+
   it('captura y registra una promesa rechazada por el procesador', async () => {
     const captured = createCapturedLogger();
     const { adapter, fake } = createSubject({

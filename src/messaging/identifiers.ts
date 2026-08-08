@@ -14,8 +14,17 @@ export function getSerializedId(value: unknown): string | null {
   try {
     if (typeof value === 'string') return normalizeSerialized(value);
     if (typeof value !== 'object' || value === null) return null;
-    const serialized = Reflect.get(value, '_serialized');
-    return typeof serialized === 'string' ? normalizeSerialized(serialized) : null;
+    const direct = Reflect.get(value, '_serialized');
+    if (typeof direct === 'string') return normalizeSerialized(direct);
+    const idProp = Reflect.get(value, 'id');
+    if (typeof idProp === 'string') return normalizeSerialized(idProp);
+    if (typeof idProp === 'object' && idProp !== null) {
+      const nested = Reflect.get(idProp, '_serialized');
+      if (typeof nested === 'string') return normalizeSerialized(nested);
+    }
+    const userProp = Reflect.get(value, 'user');
+    if (typeof userProp === 'string') return normalizeSerialized(`${userProp}@c.us`);
+    return null;
   } catch {
     return null;
   }

@@ -5,23 +5,42 @@ const script = readFileSync('public/multibot-panel.js', 'utf8');
 const css = readFileSync('src/admin/panel.css', 'utf8');
 
 describe('módulo mínimo de inteligencia artificial', () => {
-  it('usa un único formulario para configurar nombre, token y funcionamiento', () => {
+  it('resume la IA actual y despliega el formulario solamente para cambiarla', () => {
     expect(html).toContain('<h2>Inteligencia Artificial</h2>');
     expect(html).toContain('name="botName"');
     expect(html).toContain('name="activationAlias"');
     expect(html).toContain('Prompt de comportamiento');
+    expect(html).not.toMatch(/name="objective"[^>]*maxlength=/u);
+    expect(html).toContain('data-auto-grow');
+    expect(script).toContain('resizeAutoGrowTextarea');
     expect(html).toContain('id="ai-provider-form"');
+    expect(html).toContain('ai-provider-form hidden');
+    expect(html).toContain('id="ai-provider-current-name"');
+    expect(html).toMatch(
+      /id="ai-provider-current-name"[\s\S]*?class="ai-token-display-line"[\s\S]*?class="ai-provider-summary-actions"/u,
+    );
+    expect(html).toContain('id="toggle-ai-enabled"');
+    expect(html).toContain('class="ai-enable-action"');
+    expect(html).toContain('Cambiar IA');
+    expect(html).toContain('id="cancel-ai-provider-form"');
     expect(html).toContain('name="displayName"');
     expect(html).toContain('name="apiKey"');
-    expect(html).toContain('name="enabled"');
-    expect(html).toContain('Activada');
-    expect(html).toContain('Desactivada');
+    const providerForm = html.slice(
+      html.indexOf('id="ai-provider-form"'),
+      html.indexOf('ai-provider-history-card'),
+    );
+    expect(providerForm).not.toContain('name="enabled"');
+    expect(html).toContain('Activar IA');
+    expect(script).toContain('Desactivar IA');
     expect(html).toContain('Guardar configuración');
     expect(html).toContain('Historial de cambios de IA');
     expect(html).toContain('id="ai-provider-history"');
     expect(html).toContain('class="card inset ai-provider-history-card" data-collapsible');
     expect(script).toContain('/ai/provider');
     expect(script).toContain('saveAIProviderWithCompatibility');
+    expect(script).toContain('setAIProviderEditorOpen(true)');
+    expect(script).toContain("currentProvider.enabled ? 'Desactivar IA' : 'Activar IA'");
+    expect(script).toContain("classList.toggle('danger-primary', currentProvider.enabled)");
     expect(script).toContain('if (error.status !== 404) throw error;');
     expect(script).toContain('/ai-key');
     expect(script).toContain('/ai/settings');

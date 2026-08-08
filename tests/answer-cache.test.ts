@@ -114,6 +114,9 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     'para qué sirves',
     'qué puedes hacer',
     'cómo funcionas',
+    'de qué se trata este grupo',
+    'de que trata este grupo',
+    'cuál es el objetivo de este grupo',
   ])('responde el saludo local %s sin consumir Groq', async (question) => {
     const { database, provider, service, profileId } = setup();
     const result = await service.answerQuestion(question, 'group', 'user');
@@ -272,6 +275,30 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     const date = new Date().toISOString().slice(0, 10);
     expect(database.getAIUsageSummary(profileId, date, date.slice(0, 7)).requests).toBe(0);
     expect(database.listCachedAnswers('neurobot')).toHaveLength(0);
+    database.close();
+  });
+
+  it('registra en el historial de preguntas las consultas que la IA o el bot no pueden responder', async () => {
+    const { database, service } = setup();
+    const result = await service.answerQuestion('¿Qué medicamento puedo tomar para la gripe?', 'group', 'user');
+    expect(result.code).toBe('MEDICAL_SCOPE_REJECTED');
+    const cached = database.listCachedAnswers('neurobot');
+    expect(cached).toHaveLength(1);
+    expect(cached[0]?.canonicalQuestion).toBe('¿Qué medicamento puedo tomar para la gripe?');
+    expect(cached[0]?.status).toBe('INVALIDATED');
+    database.close();
+  });
+
+  it('registra saludos comunitarios y preguntas con el pronombre mi en el historial', async () => {
+    const { database, service } = setup();
+    const greetingResult = await service.answerQuestion('hola neurobot', 'group', 'user');
+    expect(greetingResult.code).toBe('COMMUNITY_GREETING');
+    const greetingCached = database.listCachedAnswers('neurobot');
+    expect(greetingCached.some((item) => item.canonicalQuestion === 'hola neurobot')).toBe(true);
+
+    await service.answerQuestion('¿Cuáles son las reglas de mi grupo?', 'group', 'user2');
+    const questionCached = database.listCachedAnswers('neurobot');
+    expect(questionCached.some((item) => item.canonicalQuestion === '¿Cuáles son las reglas de mi grupo?')).toBe(true);
     database.close();
   });
 

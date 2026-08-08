@@ -655,19 +655,19 @@ export class AppDatabase {
             question_max_chars INTEGER NOT NULL DEFAULT 300,
             context_max_tokens INTEGER NOT NULL DEFAULT 700,
             input_max_tokens INTEGER NOT NULL DEFAULT 1000,
-            response_max_tokens INTEGER NOT NULL DEFAULT 120,
+            response_max_tokens INTEGER NOT NULL DEFAULT 150,
             response_max_chars INTEGER NOT NULL DEFAULT 600,
             response_max_lines INTEGER NOT NULL DEFAULT 5,
-            temperature REAL NOT NULL DEFAULT 0.2,
+            temperature REAL NOT NULL DEFAULT 0.6,
             user_hourly_limit INTEGER NOT NULL DEFAULT 5,
             user_daily_limit INTEGER NOT NULL DEFAULT 10,
             user_cooldown_seconds INTEGER NOT NULL DEFAULT 30,
             group_hourly_limit INTEGER NOT NULL DEFAULT 20,
             group_daily_limit INTEGER NOT NULL DEFAULT 100,
-            global_daily_limit INTEGER NOT NULL DEFAULT 50,
-            global_monthly_limit INTEGER NOT NULL DEFAULT 1000,
-            global_daily_token_limit INTEGER NOT NULL DEFAULT 50000,
-            global_monthly_token_limit INTEGER NOT NULL DEFAULT 1000000,
+            global_daily_limit INTEGER NOT NULL DEFAULT 800,
+            global_monthly_limit INTEGER NOT NULL DEFAULT 30000,
+            global_daily_token_limit INTEGER NOT NULL DEFAULT 160000,
+            global_monthly_token_limit INTEGER NOT NULL DEFAULT 1600000,
             timeout_ms INTEGER NOT NULL DEFAULT 15000,
             updated_at TEXT NOT NULL
           );
@@ -1872,6 +1872,31 @@ export class AppDatabase {
           DROP TABLE IF EXISTS administrators;
         `,
       },
+      {
+        version: 25,
+        sql: `
+          ALTER TABLE bot_poll_configurations
+            ADD COLUMN weekly_schedule TEXT NOT NULL DEFAULT '[]';
+          UPDATE bot_poll_configurations SET enabled = 0;
+        `,
+      },
+      {
+        version: 26,
+        sql: `
+          -- Actualiza los valores por defecto de IA para usar openai/gpt-oss-20b.
+          -- max_tokens: 150 (respuestas breves), temperature: 0.6.
+          -- Límites internos de seguridad: 800 solicitudes/día, 160 000 tokens/día,
+          -- 30 000 solicitudes/mes, 1 600 000 tokens/mes.
+          UPDATE ai_settings SET
+            response_max_tokens = 150,
+            temperature = 0.6,
+            global_daily_limit = 800,
+            global_monthly_limit = 30000,
+            global_daily_token_limit = 160000,
+            global_monthly_token_limit = 1600000,
+            updated_at = datetime('now');
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -2095,11 +2120,23 @@ export class AppDatabase {
         profile.id,
         presentationCategory,
         'Presentación de la organización',
-        'Comunidad Neurodivergente – Autismo y TDAH. Este asistente entrega únicamente información oficial administrada sobre la comunidad.',
-        JSON.stringify(['comunidad', 'presentación', 'neurobot']),
+        'Comunidad Neurodivergente – Autismo y TDAH. Este grupo es un espacio comunitario de apoyo e información oficial sobre la comunidad, sus normas, grupos, actividades y canales de contacto.',
+        JSON.stringify(['comunidad', 'presentación', 'neurobot', 'grupo', 'este grupo', 'trata', 'de que se trata', 'objetivo', 'propósito', 'acerca']),
         now,
         now,
         profile.id,
+      );
+
+    this.db
+      .prepare(
+        `UPDATE knowledge_entries
+         SET title = 'Presentación de la organización',
+             content = 'Comunidad Neurodivergente – Autismo y TDAH. Este grupo es un espacio comunitario de apoyo e información oficial sobre la comunidad, sus normas, grupos, actividades y canales de contacto.',
+             keywords = ?
+         WHERE internal_source = 'perfil inicial' AND (keywords NOT LIKE '%grupo%')`,
+      )
+      .run(
+        JSON.stringify(['comunidad', 'presentación', 'neurobot', 'grupo', 'este grupo', 'trata', 'de que se trata', 'objetivo', 'propósito', 'acerca']),
       );
 
     const commandCategory: Record<string, string> = {
@@ -3106,6 +3143,7 @@ export class AppDatabase {
           timezone: 'America/Santiago';
           tolerance_minutes: number;
           selection_mode: PollSelectionMode;
+          weekly_schedule: string;
         }
       | undefined;
     return {
@@ -3114,6 +3152,7 @@ export class AppDatabase {
       timezone: row?.timezone ?? this.getBot(botId)?.timezone ?? 'America/Santiago',
       toleranceMinutes: row?.tolerance_minutes ?? 30,
       selectionMode: row?.selection_mode ?? 'SAME_FOR_ALL',
+      weeklySchedule: parsePollWeeklySchedule(row?.weekly_schedule),
     };
   }
 
@@ -3128,11 +3167,33 @@ export class AppDatabase {
     ) {
       throw new Error('La tolerancia de la encuesta no es válida.');
     }
+    const weekdays = new Set<number>();
+    for (const schedule of configuration.weeklySchedule) {
+      if (weekdays.has(schedule.weekday)) {
+        throw new Error('Cada día puede tener una sola programación de encuestas.');
+      }
+      weekdays.add(schedule.weekday);
+      if (!Number.isInteger(schedule.weekday) || schedule.weekday < 0 || schedule.weekday > 6) {
+        throw new Error('El día de la programación no es válido.');
+      }
+      if (!isTime(schedule.sendTime) || schedule.templateIds.length === 0) {
+        throw new Error('Cada programación requiere una hora y al menos una encuesta.');
+      }
+      if (new Set(schedule.templateIds).size !== schedule.templateIds.length) {
+        throw new Error('Una encuesta no puede repetirse en el mismo día.');
+      }
+      for (const templateId of schedule.templateIds) {
+        if (this.getPollTemplate(templateId, botId) === null) {
+          throw new Error('La encuesta seleccionada no existe o no está disponible.');
+        }
+      }
+    }
     this.db
       .prepare(
         `
         UPDATE bot_poll_configurations SET enabled = ?, send_time = ?, timezone = ?,
-          tolerance_minutes = ?, selection_mode = ?, updated_at = ? WHERE bot_id = ?
+          tolerance_minutes = ?, selection_mode = ?, weekly_schedule = ?, updated_at = ?
+          WHERE bot_id = ?
       `,
       )
       .run(
@@ -3141,6 +3202,7 @@ export class AppDatabase {
         configuration.timezone,
         configuration.toleranceMinutes,
         configuration.selectionMode,
+        JSON.stringify(configuration.weeklySchedule),
         new Date().toISOString(),
         botId,
       );
@@ -3264,6 +3326,7 @@ export class AppDatabase {
         WHERE bot_id = ? AND template_id = ? AND status = 'PENDING'`,
         )
         .run(now, botId, templateId).changes;
+      this.removePollTemplateFromWeeklySchedule(botId, templateId, now);
       return { hidden: true, cancelledOverrides, cancelledDeliveries };
     })();
   }
@@ -3380,10 +3443,43 @@ export class AppDatabase {
     const template = this.getPollTemplate(id, botId);
     if (template === null) return false;
     if (template.isDefault) throw new Error('Las encuestas predeterminadas no se pueden eliminar.');
-    return (
-      this.db.prepare('DELETE FROM bot_poll_templates WHERE id = ? AND bot_id = ?').run(id, botId)
-        .changes === 1
-    );
+    const now = new Date().toISOString();
+    return this.db.transaction(() => {
+      this.removePollTemplateFromWeeklySchedule(botId, id, now);
+      return (
+        this.db.prepare('DELETE FROM bot_poll_templates WHERE id = ? AND bot_id = ?').run(id, botId)
+          .changes === 1
+      );
+    })();
+  }
+
+  private removePollTemplateFromWeeklySchedule(
+    botId: string,
+    templateId: number,
+    now: string,
+  ): void {
+    const configuration = this.getPollConfiguration(botId);
+    const weeklySchedule = configuration.weeklySchedule
+      .map((entry) => ({
+        ...entry,
+        templateIds: entry.templateIds.filter((id) => id !== templateId),
+      }))
+      .filter((entry) => entry.templateIds.length > 0);
+    if (
+      weeklySchedule.length === configuration.weeklySchedule.length &&
+      weeklySchedule.every(
+        (entry, index) =>
+          entry.templateIds.length === configuration.weeklySchedule[index]?.templateIds.length,
+      )
+    ) {
+      return;
+    }
+    this.db
+      .prepare(
+        `UPDATE bot_poll_configurations SET weekly_schedule = ?, enabled = ?, updated_at = ?
+         WHERE bot_id = ?`,
+      )
+      .run(JSON.stringify(weeklySchedule), weeklySchedule.length > 0 ? 1 : 0, now, botId);
   }
 
   public restoreDefaultPollTemplates(botId = 'neurobot', safeActorHash = 'system'): number {
@@ -5956,8 +6052,7 @@ export class AppDatabase {
       .prepare(
         `SELECT * FROM cached_answers
          WHERE bot_id = ? AND (? = '' OR canonical_question LIKE ? OR answer LIKE ? OR category LIKE ?)
-         ORDER BY CASE status WHEN 'ADMIN_APPROVED' THEN 0 WHEN 'ADMIN_EDITED' THEN 1
-           WHEN 'AUTO_VERIFIED' THEN 2 ELSE 3 END, updated_at DESC`,
+         ORDER BY updated_at DESC, id DESC`,
       )
       .all(
         botId,
@@ -5979,6 +6074,14 @@ export class AppDatabase {
 
   public getCachedAnswer(botId: string, id: number): CachedAnswer | null {
     return this.listCachedAnswers(botId).find((answer) => answer.id === id) ?? null;
+  }
+
+  public getCachedAnswerByHash(botId: string, normalizedQuestionHash: string): CachedAnswer | null {
+    const row = this.db
+      .prepare('SELECT id FROM cached_answers WHERE bot_id = ? AND normalized_question_hash = ? LIMIT 1')
+      .get(botId, normalizedQuestionHash) as { id: number } | undefined;
+    if (row === undefined) return null;
+    return this.getCachedAnswer(botId, Number(row.id));
   }
 
   public findExactCachedAnswer(
@@ -6026,6 +6129,8 @@ export class AppDatabase {
     sourceType: CachedAnswerSourceType;
     confidence: number;
     expiresAt?: string | null;
+    invalidatedAt?: string | null;
+    invalidationReason?: string | null;
   }): CachedAnswer {
     const canonicalQuestion = validatePlainText(input.canonicalQuestion, 'pregunta canónica', 1000);
     const answer = validatePlainText(input.answer, 'respuesta guardada', 8000);
@@ -6038,6 +6143,9 @@ export class AppDatabase {
       ...new Set(input.knowledgeSourceIds.map((id) => Math.trunc(id)).filter((id) => id > 0)),
     ];
     const now = new Date().toISOString();
+    const isInvalidated = input.status === 'INVALIDATED';
+    const invalidatedAt = isInvalidated ? (input.invalidatedAt ?? now) : null;
+    const invalidationReason = isInvalidated ? (input.invalidationReason ?? 'UNANSWERED') : null;
     let id = input.id;
     if (id === undefined) {
       const result = this.db
@@ -6045,15 +6153,17 @@ export class AppDatabase {
           `INSERT INTO cached_answers(
            bot_id, canonical_question, normalized_question_hash, answer, category,
            knowledge_source_ids, knowledge_version, prompt_version, status, source_type,
-           confidence, created_at, updated_at, expires_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           confidence, created_at, updated_at, expires_at, invalidated_at, invalidation_reason
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(bot_id, normalized_question_hash) DO UPDATE SET
            canonical_question = excluded.canonical_question, answer = excluded.answer,
            category = excluded.category, knowledge_source_ids = excluded.knowledge_source_ids,
            knowledge_version = excluded.knowledge_version, prompt_version = excluded.prompt_version,
            status = excluded.status, source_type = excluded.source_type,
            confidence = excluded.confidence, updated_at = excluded.updated_at,
-           expires_at = excluded.expires_at, invalidated_at = NULL, invalidation_reason = NULL`,
+           expires_at = excluded.expires_at,
+           invalidated_at = excluded.invalidated_at,
+           invalidation_reason = excluded.invalidation_reason`,
         )
         .run(
           input.botId,
@@ -6070,6 +6180,8 @@ export class AppDatabase {
           now,
           now,
           input.expiresAt ?? null,
+          invalidatedAt,
+          invalidationReason,
         );
       id =
         result.changes === 1
@@ -6089,7 +6201,7 @@ export class AppDatabase {
           `UPDATE cached_answers SET canonical_question = ?, normalized_question_hash = ?,
            answer = ?, category = ?, knowledge_source_ids = ?, knowledge_version = ?,
            prompt_version = ?, status = ?, source_type = ?, confidence = ?, updated_at = ?,
-           expires_at = ?, invalidated_at = NULL, invalidation_reason = NULL
+           expires_at = ?, invalidated_at = ?, invalidation_reason = ?
          WHERE id = ? AND bot_id = ?`,
         )
         .run(
@@ -6105,6 +6217,8 @@ export class AppDatabase {
           input.confidence,
           now,
           input.expiresAt ?? null,
+          invalidatedAt,
+          invalidationReason,
           id,
           input.botId,
         );
@@ -6821,7 +6935,8 @@ export class AppDatabase {
            output_tokens, total_tokens, updated_at, bot_id
          ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(profile_id, ${periodColumn}) DO UPDATE SET
-           requests = requests + 1, failed_requests = failed_requests + excluded.failed_requests,
+           requests = requests + 1,
+           failed_requests = failed_requests + excluded.failed_requests,
            input_tokens = input_tokens + excluded.input_tokens,
            output_tokens = output_tokens + excluded.output_tokens,
            total_tokens = total_tokens + excluded.total_tokens, updated_at = excluded.updated_at`,
@@ -6857,9 +6972,19 @@ export class AppDatabase {
     const monthly = this.db
       .prepare('SELECT * FROM ai_usage_monthly WHERE profile_id = ? AND local_month = ?')
       .get(profileId, localMonth) as Record<string, number> | undefined;
+    const successfulEventsCount = Number(
+      (
+        this.db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM ai_usage_events WHERE profile_id = ? AND local_date = ? AND result = 'success'",
+          )
+          .get(profileId, localDate) as { count: number }
+      ).count,
+    );
     const settings = this.getAISettings(profileId);
-    const requests = daily?.requests ?? 0;
+    const requests = Math.max(daily?.requests ?? 0, successfulEventsCount);
     const totalTokens = daily?.total_tokens ?? 0;
+    const monthlyRequests = Math.max(monthly?.requests ?? 0, requests);
     return {
       requests,
       failedRequests: Number(
@@ -6884,11 +7009,11 @@ export class AppDatabase {
       monthlyBudgetPercent: Math.min(
         100,
         Math.max(
-          ((monthly?.requests ?? 0) / settings.globalMonthlyLimit) * 100,
+          (monthlyRequests / settings.globalMonthlyLimit) * 100,
           ((monthly?.total_tokens ?? 0) / settings.globalMonthlyTokenLimit) * 100,
         ),
       ),
-      monthlyRequests: monthly?.requests ?? 0,
+      monthlyRequests,
       monthlyTokens: monthly?.total_tokens ?? 0,
     };
   }
@@ -8970,7 +9095,7 @@ function validateAssistantProfile<
     activationAlias,
     description: validatePlainText(input.description, 'descripción', 1000),
     industry: validatePlainText(input.industry, 'rubro', 160),
-    objective: validatePlainText(input.objective, 'objetivo', 1200),
+    objective: validateRequiredText(input.objective, 'objetivo'),
     allowedTopics: validateTextArray(input.allowedTopics, 'temas permitidos'),
     excludedTopics: validateTextArray(input.excludedTopics, 'temas excluidos'),
     tone: validatePlainText(input.tone, 'tono', 300),
@@ -9089,6 +9214,20 @@ function validatePlainText(
   if ((!allowEmpty && normalized.length === 0) || normalized.length > maximumLength) {
     throw new Error(`El campo ${field} debe tener hasta ${maximumLength} caracteres.`);
   }
+  if (
+    /[<>]/u.test(normalized) ||
+    [...normalized].some((character) => character.codePointAt(0) === 0) ||
+    normalized.includes('```')
+  ) {
+    throw new Error(`El campo ${field} debe contener solamente texto plano.`);
+  }
+  return normalized;
+}
+
+function validateRequiredText(value: string, field: string): string {
+  if (typeof value !== 'string') throw new Error(`El campo ${field} no es válido.`);
+  const normalized = value.normalize('NFKC').trim();
+  if (normalized.length === 0) throw new Error(`El campo ${field} no puede estar vacío.`);
   if (
     /[<>]/u.test(normalized) ||
     [...normalized].some((character) => character.codePointAt(0) === 0) ||
@@ -9346,6 +9485,30 @@ function validateDate(value: string): string {
 
 function isTime(value: string): boolean {
   return /^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(value);
+}
+
+function parsePollWeeklySchedule(value: string | undefined): PollConfiguration['weeklySchedule'] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (entry): entry is PollConfiguration['weeklySchedule'][number] =>
+        typeof entry === 'object' &&
+        entry !== null &&
+        Number.isInteger((entry as { weekday?: unknown }).weekday) &&
+        Number((entry as { weekday: number }).weekday) >= 0 &&
+        Number((entry as { weekday: number }).weekday) <= 6 &&
+        typeof (entry as { sendTime?: unknown }).sendTime === 'string' &&
+        isTime((entry as { sendTime: string }).sendTime) &&
+        Array.isArray((entry as { templateIds?: unknown }).templateIds) &&
+        (entry as { templateIds: unknown[] }).templateIds.every(
+          (templateId) => Number.isInteger(templateId) && Number(templateId) > 0,
+        ),
+    );
+  } catch {
+    return [];
+  }
 }
 
 function validatePollTemplateContent(

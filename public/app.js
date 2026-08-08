@@ -715,11 +715,9 @@ async function loadAutomaticMessages() {
       );
     });
   }
-  updateAutomaticPreviews();
   updateAutomaticTemplateMetrics();
 }
 
-automaticMessagesForm.addEventListener('input', updateAutomaticPreviews);
 automaticMessagesForm.addEventListener('input', updateAutomaticTemplateMetrics);
 
 automaticMessagesForm.addEventListener('submit', async (event) => {
@@ -751,54 +749,31 @@ automaticMessagesForm.addEventListener('submit', async (event) => {
       template: form.elements.rules_template.value,
     },
   };
-  const pollDate = form.elements.localDate?.value || '';
-  const pollTemplateId = Number(form.elements.templateId?.value);
-  if (pollDate && (!Number.isInteger(pollTemplateId) || pollTemplateId <= 0)) {
-    showNotice('Selecciona una encuesta para la fecha indicada.', true);
-    return;
-  }
+  const weeklySchedule = collectWeeklyPollSchedule();
   try {
     await api(botScopedPath('/api/automatic-messages'), {
       method: 'PATCH',
       body: JSON.stringify(payload),
     });
-    if (pollDate) {
-      await api(botScopedPath('/api/polls/overrides'), {
-        method: 'PUT',
-        body: JSON.stringify({
-          localDate: pollDate,
-          templateId: pollTemplateId,
-          replaceConfirmed: true,
-        }),
-      });
-      form.elements.localDate.value = '';
-      await loadPolls();
-    }
+    const pollConfiguration = state.pollData?.configuration;
+    await api(botScopedPath('/api/polls/configuration'), {
+      method: 'PATCH',
+      body: JSON.stringify({
+        enabled: weeklySchedule.length > 0,
+        sendTime: pollConfiguration?.sendTime || '13:00',
+        timezone: state.selectedBotTimezone,
+        toleranceMinutes: pollConfiguration?.toleranceMinutes ?? 30,
+        selectionMode: 'SAME_FOR_ALL',
+        weeklySchedule,
+      }),
+    });
+    await loadPolls();
     await loadAutomaticMessages();
-    showNotice(pollDate ? 'Automatizaciones y encuesta guardadas.' : 'Automatizaciones guardadas.');
+    showNotice('Automatizaciones guardadas.');
   } catch (error) {
     showNotice(error.message, true);
   }
 });
-
-function updateAutomaticPreviews() {
-  document.querySelector('#rules-preview').textContent =
-    automaticMessagesForm.elements.rules_template.value;
-  const weekday = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Santiago',
-    weekday: 'short',
-  }).format(new Date());
-  const greetingField =
-    weekday === 'Mon'
-      ? 'greeting_monday'
-      : weekday === 'Fri'
-        ? 'greeting_friday'
-        : weekday === 'Sat' || weekday === 'Sun'
-          ? 'greeting_weekend'
-          : 'greeting_weekday';
-  document.querySelector('#greeting-preview').textContent =
-    automaticMessagesForm.elements[greetingField].value;
-}
 
 function initializeAutomaticTemplateTools() {
   automaticTemplateDefinitions.forEach((definition) => {
@@ -870,13 +845,12 @@ async function loadPolls() {
   state.pollTemplates = result.templates;
   renderPollTemplates(result.templates);
   renderHiddenPollTemplates(result.hiddenTemplates || []);
-  fillPollSelects(result);
-  renderPollOverrides(result.overrides);
+  renderWeeklyPollSchedule(result.configuration.weeklySchedule || [], result.templates);
   renderPollHistory(result.history);
-  updatePollTemplatePreview();
 }
 
 function renderPollTemplates(templates) {
+  closePollTemplateEditor();
   const target = document.querySelector('#poll-templates-list');
   target.replaceChildren();
   if (templates.length === 0) {
@@ -886,23 +860,20 @@ function renderPollTemplates(templates) {
   templates.forEach((template) => {
     const status = template.enabled ? 'Activa' : 'Desactivada';
     const origin = template.isDefault ? 'Predeterminada' : 'Personalizada';
-    const multiple = template.allowMultipleAnswers ? 'respuesta múltiple' : 'respuesta única';
     const used = template.lastUsedAt
       ? new Date(template.lastUsedAt).toLocaleString('es-CL')
       : 'Nunca utilizada';
     const item = listItem(
       template.question,
-      `${origin} · ${template.category} · ${template.options.length} opciones · ${multiple} · ${status}${
-        template.favorite ? ' · Favorita' : ''
-      }\nÚltimo uso: ${used}`,
+      `${origin} · ${template.options.length} opciones · ${status}\nÚltimo uso: ${used}`,
     );
     const actions = document.createElement('div');
     actions.className = 'actions';
     const edit = document.createElement('button');
     edit.type = 'button';
-    edit.className = 'secondary';
+    edit.className = 'poll-edit-action';
     edit.textContent = 'Editar';
-    edit.addEventListener('click', () => openPollTemplateEditor(template));
+    edit.addEventListener('click', () => openPollTemplateEditor(template, item));
     actions.append(edit);
     if (template.isDefault) {
       const remove = document.createElement('button');
@@ -916,7 +887,7 @@ function renderPollTemplates(templates) {
         const nextSchedule = state.pollData?.nextScheduledAt || 'Sin próxima programación';
         const confirmed = await confirmAction(
           `Eliminar encuesta de este asistente\n\n` +
-            `Encuesta: ${template.question}\nAsistente: ${assistantName}\nCategoría: ${template.category}\n` +
+            `Encuesta: ${template.question}\nAsistente: ${assistantName}\n` +
             `Automatización: ${automationState}\nPróxima programación: ${nextSchedule}\n\n` +
             'Esta encuesta dejará de aparecer y no se utilizará en las automatizaciones de este asistente. ' +
             'No se eliminará de otros asistentes ni del catálogo general. ' +
@@ -974,7 +945,7 @@ function renderHiddenPollTemplates(templates) {
     const hiddenAt = new Date(template.hiddenAt).toLocaleString('es-CL');
     const item = listItem(
       template.question,
-      `Predeterminada · ${template.category} · Eliminada: ${hiddenAt} · Estado: Oculta\n` +
+      `Predeterminada · Eliminada: ${hiddenAt} · Estado: Oculta\n` +
         `Esta encuesta fue eliminada solamente de ${assistantName}.`,
     );
     const restore = document.createElement('button');
@@ -1003,64 +974,82 @@ function renderHiddenPollTemplates(templates) {
   });
 }
 
-function fillPollSelects(result) {
-  const categories = [...new Set(result.templates.map((template) => template.category))].sort(
-    (left, right) => left.localeCompare(right, 'es'),
-  );
-  replaceOptions(
-    pollTemplateForm.elements.category,
-    categories.map((value) => ({ value, label: value })),
-  );
-  const enabledTemplates = result.templates.filter((template) => template.enabled);
-  const templateOptions = enabledTemplates.map((template) => ({
-    value: String(template.id),
-    label: template.question,
-  }));
-  replaceOptions(automaticMessagesForm.elements.templateId, templateOptions, true);
-}
+const pollWeekdays = [
+  ['Lunes', 1],
+  ['Martes', 2],
+  ['Miércoles', 3],
+  ['Jueves', 4],
+  ['Viernes', 5],
+  ['Sábado', 6],
+  ['Domingo', 0],
+];
 
-function replaceOptions(select, options, preserve = false) {
-  const previous = preserve ? select.value : '';
-  select.replaceChildren();
-  options.forEach((item) => {
-    const option = document.createElement('option');
-    option.value = item.value;
-    option.textContent = item.label;
-    select.append(option);
-  });
-  select.disabled = options.length === 0;
-  if (options.some((item) => item.value === previous)) select.value = previous;
-}
-
-function renderPollOverrides(overrides) {
-  const target = document.querySelector('#poll-overrides-list');
+function renderWeeklyPollSchedule(schedule, templates) {
+  const target = document.querySelector('#poll-weekly-schedule');
+  const enabledTemplates = templates.filter((template) => template.enabled);
   target.replaceChildren();
-  if (overrides.length === 0) {
-    target.append(empty('No hay encuestas fijadas para fechas futuras.'));
-    return;
-  }
-  overrides.forEach((override) => {
-    const template = state.pollTemplates.find((item) => item.id === override.templateId);
-    const item = listItem(override.localDate, template?.question || 'Plantilla no disponible');
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'danger';
-    remove.textContent = 'Quitar';
-    remove.addEventListener('click', async () => {
-      try {
-        await api(botScopedPath(`/api/polls/overrides/${override.localDate}`), {
-          method: 'DELETE',
-        });
-        await loadPolls();
-        showNotice('Programación eliminada.');
-      } catch (error) {
-        showNotice(error.message, true);
-      }
+  pollWeekdays.forEach(([label, weekday]) => {
+    const configured = schedule.find((entry) => entry.weekday === weekday);
+    const row = document.createElement('article');
+    row.className = 'poll-weekly-row';
+    row.dataset.weekday = String(weekday);
+    const heading = document.createElement('h4');
+    heading.textContent = label;
+    const timeLabel = document.createElement('label');
+    timeLabel.textContent = 'Hora';
+    const time = document.createElement('input');
+    time.type = 'time';
+    time.dataset.weeklyTime = '';
+    time.value = configured?.sendTime || '13:00';
+    timeLabel.append(time);
+    const choices = document.createElement('details');
+    choices.className = 'poll-weekly-choices';
+    const summary = document.createElement('summary');
+    choices.append(summary);
+    const options = document.createElement('div');
+    options.className = 'poll-weekly-options';
+    enabledTemplates.forEach((template) => {
+      const option = document.createElement('label');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = String(template.id);
+      checkbox.dataset.weeklyTemplate = '';
+      checkbox.checked = configured?.templateIds.includes(template.id) ?? false;
+      checkbox.addEventListener('change', () => updateWeeklyPollSummary(row));
+      option.append(checkbox, document.createTextNode(template.question));
+      options.append(option);
     });
-    item.append(remove);
-    target.append(item);
+    if (enabledTemplates.length === 0) options.append(empty('No hay encuestas disponibles.'));
+    choices.append(options);
+    row.append(heading, timeLabel, choices);
+    target.append(row);
+    updateWeeklyPollSummary(row);
   });
 }
+
+function updateWeeklyPollSummary(row) {
+  const selected = row.querySelectorAll('[data-weekly-template]:checked').length;
+  row.querySelector('summary').textContent =
+    selected === 0 ? 'Seleccionar encuestas' : `${selected} encuesta${selected === 1 ? '' : 's'}`;
+}
+
+function collectWeeklyPollSchedule() {
+  return [...document.querySelectorAll('.poll-weekly-row')]
+    .map((row) => ({
+      weekday: Number(row.dataset.weekday),
+      sendTime: row.querySelector('[data-weekly-time]').value,
+      templateIds: [...row.querySelectorAll('[data-weekly-template]:checked')].map((input) =>
+        Number(input.value),
+      ),
+    }))
+    .filter((entry) => entry.templateIds.length > 0);
+}
+
+document.addEventListener('click', (event) => {
+  document.querySelectorAll('.poll-weekly-choices[open]').forEach((menu) => {
+    if (!menu.contains(event.target)) menu.removeAttribute('open');
+  });
+});
 
 function renderPollHistory(history) {
   const target = document.querySelector('#poll-history-list');
@@ -1078,57 +1067,62 @@ function renderPollHistory(history) {
   });
 }
 
-function openPollTemplateEditor(template = null) {
+function openPollTemplateEditor(template = null, container = null) {
+  pollTemplateForm.closest('.poll-item-editing')?.classList.remove('poll-item-editing');
+  pollTemplateForm.querySelector('button[type="submit"]').textContent = 'Guardar encuesta';
   pollTemplateForm.reset();
   pollTemplateForm.elements.id.value = template?.id || '';
   pollTemplateForm.elements.question.value = template?.question || '';
   pollTemplateForm.elements.options.value = template?.options.join('\n') || '';
-  pollTemplateForm.elements.enabled.checked = template?.enabled ?? true;
-  pollTemplateForm.elements.favorite.checked = template?.favorite ?? false;
-  pollTemplateForm.elements.allowMultipleAnswers.checked = template?.allowMultipleAnswers ?? false;
-  pollTemplateForm.elements.disabledUntil.value = template?.disabledUntil
-    ? toLocalInputValue(template.disabledUntil)
-    : '';
-  if (template) pollTemplateForm.elements.category.value = template.category;
+  pollTemplateForm.dataset.category = template?.category || 'General';
+  pollTemplateForm.dataset.allowMultipleAnswers = String(template?.allowMultipleAnswers ?? false);
+  pollTemplateForm.dataset.favorite = String(template?.favorite ?? false);
+  if (container) {
+    container.classList.add('poll-item-editing');
+    container.append(pollTemplateForm);
+  } else {
+    document.querySelector('#poll-template-editor-host').append(pollTemplateForm);
+  }
   pollTemplateForm.classList.remove('hidden');
-  updatePollTemplatePreview();
   pollTemplateForm.elements.question.focus();
+}
+
+function closePollTemplateEditor() {
+  const editingItem = pollTemplateForm.closest('.poll-item-editing');
+  editingItem?.classList.remove('poll-item-editing');
+  const host = document.querySelector('#poll-template-editor-host');
+  if (!host.contains(pollTemplateForm)) host.append(pollTemplateForm);
+  pollTemplateForm.classList.add('hidden');
 }
 
 document
   .querySelector('#new-poll-template')
   .addEventListener('click', () => openPollTemplateEditor());
-document
-  .querySelector('#cancel-poll-template')
-  .addEventListener('click', () => pollTemplateForm.classList.add('hidden'));
-pollTemplateForm.addEventListener('input', updatePollTemplatePreview);
+document.querySelector('#cancel-poll-template').addEventListener('click', closePollTemplateEditor);
 
 pollTemplateForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const id = form.elements.id.value ? Number(form.elements.id.value) : undefined;
-  const disabledUntil = form.elements.disabledUntil.value
-    ? new Date(form.elements.disabledUntil.value).toISOString()
-    : null;
   const payload = {
     ...(id === undefined ? {} : { id }),
     question: form.elements.question.value,
-    category: form.elements.category.value,
+    category: form.dataset.category || 'General',
     options: form.elements.options.value
       .split(/\r?\n/)
       .map((option) => option.trim())
       .filter(Boolean),
-    allowMultipleAnswers: form.elements.allowMultipleAnswers.checked,
-    enabled: form.elements.enabled.checked,
-    favorite: form.elements.favorite.checked,
-    disabledUntil,
+    allowMultipleAnswers: form.dataset.allowMultipleAnswers === 'true',
+    enabled: true,
+    favorite: form.dataset.favorite === 'true',
+    disabledUntil: null,
   };
   try {
     await api(botScopedPath('/api/polls/templates'), {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    pollTemplateForm.classList.add('hidden');
+    closePollTemplateEditor();
     await loadPolls();
     showNotice('Plantilla de encuesta guardada.');
   } catch (error) {
@@ -1163,24 +1157,6 @@ document.querySelector('#restore-poll-defaults').addEventListener('click', async
     button.disabled = false;
   }
 });
-
-function updatePollTemplatePreview() {
-  const question = pollTemplateForm.elements.question.value.trim();
-  const options = pollTemplateForm.elements.options.value
-    .split(/\r?\n/)
-    .map((option) => option.trim())
-    .filter(Boolean);
-  document.querySelector('#poll-template-preview').textContent = [
-    question || 'Escribe una pregunta.',
-    ...options.map((option) => `• ${option}`),
-  ].join('\n');
-}
-
-function toLocalInputValue(value) {
-  const date = new Date(value);
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
-}
 
 function listItem(title, subtitle) {
   const item = document.createElement('article');
