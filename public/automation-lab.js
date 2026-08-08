@@ -1,32 +1,285 @@
-let botId=null,timezone='America/Santiago',csrfToken=null,polls=[];
-const $=(s,r=document)=>r.querySelector(s);
-const weekdays={Mon:'Lunes',Tue:'Martes',Wed:'Miércoles',Thu:'Jueves',Fri:'Viernes',Sat:'Sábado',Sun:'Domingo'};
-function notice(message,error=false){const n=$('#notice');if(!n)return;n.textContent=message;n.classList.toggle('error',error);n.classList.remove('hidden');setTimeout(()=>n.classList.add('hidden'),5000)}
-function path(value){return `${value}${value.includes('?')?'&':'?'}botId=${encodeURIComponent(botId)}`}
-async function api(url,options={}){const method=options.method||'GET';const headers={...(options.body?{'content-type':'application/json'}:{}),...(options.headers||{})};if(method!=='GET'&&csrfToken)headers['x-csrf-token']=csrfToken;const response=await fetch(url,{...options,method,headers});const type=response.headers.get('content-type')||'';const data=type.includes('json')?await response.json().catch(()=>({})):await response.text();if(!response.ok){const e=new Error(data?.error||'La solicitud no pudo completarse.');e.code=data?.code;throw e}return data}
-function activate(){const button=$('[data-section="automation-lab"]'),section=$('#section-automation-lab');if(!button||!section)return;document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x===button));document.querySelectorAll('.panel-section').forEach(x=>x.classList.add('hidden'));section.classList.remove('hidden');button.closest('details')?.setAttribute('open','');const select=$('#section-select');if(select)select.value='automation-lab'}
-function create(){if($('#section-automation-lab'))return;const source=$('[data-section="automatic-messages"]'),reference=$('#section-automatic-messages');if(!source||!reference?.parentElement)return;const button=document.createElement('button');button.type='button';button.dataset.section='automation-lab';button.dataset.module='automatic-messages';button.className=source.className;button.dataset.friendlySearch='centro de pruebas automatizaciones resumen bienvenida encuesta moderacion';button.textContent='Centro de pruebas';button.addEventListener('click',()=>{activate();void load()});source.after(button);const current=$('#section-select option[value="automatic-messages"]');if(current){const option=document.createElement('option');option.value='automation-lab';option.dataset.botOnly='';option.dataset.module='automatic-messages';option.textContent='Centro de pruebas';current.after(option)}const section=document.createElement('section');section.id='section-automation-lab';section.className='panel-section hidden automation-lab';section.innerHTML=`<div class="section-heading"><div><p class="eyebrow">Pruebas controladas</p><h2>Centro de pruebas de automatizaciones</h2><p class="muted">Ejecuta cada automatización por separado. Los envíos reales requieren un grupo autorizado.</p></div><button id="lab-refresh" class="secondary" type="button">Actualizar</button></div><div class="automation-lab-toolbar card inset"><label>Grupo de prueba<select id="lab-group"></select></label><label>Encuesta<select id="lab-poll"></select></label><button id="lab-all" type="button">Probar todas una por una</button></div><div id="lab-grid" class="automation-lab-grid"></div><article class="card digest-configuration"><h3>Resumen diario y semanal</h3><p class="muted">La IA analiza temporalmente mensajes recientes y no guarda el historial bruto.</p><form id="digest-form" class="form-grid"><label class="toggle"><input name="dailyEnabled" type="checkbox"> Activar resumen diario</label><label>Hora diaria<input name="dailyTime" type="time" required></label><label class="toggle"><input name="weeklyEnabled" type="checkbox"> Activar resumen semanal</label><label>Día semanal<select name="weeklyWeekday">${Object.entries(weekdays).map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></label><label>Hora semanal<input name="weeklyTime" type="time" required></label><label>Máximo de mensajes<input name="maxMessages" type="number" min="20" max="2000" required></label><label>Máximo de caracteres<input name="maxCharacters" type="number" min="2000" max="100000" required></label><div class="actions"><button type="submit">Guardar programación</button><button id="download-daily" class="secondary" type="button">Descargar historial diario</button><button id="download-weekly" class="secondary" type="button">Descargar historial semanal</button></div></form><p class="muted privacy-note">Las descargas omiten números, correos e identificadores. Los avisos privados de moderación continúan agrupados para evitar spam.</p></article>`;reference.parentElement.insertBefore(section,reference.nextSibling);wire();render()}
-function group(){const value=$('#lab-group')?.value;if(!value)throw new Error('Selecciona un grupo autorizado.');return value}
-function definitions(){return[
-{id:'welcome',title:'Bienvenida agrupada',description:'Envía una bienvenida marcada como prueba.',run:()=>automatic('welcome')},
-{id:'greeting',title:'Saludo diario',description:'Envía el saludo correspondiente al día actual.',run:()=>automatic('greeting')},
-{id:'rules',title:'Reglas diarias',description:'Envía las reglas configuradas al grupo.',run:()=>automatic('rules')},
-{id:'poll',title:'Encuesta diaria',description:'Envía la encuesta seleccionada sin contarla como la del día.',run:sendPoll},
-{id:'daily-digest',title:'Resumen diario',description:'Analiza hasta 24 horas y envía un resumen.',run:()=>digest('daily')},
-{id:'weekly-digest',title:'Resumen semanal',description:'Analiza hasta siete días y envía un resumen.',run:()=>digest('weekly')},
-{id:'moderation',title:'Moderación local',description:'Simula una frase; no sanciona ni envía mensajes.',run:moderation}
-]}
-function render(){const grid=$('#lab-grid');if(!grid)return;grid.replaceChildren();for(const item of definitions()){const card=document.createElement('article');card.className='card automation-test-card';card.dataset.testId=item.id;card.innerHTML=`<h3>${item.title}</h3><p class="muted">${item.description}</p><button type="button">Probar ahora</button><p class="automation-test-result muted">Sin ejecutar</p>`;$('button',card).addEventListener('click',e=>execute(item,e.currentTarget));grid.append(card)}}
-async function execute(item,button){const result=$('.automation-test-result',button.closest('article'));button.disabled=true;result.textContent='Ejecutando…';result.className='automation-test-result pending';try{const data=await item.run();result.textContent=data?.status?`${data.status}${data.errorCode?` · ${data.errorCode}`:''}`:data?.result?.action?`Acción simulada: ${data.result.action}`:'Prueba completada';result.className='automation-test-result success';return true}catch(error){result.textContent=error.message;result.className='automation-test-result failed';return false}finally{button.disabled=false}}
-function automatic(kind){return api(path(`/api/automatic-messages/send/${kind}`),{method:'POST',body:JSON.stringify({groupKey:group(),confirmed:true,fictitiousName:'Integrante de prueba'})})}
-function sendPoll(){const templateId=Number($('#lab-poll')?.value);if(!Number.isInteger(templateId)||templateId<=0)throw new Error('Selecciona una encuesta disponible.');return api(path('/api/polls/send-test'),{method:'POST',body:JSON.stringify({groupKey:group(),templateId,countsAsDaily:false,confirmed:true})})}
-function digest(period){return api(path('/api/automatic-messages/digests/send-test'),{method:'POST',body:JSON.stringify({groupKey:group(),period,confirmed:true})})}
-function moderation(){return api(`/api/bots/${encodeURIComponent(botId)}/moderation/test`,{method:'POST',body:JSON.stringify({text:'Este es un mensaje de prueba para comprobar las reglas configuradas.'})})}
-async function load(){if(!botId)return;try{const context=await api(path('/api/automation-lab/context'));csrfToken=context.csrfToken;const [automaticData,pollData,digestData]=await Promise.all([api(path('/api/automatic-messages')),api(path('/api/polls')),api(path('/api/automatic-messages/digests'))]);fillGroups(automaticData.authorizedGroups||digestData.authorizedGroups||[]);polls=(pollData.templates||[]).filter(x=>x.enabled);fillPolls();fillConfig(digestData.configuration);render()}catch(error){notice(error.message,true)}}
-function fillGroups(groups){const select=$('#lab-group');if(!select)return;const previous=select.value;select.replaceChildren();for(const item of groups){const option=document.createElement('option');option.value=item.key;option.textContent=item.name;select.append(option)}if(groups.some(x=>x.key===previous))select.value=previous}
-function fillPolls(){const select=$('#lab-poll');if(!select)return;select.replaceChildren();for(const item of polls){const option=document.createElement('option');option.value=String(item.id);option.textContent=item.question;select.append(option)}}
-function fillConfig(c){const form=$('#digest-form');if(!form||!c)return;form.elements.dailyEnabled.checked=c.daily.enabled;form.elements.dailyTime.value=c.daily.sendTime;form.elements.weeklyEnabled.checked=c.weekly.enabled;form.elements.weeklyWeekday.value=c.weekly.weekday;form.elements.weeklyTime.value=c.weekly.sendTime;form.elements.maxMessages.value=c.maxMessages;form.elements.maxCharacters.value=c.maxCharacters;form.dataset.timezone=c.timezone}
-function download(period){if(!botId)return;window.location.assign(`/api/automatic-messages/digests/history?botId=${encodeURIComponent(botId)}&groupKey=${encodeURIComponent(group())}&period=${period}`)}
-function wire(){$('#lab-refresh')?.addEventListener('click',()=>void load());$('#lab-all')?.addEventListener('click',async e=>{const button=e.currentTarget;button.disabled=true;for(const item of definitions()){const card=$(`[data-test-id="${item.id}"]`);await execute(item,$('button',card)||button)}button.disabled=false;notice('La secuencia de pruebas terminó. Revisa cada resultado.')});$('#digest-form')?.addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget;try{await api(path('/api/automatic-messages/digests'),{method:'PATCH',body:JSON.stringify({timezone:f.dataset.timezone||timezone,daily:{enabled:f.elements.dailyEnabled.checked,sendTime:f.elements.dailyTime.value,toleranceMinutes:30},weekly:{enabled:f.elements.weeklyEnabled.checked,weekday:f.elements.weeklyWeekday.value,sendTime:f.elements.weeklyTime.value,toleranceMinutes:60},maxMessages:Number(f.elements.maxMessages.value),maxCharacters:Number(f.elements.maxCharacters.value)})});notice('Programación de resúmenes guardada.')}catch(error){notice(error.message,true)}});$('#download-daily')?.addEventListener('click',()=>download('daily'));$('#download-weekly')?.addEventListener('click',()=>download('weekly'));$('#section-select')?.addEventListener('change',e=>{if(e.target.value==='automation-lab'){activate();void load()}})}
-window.addEventListener('bot-services-load',event=>{botId=event.detail.botId;timezone=event.detail.timezone||'America/Santiago';create();const visible=new Set(event.detail.visibleModules||[]).has('automatic-messages');document.querySelectorAll('[data-section="automation-lab"],option[value="automation-lab"]').forEach(x=>{x.hidden=!visible;x.disabled=!visible;x.classList.toggle('hidden',!visible)});if(visible&&!$('#section-automation-lab')?.classList.contains('hidden'))void load()});
-create();
+let botId = null;
+let csrfToken = null;
+let polls = [];
+let authorizedGroups = [];
+
+const query = (selector, root = document) => root.querySelector(selector);
+const queryAll = (selector, root = document) => [...root.querySelectorAll(selector)];
+
+function showNotice(message, error = false) {
+  const notice = query('#notice');
+  if (!notice) return;
+  notice.textContent = message;
+  notice.classList.toggle('error', error);
+  notice.classList.remove('hidden');
+  window.setTimeout(() => notice.classList.add('hidden'), 5000);
+}
+
+function botPath(path) {
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}botId=${encodeURIComponent(botId)}`;
+}
+
+async function api(path, options = {}) {
+  const method = options.method || 'GET';
+  const headers = {
+    ...(options.body ? { 'content-type': 'application/json' } : {}),
+    ...(options.headers || {}),
+  };
+  if (method !== 'GET' && csrfToken) headers['x-csrf-token'] = csrfToken;
+  const response = await fetch(path, { ...options, method, headers });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || 'La prueba no pudo completarse.');
+    error.code = payload.code;
+    throw error;
+  }
+  return payload;
+}
+
+function createModule() {
+  if (query('#section-automation-lab')) return;
+  const reference = query('#section-automatic-messages');
+  if (!reference?.parentElement) return;
+
+  const section = document.createElement('section');
+  section.id = 'section-automation-lab';
+  section.className = 'panel-section hidden automation-lab';
+  section.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Entorno controlado</p>
+        <h2>Centro de pruebas</h2>
+        <p class="muted">Ejecuta una prueba a la vez y revisa su resultado antes de continuar.</p>
+      </div>
+      <button id="lab-refresh" class="secondary" type="button">Actualizar</button>
+    </div>
+    <div class="automation-lab-toolbar card inset">
+      <label>Encuesta<select id="lab-poll"></select></label>
+      <button id="lab-all" type="button">Probar todas en orden</button>
+    </div>
+    <ol id="lab-list" class="automation-test-list"></ol>`;
+  reference.insertAdjacentElement('afterend', section);
+  bindModule();
+  renderTests();
+}
+
+function activateModule() {
+  const button = query('[data-section="automation-lab"]');
+  const section = query('#section-automation-lab');
+  if (!button || !section) return;
+  queryAll('.tabs button[data-section]').forEach((item) =>
+    item.classList.toggle('active', item === button),
+  );
+  queryAll('.panel-section').forEach((item) => item.classList.add('hidden'));
+  section.classList.remove('hidden');
+  const selector = query('#section-select');
+  if (selector) selector.value = 'automation-lab';
+}
+
+function selectedGroup() {
+  const group = authorizedGroups[0];
+  if (!group) throw new Error('No hay grupos autorizados para ejecutar pruebas.');
+  return group.key;
+}
+
+function definitions() {
+  return [
+    {
+      id: 'welcome',
+      title: 'Bienvenida agrupada',
+      description: 'Envía una bienvenida marcada como prueba.',
+      run: () => automaticTest('welcome'),
+    },
+    {
+      id: 'greeting',
+      title: 'Saludo diario',
+      description: 'Envía el saludo correspondiente al día actual.',
+      run: () => automaticTest('greeting'),
+    },
+    {
+      id: 'rules',
+      title: 'Reglas diarias',
+      description: 'Envía las reglas configuradas al grupo.',
+      run: () => automaticTest('rules'),
+    },
+    {
+      id: 'poll',
+      title: 'Encuesta diaria',
+      description: 'Envía la encuesta seleccionada sin consumir la del día.',
+      run: sendPollTest,
+    },
+    {
+      id: 'daily-digest',
+      title: 'Resumen diario',
+      description: 'Analiza hasta 24 horas y envía un resumen.',
+      run: () => sendDigestTest('daily'),
+    },
+    {
+      id: 'weekly-digest',
+      title: 'Resumen semanal',
+      description: 'Analiza hasta siete días y envía un resumen.',
+      run: () => sendDigestTest('weekly'),
+    },
+  ];
+}
+
+function renderTests() {
+  const list = query('#lab-list');
+  if (!list) return;
+  list.replaceChildren();
+  definitions().forEach((test, index) => {
+    const item = document.createElement('li');
+    item.className = 'automation-test-item';
+    item.dataset.testId = test.id;
+    const order = document.createElement('span');
+    order.className = 'test-order';
+    order.textContent = String(index + 1).padStart(2, '0');
+    const copy = document.createElement('div');
+    copy.className = 'test-copy';
+    const title = document.createElement('h3');
+    title.textContent = test.title;
+    const description = document.createElement('p');
+    description.className = 'muted';
+    description.textContent = test.description;
+    const result = document.createElement('p');
+    result.className = 'automation-test-result muted';
+    result.textContent = 'Sin ejecutar';
+    copy.append(title, description, result);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Probar';
+    button.addEventListener('click', () => void execute(test, button));
+    item.append(order, copy, button);
+    list.append(item);
+  });
+}
+
+async function execute(test, button) {
+  const result = query('.automation-test-result', button.closest('li'));
+  button.disabled = true;
+  result.textContent = 'Ejecutando…';
+  result.className = 'automation-test-result pending';
+  try {
+    const data = await test.run();
+    result.textContent = data?.status
+      ? `${data.status}${data.errorCode ? ` · ${data.errorCode}` : ''}`
+      : data?.result?.action
+        ? `Acción simulada: ${data.result.action}`
+        : 'Prueba completada';
+    result.className = 'automation-test-result success';
+    return true;
+  } catch (error) {
+    result.textContent = error.message;
+    result.className = 'automation-test-result failed';
+    return false;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function automaticTest(kind) {
+  return api(botPath(`/api/automatic-messages/send/${kind}`), {
+    method: 'POST',
+    body: JSON.stringify({
+      groupKey: selectedGroup(),
+      confirmed: true,
+      fictitiousName: 'Integrante de prueba',
+    }),
+  });
+}
+
+function sendPollTest() {
+  const templateId = Number(query('#lab-poll')?.value);
+  if (!Number.isInteger(templateId) || templateId <= 0)
+    throw new Error('Selecciona una encuesta disponible.');
+  return api(botPath('/api/polls/send-test'), {
+    method: 'POST',
+    body: JSON.stringify({
+      groupKey: selectedGroup(),
+      templateId,
+      countsAsDaily: false,
+      confirmed: true,
+    }),
+  });
+}
+
+function sendDigestTest(period) {
+  return api(botPath('/api/automatic-messages/digests/send-test'), {
+    method: 'POST',
+    body: JSON.stringify({ groupKey: selectedGroup(), period, confirmed: true }),
+  });
+}
+
+async function loadModule() {
+  if (!botId) return;
+  try {
+    const context = await api(botPath('/api/automation-lab/context'));
+    csrfToken = context.csrfToken;
+    const [automaticData, pollData, digestData] = await Promise.all([
+      api(botPath('/api/automatic-messages')),
+      api(botPath('/api/polls')),
+      api(botPath('/api/automatic-messages/digests')),
+    ]);
+    authorizedGroups = automaticData.authorizedGroups || digestData.authorizedGroups || [];
+    polls = (pollData.templates || []).filter((item) => item.enabled);
+    fillPolls();
+    renderTests();
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+}
+
+function replaceOptions(select, items, value, label) {
+  const previous = select.value;
+  select.replaceChildren();
+  items.forEach((item) => select.add(new window.Option(label(item), value(item))));
+  if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+}
+
+function fillPolls() {
+  replaceOptions(
+    query('#lab-poll'),
+    polls,
+    (item) => String(item.id),
+    (item) => item.question,
+  );
+}
+
+function bindModule() {
+  query('[data-section="automation-lab"]')?.addEventListener('click', () => {
+    activateModule();
+    void loadModule();
+  });
+  query('#lab-refresh')?.addEventListener('click', () => void loadModule());
+  query('#lab-all')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    for (const test of definitions()) {
+      const testButton = query('button', query(`[data-test-id="${test.id}"]`));
+      if (testButton) await execute(test, testButton);
+    }
+    button.disabled = false;
+    showNotice('La secuencia terminó. Revisa el resultado de cada prueba.');
+  });
+  query('#section-select')?.addEventListener('change', (event) => {
+    if (event.target.value === 'automation-lab') {
+      activateModule();
+      void loadModule();
+    }
+  });
+}
+
+window.addEventListener('bot-services-load', (event) => {
+  botId = event.detail.botId;
+  createModule();
+  const visible = new Set(event.detail.visibleModules || []).has('automatic-messages');
+  queryAll('[data-section="automation-lab"], option[value="automation-lab"]').forEach((item) => {
+    item.hidden = !visible;
+    item.disabled = !visible;
+    item.classList.toggle('hidden', !visible);
+  });
+  if (visible) void loadModule();
+});
+
+createModule();

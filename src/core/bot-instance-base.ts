@@ -8,7 +8,7 @@ import { canonicalPhoneIdentity, normalizeWhatsAppIdentity } from '../messaging/
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import type { SecretVault } from '../security/secret-vault.js';
-import { ModerationService } from '../moderation/moderation-service.js';
+import type { ModerationService } from '../moderation/moderation-service.js';
 import { AutomaticMessageService } from './automatic-message-service.js';
 import { ConnectionManager } from './connection-manager.js';
 import { ConversationFlowService } from './conversation-flow-service.js';
@@ -31,7 +31,6 @@ export type BotInstanceOptions = {
   onReady?: (botId: string) => void;
   onDuplicateIdentity?: (botId: string) => Promise<void>;
   onGroupJoin?: (botId: string, event: GroupJoinEvent) => Promise<void>;
-  isPaused?: () => boolean;
   secretVault?: SecretVault;
 };
 
@@ -45,7 +44,6 @@ export class BotInstance {
   private readonly pollScheduler: PollScheduler;
   private readonly aiQueue: AIRequestQueueService;
   private readonly outboundQueue: OutboundMessageQueueService;
-  private readonly moderation: ModerationService | null;
   private latestQr: string | null = null;
   private adminPhone: string | null = null;
   private readonly communityServicesEnabled: boolean;
@@ -82,17 +80,22 @@ export class BotInstance {
     );
     this.aiQueue = new AIRequestQueueService(database, logger, bot.id);
     this.outboundQueue = new OutboundMessageQueueService(client, database, logger, bot.id);
-    this.moderation = bot.groupChannelEnabled
-      ? new ModerationService(database, this.outboundQueue, logger, bot.id, options.secretVault)
-      : null;
     const query = new AssistantQueryService(database, provider, logger, bot.id, this.aiQueue);
     if (bot.capabilities.communitySingleTurnMode) database.clearConversationStates(bot.id);
-    const flow = bot.capabilities.conversationContinuationEnabled || bot.capabilities.interactiveMenusEnabled
-      ? new ConversationFlowService(database, client, logger, bot.id, options.mediaRoot, query, this.outboundQueue)
-      : undefined;
+    const flow =
+      bot.capabilities.conversationContinuationEnabled || bot.capabilities.interactiveMenusEnabled
+        ? new ConversationFlowService(
+            database,
+            client,
+            logger,
+            bot.id,
+            options.mediaRoot,
+            query,
+            this.outboundQueue,
+          )
+        : undefined;
     this.automaticMessages = new AutomaticMessageService(database, client, logger, anonymizer, {
       botId: bot.id,
-      ...(options.isPaused === undefined ? {} : { isPaused: options.isPaused }),
     });
     this.pollRepository = new PollRepository(database, bot.id);
     const pollSelector = new PollTemplateSelector(this.pollRepository);
@@ -105,7 +108,6 @@ export class BotInstance {
       client,
       logger,
       anonymizer,
-      options.isPaused === undefined ? {} : { isPaused: options.isPaused },
     );
     this.pollScheduler = new PollScheduler(this.pollService, logger);
     this.processor = new MessageProcessor(
@@ -123,7 +125,6 @@ export class BotInstance {
       bot.id,
       flow,
       this.outboundQueue,
-      this.moderation ?? undefined,
     );
     client.setEvents({
       onMessage: async (message) => {
@@ -131,10 +132,20 @@ export class BotInstance {
       },
       onStateChange: (state, reason) => {
         this.connection.updateState(state, reason);
-        database.updateBotWhatsAppStatus(bot.id, state, null, state === 'connected' ? new Date().toISOString() : null);
+        database.updateBotWhatsAppStatus(
+          bot.id,
+          state,
+          null,
+          state === 'connected' ? new Date().toISOString() : null,
+        );
         database.recordTechnicalEvent({
           botId: bot.id,
-          eventType: state === 'connected' ? 'BOT_CONNECTED' : state === 'disconnected' ? 'BOT_DISCONNECTED' : 'BOT_STATE_CHANGED',
+          eventType:
+            state === 'connected'
+              ? 'BOT_CONNECTED'
+              : state === 'disconnected'
+                ? 'BOT_DISCONNECTED'
+                : 'BOT_STATE_CHANGED',
           result: state,
           ...(reason === undefined ? {} : { errorCode: reason }),
         });
@@ -145,7 +156,8 @@ export class BotInstance {
         const ownIdentifier = client.getOwnIdentifier?.() ?? null;
         this.adminPhone = formatAdminPhoneNumber(ownIdentifier);
         if (ownIdentifier !== null) {
-          const normalizedIdentity = normalizeWhatsAppIdentity(ownIdentifier) ?? ownIdentifier.trim().toLowerCase();
+          const normalizedIdentity =
+            normalizeWhatsAppIdentity(ownIdentifier) ?? ownIdentifier.trim().toLowerCase();
           const normalizedPhone = canonicalPhoneIdentity(ownIdentifier);
           const identityHash = anonymizer.fingerprint(['whatsapp-identity', normalizedIdentity]);
           const phoneHash = anonymizer.fingerprint([
@@ -195,7 +207,11 @@ export class BotInstance {
       },
       onQr: (qr) => {
         this.latestQr = qr;
-        database.recordTechnicalEvent({ botId: bot.id, eventType: 'BOT_QR_GENERATED', result: 'available' });
+        database.recordTechnicalEvent({
+          botId: bot.id,
+          eventType: 'BOT_QR_GENERATED',
+          result: 'available',
+        });
       },
       onGroupJoin: async (event) => {
         if (this.communityServicesEnabled) await this.automaticMessages.handleGroupJoin(event);
@@ -208,7 +224,10 @@ export class BotInstance {
   }
 
   public async start(): Promise<void> {
-    this.logger.info({ operation: 'BOT_STARTED', botId: this.bot.id }, 'Se inició una instancia aislada');
+    this.logger.info(
+      { operation: 'BOT_STARTED', botId: this.bot.id },
+      'Se inició una instancia aislada',
+    );
     if (this.communityServicesEnabled) this.discovery.startPeriodic();
     if (this.communityServicesEnabled) {
       this.automaticMessages.start();
@@ -232,7 +251,7 @@ export class BotInstance {
   }
 
   public moderationService(): ModerationService | null {
-    return this.moderation;
+    return null;
   }
 
   public async stop(): Promise<void> {
@@ -243,7 +262,10 @@ export class BotInstance {
       this.pollScheduler.stop();
     }
     await this.connection.stop();
-    this.logger.info({ operation: 'BOT_STOPPED', botId: this.bot.id }, 'Se detuvo una instancia aislada');
+    this.logger.info(
+      { operation: 'BOT_STOPPED', botId: this.bot.id },
+      'Se detuvo una instancia aislada',
+    );
   }
 
   public async restart(): Promise<void> {
@@ -286,8 +308,16 @@ export class BotInstance {
     return this.aiQueue;
   }
 
-  public snapshot(): { connection: ConnectionSnapshot; discovery: ReturnType<GroupDiscoveryService['snapshot']>; qrAvailable: boolean } {
-    return { connection: this.connection.snapshot(), discovery: this.discovery.snapshot(), qrAvailable: this.latestQr !== null };
+  public snapshot(): {
+    connection: ConnectionSnapshot;
+    discovery: ReturnType<GroupDiscoveryService['snapshot']>;
+    qrAvailable: boolean;
+  } {
+    return {
+      connection: this.connection.snapshot(),
+      discovery: this.discovery.snapshot(),
+      qrAvailable: this.latestQr !== null,
+    };
   }
 
   public qr(): string | null {

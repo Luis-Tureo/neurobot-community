@@ -286,52 +286,6 @@ El panel permite activar la tarea, cambiar hora y tolerancia, elegir modo global
 
 No existe listener de votos. El bot no guarda nombres, números, identificadores de votantes, alternativas elegidas ni resultados individuales; tampoco interpreta respuestas o inicia mensajes privados por un voto. Los registros técnicos contienen solo hashes de grupo, ID y categoría de plantilla, fecha, hora, resultado, intento y código seguro.
 
-## Mantenimiento desde el panel
-
-Las operaciones destructivas están separadas de la página principal. Ingrese al panel y abra **Mantenimiento > Zona de peligro**.
-
-### Desvincular solamente WhatsApp
-
-Esta opción elimina la sesión vinculada y la caché local de WhatsApp Web. Conserva SQLite, los administradores de WhatsApp, grupos detectados y autorizados, comandos, respuestas, silencios y configuración general.
-
-Requiere escribir exactamente `DESVINCULAR WHATSAPP` y volver a ingresar la contraseña actual del panel. Después de completarse, el cliente se inicia nuevamente y el QR nuevo se muestra únicamente en la consola.
-
-### Restablecer bot de fábrica
-
-Esta opción elimina:
-
-- La sesión y caché de WhatsApp Web.
-- Las bases SQLite locales y sus archivos WAL/SHM dentro de `data`.
-- Grupos detectados y autorizados.
-- Administradores de comandos de WhatsApp.
-- Comandos o respuestas personalizados, silencios, configuración y registros locales.
-
-Conserva:
-
-- `.env` y sus secretos.
-- Código fuente, `src`, `public`, `package.json`, `package-lock.json` y `node_modules`.
-- El repositorio Git.
-- Las copias de seguridad automáticas.
-
-La confirmación exige escribir exactamente `RESTABLECER BOT`, marcar la casilla de comprensión, volver a ingresar la contraseña actual y elegir entre conservarla o establecer una nueva de al menos 12 caracteres. El panel bloquea otras acciones mientras trabaja y cierra todas las sesiones administrativas al terminar.
-
-Antes de borrar, el sistema crea `backups/reset-YYYYMMDD-HHMMSS`. La copia incluye SQLite y un manifiesto sin identificadores reales. La sesión de WhatsApp se guarda cifrada con AES-256-GCM para permitir rollback automático; nunca se copia en texto plano. Se conservan únicamente las cinco copias automáticas más recientes y toda la carpeta `backups` permanece excluida de Git.
-
-Si el respaldo falla, no comienza el borrado. Si falla una etapa posterior, el servicio intenta restaurar SQLite y la sesión cifrada. El panel muestra `completed`, `failed` o `rolled_back` junto con un código técnico seguro.
-
-### Recuperación
-
-Para recuperar manualmente SQLite:
-
-1. Detenga completamente la aplicación.
-2. Seleccione la copia `backups\reset-*` adecuada.
-3. Copie el contenido de su subcarpeta `database` hacia `data`, conservando los nombres y subcarpetas.
-4. Inicie nuevamente la aplicación y compruebe el panel antes de vincular WhatsApp.
-
-La sesión cifrada está destinada al rollback automático. Para una recuperación manual normal, vuelva a vincular WhatsApp mediante el QR nuevo.
-
-Si Windows mantiene archivos bloqueados, no los elimine a la fuerza: cierre la aplicación y cualquier Chromium asociado, espere unos segundos y vuelva a intentarlo. Si el QR no aparece, revise la consola, confirme que el estado sea **Esperando código QR** y use **Estado > Reiniciar conexión**. No utilice estas funciones mientras el bot procese mensajes importantes.
-
 ## Restablecimiento manual de sesión
 
 Detenga primero el bot y ejecute:

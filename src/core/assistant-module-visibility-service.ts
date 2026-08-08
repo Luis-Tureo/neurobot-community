@@ -14,9 +14,7 @@ export type AssistantModuleKey =
   | 'moderation'
   | 'automatic-messages'
   | 'polls'
-  | 'requests'
-  | 'statistics'
-  | 'maintenance';
+  | 'requests';
 
 const common: AssistantModuleKey[] = [
   'overview',
@@ -25,10 +23,8 @@ const common: AssistantModuleKey[] = [
   'knowledge',
   'cached-answers',
   'ai',
-  'statistics',
-  'maintenance',
 ];
-const community: AssistantModuleKey[] = ['automatic-messages', 'polls', 'moderation'];
+const community: AssistantModuleKey[] = ['automatic-messages', 'polls'];
 const commercial: AssistantModuleKey[] = ['menus', 'catalog', 'media', 'hours', 'requests'];
 
 export class AssistantModuleVisibilityService {
@@ -49,6 +45,7 @@ export class AssistantModuleVisibilityService {
   }
 
   public assertVisible(bot: BotRecord, module: AssistantModuleKey): void {
-    if (!this.visibleModules(bot).includes(module)) throw new Error('ASSISTANT_MODULE_NOT_AVAILABLE');
+    if (!this.visibleModules(bot).includes(module))
+      throw new Error('ASSISTANT_MODULE_NOT_AVAILABLE');
   }
 }

@@ -10,10 +10,7 @@ import {
   registerCommunityDigestService,
   unregisterCommunityDigestService,
 } from './community-digest-registry.js';
-import {
-  BotInstance as BaseBotInstance,
-  type BotInstanceOptions,
-} from './bot-instance-base.js';
+import { BotInstance as BaseBotInstance, type BotInstanceOptions } from './bot-instance-base.js';
 
 export type { BotInstanceOptions } from './bot-instance-base.js';
 
@@ -33,7 +30,6 @@ export class BotInstance extends BaseBotInstance {
     this.communityDigest = bot.groupChannelEnabled
       ? new CommunityDigestService(database, client, provider, logger, anonymizer, {
           botId: bot.id,
-          ...(options.isPaused === undefined ? {} : { isPaused: options.isPaused }),
         })
       : null;
     if (this.communityDigest !== null) {

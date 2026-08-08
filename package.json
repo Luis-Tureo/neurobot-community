@@ -6,7 +6,7 @@
   "license": "UNLICENSED",
   "type": "module",
   "engines": {
-    "node": ">=24.0.0",
+    "node": ">=24.18.1 <25",
     "npm": ">=11.0.0"
   },
   "scripts": {
@@ -16,7 +16,9 @@
     "setup": "tsx scripts/setup.ts",
     "dev": "tsx src/index.ts",
     "dev:watch": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "npm run styles:build && tsc -p tsconfig.build.json",
+    "styles:build": "npx @tailwindcss/cli -i ./src/admin/panel.css -o ./public/panel.css --minify",
+    "styles:watch": "npx @tailwindcss/cli -i ./src/admin/panel.css -o ./public/panel.css --watch",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -46,6 +48,7 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@tailwindcss/cli": "^4.3.3",
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "24.13.3",
     "@types/qrcode": "^1.5.6",
@@ -53,6 +56,7 @@
     "@vitest/coverage-v8": "4.1.10",
     "eslint": "10.8.0",
     "prettier": "3.9.6",
+    "tailwindcss": "^4.3.3",
     "tsx": "4.23.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.65.0",

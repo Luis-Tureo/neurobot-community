@@ -594,7 +594,6 @@ export type BotRecord = {
   connectorType: ConnectorType;
   operatingMode: BotOperatingMode;
   lifecycleStatus: AssistantLifecycleStatus;
-  deletionLocked: boolean;
   deletedAt: string | null;
   scheduledPermanentDeletionAt: string | null;
   groupChannelEnabled: boolean;

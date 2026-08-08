@@ -4,23 +4,26 @@ import { resolve } from 'node:path';
 describe('interfaz de encuestas', () => {
   const html = readFileSync(resolve('public', 'index.html'), 'utf8');
   const script = readFileSync(resolve('public', 'app.js'), 'utf8');
+  const labScript = readFileSync(resolve('public', 'automation-lab.js'), 'utf8');
   const index = readFileSync(resolve('src', 'index.ts'), 'utf8');
 
-  it('incluye configuración, banco, prueba, fechas e historial', () => {
+  it('incluye configuración, banco e historial', () => {
     for (const text of [
       'data-section="polls"',
       'id="section-polls"',
       'Activar encuestas diarias',
       'Banco de encuestas',
-      'Enviar encuesta de prueba',
-      'La prueba manual funciona aunque la programación diaria esté desactivada.',
-      'Programación por fecha',
       'Historial de envíos',
       'Encuestas eliminadas de este asistente',
       'America/Santiago',
     ]) {
       expect(html).toContain(text);
     }
+    const pollsSection = html.slice(
+      html.indexOf('id="section-polls"'),
+      html.indexOf('</section>', html.indexOf('id="section-polls"')),
+    );
+    expect(pollsSection).not.toContain('id="poll-override-form"');
   });
 
   it('distingue predeterminadas, personalizadas y permite ocultar o restaurar por asistente', () => {
@@ -33,13 +36,12 @@ describe('interfaz de encuestas', () => {
     expect(script).toContain('No se eliminará de otros asistentes ni del catálogo general');
   });
 
-  it('usa texto seguro, confirmación, POST, CSRF y grupos autorizados', () => {
-    expect(script).toContain("api(botScopedPath('/api/polls/send-test')");
-    expect(script).toContain("method: 'POST'");
-    expect(script).toContain('confirmed: true');
-    expect(script).toContain('window.confirm');
-    expect(script).toContain("headers['x-csrf-token']");
-    expect(script).toContain('result.authorizedGroups');
+  it('delega la prueba segura al Centro de pruebas y conserva grupos autorizados', () => {
+    expect(labScript).toContain("api(botPath('/api/polls/send-test')");
+    expect(labScript).toContain("method: 'POST'");
+    expect(labScript).toContain('confirmed: true');
+    expect(labScript).toContain("headers['x-csrf-token']");
+    expect(labScript).toContain('automaticData.authorizedGroups');
     expect(script).toContain('.textContent =');
     expect(script).not.toContain('innerHTML');
   });

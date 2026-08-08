@@ -8,7 +8,9 @@ describe('persistencia SQLite', () => {
     const database = new AppDatabase(':memory:');
     database.migrate();
     database.migrate();
-    expect(database.getMigrationVersions()).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    expect(database.getMigrationVersions()).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+    ]);
     expect(database.getBotProfile('neurobot')).toMatchObject({
       botName: 'Neurobot',
       activationAlias: '@neurobot',
@@ -19,7 +21,6 @@ describe('persistencia SQLite', () => {
       operatingMode: 'COMMUNITY_GROUPS',
       connectorMigrationLocked: true,
       lifecycleStatus: 'CONNECTED',
-      deletionLocked: true,
       capabilities: {
         communitySingleTurnMode: true,
         privateChatsEnabled: false,
@@ -56,6 +57,33 @@ describe('persistencia SQLite', () => {
     database.setSilence('grupo@g.us', new Date(Date.now() + 60_000));
     expect(database.getSilenceRemainingMs('grupo@g.us')).toBeGreaterThan(0);
     expect(database.getSetting('bot_enabled', true)).toBe(false);
+    database.close();
+  });
+
+  it('libera la identidad de WhatsApp para permitir cambiar el número', () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    expect(
+      database.claimWhatsAppIdentity({
+        botId: 'neurobot',
+        normalizedPhoneHash: 'phone-hash',
+        whatsappIdentityHash: 'identity-hash',
+        maskedNumber: '+56 9 **** 1234',
+      }),
+    ).toEqual({ accepted: true });
+    expect(database.getBot('neurobot')).toMatchObject({
+      maskedNumber: '+56 9 **** 1234',
+      lifecycleStatus: 'CONNECTED',
+    });
+
+    database.releaseBotWhatsAppIdentity('neurobot');
+
+    expect(database.getBot('neurobot')).toMatchObject({
+      maskedNumber: null,
+      whatsappStatus: 'disconnected',
+      lastConnectedAt: null,
+      lifecycleStatus: 'UNLINKED',
+    });
     database.close();
   });
 
@@ -193,18 +221,26 @@ describe('persistencia SQLite', () => {
       });
       configuration.welcome.template = 'Hola {name} en {groupName}';
       database.saveAutomaticMessageConfiguration(configuration, 'neurobot');
-      database.saveWelcomeGroupSetting('grupo-anonimo', {
-        enabled: true,
-        customTemplate: 'Bienvenida {mention}',
-        inheritAssistantTemplate: false,
-      }, 'neurobot');
-      expect(database.getAutomaticMessageConfiguration('neurobot').welcome.template).toBe('Hola {name} en {groupName}');
+      database.saveWelcomeGroupSetting(
+        'grupo-anonimo',
+        {
+          enabled: true,
+          customTemplate: 'Bienvenida {mention}',
+          inheritAssistantTemplate: false,
+        },
+        'neurobot',
+      );
+      expect(database.getAutomaticMessageConfiguration('neurobot').welcome.template).toBe(
+        'Hola {name} en {groupName}',
+      );
       expect(database.getWelcomeGroupSetting('grupo-anonimo', 'neurobot')).toEqual({
         enabled: true,
         customTemplate: 'Bienvenida {mention}',
         inheritAssistantTemplate: false,
       });
-      expect(JSON.stringify(database.listWelcomeGroupSettings('neurobot'))).not.toMatch(/@(?:c\.us|lid)/u);
+      expect(JSON.stringify(database.listWelcomeGroupSettings('neurobot'))).not.toMatch(
+        /@(?:c\.us|lid)/u,
+      );
     } finally {
       database.close();
     }

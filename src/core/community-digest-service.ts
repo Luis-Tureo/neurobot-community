@@ -42,7 +42,6 @@ type CommunityDigestServiceOptions = {
   botId: string;
   tickIntervalMs?: number;
   now?: () => Date;
-  isPaused?: () => boolean;
 };
 
 type DueDigest = {
@@ -54,7 +53,6 @@ export class CommunityDigestService {
   private readonly botId: string;
   private readonly tickIntervalMs: number;
   private readonly now: () => Date;
-  private readonly isPaused: () => boolean;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running: Promise<void> | null = null;
   private started = false;
@@ -70,7 +68,6 @@ export class CommunityDigestService {
     this.botId = options.botId;
     this.tickIntervalMs = options.tickIntervalMs ?? 30_000;
     this.now = options.now ?? (() => new Date());
-    this.isPaused = options.isPaused ?? (() => false);
   }
 
   public start(): void {
@@ -121,9 +118,7 @@ export class CommunityDigestService {
     };
     return {
       ...configuration,
-      timezone: isValidTimezone(configuration.timezone)
-        ? configuration.timezone
-        : fallbackTimezone,
+      timezone: isValidTimezone(configuration.timezone) ? configuration.timezone : fallbackTimezone,
     };
   }
 
@@ -137,7 +132,7 @@ export class CommunityDigestService {
   }
 
   public async runDueTasks(now = this.now()): Promise<void> {
-    if (this.isPaused() || !this.client.isReady()) return;
+    if (!this.client.isReady()) return;
     const configuration = this.configuration();
     const local = toLocalDateTime(now, configuration.timezone);
     const due: DueDigest[] = [];
@@ -188,7 +183,6 @@ export class CommunityDigestService {
     groupId: string,
     now = this.now(),
   ): Promise<CommunityDigestResult> {
-    if (this.isPaused()) return failed(period, 'MAINTENANCE_IN_PROGRESS');
     if (!this.client.isReady()) return failed(period, 'WHATSAPP_NOT_CONNECTED');
     if (!this.database.canBotSendToGroup(this.botId, groupId)) {
       return failed(period, 'GROUP_NOT_AVAILABLE');
@@ -215,9 +209,7 @@ export class CommunityDigestService {
       `Generado: ${now.toISOString()}`,
       'Los nombres, números, correos y otros identificadores no se incluyen.',
       '',
-      ...(lines.length > 0
-        ? lines
-        : ['No se encontraron mensajes para el período seleccionado.']),
+      ...(lines.length > 0 ? lines : ['No se encontraron mensajes para el período seleccionado.']),
       '',
     ].join('\n');
   }
@@ -294,16 +286,12 @@ export class CommunityDigestService {
       throw new Error('CHAT_HISTORY_UNAVAILABLE');
     }
     const configuration = this.configuration();
-    const history = await this.client.fetchRecentGroupMessages(
-      groupId,
-      configuration.maxMessages,
-    );
+    const history = await this.client.fetchRecentGroupMessages(groupId, configuration.maxMessages);
     const ageMs = period === 'daily' ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
     const cutoff = now.getTime() - ageMs;
     return history
       .filter(
-        (message) =>
-          !message.fromMe && message.timestampMs >= cutoff && message.body.trim() !== '',
+        (message) => !message.fromMe && message.timestampMs >= cutoff && message.body.trim() !== '',
       )
       .sort((left, right) => left.timestampMs - right.timestampMs);
   }
@@ -392,7 +380,7 @@ function sanitizeBody(value: string): string {
     .normalize('NFKC')
     .replace(/\b[A-Z0-9._%+-]{2,64}@[A-Z0-9.-]+\.[A-Z]{2,24}\b/giu, '[correo omitido]')
     .replace(/(?:\+?\d[\s().-]*){7,15}/gu, '[número omitido]')
-    .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu, ' ')
+    .replace(/[\p{Cc}\u202a-\u202e\u2066-\u2069]/gu, ' ')
     .replace(/\s+/gu, ' ')
     .trim()
     .slice(0, 1200);
@@ -419,9 +407,7 @@ function scheduledDateForWindow(
 
 function previousCalendarDate(value: string): string {
   const [year = 0, month = 1, day = 1] = value.split('-').map(Number);
-  return new Date(Date.UTC(year, month - 1, day) - 24 * 60 * 60 * 1000)
-    .toISOString()
-    .slice(0, 10);
+  return new Date(Date.UTC(year, month - 1, day) - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 function weekdayForCalendarDate(value: string): CommunityDigestWeekday {

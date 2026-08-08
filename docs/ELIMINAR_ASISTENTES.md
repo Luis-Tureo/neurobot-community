@@ -12,4 +12,4 @@ Restaurar comprueba de nuevo la propiedad de la identidad. Si está libre, el as
 
 Solo está disponible desde Papelera. Exige contraseña y la frase `ELIMINAR PERMANENTEMENTE <nombre>`. Antes de eliminar datos por `assistantId`, se crea un respaldo final de SQLite y se archiva la sesión aislada.
 
-Neurobot tiene `deletionLocked=true`; la eliminación ordinaria, el envío a papelera y la eliminación permanente están bloqueados.
+Todos los asistentes, incluido Neurobot, pueden enviarse a la papelera desde Inicio. La eliminación permanente continúa disponible desde Papelera con confirmación explícita.

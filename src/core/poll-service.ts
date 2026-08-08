@@ -22,12 +22,10 @@ export type ManualPollResult = PollSendResult & { historyId: number };
 
 export type PollServiceOptions = {
   now?: () => Date;
-  isPaused?: () => boolean;
 };
 
 export class PollService {
   private readonly now: () => Date;
-  private readonly isPaused: () => boolean;
   private runPromise: Promise<PollRunResult> | null = null;
 
   public constructor(
@@ -41,7 +39,6 @@ export class PollService {
     options: PollServiceOptions = {},
   ) {
     this.now = options.now ?? (() => new Date());
-    this.isPaused = options.isPaused ?? (() => false);
   }
 
   public async runDueTasks(): Promise<PollRunResult> {
@@ -111,7 +108,6 @@ export class PollService {
 
   private async runDueTasksOnce(): Promise<PollRunResult> {
     const result: PollRunResult = { considered: 0, sent: 0, failed: 0, skipped: 0 };
-    if (this.isPaused()) return result;
     const now = this.now();
     const configuration = this.repository.configuration();
     const local = toLocalDateTime(now, configuration.timezone);
@@ -241,7 +237,8 @@ export class PollService {
       if (!this.database.getSetting('bot_enabled', true)) return 'BOT_DISABLED';
       if (this.database.getSilenceRemainingMs(groupId, now) > 0) return 'GROUP_SILENCED';
     } else {
-      if (!this.database.canBotSendToGroup(this.repository.botId, groupId)) return 'GROUP_NOT_AVAILABLE';
+      if (!this.database.canBotSendToGroup(this.repository.botId, groupId))
+        return 'GROUP_NOT_AVAILABLE';
       if (this.database.getBot(this.repository.botId)?.enabled !== true) return 'BOT_DISABLED';
     }
     return (await this.whatsAppConnected()) ? null : 'WHATSAPP_NOT_CONNECTED';

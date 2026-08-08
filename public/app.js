@@ -2,11 +2,10 @@ const state = {
   csrfToken: null,
   commands: [],
   keywords: [],
-  maintenanceKind: null,
-  maintenanceBusy: false,
   groupFilter: 'active',
   editingCommandId: null,
   automaticDefaults: null,
+  automaticConfiguration: null,
   pollTemplates: [],
   pollData: null,
   selectedBotId: null,
@@ -76,9 +75,15 @@ function botScopedPath(path) {
 }
 
 function authenticated(value) {
+  document.body.classList.toggle('login-mode', !value);
   elements.loginView.classList.toggle('hidden', value);
   elements.panelView.classList.toggle('hidden', !value);
   elements.logout.classList.toggle('hidden', !value);
+  if (!value) {
+    document.title = 'Neurobot AI';
+    document.querySelector('#application-title').textContent = 'Neurobot AI';
+    document.querySelector('#application-subtitle').textContent = '';
+  }
 }
 
 document.querySelector('#login-form').addEventListener('submit', async (event) => {
@@ -116,12 +121,8 @@ function activatePanelSection(name, scrollOnMobile = false) {
   document
     .querySelectorAll('[data-section]')
     .forEach((item) => item.classList.toggle('active', item === button));
-  document
-    .querySelectorAll('.panel-section')
-    .forEach((item) => item.classList.add('hidden'));
+  document.querySelectorAll('.panel-section').forEach((item) => item.classList.add('hidden'));
   section.classList.remove('hidden');
-  const advancedNavigation = button.closest('.sidebar-more');
-  if (advancedNavigation) advancedNavigation.open = true;
   if (sectionSelect) sectionSelect.value = name;
   if (scrollOnMobile && window.matchMedia('(max-width: 900px)').matches) {
     document.querySelector('.mobile-navigation')?.scrollIntoView({ behavior: 'smooth' });
@@ -149,17 +150,37 @@ async function loadStatus() {
   const result = await api(`/api/bots/${encodeURIComponent(state.selectedBotId)}`);
   state.selectedBot = result.bot;
   state.selectedProfile = result.profile;
-  const connection = result.runtime?.connection || { state: result.bot.whatsappStatus, lastConnectedAt: result.bot.lastConnectedAt };
+  const connection = result.runtime?.connection || {
+    state: result.bot.whatsappStatus,
+    lastConnectedAt: result.bot.lastConnectedAt,
+  };
   document.title = result.profile.applicationName;
   document.querySelector('#application-title').textContent = result.profile.headerText;
-  document.querySelector('#application-subtitle').textContent = `${result.profile.organizationName} · ${result.profile.botName}`;
-  document.documentElement.style.setProperty('--primary', result.profile.primaryColor);
-  document.documentElement.style.setProperty('--accent', result.profile.secondaryColor);
+  document.querySelector('#application-subtitle').textContent =
+    `${result.profile.organizationName} · ${result.profile.botName}`;
   const cards = [
+    ['Número', result.bot.phoneNumber || 'Sin vincular'],
     ['WhatsApp', connectionLabels[connection.state] || connection.state],
-    ['IA', result.ai.configured ? (result.ai.enabled ? 'Configurada y activa' : 'Configurada e inactiva') : 'No configurada'],
+    [
+      'Última conexión',
+      connection.lastConnectedAt
+        ? new Date(connection.lastConnectedAt).toLocaleString('es-CL')
+        : 'Sin registro',
+    ],
+    ['Sesión', result.runtime ? 'Instancia preparada' : 'Detenida'],
+    [
+      'IA',
+      result.ai.configured
+        ? result.ai.enabled
+          ? 'Configurada y activa'
+          : 'Configurada e inactiva'
+        : 'No configurada',
+    ],
     ['Modo', modeLabel(result.bot.mode)],
-    ['Grupos activos', String(result.groups.filter((group) => group.active && !group.blocked).length)],
+    [
+      'Grupos activos',
+      String(result.groups.filter((group) => group.active && !group.blocked).length),
+    ],
     ['Chats privados', result.bot.privateMessagesEnabled ? 'Activados' : 'Desactivados'],
     ['Consultas hoy', String(result.usage.requests)],
     ['Tokens hoy', String(result.usage.totalTokens)],
@@ -660,7 +681,6 @@ document.querySelector('#settings-form').addEventListener('submit', async (event
 
 const automaticMessagesForm = document.querySelector('#automatic-messages-form');
 const automaticTemplateDefinitions = [
-  { field: 'welcome_template', key: 'welcome', maxLines: 5 },
   { field: 'greeting_monday', key: 'monday', maxLines: 5 },
   { field: 'greeting_weekday', key: 'weekday', maxLines: 5 },
   { field: 'greeting_friday', key: 'friday', maxLines: 5 },
@@ -673,32 +693,9 @@ initializeAutomaticTemplateTools();
 async function loadAutomaticMessages() {
   const result = await api(botScopedPath('/api/automatic-messages'));
   const configuration = result.configuration;
+  state.automaticConfiguration = configuration;
   state.automaticDefaults = result.defaultConfiguration;
-  automaticMessagesForm.elements.welcome_enabled.checked = configuration.welcome.enabled;
-  automaticMessagesForm.elements.welcome_batch_window.value =
-    configuration.welcome.batchWindowSeconds;
-  if (automaticMessagesForm.elements.welcome_group_simultaneous) {
-    automaticMessagesForm.elements.welcome_group_simultaneous.checked =
-      configuration.welcome.groupSimultaneous ?? true;
-  }
-  if (automaticMessagesForm.elements.welcome_reconciliation_interval) {
-    automaticMessagesForm.elements.welcome_reconciliation_interval.value =
-      configuration.welcome.reconciliationIntervalSeconds ?? 120;
-  }
   automaticMessagesForm.elements.welcome_template.value = configuration.welcome.template;
-  automaticMessagesForm.elements.welcome_include_public_name.checked = configuration.welcome.includePublicName ?? true;
-  automaticMessagesForm.elements.welcome_real_mention.checked = configuration.welcome.enableRealMention ?? true;
-  automaticMessagesForm.elements.welcome_unknown_name.value = configuration.welcome.unknownNameFallback ?? 'nuevo/a integrante';
-  automaticMessagesForm.elements.welcome_multiple_mode.value = configuration.welcome.multipleJoinMode ?? 'GROUPED';
-  automaticMessagesForm.elements.welcome_maximum_names.value = configuration.welcome.maximumGroupedNames ?? 5;
-  automaticMessagesForm.elements.welcome_send_delay.value = configuration.welcome.sendDelaySeconds ?? 2;
-  const welcomeStatus = result.welcomeStatus;
-  const welcomeRuntimeStatus = document.querySelector('#welcome-runtime-status');
-  if (welcomeRuntimeStatus) {
-    welcomeRuntimeStatus.textContent = welcomeStatus
-      ? `Listener: ${welcomeStatus.listenerRegistered ? 'registrado' : 'pendiente'} · Último ingreso: ${welcomeStatus.lastDetectedAt ?? 'sin eventos'} · Último envío: ${welcomeStatus.lastSentAt ?? 'sin envíos'} · Último error: ${welcomeStatus.lastErrorCode ?? 'ninguno'}`
-      : 'Estado de bienvenida no disponible.';
-  }
   automaticMessagesForm.elements.greeting_enabled.checked = configuration.dailyGreeting.enabled;
   automaticMessagesForm.elements.greeting_time.value = configuration.dailyGreeting.sendTime;
   automaticMessagesForm.elements.greeting_tolerance.value =
@@ -715,29 +712,6 @@ async function loadAutomaticMessages() {
   automaticMessagesForm.elements.rules_time.value = configuration.dailyRules.sendTime;
   automaticMessagesForm.elements.rules_tolerance.value = configuration.dailyRules.toleranceMinutes;
   automaticMessagesForm.elements.rules_template.value = configuration.dailyRules.template;
-
-  const groupSelect = document.querySelector('#automatic-message-group');
-  const previousGroup = groupSelect.value;
-  groupSelect.replaceChildren();
-  if (result.authorizedGroups.length === 0) {
-    const option = document.createElement('option');
-    option.value = '';
-    option.textContent = 'No hay grupos autorizados';
-    groupSelect.append(option);
-    groupSelect.disabled = true;
-  } else {
-    groupSelect.disabled = false;
-    result.authorizedGroups.forEach((group) => {
-      const option = document.createElement('option');
-      option.value = group.key;
-      option.textContent = group.name;
-      groupSelect.append(option);
-    });
-    if (result.authorizedGroups.some((group) => group.key === previousGroup)) {
-      groupSelect.value = previousGroup;
-    }
-  }
-  renderWelcomeGroupSettings(result.authorizedGroups);
 
   const deliveries = document.querySelector('#automatic-deliveries');
   deliveries.replaceChildren();
@@ -764,22 +738,13 @@ automaticMessagesForm.addEventListener('input', updateAutomaticTemplateMetrics);
 automaticMessagesForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
+  if (!state.automaticConfiguration) return;
   const payload = {
     timezone: state.selectedBotTimezone,
     welcome: {
-      enabled: form.elements.welcome_enabled.checked,
-      batchWindowSeconds: Number(form.elements.welcome_batch_window.value),
-      groupSimultaneous: form.elements.welcome_group_simultaneous?.checked ?? true,
-      reconciliationIntervalSeconds: Number(
-        form.elements.welcome_reconciliation_interval?.value ?? 120,
-      ),
+      ...state.automaticConfiguration.welcome,
+      enabled: true,
       template: form.elements.welcome_template.value,
-      includePublicName: form.elements.welcome_include_public_name.checked,
-      enableRealMention: form.elements.welcome_real_mention.checked,
-      unknownNameFallback: form.elements.welcome_unknown_name.value,
-      multipleJoinMode: form.elements.welcome_multiple_mode.value,
-      maximumGroupedNames: Number(form.elements.welcome_maximum_names.value),
-      sendDelaySeconds: Number(form.elements.welcome_send_delay.value),
     },
     dailyGreeting: {
       enabled: form.elements.greeting_enabled.checked,
@@ -800,66 +765,18 @@ automaticMessagesForm.addEventListener('submit', async (event) => {
     },
   };
   try {
-    await api(botScopedPath('/api/automatic-messages'), { method: 'PATCH', body: JSON.stringify(payload) });
+    await api(botScopedPath('/api/automatic-messages'), {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
     await loadAutomaticMessages();
-    showNotice('Configuración de mensajes automáticos guardada.');
+    showNotice('Automatizaciones guardadas.');
   } catch (error) {
     showNotice(error.message, true);
   }
 });
 
-document.querySelectorAll('.manual-automatic-send').forEach((button) => {
-  button.addEventListener('click', async () => {
-    const groupSelect = document.querySelector('#automatic-message-group');
-    if (!groupSelect.value) {
-      showNotice('Primero debes autorizar y seleccionar un grupo.', true);
-      return;
-    }
-    const label = automaticTaskLabel(
-      button.dataset.kind === 'welcome'
-        ? 'WELCOME'
-        : button.dataset.kind === 'greeting'
-          ? 'DAILY_GREETING'
-          : 'DAILY_RULES',
-    );
-    if (
-      !window.confirm(`¿Confirmas enviar ${label.toLocaleLowerCase('es')} al grupo seleccionado?`)
-    ) {
-      return;
-    }
-    button.disabled = true;
-    try {
-      const fictitiousName = button.dataset.kind === 'welcome'
-        ? document.querySelector('#welcome-preview-name').value.trim()
-        : undefined;
-      await api(botScopedPath(`/api/automatic-messages/send/${button.dataset.kind}`), {
-        method: 'POST',
-        body: JSON.stringify({ groupKey: groupSelect.value, confirmed: true, ...(fictitiousName ? { fictitiousName } : {}) }),
-      });
-      await loadAutomaticMessages();
-      showNotice(`${label} enviado correctamente.`);
-    } catch (error) {
-      showNotice(error.message, true);
-    } finally {
-      button.disabled = false;
-    }
-  });
-});
-
 function updateAutomaticPreviews() {
-  const name = document.querySelector('#welcome-preview-name')?.value.trim() || 'nuevo/a integrante';
-  const profile = state.selectedProfile || {};
-  const selectedGroup = document.querySelector('#automatic-message-group')?.selectedOptions[0]?.textContent || 'Grupo de prueba';
-  const values = {
-    name,
-    mention: `@${name.replace(/^@/u, '')}`,
-    communityName: profile.organizationName || 'la comunidad',
-    groupName: selectedGroup,
-    assistantName: profile.botName || state.selectedBot?.botName || 'el asistente',
-    botAlias: profile.activationAlias || '@neurobot',
-  };
-  document.querySelector('#welcome-preview').textContent = automaticMessagesForm.elements.welcome_template.value
-    .replace(/\{(name|mention|communityName|groupName|assistantName|botAlias)\}/gu, (_match, key) => values[key]);
   document.querySelector('#rules-preview').textContent =
     automaticMessagesForm.elements.rules_template.value;
   const weekday = new Intl.DateTimeFormat('en-US', {
@@ -876,65 +793,6 @@ function updateAutomaticPreviews() {
           : 'greeting_weekday';
   document.querySelector('#greeting-preview').textContent =
     automaticMessagesForm.elements[greetingField].value;
-}
-
-function renderWelcomeGroupSettings(groups) {
-  const target = document.querySelector('#welcome-group-settings');
-  target.replaceChildren();
-  if (groups.length === 0) {
-    target.append(empty('No hay grupos activos para configurar.'));
-    return;
-  }
-  groups.forEach((group) => {
-    const card = document.createElement('article');
-    card.className = 'list-item welcome-group-setting';
-    const title = document.createElement('strong');
-    title.textContent = group.name;
-    const enabledLabel = document.createElement('label');
-    enabledLabel.className = 'toggle';
-    const enabled = document.createElement('input');
-    enabled.type = 'checkbox';
-    enabled.checked = group.welcome.enabled;
-    enabledLabel.append(enabled, ' Bienvenida activa');
-    const inheritLabel = document.createElement('label');
-    inheritLabel.className = 'toggle';
-    const inherit = document.createElement('input');
-    inherit.type = 'checkbox';
-    inherit.checked = group.welcome.inheritAssistantTemplate;
-    inheritLabel.append(inherit, ' Usar plantilla del asistente');
-    const custom = document.createElement('textarea');
-    custom.maxLength = 2000;
-    custom.rows = 3;
-    custom.placeholder = 'Plantilla específica para este grupo';
-    custom.value = group.welcome.customTemplate || '';
-    custom.disabled = inherit.checked;
-    inherit.addEventListener('change', () => { custom.disabled = inherit.checked; });
-    const save = document.createElement('button');
-    save.type = 'button';
-    save.className = 'secondary';
-    save.textContent = 'Guardar grupo';
-    save.addEventListener('click', async () => {
-      save.disabled = true;
-      try {
-        await api(botScopedPath('/api/automatic-messages/welcome/groups'), {
-          method: 'PATCH',
-          body: JSON.stringify({
-            groupKey: group.key,
-            enabled: enabled.checked,
-            inheritAssistantTemplate: inherit.checked,
-            customTemplate: inherit.checked ? null : custom.value,
-          }),
-        });
-        showNotice('Configuración de bienvenida del grupo guardada.');
-      } catch (error) {
-        showNotice(error.message, true);
-      } finally {
-        save.disabled = false;
-      }
-    });
-    card.append(title, enabledLabel, inheritLabel, custom, save);
-    target.append(card);
-  });
 }
 
 function initializeAutomaticTemplateTools() {
@@ -988,7 +846,6 @@ function automaticTaskLabel(taskType) {
 
 const pollConfigurationForm = document.querySelector('#poll-configuration-form');
 const pollTemplateForm = document.querySelector('#poll-template-form');
-const pollTestForm = document.querySelector('#poll-test-form');
 const pollOverrideForm = document.querySelector('#poll-override-form');
 
 async function loadPolls() {
@@ -1006,7 +863,6 @@ async function loadPolls() {
   renderPollOverrides(result.overrides);
   renderPollHistory(result.history);
   updatePollTemplatePreview();
-  updatePollTestPreview();
 }
 
 function renderPollScheduleSummary(result) {
@@ -1063,16 +919,17 @@ function renderPollTemplates(templates) {
       remove.className = 'danger poll-remove-button';
       remove.textContent = 'Eliminar';
       remove.addEventListener('click', async () => {
-        const assistantName = state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
+        const assistantName =
+          state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
         const automationState = state.pollData?.configuration.enabled ? 'Activa' : 'Desactivada';
         const nextSchedule = state.pollData?.nextScheduledAt || 'Sin próxima programación';
         const confirmed = window.confirm(
           `Eliminar encuesta de este asistente\n\n` +
-          `Encuesta: ${template.question}\nAsistente: ${assistantName}\nCategoría: ${template.category}\n` +
-          `Automatización: ${automationState}\nPróxima programación: ${nextSchedule}\n\n` +
-          'Esta encuesta dejará de aparecer y no se utilizará en las automatizaciones de este asistente. ' +
-          'No se eliminará de otros asistentes ni del catálogo general. ' +
-          'También será retirada de las automatizaciones futuras de este asistente.',
+            `Encuesta: ${template.question}\nAsistente: ${assistantName}\nCategoría: ${template.category}\n` +
+            `Automatización: ${automationState}\nPróxima programación: ${nextSchedule}\n\n` +
+            'Esta encuesta dejará de aparecer y no se utilizará en las automatizaciones de este asistente. ' +
+            'No se eliminará de otros asistentes ni del catálogo general. ' +
+            'También será retirada de las automatizaciones futuras de este asistente.',
         );
         if (!confirmed) return;
         try {
@@ -1090,7 +947,12 @@ function renderPollTemplates(templates) {
       remove.className = 'danger';
       remove.textContent = 'Eliminar permanentemente';
       remove.addEventListener('click', async () => {
-        if (!window.confirm('¿Eliminar permanentemente esta encuesta personalizada de este asistente?')) return;
+        if (
+          !window.confirm(
+            '¿Eliminar permanentemente esta encuesta personalizada de este asistente?',
+          )
+        )
+          return;
         try {
           await api(botScopedPath(`/api/polls/templates/${template.id}`), { method: 'DELETE' });
           await loadPolls();
@@ -1113,13 +975,14 @@ function renderHiddenPollTemplates(templates) {
     target.append(empty('No hay encuestas predeterminadas eliminadas de este asistente.'));
     return;
   }
-  const assistantName = state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
+  const assistantName =
+    state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
   templates.forEach((template) => {
     const hiddenAt = new Date(template.hiddenAt).toLocaleString('es-CL');
     const item = listItem(
       template.question,
       `Predeterminada · ${template.category} · Eliminada: ${hiddenAt} · Estado: Oculta\n` +
-      `Esta encuesta fue eliminada solamente de ${assistantName}.`,
+        `Esta encuesta fue eliminada solamente de ${assistantName}.`,
     );
     const restore = document.createElement('button');
     restore.type = 'button';
@@ -1153,13 +1016,7 @@ function fillPollSelects(result) {
     value: String(template.id),
     label: template.question,
   }));
-  replaceOptions(pollTestForm.elements.templateId, templateOptions, true);
   replaceOptions(pollOverrideForm.elements.templateId, templateOptions, true);
-  replaceOptions(
-    pollTestForm.elements.groupKey,
-    result.authorizedGroups.map((group) => ({ value: group.key, label: group.name })),
-    true,
-  );
 }
 
 function replaceOptions(select, options, preserve = false) {
@@ -1191,7 +1048,9 @@ function renderPollOverrides(overrides) {
     remove.textContent = 'Quitar';
     remove.addEventListener('click', async () => {
       try {
-        await api(botScopedPath(`/api/polls/overrides/${override.localDate}`), { method: 'DELETE' });
+        await api(botScopedPath(`/api/polls/overrides/${override.localDate}`), {
+          method: 'DELETE',
+        });
         await loadPolls();
         showNotice('Programación eliminada.');
       } catch (error) {
@@ -1286,7 +1145,10 @@ pollTemplateForm.addEventListener('submit', async (event) => {
     disabledUntil,
   };
   try {
-    await api(botScopedPath('/api/polls/templates'), { method: 'POST', body: JSON.stringify(payload) });
+    await api(botScopedPath('/api/polls/templates'), {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
     pollTemplateForm.classList.add('hidden');
     await loadPolls();
     showNotice('Plantilla de encuesta guardada.');
@@ -1296,46 +1158,26 @@ pollTemplateForm.addEventListener('submit', async (event) => {
 });
 
 document.querySelector('#restore-poll-defaults').addEventListener('click', async () => {
-  const assistantName = state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
-  if (!window.confirm(`¿Restaurar las encuestas predeterminadas eliminadas solamente para ${assistantName}?`)) return;
-  try {
-    const result = await api(botScopedPath('/api/polls/templates/restore-defaults'), { method: 'POST' });
-    await loadPolls();
-    showNotice(result.restored > 0
-      ? `Se restauraron ${result.restored} encuestas predeterminadas para ${assistantName}.`
-      : 'No hay encuestas predeterminadas para restaurar en este asistente.');
-  } catch (error) {
-    showNotice(error.message, true);
-  }
-});
-
-pollTestForm.addEventListener('input', updatePollTestPreview);
-pollTestForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const groupName = form.elements.groupKey.selectedOptions[0]?.textContent || 'el grupo';
-  const template = state.pollTemplates.find(
-    (item) => item.id === Number(form.elements.templateId.value),
-  );
-  if (!template || !form.elements.groupKey.value) {
-    showNotice('Selecciona una plantilla y un grupo autorizado.', true);
+  const assistantName =
+    state.selectedProfile?.botName || state.selectedBot?.botName || 'este asistente';
+  if (
+    !window.confirm(
+      `¿Restaurar las encuestas predeterminadas eliminadas solamente para ${assistantName}?`,
+    )
+  )
     return;
-  }
-  if (!window.confirm(`¿Enviar ahora “${template.question}” a ${groupName}?`)) return;
   try {
-    await api(botScopedPath('/api/polls/send-test'), {
+    const result = await api(botScopedPath('/api/polls/templates/restore-defaults'), {
       method: 'POST',
-      body: JSON.stringify({
-        groupKey: form.elements.groupKey.value,
-        templateId: template.id,
-        countsAsDaily: form.elements.countsAsDaily.checked,
-        confirmed: true,
-      }),
     });
     await loadPolls();
-    showNotice('Encuesta de prueba enviada.');
+    showNotice(
+      result.restored > 0
+        ? `Se restauraron ${result.restored} encuestas predeterminadas para ${assistantName}.`
+        : 'No hay encuestas predeterminadas para restaurar en este asistente.',
+    );
   } catch (error) {
-    showNotice(`${error.message}${error.code ? ` (${error.code})` : ''}`, true);
+    showNotice(error.message, true);
   }
 });
 
@@ -1371,264 +1213,11 @@ function updatePollTemplatePreview() {
   ].join('\n');
 }
 
-function updatePollTestPreview() {
-  const template = state.pollTemplates.find(
-    (item) => item.id === Number(pollTestForm.elements.templateId.value),
-  );
-  document.querySelector('#poll-test-preview').textContent = template
-    ? [template.question, ...template.options.map((option) => `• ${option}`)].join('\n')
-    : 'Selecciona una plantilla.';
-}
-
 function toLocalInputValue(value) {
   const date = new Date(value);
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 16);
 }
-
-const maintenanceDialog = document.querySelector('#maintenance-dialog');
-const maintenanceForm = document.querySelector('#maintenance-form');
-const maintenanceConfirmationView = document.querySelector('#maintenance-confirmation-view');
-const maintenanceProgressView = document.querySelector('#maintenance-progress-view');
-const maintenanceConfigurations = {
-  factory: {
-    phrase: 'RESTABLECER BOT',
-    endpoint: '/api/admin/maintenance/factory-reset',
-    title: 'Restablecer bot de fábrica',
-    description:
-      'Se creará una copia de seguridad y luego se eliminarán la vinculación y las configuraciones locales del chatbot.',
-  },
-  unlink: {
-    phrase: 'DESVINCULAR WHATSAPP',
-    endpoint: '/api/admin/maintenance/unlink-whatsapp',
-    title: 'Desvincular solamente WhatsApp',
-    description:
-      'Se eliminarán la sesión y la caché de WhatsApp. La base de datos y sus configuraciones se conservarán.',
-  },
-};
-const maintenanceStageOrder = [
-  'verifying_authorization',
-  'stopping_whatsapp',
-  'closing_database',
-  'creating_backup',
-  'deleting_previous_state',
-  'creating_database',
-  'restoring_defaults',
-  'restarting_services',
-  'waiting_qr',
-  'finished',
-];
-
-document
-  .querySelector('#open-factory-reset')
-  .addEventListener('click', () => openMaintenanceDialog('factory'));
-document
-  .querySelector('#open-unlink-whatsapp')
-  .addEventListener('click', () => openMaintenanceDialog('unlink'));
-
-function openMaintenanceDialog(kind) {
-  if (state.maintenanceBusy) return;
-  state.maintenanceKind = kind;
-  const configuration = maintenanceConfigurations[kind];
-  maintenanceForm.reset();
-  maintenanceForm.elements.passwordChoice.value = 'keep';
-  document.querySelector('#maintenance-title').textContent = configuration.title;
-  document.querySelector('#maintenance-description').textContent = configuration.description;
-  document.querySelector('#required-maintenance-phrase').textContent = configuration.phrase;
-  document.querySelector('#factory-reset-details').classList.toggle('hidden', kind !== 'factory');
-  document
-    .querySelector('#factory-password-options')
-    .classList.toggle('hidden', kind !== 'factory');
-  document.querySelector('#new-password-fields').classList.add('hidden');
-  setNewPasswordRequired(false);
-  maintenanceConfirmationView.classList.remove('hidden');
-  maintenanceProgressView.classList.add('hidden');
-  document.querySelector('#maintenance-result-code').textContent = '';
-  document.querySelector('#close-maintenance-result').classList.add('hidden');
-  document.querySelectorAll('#maintenance-progress li').forEach((item) => {
-    item.classList.remove('active', 'complete', 'failed');
-    const unlinkHidden =
-      kind === 'unlink' &&
-      ['closing_database', 'creating_backup', 'creating_database', 'restoring_defaults'].includes(
-        item.dataset.stage,
-      );
-    item.classList.toggle('hidden', unlinkHidden);
-  });
-  validateMaintenanceForm();
-  maintenanceDialog.showModal();
-  maintenanceForm.elements.currentPassword.focus();
-}
-
-maintenanceForm.addEventListener('input', () => {
-  const replacePassword = maintenanceForm.elements.passwordChoice.value === 'replace';
-  document.querySelector('#new-password-fields').classList.toggle('hidden', !replacePassword);
-  setNewPasswordRequired(replacePassword);
-  validateMaintenanceForm();
-});
-
-function setNewPasswordRequired(required) {
-  maintenanceForm.elements.newPassword.required = required;
-  maintenanceForm.elements.newPasswordConfirmation.required = required;
-}
-
-function validateMaintenanceForm() {
-  const configuration = maintenanceConfigurations[state.maintenanceKind];
-  if (!configuration) return;
-  const currentPasswordValid = maintenanceForm.elements.currentPassword.value.length > 0;
-  const phraseValid = maintenanceForm.elements.confirmation.value === configuration.phrase;
-  let operationValid = currentPasswordValid && phraseValid;
-  if (state.maintenanceKind === 'factory') {
-    const understood = maintenanceForm.elements.understood.checked;
-    const replacePassword = maintenanceForm.elements.passwordChoice.value === 'replace';
-    const newPassword = maintenanceForm.elements.newPassword.value;
-    const confirmation = maintenanceForm.elements.newPasswordConfirmation.value;
-    const passwordValid =
-      !replacePassword || (newPassword.length >= 12 && newPassword === confirmation);
-    operationValid = operationValid && understood && passwordValid;
-  }
-  document.querySelector('#confirm-maintenance').disabled = !operationValid;
-}
-
-document.querySelector('#cancel-maintenance').addEventListener('click', () => {
-  if (!state.maintenanceBusy) maintenanceDialog.close();
-});
-
-maintenanceDialog.addEventListener('cancel', (event) => {
-  if (state.maintenanceBusy) event.preventDefault();
-});
-
-window.addEventListener('beforeunload', (event) => {
-  if (!state.maintenanceBusy) return;
-  event.preventDefault();
-  event.returnValue = '';
-});
-
-maintenanceForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  validateMaintenanceForm();
-  if (document.querySelector('#confirm-maintenance').disabled) return;
-  const configuration = maintenanceConfigurations[state.maintenanceKind];
-  const payload = {
-    confirmation: maintenanceForm.elements.confirmation.value,
-    currentPassword: maintenanceForm.elements.currentPassword.value,
-    ...(state.maintenanceKind === 'factory'
-      ? {
-          understood: maintenanceForm.elements.understood.checked,
-          passwordChoice: maintenanceForm.elements.passwordChoice.value,
-          ...(maintenanceForm.elements.passwordChoice.value === 'replace'
-            ? {
-                newPassword: maintenanceForm.elements.newPassword.value,
-                newPasswordConfirmation: maintenanceForm.elements.newPasswordConfirmation.value,
-              }
-            : {}),
-        }
-      : {}),
-  };
-  setMaintenanceBusy(true);
-  try {
-    const accepted = await api(configuration.endpoint, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    clearMaintenancePasswords();
-    maintenanceConfirmationView.classList.add('hidden');
-    maintenanceProgressView.classList.remove('hidden');
-    await pollMaintenance(accepted.operationId);
-  } catch (error) {
-    clearMaintenancePasswords();
-    setMaintenanceBusy(false);
-    showNotice(error.code ? `${error.message} Código: ${error.code}.` : error.message, true);
-  }
-});
-
-async function pollMaintenance(operationId) {
-  while (state.maintenanceBusy) {
-    await new Promise((resolve) => window.setTimeout(resolve, 400));
-    try {
-      const snapshot = await api(
-        `/api/admin/maintenance/status?operationId=${encodeURIComponent(operationId)}`,
-      );
-      updateMaintenanceProgress(snapshot);
-      if (snapshot.result === 'running' || snapshot.result === 'idle') continue;
-      setMaintenanceBusy(false);
-      const successful = snapshot.result === 'completed';
-      const rolledBack = snapshot.result === 'rolled_back';
-      document.querySelector('#maintenance-progress-message').textContent = successful
-        ? 'La operación terminó correctamente. Revise la consola para vincular WhatsApp mediante QR.'
-        : rolledBack
-          ? 'La operación falló y el estado anterior fue restaurado automáticamente.'
-          : 'La operación no pudo completarse. El panel permanece disponible para diagnóstico.';
-      document.querySelector('#maintenance-result-code').textContent = snapshot.code
-        ? `Código técnico: ${snapshot.code}`
-        : '';
-      if (snapshot.logoutRequired) {
-        window.setTimeout(() => {
-          state.csrfToken = null;
-          authenticated(false);
-          maintenanceDialog.close();
-          showNotice(
-            'La sesión administrativa se cerró después del restablecimiento.',
-            !successful,
-          );
-        }, 1400);
-      } else {
-        document.querySelector('#close-maintenance-result').classList.remove('hidden');
-      }
-      return;
-    } catch (error) {
-      if (error.status === 401) {
-        setMaintenanceBusy(false);
-        state.csrfToken = null;
-        authenticated(false);
-        maintenanceDialog.close();
-        return;
-      }
-      document.querySelector('#maintenance-progress-message').textContent =
-        'Esperando una actualización segura del proceso…';
-    }
-  }
-}
-
-function updateMaintenanceProgress(snapshot) {
-  const currentIndex = maintenanceStageOrder.indexOf(snapshot.stage);
-  document.querySelectorAll('#maintenance-progress li').forEach((item) => {
-    const index = maintenanceStageOrder.indexOf(item.dataset.stage);
-    item.classList.toggle('complete', index >= 0 && index < currentIndex);
-    item.classList.toggle('active', item.dataset.stage === snapshot.stage);
-    item.classList.toggle(
-      'failed',
-      snapshot.result === 'failed' && item.dataset.stage === snapshot.stage,
-    );
-  });
-  document.querySelector('#maintenance-progress-message').textContent =
-    snapshot.result === 'running'
-      ? 'La operación continúa. No cierre esta ventana ni apague el equipo.'
-      : 'Procesando el resultado final.';
-  document.querySelector('#maintenance-result-code').textContent = snapshot.code
-    ? `Código técnico: ${snapshot.code}`
-    : '';
-}
-
-function clearMaintenancePasswords() {
-  maintenanceForm.elements.currentPassword.value = '';
-  maintenanceForm.elements.newPassword.value = '';
-  maintenanceForm.elements.newPasswordConfirmation.value = '';
-}
-
-function setMaintenanceBusy(value) {
-  state.maintenanceBusy = value;
-  document.querySelectorAll('#panel-view button').forEach((button) => {
-    button.disabled = value;
-  });
-  document.querySelector('#cancel-maintenance').disabled = value;
-  document.querySelector('#confirm-maintenance').disabled =
-    value || !maintenanceForm.checkValidity();
-}
-
-document.querySelector('#close-maintenance-result').addEventListener('click', async () => {
-  maintenanceDialog.close();
-  await loadAll();
-});
 
 function listItem(title, subtitle) {
   const item = document.createElement('article');

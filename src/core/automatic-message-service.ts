@@ -42,7 +42,6 @@ export type AutomaticMessageServiceOptions = {
   welcomeDeduplicationTtlMs?: number;
   now?: () => Date;
   sleep?: (milliseconds: number) => Promise<void>;
-  isPaused?: () => boolean;
 };
 
 type WelcomeBatch = {
@@ -57,11 +56,12 @@ export class AutomaticMessageService {
   private readonly groupBackoffMs: number;
   private readonly now: () => Date;
   private readonly sleep: (milliseconds: number) => Promise<void>;
-  private readonly isPaused: () => boolean;
   private readonly botId: string;
   private readonly joinEvents: ExpiringSet;
   private readonly joinedParticipants: ExpiringSet;
   private readonly welcomeBatches = new Map<string, WelcomeBatch>();
+  private readonly welcomeLastSentAt = new Map<string, number>();
+  private readonly nextGroupSendAt = new Map<string, number>();
   private schedulerTimer: ReturnType<typeof setTimeout> | null = null;
   private welcomeReconciliationTimer: ReturnType<typeof setTimeout> | null = null;
   private welcomeReconciliationPromise: Promise<void> | null = null;
@@ -80,7 +80,6 @@ export class AutomaticMessageService {
     this.groupBackoffMs = options.groupBackoffMs ?? 30 * 60 * 1000;
     this.now = options.now ?? (() => new Date());
     this.sleep = options.sleep ?? wait;
-    this.isPaused = options.isPaused ?? (() => false);
     this.botId = options.botId ?? 'neurobot';
     const welcomeTtl = options.welcomeDeduplicationTtlMs ?? 10 * 60 * 1000;
     this.joinEvents = new ExpiringSet(welcomeTtl);
@@ -105,6 +104,8 @@ export class AutomaticMessageService {
     this.welcomeReconciliationTimer = null;
     for (const batch of this.welcomeBatches.values()) clearTimeout(batch.timer);
     this.welcomeBatches.clear();
+    this.welcomeLastSentAt.clear();
+    this.nextGroupSendAt.clear();
     this.joinEvents.clear();
     this.joinedParticipants.clear();
     this.record('AUTOMATIC_SCHEDULER_STOPPED', null, null, 'stopped');
@@ -147,15 +148,37 @@ export class AutomaticMessageService {
   }
 
   public async handleGroupJoin(event: GroupJoinEvent): Promise<void> {
-    if (this.isPaused()) return;
     const now = this.now();
     const configuration = this.database.getAutomaticMessageConfiguration(this.botId);
     const local = toLocalDateTime(now, configuration.timezone);
     const groupHash = this.hash(event.groupId);
     this.database.updateWelcomeRuntime({ lastDetectedAt: now.toISOString() }, this.botId);
-    this.record('GROUP_JOIN_EVENT_RECEIVED', 'WELCOME', groupHash, event.source ?? 'group_join', null, local, event.participantIds.length);
-    this.record('WELCOME_EVENT_RECEIVED', 'WELCOME', groupHash, event.source ?? 'group_join', null, local, event.participantIds.length);
-    this.record('GROUP_JOIN_SUBTYPE_DETECTED', 'WELCOME', groupHash, event.subtype ?? 'unknown', null, local);
+    this.record(
+      'GROUP_JOIN_EVENT_RECEIVED',
+      'WELCOME',
+      groupHash,
+      event.source ?? 'group_join',
+      null,
+      local,
+      event.participantIds.length,
+    );
+    this.record(
+      'WELCOME_EVENT_RECEIVED',
+      'WELCOME',
+      groupHash,
+      event.source ?? 'group_join',
+      null,
+      local,
+      event.participantIds.length,
+    );
+    this.record(
+      'GROUP_JOIN_SUBTYPE_DETECTED',
+      'WELCOME',
+      groupHash,
+      event.subtype ?? 'unknown',
+      null,
+      local,
+    );
     if (event.subtype === 'linked_group_join') {
       this.record('COMMUNITY_LINKED_JOIN_DETECTED', 'WELCOME', groupHash, 'detected', null, local);
     }
@@ -165,18 +188,39 @@ export class AutomaticMessageService {
     }
     this.record('GROUP_RESOLVED', 'WELCOME', groupHash, 'resolved', null, local);
 
+    if (
+      event.subtype === 'linked_group_join' ||
+      !this.database.isWelcomeGroupBaselineInitialized(groupHash, this.botId)
+    ) {
+      const baselineInitialized = await this.initializeWelcomeGroupBaseline(
+        event.groupId,
+        groupHash,
+      );
+      this.record(
+        'WELCOME_SKIPPED',
+        'WELCOME',
+        groupHash,
+        'skipped',
+        baselineInitialized
+          ? event.subtype === 'linked_group_join'
+            ? 'BOT_JOIN_BASELINE_CREATED'
+            : 'BASELINE_CREATED'
+          : 'BASELINE_PENDING',
+        local,
+        event.participantIds.length,
+      );
+      return;
+    }
+
     if (!configuration.welcome.enabled) {
       this.record('WELCOME_DISABLED', 'WELCOME', groupHash, 'skipped', 'WELCOME_DISABLED', local);
       this.record('WELCOME_SKIPPED', 'WELCOME', groupHash, 'skipped', 'WELCOME_DISABLED', local);
       return;
     }
-    const groupWelcome = this.database.getWelcomeGroupSetting(groupHash, this.botId);
-    if (groupWelcome?.enabled === false) {
-      this.record('WELCOME_SKIPPED', 'WELCOME', groupHash, 'skipped', 'GROUP_WELCOME_DISABLED', local);
-      return;
-    }
     if (!this.database.canSendToGroup(event.groupId)) {
-      const blocked = this.botId === 'neurobot' && this.database.getGroupById(event.groupId)?.status === 'ARCHIVED';
+      const blocked =
+        this.botId === 'neurobot' &&
+        this.database.getGroupById(event.groupId)?.status === 'ARCHIVED';
       this.record(
         blocked ? 'GROUP_BLOCKED' : 'GROUP_INACTIVE',
         'WELCOME',
@@ -263,8 +307,22 @@ export class AutomaticMessageService {
       );
     }
     if (uniqueParticipants.size === 0) {
-      this.record('WELCOME_DUPLICATE_BLOCKED', 'WELCOME', groupHash, 'skipped', 'NO_NEW_PARTICIPANTS', local);
-      this.record('WELCOME_DUPLICATE_SUPPRESSED', 'WELCOME', groupHash, 'skipped', 'NO_NEW_PARTICIPANTS', local);
+      this.record(
+        'WELCOME_DUPLICATE_BLOCKED',
+        'WELCOME',
+        groupHash,
+        'skipped',
+        'NO_NEW_PARTICIPANTS',
+        local,
+      );
+      this.record(
+        'WELCOME_DUPLICATE_SUPPRESSED',
+        'WELCOME',
+        groupHash,
+        'skipped',
+        'NO_NEW_PARTICIPANTS',
+        local,
+      );
       return;
     }
     this.record(
@@ -276,7 +334,15 @@ export class AutomaticMessageService {
       local,
       uniqueParticipants.size,
     );
-    this.record('WELCOME_RECIPIENTS_RESOLVED', 'WELCOME', groupHash, 'resolved', null, local, uniqueParticipants.size);
+    this.record(
+      'WELCOME_RECIPIENTS_RESOLVED',
+      'WELCOME',
+      groupHash,
+      'resolved',
+      null,
+      local,
+      uniqueParticipants.size,
+    );
 
     this.record(
       'GROUP_JOIN_DETECTED',
@@ -309,8 +375,14 @@ export class AutomaticMessageService {
       };
       resolvedParticipants.set(participantHash, participant);
       this.record(
-        participant.displayName === null ? 'WELCOME_PUBLIC_NAME_UNAVAILABLE' : 'WELCOME_PUBLIC_NAME_RESOLVED',
-        'WELCOME', groupHash, participant.nameSource.toLowerCase(), null, local,
+        participant.displayName === null
+          ? 'WELCOME_PUBLIC_NAME_UNAVAILABLE'
+          : 'WELCOME_PUBLIC_NAME_RESOLVED',
+        'WELCOME',
+        groupHash,
+        participant.nameSource.toLowerCase(),
+        null,
+        local,
       );
       if (participant.displayName !== null) {
         this.record('WELCOME_NAME_SANITIZED', 'WELCOME', groupHash, 'sanitized', null, local);
@@ -325,12 +397,25 @@ export class AutomaticMessageService {
     }
 
     const batchId = randomUUID();
-    const timer = setTimeout(() => {
-      void this.flushWelcome(event.groupId).catch((error: unknown) => {
-        const details = serializeError(error, 'WELCOME_BATCH_FAILED', false);
-        this.record('SCHEDULED_MESSAGE_FAILED', 'WELCOME', groupHash, 'failed', details.errorCode);
-      });
-    }, configuration.welcome.sendDelaySeconds * 1000);
+    const minimumGroupIntervalMs = 60_000;
+    const configuredDelayMs = configuration.welcome.sendDelaySeconds * 1000;
+    const elapsedSinceLastSend = now.getTime() - (this.welcomeLastSentAt.get(event.groupId) ?? 0);
+    const antiSpamDelayMs = Math.max(0, minimumGroupIntervalMs - elapsedSinceLastSend);
+    const timer = setTimeout(
+      () => {
+        void this.flushWelcome(event.groupId).catch((error: unknown) => {
+          const details = serializeError(error, 'WELCOME_BATCH_FAILED', false);
+          this.record(
+            'SCHEDULED_MESSAGE_FAILED',
+            'WELCOME',
+            groupHash,
+            'failed',
+            details.errorCode,
+          );
+        });
+      },
+      Math.max(configuredDelayMs, antiSpamDelayMs),
+    );
     timer.unref?.();
     this.welcomeBatches.set(event.groupId, {
       id: batchId,
@@ -357,7 +442,7 @@ export class AutomaticMessageService {
   }
 
   private async reconcileWelcomeParticipantsOnce(): Promise<void> {
-    if (!this.started || this.isPaused() || !this.client.isReady()) return;
+    if (!this.started || !this.client.isReady()) return;
     const groups = await this.client.listGroups();
     const runtime = this.database.getWelcomeRuntime(this.botId);
     let newCount = 0;
@@ -414,7 +499,15 @@ export class AutomaticMessageService {
     }
     if (!runtime.baselineInitialized) {
       this.database.updateWelcomeRuntime({ baselineInitialized: true }, this.botId);
-      this.record('WELCOME_BASELINE_CREATED', 'WELCOME', null, 'created', null, undefined, participantCount);
+      this.record(
+        'WELCOME_BASELINE_CREATED',
+        'WELCOME',
+        null,
+        'created',
+        null,
+        undefined,
+        participantCount,
+      );
       return;
     }
     this.record(
@@ -428,8 +521,47 @@ export class AutomaticMessageService {
     );
   }
 
+  private async initializeWelcomeGroupBaseline(
+    groupId: string,
+    groupHash: string,
+  ): Promise<boolean> {
+    const groups = await this.client.listGroups();
+    const group = groups.find((candidate) => candidate.id === groupId);
+    if (group?.participantIds === null || group?.participantIds === undefined) {
+      this.record(
+        'WELCOME_GROUP_BASELINE_DEFERRED',
+        'WELCOME',
+        groupHash,
+        'deferred',
+        'PARTICIPANT_SNAPSHOT_UNAVAILABLE',
+      );
+      return false;
+    }
+    let participantCount = 0;
+    for (const participantId of group.participantIds) {
+      if (this.client.isOwnIdentifier(participantId)) continue;
+      const participantHash = this.anonymizer.fingerprint([
+        'joined-participant',
+        groupId,
+        normalizeWelcomeParticipantIdentity(participantId),
+      ]);
+      this.database.addWelcomeBaselineParticipant(groupHash, participantHash, this.botId);
+      participantCount += 1;
+    }
+    this.database.markWelcomeGroupBaselineInitialized(groupHash, this.botId);
+    this.record(
+      'WELCOME_GROUP_BASELINE_CREATED',
+      'WELCOME',
+      groupHash,
+      'created',
+      null,
+      undefined,
+      participantCount,
+    );
+    return true;
+  }
+
   public async runDueTasks(now = this.now()): Promise<void> {
-    if (this.isPaused()) return;
     const configuration = this.database.getAutomaticMessageConfiguration(this.botId);
     const local = toLocalDateTime(now, configuration.timezone);
     await this.runTaskIfDue('DAILY_GREETING', configuration, local, now);
@@ -441,9 +573,6 @@ export class AutomaticMessageService {
     groupId: string,
     now = this.now(),
   ): Promise<AutomaticSendResult> {
-    if (this.isPaused()) {
-      return { status: 'SKIPPED', attempts: 0, errorCode: 'MAINTENANCE_IN_PROGRESS' };
-    }
     const configuration = this.database.getAutomaticMessageConfiguration(this.botId);
     const local = toLocalDateTime(now, configuration.timezone);
     const rejection = await this.getGroupRejection(groupId, now);
@@ -464,24 +593,30 @@ export class AutomaticMessageService {
 
   public previewWelcome(fictitiousName: string, groupId?: string): string {
     const configuration = this.database.getAutomaticMessageConfiguration(this.botId);
-    const selectedGroupId = groupId;
     const safeName = sanitizeWhatsAppDisplayName(fictitiousName);
-    const destination = selectedGroupId ?? 'preview@g.us';
-    const groupSetting = selectedGroupId === undefined
-      ? null
-      : this.database.getWelcomeGroupSetting(this.hash(selectedGroupId), this.botId);
-    const template = groupSetting?.inheritAssistantTemplate === false && groupSetting.customTemplate !== null
-      ? groupSetting.customTemplate
-      : configuration.welcome.template;
-    return this.buildWelcomeMessages(destination, template, [{
-      participantId: '',
-      displayName: safeName,
-      nameSource: safeName === null ? 'FALLBACK' : 'PUSHNAME',
-      mentionId: '',
-    }], configuration)[0]?.text ?? '';
+    const destination = groupId ?? 'preview@g.us';
+    const template = configuration.welcome.template;
+    return (
+      this.buildWelcomeMessages(
+        destination,
+        template,
+        [
+          {
+            participantId: '',
+            displayName: safeName,
+            nameSource: safeName === null ? 'FALLBACK' : 'PUSHNAME',
+            mentionId: '',
+          },
+        ],
+        configuration,
+      )[0]?.text ?? ''
+    );
   }
 
-  public async sendWelcomeTest(groupId: string, fictitiousName: string): Promise<AutomaticSendResult> {
+  public async sendWelcomeTest(
+    groupId: string,
+    fictitiousName: string,
+  ): Promise<AutomaticSendResult> {
     const now = this.now();
     const rejection = await this.getGroupRejection(groupId, now);
     if (rejection !== null) return { status: 'SKIPPED', attempts: 0, errorCode: rejection };
@@ -492,7 +627,13 @@ export class AutomaticMessageService {
       return { status: 'SENT', attempts: 1, errorCode: null };
     } catch (error) {
       const details = serializeError(error, 'WELCOME_TEST_SEND_FAILED', false);
-      this.record('WELCOME_SEND_FAILED', 'WELCOME', this.hash(groupId), 'failed', details.errorCode);
+      this.record(
+        'WELCOME_SEND_FAILED',
+        'WELCOME',
+        this.hash(groupId),
+        'failed',
+        details.errorCode,
+      );
       return { status: 'FAILED', attempts: 1, errorCode: details.errorCode };
     }
   }
@@ -558,7 +699,12 @@ export class AutomaticMessageService {
         this.record(`${taskType}_SKIPPED`, taskType, groupHash, 'skipped', rejection, local);
         continue;
       }
-      const deliveryId = this.database.claimScheduledDelivery(taskType, groupId, local.date, this.botId);
+      const deliveryId = this.database.claimScheduledDelivery(
+        taskType,
+        groupId,
+        local.date,
+        this.botId,
+      );
       if (deliveryId === null) {
         this.record(
           'DUPLICATE_SCHEDULE_BLOCKED',
@@ -582,11 +728,8 @@ export class AutomaticMessageService {
     const configuration = this.database.getAutomaticMessageConfiguration(this.botId);
     const local = toLocalDateTime(now, configuration.timezone);
     const groupHash = this.hash(groupId);
-    const groupWelcome = this.database.getWelcomeGroupSetting(groupHash, this.botId);
     const rejection = configuration.welcome.enabled
-      ? groupWelcome?.enabled === false
-        ? 'GROUP_WELCOME_DISABLED'
-        : await this.getGroupRejection(groupId, now)
+      ? await this.getGroupRejection(groupId, now)
       : 'WELCOME_DISABLED';
     if (rejection !== null) {
       this.record(
@@ -600,14 +743,28 @@ export class AutomaticMessageService {
       );
       return;
     }
-    const template = groupWelcome?.inheritAssistantTemplate === false && groupWelcome.customTemplate !== null
-      ? groupWelcome.customTemplate
-      : configuration.welcome.template;
+    const template = configuration.welcome.template;
     const participants = [...batch.participants.values()];
     const messages = this.buildWelcomeMessages(groupId, template, participants, configuration);
-    this.record('WELCOME_TEMPLATE_RENDERED', 'WELCOME', groupHash, 'rendered', null, local, participants.length);
+    this.record(
+      'WELCOME_TEMPLATE_RENDERED',
+      'WELCOME',
+      groupHash,
+      'rendered',
+      null,
+      local,
+      participants.length,
+    );
     if (configuration.welcome.multipleJoinMode === 'GROUPED' && participants.length > 1) {
-      this.record('WELCOME_MULTIPLE_JOIN_GROUPED', 'WELCOME', groupHash, 'grouped', null, local, participants.length);
+      this.record(
+        'WELCOME_MULTIPLE_JOIN_GROUPED',
+        'WELCOME',
+        groupHash,
+        'grouped',
+        null,
+        local,
+        participants.length,
+      );
     }
     for (const [index, message] of messages.entries()) {
       const deliveryId = this.database.createWelcomeDelivery(
@@ -617,10 +774,17 @@ export class AutomaticMessageService {
         this.botId,
       );
       await this.sendAndRecord(
-        deliveryId, 'WELCOME', groupId, message.text, local, now,
-        message.participantCount, message.mentionIds,
+        deliveryId,
+        'WELCOME',
+        groupId,
+        message.text,
+        local,
+        now,
+        message.participantCount,
+        message.mentionIds,
       );
     }
+    this.welcomeLastSentAt.set(groupId, now.getTime());
   }
 
   private buildWelcomeMessages(
@@ -631,17 +795,21 @@ export class AutomaticMessageService {
   ): Array<{ text: string; mentionIds: string[]; participantCount: number }> {
     const settings = configuration.welcome;
     if (participants.length > settings.maximumGroupedNames) {
-      return [{
-        text: '¡Bienvenidos/as a la comunidad! 👋',
-        mentionIds: [],
-        participantCount: participants.length,
-      }];
+      return [
+        {
+          text: '¡Bienvenidos/as a la comunidad! 👋',
+          mentionIds: [],
+          participantCount: participants.length,
+        },
+      ];
     }
 
     const profile = this.database.getBotProfile(this.botId);
-    const linkedGroup = this.database.listBotGroups(this.botId, (identifier) => this.hash(identifier))
+    const linkedGroup = this.database
+      .listBotGroups(this.botId, (identifier) => this.hash(identifier))
       .find((group) => group.groupHash === this.hash(groupId));
-    const groupName = linkedGroup?.name ?? this.database.getGroupById(groupId)?.name ?? 'este grupo';
+    const groupName =
+      linkedGroup?.name ?? this.database.getGroupById(groupId)?.name ?? 'este grupo';
     const templateUsesIdentity = /\{(?:name|mention)\}/u.test(template);
 
     const render = (selected: WelcomeParticipant[]) => {
@@ -666,21 +834,25 @@ export class AutomaticMessageService {
         text = renderWelcomeTemplate(template, values);
       } else {
         const bodyTemplate = stripLeadingWelcomeHeading(template);
-        const body = bodyTemplate.length === 0 ? '' : renderWelcomeTemplate(bodyTemplate, values).trim();
-        text = body.length === 0 ? heading : `${heading}
+        const body =
+          bodyTemplate.length === 0 ? '' : renderWelcomeTemplate(bodyTemplate, values).trim();
+        text =
+          body.length === 0
+            ? heading
+            : `${heading}
 
 ${body}`;
       }
 
       return {
         text,
-        mentionIds: settings.enableRealMention && canPersonalize
-          ? selected.map((participant) => participant.mentionId).filter(Boolean)
-          : [],
+        mentionIds:
+          settings.enableRealMention && canPersonalize
+            ? selected.map((participant) => participant.mentionId).filter(Boolean)
+            : [],
         participantCount: selected.length,
       };
     };
-    if (settings.multipleJoinMode === 'INDIVIDUAL') return participants.map((participant) => render([participant]));
     return [render(participants)];
   }
 
@@ -699,16 +871,45 @@ ${body}`;
     while (attempts < 2) {
       attempts += 1;
       try {
+        await this.waitForGroupSendSlot(groupId);
         if (taskType === 'WELCOME') {
-          this.record('WELCOME_SEND_STARTED', taskType, this.hash(groupId), 'attempted', null, local, itemCount, attempts);
+          this.record(
+            'WELCOME_SEND_STARTED',
+            taskType,
+            this.hash(groupId),
+            'attempted',
+            null,
+            local,
+            itemCount,
+            attempts,
+          );
         }
-        if (taskType === 'WELCOME' && mentionIds.length > 0 && this.client.sendMessageWithMentions !== undefined) {
+        if (
+          taskType === 'WELCOME' &&
+          mentionIds.length > 0 &&
+          this.client.sendMessageWithMentions !== undefined
+        ) {
           try {
             await this.client.sendMessageWithMentions(groupId, text, mentionIds);
-            this.record('WELCOME_REAL_MENTION_CREATED', taskType, this.hash(groupId), 'sent', null, local, mentionIds.length);
+            this.record(
+              'WELCOME_REAL_MENTION_CREATED',
+              taskType,
+              this.hash(groupId),
+              'sent',
+              null,
+              local,
+              mentionIds.length,
+            );
           } catch (mentionError) {
             const details = serializeError(mentionError, 'WELCOME_REAL_MENTION_FAILED', false);
-            this.record('WELCOME_REAL_MENTION_FAILED', taskType, this.hash(groupId), 'fallback', details.errorCode, local);
+            this.record(
+              'WELCOME_REAL_MENTION_FAILED',
+              taskType,
+              this.hash(groupId),
+              'fallback',
+              details.errorCode,
+              local,
+            );
             await this.client.sendMessage(groupId, text);
           }
         } else {
@@ -726,7 +927,10 @@ ${body}`;
           attempts,
         );
         if (taskType === 'WELCOME') {
-          this.database.updateWelcomeRuntime({ lastSentAt: new Date().toISOString(), lastErrorCode: null }, this.botId);
+          this.database.updateWelcomeRuntime(
+            { lastSentAt: new Date().toISOString(), lastErrorCode: null },
+            this.botId,
+          );
         }
         return { status: 'SENT', attempts, errorCode: null };
       } catch (error) {
@@ -757,9 +961,21 @@ ${body}`;
       attempts,
     );
     if (taskType === 'WELCOME') {
-      this.database.updateWelcomeRuntime({ lastErrorCode: errorCode ?? 'AUTOMATIC_SEND_FAILED' }, this.botId);
+      this.database.updateWelcomeRuntime(
+        { lastErrorCode: errorCode ?? 'AUTOMATIC_SEND_FAILED' },
+        this.botId,
+      );
     }
     return { status: 'FAILED', attempts, errorCode };
+  }
+
+  private async waitForGroupSendSlot(groupId: string): Promise<void> {
+    const minimumIntervalMs = 2_000;
+    const current = Date.now();
+    const scheduledAt = Math.max(current, this.nextGroupSendAt.get(groupId) ?? current);
+    this.nextGroupSendAt.set(groupId, scheduledAt + minimumIntervalMs);
+    const delay = scheduledAt - current;
+    if (delay > 0) await this.sleep(delay);
   }
 
   private async getGroupRejection(groupId: string, now: Date): Promise<string | null> {
@@ -911,7 +1127,11 @@ function classifySendFailure(
   };
 }
 
-function requirePart(values: Map<string, string>, key: string, timezone = 'America/Santiago'): string {
+function requirePart(
+  values: Map<string, string>,
+  key: string,
+  timezone = 'America/Santiago',
+): string {
   const value = values.get(key);
   if (value === undefined) throw new Error(`No fue posible determinar ${key} en ${timezone}.`);
   return value;

@@ -5,7 +5,6 @@ import { resolve } from 'node:path';
 import { AIProviderFactory } from './ai/ai-provider-factory.js';
 import { buildAdminServer } from './admin/server.js';
 import { loadEnvironment } from './config/environment.js';
-import { MaintenanceService } from './core/maintenance-service.js';
 import { MultiBotManager } from './core/multi-bot-manager.js';
 import { WhatsAppSessionManager } from './core/whatsapp-session-manager.js';
 import { createLogger } from './infrastructure/logger.js';
@@ -42,7 +41,6 @@ async function main(): Promise<void> {
     resolve(process.cwd(), 'data', 'whatsapp-sessions'),
     resolve(process.cwd(), 'backups', 'sessions'),
   );
-  let maintenance: MaintenanceService | null = null;
   const multiBotManager = new MultiBotManager(
     database,
     aiProviders,
@@ -58,7 +56,6 @@ async function main(): Promise<void> {
       developmentMode: environment.developmentMode,
       secretVault: vault,
       mediaRoot: resolve(process.cwd(), 'data', 'media'),
-      isPaused: () => maintenance?.isRunning() ?? false,
       ...(environment.chromeExecutablePath === undefined
         ? {}
         : { chromeExecutablePath: environment.chromeExecutablePath }),
@@ -71,20 +68,6 @@ async function main(): Promise<void> {
   if (client === null || connectionManager === null || groupDiscovery === null) {
     throw new Error('No fue posible preparar la instancia inicial de Neurobot.');
   }
-  maintenance = new MaintenanceService(
-    database,
-    connectionManager,
-    groupDiscovery,
-    anonymizer,
-    logger,
-    {
-      projectRoot: process.cwd(),
-      databasePath: environment.databasePath,
-      sessionPath: environment.sessionPath,
-      encryptionSecret: environment.panelSessionSecret,
-      resetTransientState: () => multiBotManager.resetTransientState(),
-    },
-  );
   const automaticMessages = multiBotManager.automaticMessages('neurobot');
   const pollRepository = multiBotManager.pollRepository('neurobot');
   const pollService = multiBotManager.pollService('neurobot');
@@ -112,7 +95,6 @@ async function main(): Promise<void> {
     sessionSecret: environment.panelSessionSecret,
     applicationVersion: packageData.version,
     developmentMode: environment.developmentMode,
-    maintenance,
     automaticMessages,
     pollRepository,
     pollService,
@@ -131,7 +113,10 @@ async function main(): Promise<void> {
   );
   void multiBotManager.startAll().catch((error: unknown) => {
     logger.error(
-      { operation: 'MULTIBOT_START_FAILED', ...serializeError(error, 'MULTIBOT_START_FAILED', false) },
+      {
+        operation: 'MULTIBOT_START_FAILED',
+        ...serializeError(error, 'MULTIBOT_START_FAILED', false),
+      },
       'No fue posible completar el inicio de todos los asistentes',
     );
   });

@@ -13,7 +13,7 @@ database.recordAudit({
   actionType: 'panel_password_reset',
   resource: 'admin',
   result: 'ok',
-  administratorHash: 'local-maintenance',
+  administratorHash: 'local-admin-reset',
 });
 database.close();
 process.stdout.write(`Contraseña administrativa restablecida. Nueva contraseña: ${password}\n`);
