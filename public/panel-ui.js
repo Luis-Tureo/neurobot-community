@@ -216,6 +216,23 @@ function installDigestDesktopLayoutAdjustment() {
   document.head.append(style);
 }
 
+function configureAssistantQuickActionOrder() {
+  const container = document.querySelector('#status-quick-actions');
+  if (!container || container.dataset.actionOrderReady === 'true') return;
+
+  const applyOrder = () => {
+    const deleteButton = container.querySelector(':scope > button.danger');
+    const statusSwitch = container.querySelector(':scope > button.status-switch');
+    if (!deleteButton || !statusSwitch || deleteButton.nextElementSibling === statusSwitch) return;
+    container.append(deleteButton, statusSwitch);
+  };
+
+  const observer = new MutationObserver(applyOrder);
+  observer.observe(container, { childList: true });
+  container.dataset.actionOrderReady = 'true';
+  applyOrder();
+}
+
 function revealActiveNavigationGroup() {
   const active = document.querySelector('.tabs button[data-section].active');
   active?.scrollIntoView({ block: 'nearest' });
@@ -224,6 +241,7 @@ function revealActiveNavigationGroup() {
 function initializePanelUi() {
   installPollConfigurationEnabledGuard();
   installDigestDesktopLayoutAdjustment();
+  configureAssistantQuickActionOrder();
   configureWeeklyPollScheduleCard();
   document.querySelectorAll('[data-collapsible]').forEach(configureCollapsible);
   document.querySelectorAll('.tabs button[data-section]').forEach((button) => {
