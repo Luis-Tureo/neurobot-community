@@ -27,16 +27,20 @@ describe('requerimiento 20 - Centro de pruebas', () => {
     expect(panelUi).toContain("button.setAttribute('aria-expanded', String(open))");
   });
 
-  it('oculta Limpiar conversación junto con el contenido cuando el simulador está colapsado', () => {
+  it('coloca Limpiar conversación inmediatamente a la izquierda de Enviar al bot', () => {
     const simulatorStart = labScript.indexOf('lab-ai-simulator-card');
-    const clearAction = labScript.indexOf('id="lab-clear-chat"', simulatorStart);
     const simulatorForm = labScript.indexOf('id="lab-chat-form"', simulatorStart);
-    const headingClose = labScript.indexOf('</div>\n      <div class="section-heading-actions">', simulatorStart);
+    const actionButtons = labScript.indexOf('class="lab-chat-action-buttons"', simulatorForm);
+    const clearAction = labScript.indexOf('id="lab-clear-chat"', actionButtons);
+    const sendAction = labScript.indexOf('id="lab-chat-send"', actionButtons);
+    const formEnd = labScript.indexOf('</form>', simulatorForm);
 
     expect(simulatorStart).toBeGreaterThanOrEqual(0);
-    expect(headingClose).toBeGreaterThan(simulatorStart);
-    expect(clearAction).toBeGreaterThan(headingClose);
-    expect(simulatorForm).toBeGreaterThan(clearAction);
+    expect(simulatorForm).toBeGreaterThan(simulatorStart);
+    expect(actionButtons).toBeGreaterThan(simulatorForm);
+    expect(clearAction).toBeGreaterThan(actionButtons);
+    expect(sendAction).toBeGreaterThan(clearAction);
+    expect(formEnd).toBeGreaterThan(sendAction);
     expect(styles).toContain("[data-collapsible].is-collapsed > :not(.section-heading)");
     expect(styles).toContain('display: none !important;');
   });
