@@ -31,6 +31,16 @@ describe('configuración de entorno', () => {
     expect(() => loadEnvironment({ ...valid, PANEL_PORT: '80' })).toThrow('Configuración inválida');
   });
 
+  it('acepta el puerto administrado por Azure aunque sea privilegiado', () => {
+    const environment = loadEnvironment({
+      ...valid,
+      WEBSITE_SITE_NAME: 'neurobot-community',
+      PORT: '80',
+    });
+    expect(environment.panelHost).toBe('0.0.0.0');
+    expect(environment.panelPort).toBe(80);
+  });
+
   it('trata cadenas opcionales vacías como ausentes', () => {
     const environment = loadEnvironment({
       ...valid,
