@@ -6,7 +6,18 @@ WORKDIR /app
 
 # Puppeteer guarda Chrome dentro de la propia imagen para que el runtime
 # no dependa del navegador disponible en Azure App Service.
-ENV PUPPETEER_CACHE_DIR=/app/.cache/puppeteer
+ENV PUPPETEER_CACHE_DIR=/app/.cache/puppeteer \
+    PYTHON=/usr/bin/python3
+
+# better-sqlite3 usa node-gyp cuando no existe un binario precompilado para
+# la combinación exacta de Node/Linux. La imagen slim no incluye compilador,
+# make ni Python, por lo que los instalamos solamente en la etapa de build.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
 COPY scripts/verify-runtime.mjs ./scripts/verify-runtime.mjs
