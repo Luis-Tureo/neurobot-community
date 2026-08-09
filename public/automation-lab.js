@@ -5,6 +5,10 @@ let authorizedGroups = [];
 let selectedGroupKeys = new Set();
 let botValidation = null;
 let botValidationSignature = '';
+let validationTimerId = null;
+let validationCountdown = 30;
+let simulatorTimerId = null;
+let simulatorCountdown = 30;
 
 const query = (selector, root = document) => root.querySelector(selector);
 const queryAll = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -16,6 +20,93 @@ function showNotice(message, error = false) {
   notice.classList.toggle('error', error);
   notice.classList.remove('hidden');
   window.setTimeout(() => notice.classList.add('hidden'), 5000);
+}
+
+function clearValidationTimer() {
+  if (validationTimerId) {
+    window.clearInterval(validationTimerId);
+    validationTimerId = null;
+  }
+  const timerBadge = query('#lab-validation-timer');
+  if (timerBadge) {
+    timerBadge.classList.add('hidden');
+    timerBadge.textContent = '';
+  }
+}
+
+function startValidationAutoClear() {
+  clearValidationTimer();
+  const timerBadge = query('#lab-validation-timer');
+  if (!timerBadge) return;
+  validationCountdown = 30;
+  timerBadge.textContent = `Se ocultará en ${validationCountdown} s`;
+  timerBadge.classList.remove('hidden');
+
+  validationTimerId = window.setInterval(() => {
+    validationCountdown -= 1;
+    if (validationCountdown > 0) {
+      timerBadge.textContent = `Se ocultará en ${validationCountdown} s`;
+    } else {
+      clearValidationTimer();
+      hideValidationResult();
+    }
+  }, 1000);
+}
+
+function hideValidationResult() {
+  const container = query('#lab-validation-container');
+  if (container) container.classList.add('hidden');
+  botValidation = null;
+  botValidationSignature = '';
+  const summary = query('#lab-validation-summary');
+  if (summary) {
+    summary.dataset.state = 'idle';
+    summary.textContent = 'Sin validar';
+  }
+  query('#lab-validation-checks')?.replaceChildren();
+}
+
+function clearSimulatorTimer() {
+  if (simulatorTimerId) {
+    window.clearInterval(simulatorTimerId);
+    simulatorTimerId = null;
+  }
+  const timerBadge = query('#lab-chat-timer');
+  if (timerBadge) {
+    timerBadge.classList.add('hidden');
+    timerBadge.textContent = '';
+  }
+}
+
+function startSimulatorAutoClear() {
+  clearSimulatorTimer();
+  const timerBadge = query('#lab-chat-timer');
+  if (!timerBadge) return;
+  simulatorCountdown = 30;
+  timerBadge.textContent = `Se ocultará en ${simulatorCountdown} s`;
+  timerBadge.classList.remove('hidden');
+
+  simulatorTimerId = window.setInterval(() => {
+    simulatorCountdown -= 1;
+    if (simulatorCountdown > 0) {
+      timerBadge.textContent = `Se ocultará en ${simulatorCountdown} s`;
+    } else {
+      clearSimulatorTimer();
+      resetSimulatorUI();
+    }
+  }, 1000);
+}
+
+function resetSimulatorUI() {
+  const container = query('#lab-chat-container');
+  if (container) container.classList.add('hidden');
+  const chat = query('#lab-chat');
+  if (!chat) return;
+  chat.replaceChildren();
+  const empty = document.createElement('p');
+  empty.className = 'lab-chat-empty';
+  empty.textContent = 'Selecciona uno o más grupos, valida el bot y escribe una pregunta.';
+  chat.append(empty);
 }
 
 function botPath(path) {
@@ -46,6 +137,9 @@ function createModule() {
   if (existing) {
     query('#lab-refresh', existing)?.remove();
     installSimulatorStyles();
+    existing.querySelectorAll('[data-collapsible]').forEach((card) => {
+      if (window.configureCollapsible) window.configureCollapsible(card);
+    });
     return;
   }
   const reference = query('#section-automatic-messages');
@@ -73,27 +167,33 @@ function createModule() {
         <div id="lab-group-options" class="lab-group-options"></div>
       </details>
     </fieldset>
-    <article class="card inset lab-bot-validation-card">
+    <article class="card inset lab-bot-validation-card" data-collapsible data-open="true">
       <div class="section-heading">
         <div>
           <h3>Validación del funcionamiento del bot</h3>
           <p class="muted">Comprueba que el asistente, WhatsApp, la IA y los grupos estén disponibles antes de probar conversaciones.</p>
         </div>
-        <button id="lab-validate-bot" class="secondary" type="button">Validar bot</button>
+        <div class="section-heading-actions">
+          <button id="lab-validate-bot" class="secondary" type="button">Validar bot</button>
+        </div>
       </div>
-      <p id="lab-validation-summary" class="lab-validation-summary" data-state="idle">Sin validar</p>
-      <ul id="lab-validation-checks" class="lab-validation-checks"></ul>
+      <div id="lab-validation-container" class="lab-validation-container hidden">
+        <div class="lab-validation-status-bar">
+          <p id="lab-validation-summary" class="lab-validation-summary" data-state="idle">Sin validar</p>
+          <span id="lab-validation-timer" class="lab-timer-badge hidden" aria-live="polite">Se ocultará en 30 s</span>
+        </div>
+        <ul id="lab-validation-checks" class="lab-validation-checks"></ul>
+      </div>
     </article>
-    <article class="card inset lab-ai-simulator-card">
+    <article class="card inset lab-ai-simulator-card" data-collapsible data-open="true">
       <div class="section-heading">
         <div>
           <h3>Simulador conversacional con IA</h3>
           <p class="muted">Escribe como un integrante y revisa la respuesta que produciría el pipeline real del asistente.</p>
         </div>
-        <button id="lab-clear-chat" class="secondary" type="button">Limpiar conversación</button>
-      </div>
-      <div id="lab-chat" class="lab-chat" aria-live="polite">
-        <p class="lab-chat-empty">Selecciona uno o más grupos, valida el bot y escribe una pregunta.</p>
+        <div class="section-heading-actions">
+          <button id="lab-clear-chat" class="secondary" type="button">Limpiar conversación</button>
+        </div>
       </div>
       <form id="lab-chat-form" class="lab-chat-form">
         <label for="lab-chat-question">Pregunta de prueba</label>
@@ -103,10 +203,30 @@ function createModule() {
           <button id="lab-chat-send" type="submit">Enviar al bot</button>
         </div>
       </form>
+      <div id="lab-chat-container" class="lab-chat-container hidden">
+        <div class="lab-chat-header">
+          <h4 class="lab-chat-title">Respuesta del simulador</h4>
+          <span id="lab-chat-timer" class="lab-timer-badge hidden" aria-live="polite">Se ocultará en 30 s</span>
+        </div>
+        <div id="lab-chat" class="lab-chat" aria-live="polite">
+          <p class="lab-chat-empty">Selecciona uno o más grupos, valida el bot y escribe una pregunta.</p>
+        </div>
+      </div>
     </article>
-    <ol id="lab-list" class="automation-test-list"></ol>`;
+    <article class="card inset lab-test-options-card" data-collapsible data-open="true">
+      <div class="section-heading">
+        <div>
+          <h3>Opciones de prueba</h3>
+          <p class="muted">Ejecuta pruebas individuales de mensajes automáticos y resúmenes para el grupo seleccionado.</p>
+        </div>
+      </div>
+      <ol id="lab-list" class="automation-test-list"></ol>
+    </article>`;
   reference.insertAdjacentElement('afterend', section);
   installSimulatorStyles();
+  section.querySelectorAll('[data-collapsible]').forEach((card) => {
+    if (window.configureCollapsible) window.configureCollapsible(card);
+  });
   bindModule();
   bindSimulator();
   renderTests();
@@ -118,19 +238,42 @@ function installSimulatorStyles() {
   style.id = 'automation-lab-simulator-styles';
   style.textContent = `
     .lab-bot-validation-card,
-    .lab-ai-simulator-card {
-      display: grid;
+    .lab-ai-simulator-card,
+    .lab-test-options-card {
+      display: flex;
+      flex-direction: column;
       gap: 1rem;
       margin: 0 0 1rem;
     }
+    .lab-timer-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #4338ca;
+      background: #eef2ff;
+      border: 1px solid #c7d2fe;
+    }
+    .lab-validation-status-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.25rem;
+    }
     .lab-validation-summary {
       margin: 0;
+      flex: 1;
       border: 1px solid #cbd5e1;
-      border-radius: .75rem;
+      border-radius: 0.75rem;
       background: #f8fafc;
-      padding: .75rem .9rem;
+      padding: 0.75rem 0.9rem;
       color: #475569;
-      font-size: .88rem;
+      font-size: 0.88rem;
       font-weight: 750;
     }
     .lab-validation-summary[data-state='healthy'] {
@@ -151,7 +294,7 @@ function installSimulatorStyles() {
     .lab-validation-checks {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: .65rem;
+      gap: 0.65rem;
       margin: 0;
       padding: 0;
       list-style: none;
@@ -159,12 +302,12 @@ function installSimulatorStyles() {
     .lab-validation-check {
       display: grid;
       grid-template-columns: auto minmax(0, 1fr);
-      gap: .65rem;
+      gap: 0.65rem;
       align-items: start;
       border: 1px solid #e2e8f0;
-      border-radius: .75rem;
+      border-radius: 0.75rem;
       background: #fff;
-      padding: .75rem;
+      padding: 0.75rem;
     }
     .lab-validation-check[data-ok='true'] {
       border-color: #a7f3d0;
@@ -188,57 +331,81 @@ function installSimulatorStyles() {
     }
     .lab-validation-copy {
       display: grid;
-      gap: .2rem;
+      gap: 0.2rem;
       min-width: 0;
     }
     .lab-validation-copy strong {
       color: #0f172a;
-      font-size: .86rem;
+      font-size: 0.86rem;
     }
     .lab-validation-copy span {
       color: #64748b;
-      font-size: .78rem;
+      font-size: 0.78rem;
       line-height: 1.4;
     }
+    .lab-chat-container {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      margin-top: 0.5rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid #e2e8f0;
+    }
+    .lab-chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    .lab-chat-title {
+      margin: 0;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748b;
+    }
     .lab-chat {
-      display: grid;
-      gap: .75rem;
-      min-height: 12rem;
-      max-height: 30rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      min-height: 8rem;
+      max-height: 28rem;
       overflow-y: auto;
       border: 1px solid #dbe4ee;
-      border-radius: .9rem;
+      border-radius: 0.9rem;
       background: #f8fafc;
       padding: 1rem;
     }
     .lab-chat-empty {
       align-self: center;
-      margin: 0;
+      margin: auto;
       color: #64748b;
       text-align: center;
-      font-size: .88rem;
+      font-size: 0.88rem;
     }
     .lab-chat-message {
-      display: grid;
-      gap: .3rem;
-      max-width: min(78%, 46rem);
-      border-radius: .9rem;
-      padding: .8rem .9rem;
-      box-shadow: 0 .1rem .35rem rgba(15, 23, 42, .08);
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      max-width: min(85%, 46rem);
+      border-radius: 0.9rem;
+      padding: 0.8rem 0.9rem;
+      box-shadow: 0 0.1rem 0.35rem rgba(15, 23, 42, 0.08);
     }
     .lab-chat-message[data-role='user'] {
-      justify-self: end;
+      align-self: flex-end;
       background: #4f46e5;
       color: #fff;
     }
     .lab-chat-message[data-role='assistant'] {
-      justify-self: start;
+      align-self: flex-start;
       border: 1px solid #e2e8f0;
       background: #fff;
       color: #0f172a;
     }
     .lab-chat-message[data-role='error'] {
-      justify-self: start;
+      align-self: flex-start;
       border: 1px solid #fecaca;
       background: #fef2f2;
       color: #991b1b;
@@ -249,15 +416,17 @@ function installSimulatorStyles() {
       line-height: 1.5;
     }
     .lab-chat-meta {
-      opacity: .8;
-      font-size: .72rem;
+      opacity: 0.8;
+      font-size: 0.72rem;
       font-weight: 700;
     }
     .lab-chat-form {
-      gap: .75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
     }
     .lab-chat-form textarea {
-      min-height: 6rem;
+      min-height: 5.5rem;
       resize: vertical;
     }
     .lab-chat-actions {
@@ -269,7 +438,7 @@ function installSimulatorStyles() {
     .lab-chat-actions p {
       margin: 0;
       max-width: 52rem;
-      font-size: .78rem;
+      font-size: 0.78rem;
     }
     @media (max-width: 760px) {
       .lab-validation-checks {
@@ -317,6 +486,7 @@ function selectionSignature(groupKeys = [...selectedGroupKeys]) {
 }
 
 function invalidateBotValidation() {
+  clearValidationTimer();
   botValidation = null;
   botValidationSignature = '';
   const summary = query('#lab-validation-summary');
@@ -325,6 +495,7 @@ function invalidateBotValidation() {
     summary.textContent = 'Pendiente de validar para la selección actual.';
   }
   query('#lab-validation-checks')?.replaceChildren();
+  query('#lab-validation-container')?.classList.add('hidden');
 }
 
 function renderGroupSelector() {
@@ -534,7 +705,9 @@ async function sendDigestTest(period, groupKey) {
 function renderBotValidation(validation) {
   const summary = query('#lab-validation-summary');
   const list = query('#lab-validation-checks');
+  const container = query('#lab-validation-container');
   if (!summary || !list) return;
+  if (container) container.classList.remove('hidden');
   summary.dataset.state = validation.healthy ? 'healthy' : 'failed';
   summary.textContent = validation.healthy
     ? 'Bot operativo: todas las validaciones requeridas fueron superadas.'
@@ -557,11 +730,15 @@ function renderBotValidation(validation) {
     item.append(icon, copy);
     list.append(item);
   });
+  startValidationAutoClear();
 }
 
 async function validateSelectedBot(testProvider = true) {
   if (!botId) throw new Error('No hay un asistente seleccionado.');
   const groupKeys = selectedGroups();
+  clearValidationTimer();
+  const container = query('#lab-validation-container');
+  if (container) container.classList.remove('hidden');
   const summary = query('#lab-validation-summary');
   const button = query('#lab-validate-bot');
   if (summary) {
@@ -616,13 +793,8 @@ function appendChatMessage(role, text, meta = '') {
 }
 
 function clearSimulatorConversation() {
-  const chat = query('#lab-chat');
-  if (!chat) return;
-  chat.replaceChildren();
-  const empty = document.createElement('p');
-  empty.className = 'lab-chat-empty';
-  empty.textContent = 'Conversación limpiada. Puedes realizar una nueva prueba.';
-  chat.append(empty);
+  clearSimulatorTimer();
+  resetSimulatorUI();
 }
 
 async function sendSimulatorQuestion(event) {
@@ -636,6 +808,8 @@ async function sendSimulatorQuestion(event) {
   try {
     const groupKeys = selectedGroups();
     button.disabled = true;
+    clearSimulatorTimer();
+    query('#lab-chat-container')?.classList.remove('hidden');
     await ensureConversationValidation(groupKeys);
     appendChatMessage('user', question, 'Pregunta de prueba');
     input.value = '';
@@ -655,6 +829,7 @@ async function sendSimulatorQuestion(event) {
     if ((result.responses || []).length === 0) {
       appendChatMessage('error', 'El simulador no devolvió ninguna respuesta.', 'Simulador');
     }
+    startSimulatorAutoClear();
   } catch (error) {
     if (error.validation) {
       botValidation = error.validation;
@@ -662,6 +837,7 @@ async function sendSimulatorQuestion(event) {
       renderBotValidation(error.validation);
     }
     appendChatMessage('error', error.message || 'La prueba conversacional no pudo completarse.', 'Error de prueba');
+    startSimulatorAutoClear();
   } finally {
     button.disabled = false;
   }

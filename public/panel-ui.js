@@ -178,7 +178,7 @@ function configureWeeklyPollScheduleCard() {
   configureCollapsible(card);
 }
 
-function configureCollapsible(card) {
+export function configureCollapsible(card) {
   if (card.dataset.collapsibleReady === 'true') return;
   const heading = card.querySelector(':scope > .section-heading');
   if (!heading) return;
@@ -211,6 +211,11 @@ function configureCollapsible(card) {
   card.dataset.collapsibleReady = 'true';
   setOpen(card.dataset.open === 'true');
 }
+
+if (typeof window !== 'undefined') {
+  window.configureCollapsible = configureCollapsible;
+}
+
 
 function installPanelEnhancementStyles() {
   if (document.querySelector('#panel-enhancement-styles')) return;
