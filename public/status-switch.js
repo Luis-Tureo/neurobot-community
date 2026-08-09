@@ -1,4 +1,5 @@
 import './state-metrics-ui.js';
+import './qr-linking-ui.js';
 
 const structure = new WeakSet();
 
