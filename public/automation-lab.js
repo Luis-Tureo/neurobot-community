@@ -166,7 +166,7 @@ function createModule() {
         <div id="lab-group-options" class="lab-group-options"></div>
       </details>
     </fieldset>
-    <article class="card inset lab-bot-validation-card" data-collapsible data-open="true">
+    <article class="card inset lab-bot-validation-card">
       <div class="section-heading">
         <div>
           <h3>Validación del funcionamiento del bot</h3>
@@ -190,9 +190,9 @@ function createModule() {
           <h3>Simulador conversacional con IA</h3>
           <p class="muted">Escribe como un integrante y revisa la respuesta que produciría el pipeline real del asistente.</p>
         </div>
-        <div class="section-heading-actions">
-          <button id="lab-clear-chat" class="secondary" type="button">Limpiar conversación</button>
-        </div>
+      </div>
+      <div class="section-heading-actions">
+        <button id="lab-clear-chat" class="secondary" type="button">Limpiar conversación</button>
       </div>
       <form id="lab-chat-form" class="lab-chat-form">
         <label for="lab-chat-question">Pregunta de prueba</label>
