@@ -323,6 +323,20 @@
     @apply m-0 rounded-2xl bg-white p-5;
   }
 
+  .digest-frequency-list {
+    @apply grid gap-3;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  }
+
+  .digest-frequency-fields {
+    @apply grid gap-3;
+    grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  }
+
+  [data-digest-frequency].is-disabled > :not(legend, .toggle) {
+    opacity: 0.58;
+  }
+
   #automatic-messages-form {
     @apply grid gap-4;
   }

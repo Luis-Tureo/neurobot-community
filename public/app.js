@@ -8,6 +8,7 @@ const state = {
   editingCommandId: null,
   automaticDefaults: null,
   automaticConfiguration: null,
+  communityDigestConfiguration: null,
   automationGroups: [],
   selectedAutomationGroupKeys: new Set(),
   welcomeGroups: [],
@@ -675,9 +676,14 @@ const automaticTemplateDefinitions = [
 initializeAutomaticTemplateTools();
 
 async function loadAutomaticMessages() {
-  const result = await api(botScopedPath('/api/automatic-messages'));
+  const [result, digestResult] = await Promise.all([
+    api(botScopedPath('/api/automatic-messages')),
+    api(botScopedPath('/api/automatic-messages/digests')),
+  ]);
   const configuration = result.configuration;
+  const digestConfiguration = digestResult.configuration;
   state.automaticConfiguration = configuration;
+  state.communityDigestConfiguration = digestConfiguration;
   state.automaticDefaults = result.defaultConfiguration;
   state.automationGroups = result.authorizedGroups || [];
   state.selectedAutomationGroupKeys = new Set(result.selectedGroupKeys || []);
@@ -710,6 +716,24 @@ async function loadAutomaticMessages() {
   automaticMessagesForm.elements.rules_tolerance.value = configuration.dailyRules.toleranceMinutes;
   automaticMessagesForm.elements.rules_template.value =
     configuration.dailyRules.template.trim() || result.defaultConfiguration.dailyRules.template;
+  automaticMessagesForm.elements.digest_daily_enabled.checked = digestConfiguration.daily.enabled;
+  automaticMessagesForm.elements.digest_daily_time.value = digestConfiguration.daily.sendTime;
+  automaticMessagesForm.elements.digest_daily_tolerance.value =
+    digestConfiguration.daily.toleranceMinutes;
+  automaticMessagesForm.elements.digest_weekly_enabled.checked = digestConfiguration.weekly.enabled;
+  automaticMessagesForm.elements.digest_weekly_day.value = digestConfiguration.weekly.weekday;
+  automaticMessagesForm.elements.digest_weekly_time.value = digestConfiguration.weekly.sendTime;
+  automaticMessagesForm.elements.digest_weekly_tolerance.value =
+    digestConfiguration.weekly.toleranceMinutes;
+  automaticMessagesForm.elements.digest_monthly_enabled.checked =
+    digestConfiguration.monthly.enabled;
+  automaticMessagesForm.elements.digest_monthly_day.value = String(
+    digestConfiguration.monthly.dayOfMonth,
+  );
+  automaticMessagesForm.elements.digest_monthly_time.value = digestConfiguration.monthly.sendTime;
+  automaticMessagesForm.elements.digest_monthly_tolerance.value =
+    digestConfiguration.monthly.toleranceMinutes;
+  updateDigestControlStates();
 
   const deliveries = document.querySelector('#automatic-deliveries');
   deliveries.replaceChildren();
@@ -731,6 +755,13 @@ async function loadAutomaticMessages() {
 
 automaticMessagesForm.addEventListener('input', updateAutomaticTemplateMetrics);
 
+for (const frequency of ['daily', 'weekly', 'monthly']) {
+  automaticMessagesForm.elements[`digest_${frequency}_enabled`].addEventListener(
+    'change',
+    updateDigestControlStates,
+  );
+}
+
 automaticMessagesForm.elements.welcome_enabled.addEventListener(
   'change',
   updateWelcomeEnabledLabel,
@@ -740,6 +771,18 @@ automaticMessagesForm.elements.welcome_group_inherit.addEventListener(
   'change',
   updateWelcomeGroupTemplateState,
 );
+
+function updateDigestControlStates() {
+  for (const frequency of ['daily', 'weekly', 'monthly']) {
+    const enabled = automaticMessagesForm.elements[`digest_${frequency}_enabled`].checked;
+    const fieldset = document.querySelector(`[data-digest-frequency="${frequency}"]`);
+    fieldset?.classList.toggle('is-disabled', !enabled);
+    fieldset?.setAttribute('aria-disabled', String(!enabled));
+    fieldset
+      ?.querySelectorAll('input:not([type="checkbox"]), select')
+      .forEach((field) => (field.disabled = !enabled));
+  }
+}
 
 function renderAutomationGroupSelector() {
   const options = document.querySelector('#automation-group-options');
@@ -898,7 +941,7 @@ document.querySelector('#save-welcome-group').addEventListener('click', async ()
 automaticMessagesForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  if (!state.automaticConfiguration) return;
+  if (!state.automaticConfiguration || !state.communityDigestConfiguration) return;
   if (state.selectedAutomationGroupKeys.size === 0) {
     const message = 'Debes seleccionar al menos un grupo para guardar las automatizaciones.';
     document.querySelector('#automation-groups-error').textContent = message;
@@ -933,6 +976,29 @@ automaticMessagesForm.addEventListener('submit', async (event) => {
       template: form.elements.rules_template.value,
     },
   };
+  const monthlyDay = form.elements.digest_monthly_day.value;
+  const digestPayload = {
+    timezone: state.selectedBotTimezone,
+    daily: {
+      enabled: form.elements.digest_daily_enabled.checked,
+      sendTime: form.elements.digest_daily_time.value,
+      toleranceMinutes: Number(form.elements.digest_daily_tolerance.value),
+    },
+    weekly: {
+      enabled: form.elements.digest_weekly_enabled.checked,
+      weekday: form.elements.digest_weekly_day.value,
+      sendTime: form.elements.digest_weekly_time.value,
+      toleranceMinutes: Number(form.elements.digest_weekly_tolerance.value),
+    },
+    monthly: {
+      enabled: form.elements.digest_monthly_enabled.checked,
+      dayOfMonth: monthlyDay === 'last' ? 'last' : Number(monthlyDay),
+      sendTime: form.elements.digest_monthly_time.value,
+      toleranceMinutes: Number(form.elements.digest_monthly_tolerance.value),
+    },
+    maxMessages: state.communityDigestConfiguration.maxMessages,
+    maxCharacters: state.communityDigestConfiguration.maxCharacters,
+  };
   const weeklySchedule = collectWeeklyPollSchedule();
   try {
     await api(botScopedPath('/api/automatic-messages'), {
@@ -940,17 +1006,23 @@ automaticMessagesForm.addEventListener('submit', async (event) => {
       body: JSON.stringify(payload),
     });
     const pollConfiguration = state.pollData?.configuration;
-    await api(botScopedPath('/api/polls/configuration'), {
-      method: 'PATCH',
-      body: JSON.stringify({
-        enabled: weeklySchedule.length > 0,
-        sendTime: pollConfiguration?.sendTime || '13:00',
-        timezone: state.selectedBotTimezone,
-        toleranceMinutes: pollConfiguration?.toleranceMinutes ?? 30,
-        selectionMode: 'SAME_FOR_ALL',
-        weeklySchedule,
+    await Promise.all([
+      api(botScopedPath('/api/polls/configuration'), {
+        method: 'PATCH',
+        body: JSON.stringify({
+          enabled: weeklySchedule.length > 0,
+          sendTime: pollConfiguration?.sendTime || '13:00',
+          timezone: state.selectedBotTimezone,
+          toleranceMinutes: pollConfiguration?.toleranceMinutes ?? 30,
+          selectionMode: 'SAME_FOR_ALL',
+          weeklySchedule,
+        }),
       }),
-    });
+      api(botScopedPath('/api/automatic-messages/digests'), {
+        method: 'PATCH',
+        body: JSON.stringify(digestPayload),
+      }),
+    ]);
     await loadPolls();
     await loadAutomaticMessages();
     showNotice('Automatizaciones guardadas.');

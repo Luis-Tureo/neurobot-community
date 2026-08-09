@@ -1081,6 +1081,126 @@
                   </div>
                   <div id="poll-weekly-schedule" class="poll-weekly-grid"></div>
                 </article>
+                <article class="card inset automatic-card digest-automation-card" data-collapsible>
+                  <div class="section-heading">
+                    <div>
+                      <h3>Res&uacute;menes de conversaciones</h3>
+                      <p class="muted">
+                        Genera un resumen independiente para cada grupo seleccionado y frecuencia.
+                      </p>
+                    </div>
+                  </div>
+                  <div class="digest-frequency-list">
+                    <fieldset data-digest-frequency="daily">
+                      <legend>Resumen diario</legend>
+                      <label class="toggle"
+                        ><input name="digest_daily_enabled" type="checkbox" /> Activar</label
+                      >
+                      <div class="digest-frequency-fields">
+                        <label
+                          >Hora<input name="digest_daily_time" type="time" step="60" required
+                        /></label>
+                        <label
+                          >Tolerancia (minutos)<input
+                            name="digest_daily_tolerance"
+                            type="number"
+                            min="0"
+                            max="180"
+                            required
+                        /></label>
+                      </div>
+                    </fieldset>
+                    <fieldset data-digest-frequency="weekly">
+                      <legend>Resumen semanal</legend>
+                      <label class="toggle"
+                        ><input name="digest_weekly_enabled" type="checkbox" /> Activar</label
+                      >
+                      <div class="digest-frequency-fields">
+                        <label
+                          >D&iacute;a<select name="digest_weekly_day" required>
+                            <option value="Mon">Lunes</option>
+                            <option value="Tue">Martes</option>
+                            <option value="Wed">Mi&eacute;rcoles</option>
+                            <option value="Thu">Jueves</option>
+                            <option value="Fri">Viernes</option>
+                            <option value="Sat">S&aacute;bado</option>
+                            <option value="Sun">Domingo</option>
+                          </select></label
+                        >
+                        <label
+                          >Hora<input name="digest_weekly_time" type="time" step="60" required
+                        /></label>
+                        <label
+                          >Tolerancia (minutos)<input
+                            name="digest_weekly_tolerance"
+                            type="number"
+                            min="0"
+                            max="180"
+                            required
+                        /></label>
+                      </div>
+                    </fieldset>
+                    <fieldset data-digest-frequency="monthly">
+                      <legend>Resumen mensual</legend>
+                      <label class="toggle"
+                        ><input name="digest_monthly_enabled" type="checkbox" /> Activar</label
+                      >
+                      <div class="digest-frequency-fields">
+                        <label
+                          >D&iacute;a<select name="digest_monthly_day" required>
+                            <option value="last">&Uacute;ltimo d&iacute;a del mes</option>
+                            <option value="1">D&iacute;a 1</option>
+                            <option value="2">D&iacute;a 2</option>
+                            <option value="3">D&iacute;a 3</option>
+                            <option value="4">D&iacute;a 4</option>
+                            <option value="5">D&iacute;a 5</option>
+                            <option value="6">D&iacute;a 6</option>
+                            <option value="7">D&iacute;a 7</option>
+                            <option value="8">D&iacute;a 8</option>
+                            <option value="9">D&iacute;a 9</option>
+                            <option value="10">D&iacute;a 10</option>
+                            <option value="11">D&iacute;a 11</option>
+                            <option value="12">D&iacute;a 12</option>
+                            <option value="13">D&iacute;a 13</option>
+                            <option value="14">D&iacute;a 14</option>
+                            <option value="15">D&iacute;a 15</option>
+                            <option value="16">D&iacute;a 16</option>
+                            <option value="17">D&iacute;a 17</option>
+                            <option value="18">D&iacute;a 18</option>
+                            <option value="19">D&iacute;a 19</option>
+                            <option value="20">D&iacute;a 20</option>
+                            <option value="21">D&iacute;a 21</option>
+                            <option value="22">D&iacute;a 22</option>
+                            <option value="23">D&iacute;a 23</option>
+                            <option value="24">D&iacute;a 24</option>
+                            <option value="25">D&iacute;a 25</option>
+                            <option value="26">D&iacute;a 26</option>
+                            <option value="27">D&iacute;a 27</option>
+                            <option value="28">D&iacute;a 28</option>
+                            <option value="29">D&iacute;a 29</option>
+                            <option value="30">D&iacute;a 30</option>
+                            <option value="31">D&iacute;a 31</option>
+                          </select></label
+                        >
+                        <label
+                          >Hora<input name="digest_monthly_time" type="time" step="60" required
+                        /></label>
+                        <label
+                          >Tolerancia (minutos)<input
+                            name="digest_monthly_tolerance"
+                            type="number"
+                            min="0"
+                            max="180"
+                            required
+                        /></label>
+                      </div>
+                      <p class="muted">
+                        Si el mes no tiene el d&iacute;a elegido, se ejecuta el &uacute;ltimo
+                        d&iacute;a.
+                      </p>
+                    </fieldset>
+                  </div>
+                </article>
                 <article class="card inset automatic-card" data-collapsible data-open="true">
                   <div class="section-heading">
                     <div>

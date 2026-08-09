@@ -14,6 +14,7 @@ describe('centro de pruebas de automatizaciones', () => {
       'Encuesta diaria',
       'Resumen diario',
       'Resumen semanal',
+      'Resumen mensual',
     ]) {
       expect(script).toContain(label);
     }
@@ -54,6 +55,7 @@ describe('centro de pruebas de automatizaciones', () => {
     expect(script).toContain('/api/automation-lab/context');
     expect(script).toContain("headers['x-csrf-token']");
     expect(script).toContain('/api/automatic-messages/digests/send-test');
+    expect(script).toContain("sendDigestTest('monthly', groupKey)");
   });
 
   it('interpreta correctamente estados SKIPPED y FAILED del resumen', () => {

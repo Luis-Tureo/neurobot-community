@@ -8,7 +8,10 @@ const COOKIE_NAME = 'panel_session';
 
 const botQuerySchema = z
   .object({
-    botId: z.string().regex(/^[a-z][a-z0-9-]{2,39}$/u).optional(),
+    botId: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{2,39}$/u)
+      .optional(),
   })
   .passthrough();
 
@@ -35,6 +38,14 @@ const configurationSchema = z
         toleranceMinutes: z.number().int().min(0).max(180),
       })
       .strict(),
+    monthly: z
+      .object({
+        enabled: z.boolean(),
+        dayOfMonth: z.union([z.literal('last'), z.number().int().min(1).max(31)]),
+        sendTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u),
+        toleranceMinutes: z.number().int().min(0).max(180),
+      })
+      .strict(),
     maxMessages: z.number().int().min(20).max(2000),
     maxCharacters: z.number().int().min(2000).max(100_000),
   })
@@ -43,14 +54,14 @@ const configurationSchema = z
 const manualSchema = z
   .object({
     groupKey: z.string().length(20),
-    period: z.enum(['daily', 'weekly']),
+    period: z.enum(['daily', 'weekly', 'monthly']),
     confirmed: z.literal(true),
   })
   .strict();
 
 const historySchema = botQuerySchema.extend({
   groupKey: z.string().length(20),
-  period: z.enum(['daily', 'weekly']),
+  period: z.enum(['daily', 'weekly', 'monthly']),
 });
 
 export function registerCommunityDigestRoutes(
@@ -104,11 +115,6 @@ export function registerCommunityDigestRoutes(
       if (service === null) return unavailable(reply);
       const configuration = configurationSchema.parse(request.body);
       service.saveConfiguration(configuration);
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'COMMUNITY_DIGEST_CONFIGURATION_UPDATED',
-        result: 'updated',
-      });
       return { updated: true, configuration };
     },
   );
@@ -121,10 +127,8 @@ export function registerCommunityDigestRoutes(
       const service = getCommunityDigestService(botId);
       if (service === null) return unavailable(reply);
       const input = manualSchema.parse(request.body);
-      const groupId = context.database.resolveBotGroupKey(
-        botId,
-        input.groupKey,
-        (identifier) => context.anonymizer.identifier(identifier),
+      const groupId = context.database.resolveBotGroupKey(botId, input.groupKey, (identifier) =>
+        context.anonymizer.identifier(identifier),
       );
       if (groupId === null || !context.database.canBotSendToGroup(botId, groupId)) {
         return reply
@@ -148,10 +152,8 @@ export function registerCommunityDigestRoutes(
       const botId = input.botId ?? 'neurobot';
       const service = getCommunityDigestService(botId);
       if (service === null) return unavailable(reply);
-      const groupId = context.database.resolveBotGroupKey(
-        botId,
-        input.groupKey,
-        (identifier) => context.anonymizer.identifier(identifier),
+      const groupId = context.database.resolveBotGroupKey(botId, input.groupKey, (identifier) =>
+        context.anonymizer.identifier(identifier),
       );
       if (groupId === null || !context.database.canBotSendToGroup(botId, groupId)) {
         return reply
@@ -198,8 +200,10 @@ function digestErrorMessage(errorCode: string | null): string {
     AI_NOT_CONFIGURED: 'La IA no está configurada para este asistente.',
     AI_EMPTY_RESPONSE: 'La IA no pudo generar un resumen.',
     WHATSAPP_NOT_CONNECTED: 'WhatsApp no está conectado.',
+    WHATSAPP_SEND_FAILED: 'El resumen se generó, pero WhatsApp no pudo enviarlo.',
     GROUP_NOT_AVAILABLE: 'El grupo no está disponible.',
     CHAT_HISTORY_UNAVAILABLE: 'El historial de mensajes no está disponible.',
+    CHAT_HISTORY_FAILED: 'No fue posible recuperar el historial de mensajes.',
     AI_TIMEOUT: 'La solicitud a la IA excedió el tiempo máximo.',
     AI_NETWORK_ERROR: 'No fue posible conectar con el proveedor de IA.',
     AI_INVALID_KEY: 'Las credenciales del proveedor de IA no son válidas.',

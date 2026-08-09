@@ -180,6 +180,12 @@ function definitions() {
       description: 'Analiza hasta siete días y envía un resumen.',
       run: (groupKey) => sendDigestTest('weekly', groupKey),
     },
+    {
+      id: 'monthly-digest',
+      title: 'Resumen mensual',
+      description: 'Analiza el último mes y envía un resumen.',
+      run: (groupKey) => sendDigestTest('monthly', groupKey),
+    },
   ];
 }
 

@@ -84,6 +84,29 @@ describe('interfaz de mensajes automáticos', () => {
     expect(styles).toContain('.automation-group-chip');
   });
 
+  it('configura resúmenes diario, semanal y mensual con el selector general', () => {
+    const automaticSection = html.slice(
+      html.indexOf('id="section-automatic-messages"'),
+      html.indexOf('id="section-polls"'),
+    );
+    expect(automaticSection).toContain('Res&uacute;menes de conversaciones');
+    expect(automaticSection).toContain('name="digest_daily_enabled"');
+    expect(automaticSection).toContain('name="digest_daily_time"');
+    expect(automaticSection).toContain('name="digest_weekly_enabled"');
+    expect(automaticSection).toContain('name="digest_weekly_day"');
+    expect(automaticSection).toContain('name="digest_weekly_time"');
+    expect(automaticSection).toContain('name="digest_monthly_enabled"');
+    expect(automaticSection).toContain('name="digest_monthly_day"');
+    expect(automaticSection).toContain('value="last"');
+    expect(automaticSection).toContain('name="digest_monthly_time"');
+    expect(automaticSection.match(/id="automation-group-options"/gu)).toHaveLength(1);
+    expect(script).toContain("api(botScopedPath('/api/automatic-messages/digests'))");
+    expect(script).toContain('state.communityDigestConfiguration.maxMessages');
+    expect(script).toContain("monthlyDay === 'last' ? 'last' : Number(monthlyDay)");
+    expect(styles).toContain('.digest-frequency-list');
+    expect(styles).toContain('[data-digest-frequency].is-disabled');
+  });
+
   it('ofrece una sola restauración de textos junto al guardado general', () => {
     const automaticSection = html.slice(
       html.indexOf('id="section-automatic-messages"'),

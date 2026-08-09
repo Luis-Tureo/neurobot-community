@@ -1,8 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import type { Response as InjectResponse } from 'light-my-request';
+import type { AIProvider } from '../src/ai/ai-provider.js';
 import { AIProviderFactory } from '../src/ai/ai-provider-factory.js';
 import { buildAdminServer } from '../src/admin/server.js';
 import { AutomaticMessageService } from '../src/core/automatic-message-service.js';
+import {
+  registerCommunityDigestService,
+  unregisterCommunityDigestService,
+} from '../src/core/community-digest-registry.js';
+import { CommunityDigestService } from '../src/core/community-digest-service.js';
 import { ConnectionManager } from '../src/core/connection-manager.js';
 import { GroupDiscoveryService } from '../src/core/group-discovery-service.js';
 import { createProfileFromPreset } from '../src/core/profile-presets.js';
@@ -117,6 +123,69 @@ describe('API administrativa', () => {
       (await app.inject({ method: 'GET', url: '/api/status', headers: { cookie: auth.cookie } }))
         .statusCode,
     ).toBe(401);
+  });
+
+  it('expone y valida la configuración persistente de resúmenes mensuales', async () => {
+    const provider: AIProvider = {
+      isConfigured: () => true,
+      testConnection: async () => ({ successful: true }),
+      generateGroundedResponse: async () => ({
+        text: 'Resumen de prueba',
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      }),
+      getModelInformation: () => ({ provider: 'test', model: 'test' }),
+      normalizeUsage: () => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
+      classifyProviderError: () => 'AI_TEMPORARY_ERROR',
+    };
+    const service = new CommunityDigestService(
+      database,
+      client,
+      provider,
+      createLogger('silent'),
+      new Anonymizer('x'.repeat(32)),
+      { botId: 'neurobot' },
+    );
+    registerCommunityDigestService('neurobot', service);
+    try {
+      const auth = await login(app);
+      const current = await app.inject({
+        method: 'GET',
+        url: '/api/automatic-messages/digests',
+        headers: { cookie: auth.cookie },
+      });
+      expect(current.statusCode).toBe(200);
+      const configuration = current.json().configuration;
+      configuration.daily.enabled = true;
+      configuration.weekly.enabled = true;
+      configuration.monthly = {
+        enabled: true,
+        dayOfMonth: 'last',
+        sendTime: '20:15',
+        toleranceMinutes: 45,
+      };
+
+      const updated = await injectAuthenticated(app, auth, {
+        method: 'PATCH',
+        url: '/api/automatic-messages/digests',
+        payload: configuration,
+      });
+      expect(updated.statusCode).toBe(200);
+      expect(service.configuration()).toMatchObject({
+        daily: { enabled: true },
+        weekly: { enabled: true },
+        monthly: configuration.monthly,
+      });
+
+      const invalid = await injectAuthenticated(app, auth, {
+        method: 'PATCH',
+        url: '/api/automatic-messages/digests',
+        payload: { ...configuration, monthly: { ...configuration.monthly, dayOfMonth: 32 } },
+      });
+      expect(invalid.statusCode).toBe(400);
+      expect(service.configuration().monthly.dayOfMonth).toBe('last');
+    } finally {
+      unregisterCommunityDigestService('neurobot', service);
+    }
   });
 
   it('detecta, autoriza y desautoriza grupos mediante identificadores anónimos', async () => {

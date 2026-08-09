@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { AIProvider } from '../src/ai/ai-provider.js';
 import { CommunityDigestService } from '../src/core/community-digest-service.js';
 import { createLogger } from '../src/infrastructure/logger.js';
@@ -22,7 +25,7 @@ function createProvider(): AIProvider {
   };
 }
 
-function createSubject(referenceNow = NOW) {
+function createSubject(referenceNow = NOW, provider = createProvider()) {
   const database = new AppDatabase(':memory:');
   database.migrate();
   database.synchronizeBotGroup('neurobot', {
@@ -43,7 +46,7 @@ function createSubject(referenceNow = NOW) {
   const service = new CommunityDigestService(
     database,
     client,
-    createProvider(),
+    provider,
     createLogger('silent'),
     new Anonymizer('x'.repeat(32)),
     { botId: 'neurobot' },
@@ -545,6 +548,643 @@ describe('resumen diario — centro de pruebas', () => {
       expect(result.status).toBe('FAILED');
       expect(result.errorCode).toBe('AI_NOT_CONFIGURED');
       expect(client.sentMessages).toHaveLength(0);
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe('automatización de resúmenes diario, semanal y mensual', () => {
+  it('caso 2: ejecuta el resumen semanal únicamente en el día y hora configurados', async () => {
+    const scheduled = new Date('2026-08-09T19:00:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.weekly = {
+        enabled: true,
+        weekday: 'Sun',
+        sendTime: '19:00',
+        toleranceMinutes: 30,
+      };
+      service.saveConfiguration(configuration);
+
+      await service.runDueTasks(new Date('2026-08-08T19:00:00.000Z'));
+      await service.runDueTasks(scheduled);
+
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]?.text).toContain('Resumen semanal');
+    } finally {
+      database.close();
+    }
+  });
+
+  it('caso 3: ejecuta el resumen mensual en la fecha y hora configuradas', async () => {
+    const scheduled = new Date('2026-08-31T19:00:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.monthly = {
+        enabled: true,
+        dayOfMonth: 'last',
+        sendTime: '19:00',
+        toleranceMinutes: 30,
+      };
+      service.saveConfiguration(configuration);
+
+      await service.runDueTasks(scheduled);
+
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]?.text).toContain('Resumen mensual');
+    } finally {
+      database.close();
+    }
+  });
+
+  it('caso 4: ejecuta las tres frecuencias cuando coinciden', async () => {
+    const scheduled = new Date('2026-05-31T19:00:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      configuration.weekly = {
+        enabled: true,
+        weekday: 'Sun',
+        sendTime: '19:00',
+        toleranceMinutes: 30,
+      };
+      configuration.monthly = {
+        enabled: true,
+        dayOfMonth: 'last',
+        sendTime: '19:00',
+        toleranceMinutes: 30,
+      };
+      service.saveConfiguration(configuration);
+
+      await service.runDueTasks(scheduled);
+
+      expect(client.sentMessages).toHaveLength(3);
+      expect(client.sentMessages.map((message) => message.text)).toEqual([
+        expect.stringContaining('Resumen del día'),
+        expect.stringContaining('Resumen semanal'),
+        expect.stringContaining('Resumen mensual'),
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('caso 5: no ejecuta una frecuencia desactivada y conserva su hora', async () => {
+    const scheduled = new Date('2026-08-31T19:00:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.daily = { enabled: false, sendTime: '19:00', toleranceMinutes: 30 };
+      service.saveConfiguration(configuration);
+
+      await service.runDueTasks(scheduled);
+
+      expect(client.sentMessages).toHaveLength(0);
+      expect(service.configuration().daily).toEqual(configuration.daily);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('reactiva una frecuencia con el mismo día, hora y tolerancia', async () => {
+    const scheduled = new Date('2026-08-07T20:15:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.weekly = {
+        enabled: false,
+        weekday: 'Fri',
+        sendTime: '20:15',
+        toleranceMinutes: 17,
+      };
+      service.saveConfiguration(configuration);
+      const reactivated = service.configuration();
+      reactivated.weekly.enabled = true;
+      service.saveConfiguration(reactivated);
+
+      expect(service.configuration().weekly).toEqual({
+        enabled: true,
+        weekday: 'Fri',
+        sendTime: '20:15',
+        toleranceMinutes: 17,
+      });
+      await service.runDueTasks(scheduled);
+      expect(client.sentMessages).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('casos 6 y 7: procesa varios grupos sin mezclar sus mensajes', async () => {
+    const scheduled = new Date('2026-08-31T19:00:00.000Z');
+    const GROUP_A = 'automatizado-a@g.us';
+    const GROUP_B = 'automatizado-b@g.us';
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    database.synchronizeBotGroup('neurobot', { id: GROUP_A, name: 'Grupo A', botIsMember: true });
+    database.synchronizeBotGroup('neurobot', { id: GROUP_B, name: 'Grupo B', botIsMember: true });
+    database.replaceAutomationGroupIds('neurobot', [GROUP_A, GROUP_B]);
+    const client = new SimulatedMessagingClient();
+    client.recentGroupMessages.set(GROUP_A, [
+      {
+        id: 'a',
+        body: 'Contenido exclusivo automatizado A.',
+        timestampMs: scheduled.getTime() - 60_000,
+        fromMe: false,
+        participantId: '56900000001@c.us',
+      },
+    ]);
+    client.recentGroupMessages.set(GROUP_B, [
+      {
+        id: 'b',
+        body: 'Contenido exclusivo automatizado B.',
+        timestampMs: scheduled.getTime() - 60_000,
+        fromMe: false,
+        participantId: '56900000002@c.us',
+      },
+    ]);
+    const contexts: string[] = [];
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async (request) => {
+        contexts.push(request.context);
+        return {
+          text: '• Resumen aislado.\n• Convivencia: sin alertas.',
+          usage: { inputTokens: 20, outputTokens: 15, totalTokens: 35 },
+        };
+      },
+    };
+    const service = new CommunityDigestService(
+      database,
+      client,
+      provider,
+      createLogger('silent'),
+      new Anonymizer('x'.repeat(32)),
+      { botId: 'neurobot' },
+    );
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      service.saveConfiguration(configuration);
+
+      await service.runDueTasks(scheduled);
+
+      expect(client.sentMessages.map((message) => message.chatId)).toEqual([GROUP_A, GROUP_B]);
+      expect(contexts).toHaveLength(2);
+      expect(contexts[0]).toContain('exclusivo automatizado A');
+      expect(contexts[0]).not.toContain('exclusivo automatizado B');
+      expect(contexts[1]).toContain('exclusivo automatizado B');
+      expect(contexts[1]).not.toContain('exclusivo automatizado A');
+    } finally {
+      database.close();
+    }
+  });
+
+  it('caso 8: sin mensajes no llama a IA ni WhatsApp y registra el salto', async () => {
+    const scheduled = new Date('2026-08-31T19:00:00.000Z');
+    const generate = vi.fn(createProvider().generateGroundedResponse);
+    const provider: AIProvider = { ...createProvider(), generateGroundedResponse: generate };
+    const { database, client, service } = createSubject(scheduled, provider);
+    try {
+      client.recentGroupMessages.set(GROUP_ID, []);
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      service.saveConfiguration(configuration);
+
+      await service.runDueTasks(scheduled);
+
+      expect(generate).not.toHaveBeenCalled();
+      expect(client.sentMessages).toHaveLength(0);
+      expect(database.getTechnicalEvents()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            event_type: 'COMMUNITY_DIGEST_SKIPPED_NO_MESSAGES',
+            result: 'skipped',
+          }),
+        ]),
+      );
+    } finally {
+      database.close();
+    }
+  });
+
+  it('caso 9: un fallo de IA en A no impide procesar B', async () => {
+    const scheduled = new Date('2026-08-31T19:00:00.000Z');
+    const GROUP_A = 'falla-ia-a@g.us';
+    const GROUP_B = 'continua-ia-b@g.us';
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    database.synchronizeBotGroup('neurobot', { id: GROUP_A, name: 'Grupo A', botIsMember: true });
+    database.synchronizeBotGroup('neurobot', { id: GROUP_B, name: 'Grupo B', botIsMember: true });
+    database.replaceAutomationGroupIds('neurobot', [GROUP_A, GROUP_B]);
+    const client = new SimulatedMessagingClient();
+    client.recentGroupMessages.set(GROUP_A, [
+      {
+        id: 'a',
+        body: 'Provocar falla IA A.',
+        timestampMs: scheduled.getTime(),
+        fromMe: false,
+        participantId: '56900000003@c.us',
+      },
+    ]);
+    client.recentGroupMessages.set(GROUP_B, [
+      {
+        id: 'b',
+        body: 'Continuar con IA B.',
+        timestampMs: scheduled.getTime(),
+        fromMe: false,
+        participantId: '56900000004@c.us',
+      },
+    ]);
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async (request) => {
+        if (request.context.includes('falla IA A')) throw new Error('AI_TEMPORARY_ERROR');
+        return createProvider().generateGroundedResponse(request);
+      },
+    };
+    const service = new CommunityDigestService(
+      database,
+      client,
+      provider,
+      createLogger('silent'),
+      new Anonymizer('x'.repeat(32)),
+      { botId: 'neurobot' },
+    );
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      service.saveConfiguration(configuration);
+      await service.runDueTasks(scheduled);
+
+      expect(client.sentMessages.map((message) => message.chatId)).toEqual([GROUP_B]);
+      expect(database.getTechnicalEvents()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ event_type: 'COMMUNITY_DIGEST_AI_FAILED' }),
+          expect.objectContaining({ event_type: 'COMMUNITY_DIGEST_COMPLETED' }),
+        ]),
+      );
+    } finally {
+      database.close();
+    }
+  });
+
+  it('caso 10: un fallo de WhatsApp en A no impide procesar B', async () => {
+    const scheduled = new Date('2026-08-31T19:00:00.000Z');
+    const GROUP_A = 'falla-whatsapp-a@g.us';
+    const GROUP_B = 'continua-whatsapp-b@g.us';
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    database.synchronizeBotGroup('neurobot', { id: GROUP_A, name: 'Grupo A', botIsMember: true });
+    database.synchronizeBotGroup('neurobot', { id: GROUP_B, name: 'Grupo B', botIsMember: true });
+    database.replaceAutomationGroupIds('neurobot', [GROUP_A, GROUP_B]);
+    const client = new SimulatedMessagingClient();
+    client.recentGroupMessages.set(GROUP_A, [
+      {
+        id: 'a',
+        body: 'Mensaje para A.',
+        timestampMs: scheduled.getTime(),
+        fromMe: false,
+        participantId: '56900000005@c.us',
+      },
+    ]);
+    client.recentGroupMessages.set(GROUP_B, [
+      {
+        id: 'b',
+        body: 'Mensaje para B.',
+        timestampMs: scheduled.getTime(),
+        fromMe: false,
+        participantId: '56900000006@c.us',
+      },
+    ]);
+    const originalSend = client.sendMessage.bind(client);
+    client.sendMessage = async (chatId, text, replyToMessageId) => {
+      if (chatId === GROUP_A) throw new Error('Fallo simulado del grupo A');
+      await originalSend(chatId, text, replyToMessageId);
+    };
+    const service = new CommunityDigestService(
+      database,
+      client,
+      createProvider(),
+      createLogger('silent'),
+      new Anonymizer('x'.repeat(32)),
+      { botId: 'neurobot' },
+    );
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      service.saveConfiguration(configuration);
+      await service.runDueTasks(scheduled);
+
+      expect(client.sentMessages.map((message) => message.chatId)).toEqual([GROUP_B]);
+      expect(database.getTechnicalEvents()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            event_type: 'COMMUNITY_DIGEST_WHATSAPP_SEND_FAILED',
+            error_code: 'WHATSAPP_SEND_FAILED',
+          }),
+          expect.objectContaining({ event_type: 'COMMUNITY_DIGEST_COMPLETED' }),
+        ]),
+      );
+    } finally {
+      database.close();
+    }
+  });
+
+  it('caso 11: bloquea duplicados incluso después de recrear el servicio', async () => {
+    const scheduled = new Date('2026-08-31T19:00:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
+    const createRestartedService = () =>
+      new CommunityDigestService(
+        database,
+        client,
+        createProvider(),
+        createLogger('silent'),
+        new Anonymizer('x'.repeat(32)),
+        { botId: 'neurobot' },
+      );
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      service.saveConfiguration(configuration);
+      await Promise.all([service.runDueTasks(scheduled), service.runDueTasks(scheduled)]);
+      await createRestartedService().runDueTasks(new Date('2026-08-31T19:10:00.000Z'));
+
+      expect(client.sentMessages).toHaveLength(1);
+      expect(
+        database
+          .getTechnicalEvents()
+          .some((event) => event.event_type === 'COMMUNITY_DIGEST_DUPLICATE_BLOCKED'),
+      ).toBe(true);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('conserva la reclamación idempotente al cerrar y reabrir la base de datos', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'neurobot-digest-runs-'));
+    const path = join(directory, 'runs.db');
+    const scheduled = new Date('2026-08-31T19:00:00.000Z');
+    const client = new SimulatedMessagingClient();
+    client.recentGroupMessages.set(GROUP_ID, [
+      {
+        id: 'persisted-run',
+        body: 'Mensaje para comprobar reinicio.',
+        timestampMs: scheduled.getTime() - 60_000,
+        fromMe: false,
+        participantId: '56900000009@c.us',
+      },
+    ]);
+    const createService = (database: AppDatabase) =>
+      new CommunityDigestService(
+        database,
+        client,
+        createProvider(),
+        createLogger('silent'),
+        new Anonymizer('x'.repeat(32)),
+        { botId: 'neurobot' },
+      );
+
+    const first = new AppDatabase(path);
+    first.migrate();
+    first.synchronizeBotGroup('neurobot', {
+      id: GROUP_ID,
+      name: 'Grupo persistente',
+      botIsMember: true,
+    });
+    const firstService = createService(first);
+    const configuration = firstService.configuration();
+    configuration.timezone = 'UTC';
+    configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+    firstService.saveConfiguration(configuration);
+    await firstService.runDueTasks(scheduled);
+    first.close();
+
+    const second = new AppDatabase(path);
+    second.migrate();
+    try {
+      await createService(second).runDueTasks(new Date('2026-08-31T19:10:00.000Z'));
+      expect(client.sentMessages).toHaveLength(1);
+    } finally {
+      second.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('caso 12: cambiar la hora deja de considerar la programación anterior', async () => {
+    const scheduled = new Date('2026-08-31T19:00:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.daily = { enabled: true, sendTime: '18:00', toleranceMinutes: 0 };
+      service.saveConfiguration(configuration);
+      configuration.daily.sendTime = '19:00';
+      service.saveConfiguration(configuration);
+
+      await service.runDueTasks(new Date('2026-08-31T18:00:00.000Z'));
+      await service.runDueTasks(scheduled);
+
+      expect(client.sentMessages).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it.each([
+    ['febrero', '2026-02-28T19:00:00.000Z'],
+    ['abril', '2026-04-30T19:00:00.000Z'],
+    ['diciembre', '2026-12-31T19:00:00.000Z'],
+  ])('caso 13: calcula el último día de %s', async (_month, instant) => {
+    const scheduled = new Date(instant);
+    const { database, client, service } = createSubject(scheduled);
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.monthly = {
+        enabled: true,
+        dayOfMonth: 'last',
+        sendTime: '19:00',
+        toleranceMinutes: 0,
+      };
+      service.saveConfiguration(configuration);
+      await service.runDueTasks(new Date(scheduled.getTime() - 24 * 60 * 60 * 1000));
+      await service.runDueTasks(scheduled);
+      expect(client.sentMessages).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('caso 14: reconoce el 29 de febrero de un año bisiesto', async () => {
+    const scheduled = new Date('2028-02-29T19:00:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.monthly = {
+        enabled: true,
+        dayOfMonth: 'last',
+        sendTime: '19:00',
+        toleranceMinutes: 0,
+      };
+      service.saveConfiguration(configuration);
+      await service.runDueTasks(new Date('2028-02-28T19:00:00.000Z'));
+      await service.runDueTasks(scheduled);
+      expect(client.sentMessages).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('ajusta un día numérico inexistente al último día real del mes', async () => {
+    const scheduled = new Date('2026-04-30T19:00:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.monthly = {
+        enabled: true,
+        dayOfMonth: 31,
+        sendTime: '19:00',
+        toleranceMinutes: 0,
+      };
+      service.saveConfiguration(configuration);
+      await service.runDueTasks(scheduled);
+      expect(client.sentMessages).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('caso 15: interpreta la hora configurada en la zona America/Santiago', async () => {
+    const scheduled = new Date('2026-08-31T23:00:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'America/Santiago';
+      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      service.saveConfiguration(configuration);
+      await service.runDueTasks(new Date('2026-08-31T22:59:00.000Z'));
+      await service.runDueTasks(scheduled);
+      expect(client.sentMessages).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('caso 16: persiste las tres frecuencias al cerrar y reabrir la base de datos', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'neurobot-digests-'));
+    const path = join(directory, 'digests.db');
+    const first = new AppDatabase(path);
+    first.migrate();
+    const firstService = new CommunityDigestService(
+      first,
+      new SimulatedMessagingClient(),
+      createProvider(),
+      createLogger('silent'),
+      new Anonymizer('x'.repeat(32)),
+      { botId: 'neurobot' },
+    );
+    const configuration = firstService.configuration();
+    configuration.timezone = 'UTC';
+    configuration.daily = { enabled: true, sendTime: '20:01', toleranceMinutes: 11 };
+    configuration.weekly = {
+      enabled: true,
+      weekday: 'Fri',
+      sendTime: '20:02',
+      toleranceMinutes: 12,
+    };
+    configuration.monthly = {
+      enabled: true,
+      dayOfMonth: 15,
+      sendTime: '20:03',
+      toleranceMinutes: 13,
+    };
+    firstService.saveConfiguration(configuration);
+    first.close();
+
+    const second = new AppDatabase(path);
+    second.migrate();
+    const secondService = new CommunityDigestService(
+      second,
+      new SimulatedMessagingClient(),
+      createProvider(),
+      createLogger('silent'),
+      new Anonymizer('x'.repeat(32)),
+      { botId: 'neurobot' },
+    );
+    try {
+      expect(secondService.configuration()).toEqual(configuration);
+    } finally {
+      second.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('caso 17: el Centro de pruebas usa el mismo pipeline también para mensual', async () => {
+    const { database, client, service } = createSubject();
+    try {
+      const result = await service.sendManual('monthly', GROUP_ID, NOW);
+      expect(result).toMatchObject({ period: 'monthly', status: 'SENT', messageCount: 1 });
+      expect(client.sentMessages[0]?.text).toContain('Resumen mensual');
+    } finally {
+      database.close();
+    }
+  });
+
+  it('calcula el período mensual como un mes calendario móvil en la zona configurada', async () => {
+    const scheduled = new Date('2026-03-31T19:00:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      service.saveConfiguration(configuration);
+      client.recentGroupMessages.set(GROUP_ID, [
+        {
+          id: 'outside',
+          body: 'Fuera del mes calendario móvil.',
+          timestampMs: new Date('2026-02-28T18:59:59.000Z').getTime(),
+          fromMe: false,
+          participantId: '56900000007@c.us',
+        },
+        {
+          id: 'inside',
+          body: 'Dentro del mes calendario móvil.',
+          timestampMs: new Date('2026-02-28T19:00:01.000Z').getTime(),
+          fromMe: false,
+          participantId: '56900000008@c.us',
+        },
+      ]);
+
+      const result = await service.sendManual('monthly', GROUP_ID, scheduled);
+
+      expect(result).toMatchObject({ status: 'SENT', messageCount: 1 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it('rechaza días mensuales fuera de rango en el backend', () => {
+    const { database, service } = createSubject();
+    try {
+      const configuration = service.configuration();
+      configuration.monthly.dayOfMonth = 32;
+      expect(() => service.saveConfiguration(configuration)).toThrow('INVALID_MONTH_DAY');
     } finally {
       database.close();
     }
