@@ -331,6 +331,7 @@ export class AutomaticMessageService {
 
     const uniqueParticipants = new Map<string, string>();
     let ignoredSelfParticipants = 0;
+    let ignoredDuplicateParticipants = 0;
     for (const participantId of event.participantIds) {
       const normalizedParticipantId = normalizeWelcomeParticipantIdentity(participantId);
       const canonicalParticipantId =
@@ -347,6 +348,15 @@ export class AutomaticMessageService {
         canonicalGroupId,
         canonicalParticipantId,
       ]);
+      const participantAlreadyPresent = this.database.hasWelcomeBaselineParticipant(
+        groupHash,
+        participantHash,
+        this.botId,
+      );
+      if (participantAlreadyPresent && event.source !== 'reconciliation') {
+        ignoredDuplicateParticipants += 1;
+        continue;
+      }
       this.database.addWelcomeBaselineParticipant(groupHash, participantHash, this.botId);
       uniqueParticipants.set(participantHash, canonicalParticipantId);
     }
@@ -361,13 +371,30 @@ export class AutomaticMessageService {
         ignoredSelfParticipants,
       );
     }
+    if (ignoredDuplicateParticipants > 0) {
+      this.record(
+        'WELCOME_DUPLICATE_PARTICIPANT_IGNORED',
+        'WELCOME',
+        groupHash,
+        'ignored',
+        null,
+        local,
+        ignoredDuplicateParticipants,
+      );
+    }
     if (uniqueParticipants.size === 0) {
+      const skipReason =
+        ignoredDuplicateParticipants > 0
+          ? 'DUPLICATE_JOIN_EVENT'
+          : ignoredSelfParticipants > 0
+            ? 'SELF_PARTICIPANT'
+            : 'NO_NEW_PARTICIPANTS';
       this.record(
         'WELCOME_EVENT_SKIPPED',
         'WELCOME',
         groupHash,
         'skipped',
-        ignoredSelfParticipants > 0 ? 'SELF_PARTICIPANT' : 'NO_NEW_PARTICIPANTS',
+        skipReason,
         local,
       );
       return;
@@ -474,7 +501,7 @@ export class AutomaticMessageService {
       'pending',
       null,
       local,
-      uniqueParticipants.size,
+      resolvedParticipants.size,
     );
     this.record(
       'WELCOME_PARTICIPANT_ADDED',
@@ -483,7 +510,7 @@ export class AutomaticMessageService {
       'batched',
       null,
       local,
-      uniqueParticipants.size,
+      resolvedParticipants.size,
     );
   }
 
