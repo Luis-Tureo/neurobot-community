@@ -136,7 +136,6 @@ function createModule() {
   const existing = query('#section-automation-lab');
   if (existing) {
     query('#lab-refresh', existing)?.remove();
-    installSimulatorStyles();
     existing.querySelectorAll('[data-collapsible]').forEach((card) => {
       if (window.configureCollapsible) window.configureCollapsible(card);
     });
@@ -223,240 +222,12 @@ function createModule() {
       <ol id="lab-list" class="automation-test-list"></ol>
     </article>`;
   reference.insertAdjacentElement('afterend', section);
-  installSimulatorStyles();
   section.querySelectorAll('[data-collapsible]').forEach((card) => {
     if (window.configureCollapsible) window.configureCollapsible(card);
   });
   bindModule();
   bindSimulator();
   renderTests();
-}
-
-function installSimulatorStyles() {
-  if (query('#automation-lab-simulator-styles')) return;
-  const style = document.createElement('style');
-  style.id = 'automation-lab-simulator-styles';
-  style.textContent = `
-    .lab-bot-validation-card,
-    .lab-ai-simulator-card,
-    .lab-test-options-card {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-      margin: 0 0 1rem;
-    }
-    .lab-timer-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.25rem;
-      padding: 0.25rem 0.75rem;
-      border-radius: 9999px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: #4338ca;
-      background: #eef2ff;
-      border: 1px solid #c7d2fe;
-    }
-    .lab-validation-status-bar {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
-      gap: 0.75rem;
-      margin-bottom: 0.25rem;
-    }
-    .lab-validation-summary {
-      margin: 0;
-      flex: 1;
-      border: 1px solid #cbd5e1;
-      border-radius: 0.75rem;
-      background: #f8fafc;
-      padding: 0.75rem 0.9rem;
-      color: #475569;
-      font-size: 0.88rem;
-      font-weight: 750;
-    }
-    .lab-validation-summary[data-state='healthy'] {
-      border-color: #6ee7b7;
-      background: #ecfdf5;
-      color: #065f46;
-    }
-    .lab-validation-summary[data-state='failed'] {
-      border-color: #fca5a5;
-      background: #fef2f2;
-      color: #991b1b;
-    }
-    .lab-validation-summary[data-state='pending'] {
-      border-color: #a5b4fc;
-      background: #eef2ff;
-      color: #3730a3;
-    }
-    .lab-validation-checks {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0.65rem;
-      margin: 0;
-      padding: 0;
-      list-style: none;
-    }
-    .lab-validation-check {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr);
-      gap: 0.65rem;
-      align-items: start;
-      border: 1px solid #e2e8f0;
-      border-radius: 0.75rem;
-      background: #fff;
-      padding: 0.75rem;
-    }
-    .lab-validation-check[data-ok='true'] {
-      border-color: #a7f3d0;
-    }
-    .lab-validation-check[data-ok='false'] {
-      border-color: #fecaca;
-    }
-    .lab-validation-icon {
-      display: grid;
-      place-items: center;
-      width: 1.65rem;
-      height: 1.65rem;
-      border-radius: 999px;
-      background: #fee2e2;
-      color: #991b1b;
-      font-weight: 900;
-    }
-    .lab-validation-check[data-ok='true'] .lab-validation-icon {
-      background: #d1fae5;
-      color: #065f46;
-    }
-    .lab-validation-copy {
-      display: grid;
-      gap: 0.2rem;
-      min-width: 0;
-    }
-    .lab-validation-copy strong {
-      color: #0f172a;
-      font-size: 0.86rem;
-    }
-    .lab-validation-copy span {
-      color: #64748b;
-      font-size: 0.78rem;
-      line-height: 1.4;
-    }
-    .lab-chat-container {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-      margin-top: 0.5rem;
-      padding-top: 0.75rem;
-      border-top: 1px solid #e2e8f0;
-    }
-    .lab-chat-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 0.75rem;
-    }
-    .lab-chat-title {
-      margin: 0;
-      font-size: 0.75rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: #64748b;
-    }
-    .lab-chat {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-      min-height: 8rem;
-      max-height: 28rem;
-      overflow-y: auto;
-      border: 1px solid #dbe4ee;
-      border-radius: 0.9rem;
-      background: #f8fafc;
-      padding: 1rem;
-    }
-    .lab-chat-empty {
-      align-self: center;
-      margin: auto;
-      color: #64748b;
-      text-align: center;
-      font-size: 0.88rem;
-    }
-    .lab-chat-message {
-      display: flex;
-      flex-direction: column;
-      gap: 0.3rem;
-      max-width: min(85%, 46rem);
-      border-radius: 0.9rem;
-      padding: 0.8rem 0.9rem;
-      box-shadow: 0 0.1rem 0.35rem rgba(15, 23, 42, 0.08);
-    }
-    .lab-chat-message[data-role='user'] {
-      align-self: flex-end;
-      background: #4f46e5;
-      color: #fff;
-    }
-    .lab-chat-message[data-role='assistant'] {
-      align-self: flex-start;
-      border: 1px solid #e2e8f0;
-      background: #fff;
-      color: #0f172a;
-    }
-    .lab-chat-message[data-role='error'] {
-      align-self: flex-start;
-      border: 1px solid #fecaca;
-      background: #fef2f2;
-      color: #991b1b;
-    }
-    .lab-chat-message p {
-      margin: 0;
-      white-space: pre-wrap;
-      line-height: 1.5;
-    }
-    .lab-chat-meta {
-      opacity: 0.8;
-      font-size: 0.72rem;
-      font-weight: 700;
-    }
-    .lab-chat-form {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-    .lab-chat-form textarea {
-      min-height: 5.5rem;
-      resize: vertical;
-    }
-    .lab-chat-actions {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 1rem;
-    }
-    .lab-chat-actions p {
-      margin: 0;
-      max-width: 52rem;
-      font-size: 0.78rem;
-    }
-    @media (max-width: 760px) {
-      .lab-validation-checks {
-        grid-template-columns: 1fr;
-      }
-      .lab-chat-message {
-        max-width: 92%;
-      }
-      .lab-chat-actions {
-        align-items: stretch;
-        flex-direction: column;
-      }
-      .lab-chat-actions button {
-        width: 100%;
-      }
-    }
-  `;
-  document.head.append(style);
 }
 
 function activateModule() {
@@ -767,7 +538,9 @@ async function ensureConversationValidation(groupKeys) {
   if (botValidation?.healthy && botValidationSignature === signature) return botValidation;
   const validation = await validateSelectedBot(true);
   if (!validation.healthy) {
-    throw new Error('El bot no está completamente operativo. Corrige el diagnóstico antes de probar la conversación.');
+    throw new Error(
+      'El bot no está completamente operativo. Corrige el diagnóstico antes de probar la conversación.',
+    );
   }
   return validation;
 }
@@ -836,7 +609,11 @@ async function sendSimulatorQuestion(event) {
       botValidationSignature = selectionSignature();
       renderBotValidation(error.validation);
     }
-    appendChatMessage('error', error.message || 'La prueba conversacional no pudo completarse.', 'Error de prueba');
+    appendChatMessage(
+      'error',
+      error.message || 'La prueba conversacional no pudo completarse.',
+      'Error de prueba',
+    );
     startSimulatorAutoClear();
   } finally {
     button.disabled = false;
