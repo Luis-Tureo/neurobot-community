@@ -422,7 +422,22 @@ export class AutomaticMessageService {
       }
     }
     const resolvedParticipants = new Map<string, WelcomeParticipant>();
+    let ignoredDuplicateParticipants = 0;
     for (const [participantHash, participantId] of uniqueParticipants) {
+      const participantClaimHash = this.anonymizer.fingerprint([
+        'welcome-participant',
+        canonicalGroupId,
+        participantId,
+      ]);
+      const participantClaimed = this.database.claimWelcomeEvent(
+        participantClaimHash,
+        new Date(now.getTime() + this.welcomeEventDeduplicationTtlMs),
+        this.botId,
+      );
+      if (!participantClaimed) {
+        ignoredDuplicateParticipants += 1;
+        continue;
+      }
       const participant = provided.get(normalizeWelcomeParticipantIdentity(participantId)) ?? {
         participantId,
         displayName: null,
@@ -443,6 +458,29 @@ export class AutomaticMessageService {
       if (participant.displayName !== null) {
         this.record('WELCOME_NAME_SANITIZED', 'WELCOME', groupHash, 'sanitized', null, local);
       }
+    }
+    if (ignoredDuplicateParticipants > 0) {
+      this.record(
+        'WELCOME_DUPLICATE_PARTICIPANT_IGNORED',
+        'WELCOME',
+        groupHash,
+        'ignored',
+        null,
+        local,
+        ignoredDuplicateParticipants,
+      );
+    }
+    if (resolvedParticipants.size === 0) {
+      this.record(
+        'WELCOME_SKIPPED',
+        'WELCOME',
+        groupHash,
+        'skipped',
+        'DUPLICATE_JOIN_EVENT',
+        local,
+        ignoredDuplicateParticipants,
+      );
+      return;
     }
     const existing = this.welcomeBatches.get(canonicalGroupId);
     if (existing !== undefined) {
@@ -474,7 +512,7 @@ export class AutomaticMessageService {
       'pending',
       null,
       local,
-      uniqueParticipants.size,
+      resolvedParticipants.size,
     );
     this.record(
       'WELCOME_PARTICIPANT_ADDED',
@@ -483,7 +521,7 @@ export class AutomaticMessageService {
       'batched',
       null,
       local,
-      uniqueParticipants.size,
+      resolvedParticipants.size,
     );
   }
 
