@@ -68,6 +68,39 @@ describe('personalización segura de bienvenidas', () => {
     );
   });
 
+  it('no repite el respaldo cuando ingresan varias personas sin nombre público', () => {
+    expect(joinWelcomeNames(['nuevo/a integrante', 'nuevo/a integrante'])).toBe(
+      'nuevos integrantes',
+    );
+    expect(
+      joinWelcomeNames(['nuevo/a integrante', 'nuevo/a integrante', 'nuevo/a integrante']),
+    ).toBe('nuevos integrantes');
+  });
+
+  it('combina nombres públicos con una sola referencia plural para quienes no tienen nombre', () => {
+    expect(joinWelcomeNames(['María', 'nuevo/a integrante'])).toBe(
+      'María y nuevos integrantes',
+    );
+    expect(joinWelcomeNames(['María', 'Pedro', 'nuevo/a integrante'])).toBe(
+      'María, Pedro y nuevos integrantes',
+    );
+  });
+
+  it('pluraliza el saludo cuando la bienvenida representa a varias personas', () => {
+    expect(
+      renderWelcomeTemplate('¡Bienvenido/a {usuarios} a {grupo}! 👋', {
+        usuarios: 'nuevos integrantes',
+        grupo: 'NEURODIVERGENTES',
+      }),
+    ).toBe('¡Bienvenidos nuevos integrantes a NEURODIVERGENTES! 👋');
+    expect(
+      renderWelcomeTemplate('¡Bienvenido/a {usuarios} a {grupo}! 👋', {
+        usuarios: 'María y nuevos integrantes',
+        grupo: 'NEURODIVERGENTES',
+      }),
+    ).toBe('¡Bienvenidos María y nuevos integrantes a NEURODIVERGENTES! 👋');
+  });
+
   it('reemplaza todas las apariciones y mantiene compatibilidad con usuario individual', () => {
     expect(
       renderWelcomeTemplate('Hola {usuarios}. Nuevamente, {usuarios} en {grupo}.', {
