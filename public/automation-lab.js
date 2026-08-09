@@ -166,24 +166,6 @@ function createModule() {
         <div id="lab-group-options" class="lab-group-options"></div>
       </details>
     </fieldset>
-    <article class="card inset lab-bot-validation-card">
-      <div class="section-heading">
-        <div>
-          <h3>Validación del funcionamiento del bot</h3>
-          <p class="muted">Comprueba que el asistente, WhatsApp, la IA y los grupos estén disponibles antes de probar conversaciones.</p>
-        </div>
-        <div class="section-heading-actions">
-          <button id="lab-validate-bot" class="secondary" type="button">Validar bot</button>
-        </div>
-      </div>
-      <div id="lab-validation-container" class="lab-validation-container hidden">
-        <div class="lab-validation-status-bar">
-          <p id="lab-validation-summary" class="lab-validation-summary" data-state="idle">Sin validar</p>
-          <span id="lab-validation-timer" class="lab-timer-badge hidden" aria-live="polite">Se ocultará en 30 s</span>
-        </div>
-        <ul id="lab-validation-checks" class="lab-validation-checks"></ul>
-      </div>
-    </article>
     <article class="card inset lab-ai-simulator-card" data-collapsible data-open="true">
       <div class="section-heading">
         <div>
@@ -220,6 +202,24 @@ function createModule() {
         </div>
       </div>
       <ol id="lab-list" class="automation-test-list"></ol>
+    </article>
+    <article class="card inset lab-bot-validation-card">
+      <div class="section-heading">
+        <div>
+          <h3>Validación del funcionamiento del bot</h3>
+          <p class="muted">Comprueba que el asistente, WhatsApp, la IA y los grupos estén disponibles antes de probar conversaciones.</p>
+        </div>
+        <div class="section-heading-actions">
+          <button id="lab-validate-bot" class="secondary" type="button">Validar bot</button>
+        </div>
+      </div>
+      <div id="lab-validation-container" class="lab-validation-container hidden">
+        <div class="lab-validation-status-bar">
+          <p id="lab-validation-summary" class="lab-validation-summary" data-state="idle">Sin validar</p>
+          <span id="lab-validation-timer" class="lab-timer-badge hidden" aria-live="polite">Se ocultará en 30 s</span>
+        </div>
+        <ul id="lab-validation-checks" class="lab-validation-checks"></ul>
+      </div>
     </article>`;
   reference.insertAdjacentElement('afterend', section);
   section.querySelectorAll('[data-collapsible]').forEach((card) => {

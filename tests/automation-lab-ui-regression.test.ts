@@ -45,6 +45,18 @@ describe('requerimiento 20 - Centro de pruebas', () => {
     expect(styles).toContain('display: none !important;');
   });
 
+  it('deja la validación del bot al final del Centro de pruebas', () => {
+    const simulatorStart = labScript.indexOf('lab-ai-simulator-card');
+    const testOptionsStart = labScript.indexOf('lab-test-options-card');
+    const validationStart = labScript.indexOf('lab-bot-validation-card');
+    const templateEnd = labScript.indexOf('`;\n  reference.insertAdjacentElement', validationStart);
+
+    expect(simulatorStart).toBeGreaterThanOrEqual(0);
+    expect(testOptionsStart).toBeGreaterThan(simulatorStart);
+    expect(validationStart).toBeGreaterThan(testOptionsStart);
+    expect(templateEnd).toBeGreaterThan(validationStart);
+  });
+
   it('mantiene contadores independientes de 30 segundos y limpia los resultados', () => {
     expect(labScript).toContain('let validationCountdown = 30;');
     expect(labScript).toContain('let simulatorCountdown = 30;');
