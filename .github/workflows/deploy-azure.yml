@@ -106,6 +106,8 @@ jobs:
               DATA_ROOT=/home/neurobot \
               PUPPETEER_CACHE_DIR=/app/.cache/puppeteer \
               CHROME_EXECUTABLE_PATH=/usr/local/bin/neurobot-chrome \
+              AI_PROVIDER=groq \
+              GROQ_MODEL=openai/gpt-oss-20b \
             >/dev/null
 
           # Se despliega la etiqueta inmutable del commit, no latest, para evitar
