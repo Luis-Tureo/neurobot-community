@@ -324,13 +324,20 @@
   }
 
   .digest-frequency-list {
-    @apply grid gap-3;
-    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    @apply grid gap-4;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .digest-frequency-fields {
     @apply grid gap-3;
-    grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  }
+
+  .digest-frequency-fields--single {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .digest-frequency-fields--split {
+    grid-template-columns: minmax(0, 1.35fr) minmax(7.5rem, 0.85fr);
   }
 
   [data-digest-frequency].is-disabled > :not(legend, .status-switch) {
@@ -2578,8 +2585,18 @@ button.status-switch.is-loading .status-switch__knob {
 }
 
 .digest-frequency-list fieldset {
+  min-width: 0;
+  min-height: 11.5rem;
+  height: 100%;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-rows: auto auto auto;
+  align-content: start;
+  align-items: start;
+  gap: 1rem;
+  padding: 1.1rem;
+  border-color: #dbe4ee;
+  border-radius: 1rem;
+  background: #f8fafc;
 }
 
 .digest-frequency-list fieldset > legend {
@@ -2590,11 +2607,35 @@ button.status-switch.is-loading .status-switch__knob {
 .digest-frequency-list fieldset > .status-switch {
   grid-column: 2;
   grid-row: 1;
+  align-self: start;
+  justify-self: end;
 }
 
 .digest-frequency-list fieldset > .digest-frequency-fields,
 .digest-frequency-list fieldset > p {
   grid-column: 1 / -1;
+}
+
+.digest-frequency-list fieldset > .digest-frequency-fields {
+  grid-row: 2;
+  width: 100%;
+  align-self: start;
+}
+
+.digest-frequency-fields > label {
+  min-width: 0;
+}
+
+.digest-frequency-fields input,
+.digest-frequency-fields select {
+  width: 100%;
+  min-height: 2.75rem;
+}
+
+.digest-frequency-help {
+  grid-row: 3;
+  margin: 0;
+  line-height: 1.45;
 }
 
 .group-option-copy {
@@ -2622,21 +2663,23 @@ button.status-switch.is-loading .status-switch__knob {
     margin-left: 0;
     justify-content: flex-start;
   }
+}
 
-  .digest-frequency-list fieldset {
-    grid-template-columns: 1fr;
+@media (max-width: 1100px) {
+  .digest-frequency-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
 
-  .digest-frequency-list fieldset > legend,
-  .digest-frequency-list fieldset > .status-switch,
-  .digest-frequency-list fieldset > .digest-frequency-fields,
-  .digest-frequency-list fieldset > p {
-    grid-column: 1;
+@media (max-width: 700px) {
+  .digest-frequency-list {
+    grid-template-columns: minmax(0, 1fr);
   }
+}
 
-  .digest-frequency-list fieldset > .status-switch {
-    grid-row: auto;
-    justify-self: start;
+@media (max-width: 420px) {
+  .digest-frequency-fields--split {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

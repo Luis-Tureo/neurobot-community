@@ -3,7 +3,10 @@ import type { Logger } from 'pino';
 import type { Client as WhatsAppClient } from 'whatsapp-web.js';
 import type { GroupChangeEvent, GroupJoinEvent, IncomingMessage } from '../src/domain/types.js';
 import { createLogger } from '../src/infrastructure/logger.js';
-import { WhatsAppWebAdapter } from '../src/messaging/whatsapp-adapter.js';
+import {
+  readGroupMessageHistoryInBrowser,
+  WhatsAppWebAdapter,
+} from '../src/messaging/whatsapp-adapter.js';
 import { Anonymizer } from '../src/security/anonymizer.js';
 
 class FakeWhatsAppClient extends EventEmitter {
@@ -315,13 +318,164 @@ describe('adaptador de WhatsApp', () => {
     expect(JSON.stringify(warning)).not.toContain('errorStack');
   });
 
+  it('recupera historial sin serializar el modelo completo con getChatById', async () => {
+    const { adapter, fake } = createSubject();
+    fake.getChatById.mockRejectedValue(Object.assign(new Error('r'), { name: 'r' }));
+    fake.pupPage = {
+      evaluate: vi.fn(async () => ({
+        status: 'SUCCESS',
+        resolvedChatId: 'grupo-normal@g.us',
+        groupName: 'Grupo normal',
+        resolvedChatType: 'group',
+        messages: [
+          {
+            id: 'message-history-1',
+            body: 'Mensaje real.',
+            timestamp: 1_786_251_490,
+            fromMe: false,
+            participantId: '56912345678@c.us',
+            messageType: 'chat',
+          },
+        ],
+        cachedMessageCount: 1,
+        loadedMessageCount: 50,
+        pageCount: 1,
+        reachedPeriodStart: true,
+        historyExhausted: false,
+        safetyLimitReached: false,
+      })),
+    };
+    await adapter.initialize();
+    fake.emit('ready');
+
+    const result = await adapter.fetchGroupMessageHistory({
+      groupId: 'grupo-normal@g.us',
+      periodStartMs: 1_786_000_000_000,
+      periodEndMs: 1_786_300_000_000,
+      maxMessages: 500,
+    });
+
+    expect(fake.getChatById).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      resolvedChatId: 'grupo-normal@g.us',
+      resolvedChatType: 'group',
+      pageCount: 1,
+      messages: [
+        expect.objectContaining({
+          body: 'Mensaje real.',
+          timestampMs: 1_786_251_490_000,
+          messageType: 'chat',
+        }),
+      ],
+    });
+  });
+
+  it('distingue chat no disponible y conserva la causa de resolución', async () => {
+    const { adapter, fake } = createSubject();
+    fake.pupPage = {
+      evaluate: vi.fn(async () => ({
+        status: 'CHAT_NOT_FOUND',
+        operation: 'resolveRawGroupChat',
+        errorName: 'r',
+        errorMessage: 'r',
+        errorStack: 'r: r',
+      })),
+    };
+    await adapter.initialize();
+    fake.emit('ready');
+
+    await expect(
+      adapter.fetchGroupMessageHistory({
+        groupId: 'grupo-normal@g.us',
+        periodStartMs: 1_786_000_000_000,
+        periodEndMs: 1_786_300_000_000,
+        maxMessages: 500,
+      }),
+    ).rejects.toMatchObject({
+      code: 'GROUP_CHAT_NOT_AVAILABLE',
+      operation: 'resolveRawGroupChat',
+      cause: expect.objectContaining({ name: 'r', message: 'r' }),
+    });
+  });
+
+  it('pagina hasta alcanzar el inicio del período sin mezclar otro chat', async () => {
+    const nowSeconds = 1_786_300_000;
+    const daySeconds = 24 * 60 * 60;
+    const chat = {
+      id: { _serialized: 'grupo-normal@g.us' },
+      formattedTitle: 'Grupo normal',
+      groupMetadata: { subject: 'Grupo normal' },
+      msgs: {
+        getModelsArray: () => [
+          {
+            id: { _serialized: 'cached', fromMe: false },
+            t: nowSeconds,
+            body: 'Actual',
+            type: 'chat',
+          },
+        ],
+      },
+    };
+    const pages = [
+      [
+        {
+          id: { _serialized: 'five-days', fromMe: false },
+          t: nowSeconds - 5 * daySeconds,
+          body: 'Cinco días',
+          type: 'chat',
+        },
+      ],
+      [
+        {
+          id: { _serialized: 'eight-days', fromMe: false },
+          t: nowSeconds - 8 * daySeconds,
+          body: 'Ocho días',
+          type: 'chat',
+        },
+      ],
+    ];
+    const loadEarlierMsgs = vi.fn(async () => pages.shift() ?? []);
+    const originalRequire = Object.getOwnPropertyDescriptor(globalThis, 'require');
+    try {
+      Object.defineProperty(globalThis, 'require', {
+        configurable: true,
+        value: (moduleName: string) =>
+          moduleName === 'WAWebCollections'
+            ? { Chat: { getModelsArray: () => [chat] } }
+            : { loadEarlierMsgs },
+      });
+
+      const result = await readGroupMessageHistoryInBrowser({
+        groupId: 'grupo-normal@g.us',
+        periodStartMs: (nowSeconds - 7 * daySeconds) * 1000,
+        maxMessages: 200,
+      });
+
+      expect(result).toMatchObject({
+        status: 'SUCCESS',
+        resolvedChatId: 'grupo-normal@g.us',
+        pageCount: 2,
+        reachedPeriodStart: true,
+        historyExhausted: false,
+        safetyLimitReached: false,
+      });
+      expect(loadEarlierMsgs).toHaveBeenCalledTimes(2);
+      if (result.status === 'SUCCESS') {
+        expect(result.messages.map((message) => message.id)).toEqual(
+          expect.arrayContaining(['cached', 'five-days', 'eight-days']),
+        );
+      }
+    } finally {
+      if (originalRequire === undefined) Reflect.deleteProperty(globalThis, 'require');
+      else Object.defineProperty(globalThis, 'require', originalRequire);
+    }
+  });
+
   it('recupera el nombre real si la lectura mínima no lo incluye', async () => {
     const { adapter, fake } = createSubject();
     fake.getChats.mockRejectedValueOnce(new Error('fallo recuperable'));
     fake.pupPage = {
-      evaluate: vi.fn(async () => [
-        { id: 'grupo-normal@g.us', name: null, isGroup: true },
-      ]),
+      evaluate: vi.fn(async () => [{ id: 'grupo-normal@g.us', name: null, isGroup: true }]),
     };
     fake.chatsById.set('grupo-normal@g.us', {
       subject: 'Nombre recuperado',

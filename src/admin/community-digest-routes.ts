@@ -27,7 +27,6 @@ const configurationSchema = z
       .object({
         enabled: z.boolean(),
         sendTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u),
-        toleranceMinutes: z.number().int().min(0).max(180),
       })
       .strict(),
     weekly: z
@@ -35,7 +34,6 @@ const configurationSchema = z
         enabled: z.boolean(),
         weekday: z.enum(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']),
         sendTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u),
-        toleranceMinutes: z.number().int().min(0).max(180),
       })
       .strict(),
     monthly: z
@@ -43,7 +41,6 @@ const configurationSchema = z
         enabled: z.boolean(),
         dayOfMonth: z.union([z.literal('last'), z.number().int().min(1).max(31)]),
         sendTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u),
-        toleranceMinutes: z.number().int().min(0).max(180),
       })
       .strict(),
     maxMessages: z.number().int().min(20).max(2000),
@@ -130,10 +127,16 @@ export function registerCommunityDigestRoutes(
       const groupId = context.database.resolveBotGroupKey(botId, input.groupKey, (identifier) =>
         context.anonymizer.identifier(identifier),
       );
-      if (groupId === null || !context.database.canBotSendToGroup(botId, groupId)) {
+      if (groupId === null) {
         return reply
           .code(404)
-          .send({ error: 'El grupo no está disponible.', code: 'GROUP_NOT_AVAILABLE' });
+          .send({ error: 'No se encontró el grupo seleccionado.', code: 'GROUP_NOT_FOUND' });
+      }
+      if (!context.database.canBotSendToGroup(botId, groupId)) {
+        return reply.code(409).send({
+          error: 'El chat del grupo no está disponible en la sesión activa.',
+          code: 'GROUP_CHAT_NOT_AVAILABLE',
+        });
       }
       const result = await service.sendManual(input.period, groupId);
       if (result.status === 'SENT') return reply.code(200).send(result);
@@ -155,10 +158,16 @@ export function registerCommunityDigestRoutes(
       const groupId = context.database.resolveBotGroupKey(botId, input.groupKey, (identifier) =>
         context.anonymizer.identifier(identifier),
       );
-      if (groupId === null || !context.database.canBotSendToGroup(botId, groupId)) {
+      if (groupId === null) {
         return reply
           .code(404)
-          .send({ error: 'El grupo no está disponible.', code: 'GROUP_NOT_AVAILABLE' });
+          .send({ error: 'No se encontró el grupo seleccionado.', code: 'GROUP_NOT_FOUND' });
+      }
+      if (!context.database.canBotSendToGroup(botId, groupId)) {
+        return reply.code(409).send({
+          error: 'El chat del grupo no está disponible en la sesión activa.',
+          code: 'GROUP_CHAT_NOT_AVAILABLE',
+        });
       }
       const history = await service.exportHistory(input.period, groupId);
       return reply
@@ -197,12 +206,11 @@ function isValidTimezone(value: string): boolean {
 function digestErrorMessage(errorCode: string | null): string {
   const messages: Record<string, string> = {
     NO_MESSAGES_IN_PERIOD: 'No se encontraron conversaciones para el período seleccionado.',
-    AI_NOT_CONFIGURED: 'La IA no está configurada para este asistente.',
-    AI_EMPTY_RESPONSE: 'La IA no pudo generar un resumen.',
+    AI_SUMMARY_FAILED: 'La IA no pudo generar el resumen.',
     WHATSAPP_NOT_CONNECTED: 'WhatsApp no está conectado.',
-    WHATSAPP_SEND_FAILED: 'El resumen se generó, pero WhatsApp no pudo enviarlo.',
-    GROUP_NOT_AVAILABLE: 'El grupo no está disponible.',
-    CHAT_HISTORY_UNAVAILABLE: 'El historial de mensajes no está disponible.',
+    SUMMARY_SEND_FAILED: 'El resumen se generó, pero WhatsApp no pudo enviarlo.',
+    GROUP_NOT_FOUND: 'No se encontró el grupo seleccionado.',
+    GROUP_CHAT_NOT_AVAILABLE: 'El chat del grupo no está disponible en WhatsApp.',
     CHAT_HISTORY_FAILED: 'No fue posible recuperar el historial de mensajes.',
     AI_TIMEOUT: 'La solicitud a la IA excedió el tiempo máximo.',
     AI_NETWORK_ERROR: 'No fue posible conectar con el proveedor de IA.',

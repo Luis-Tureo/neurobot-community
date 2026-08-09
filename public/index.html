@@ -1030,8 +1030,8 @@
                       <h3>Grupos para las automatizaciones</h3>
                       <p id="automation-groups-help" class="muted">
                         Selecciona uno o m&aacute;s grupos donde se ejecutar&aacute;n las
-                        automatizaciones. Esta selecci&oacute;n persistida es la fuente de verdad para
-                        los env&iacute;os reales.
+                        automatizaciones. Esta selecci&oacute;n persistida es la fuente de verdad
+                        para los env&iacute;os reales.
                       </p>
                     </div>
                   </div>
@@ -1087,17 +1087,9 @@
                       >
                         Inactivo
                       </button>
-                      <div class="digest-frequency-fields">
+                      <div class="digest-frequency-fields digest-frequency-fields--single">
                         <label
                           >Hora<input name="digest_daily_time" type="time" step="60" required
-                        /></label>
-                        <label
-                          >Tolerancia (minutos)<input
-                            name="digest_daily_tolerance"
-                            type="number"
-                            min="0"
-                            max="180"
-                            required
                         /></label>
                       </div>
                     </fieldset>
@@ -1113,7 +1105,7 @@
                       >
                         Inactivo
                       </button>
-                      <div class="digest-frequency-fields">
+                      <div class="digest-frequency-fields digest-frequency-fields--split">
                         <label
                           >D&iacute;a<select name="digest_weekly_day" required>
                             <option value="Mon">Lunes</option>
@@ -1127,14 +1119,6 @@
                         >
                         <label
                           >Hora<input name="digest_weekly_time" type="time" step="60" required
-                        /></label>
-                        <label
-                          >Tolerancia (minutos)<input
-                            name="digest_weekly_tolerance"
-                            type="number"
-                            min="0"
-                            max="180"
-                            required
                         /></label>
                       </div>
                     </fieldset>
@@ -1150,7 +1134,7 @@
                       >
                         Inactivo
                       </button>
-                      <div class="digest-frequency-fields">
+                      <div class="digest-frequency-fields digest-frequency-fields--split">
                         <label
                           >D&iacute;a<select name="digest_monthly_day" required>
                             <option value="last">&Uacute;ltimo d&iacute;a del mes</option>
@@ -1190,16 +1174,8 @@
                         <label
                           >Hora<input name="digest_monthly_time" type="time" step="60" required
                         /></label>
-                        <label
-                          >Tolerancia (minutos)<input
-                            name="digest_monthly_tolerance"
-                            type="number"
-                            min="0"
-                            max="180"
-                            required
-                        /></label>
                       </div>
-                      <p class="muted">
+                      <p class="muted digest-frequency-help">
                         Si el mes no tiene el d&iacute;a elegido, se ejecuta el &uacute;ltimo
                         d&iacute;a.
                       </p>

@@ -738,22 +738,16 @@ async function loadAutomaticMessages() {
   setHiddenEnabledValue('digest_daily_enabled', digestConfiguration.daily.enabled);
   updateAutomationToggleButton('digest_daily', digestConfiguration.daily.enabled);
   automaticMessagesForm.elements.digest_daily_time.value = digestConfiguration.daily.sendTime;
-  automaticMessagesForm.elements.digest_daily_tolerance.value =
-    digestConfiguration.daily.toleranceMinutes;
   setHiddenEnabledValue('digest_weekly_enabled', digestConfiguration.weekly.enabled);
   updateAutomationToggleButton('digest_weekly', digestConfiguration.weekly.enabled);
   automaticMessagesForm.elements.digest_weekly_day.value = digestConfiguration.weekly.weekday;
   automaticMessagesForm.elements.digest_weekly_time.value = digestConfiguration.weekly.sendTime;
-  automaticMessagesForm.elements.digest_weekly_tolerance.value =
-    digestConfiguration.weekly.toleranceMinutes;
   setHiddenEnabledValue('digest_monthly_enabled', digestConfiguration.monthly.enabled);
   updateAutomationToggleButton('digest_monthly', digestConfiguration.monthly.enabled);
   automaticMessagesForm.elements.digest_monthly_day.value = String(
     digestConfiguration.monthly.dayOfMonth,
   );
   automaticMessagesForm.elements.digest_monthly_time.value = digestConfiguration.monthly.sendTime;
-  automaticMessagesForm.elements.digest_monthly_tolerance.value =
-    digestConfiguration.monthly.toleranceMinutes;
   updateDigestControlStates();
 
   const deliveries = document.querySelector('#automatic-deliveries');
@@ -869,14 +863,12 @@ async function toggleAutomation(key, button) {
           enabled:
             key === 'digest_daily' ? targetEnabled : isAutomationEnabled('digest_daily_enabled'),
           sendTime: automaticMessagesForm.elements.digest_daily_time.value,
-          toleranceMinutes: Number(automaticMessagesForm.elements.digest_daily_tolerance.value),
         },
         weekly: {
           enabled:
             key === 'digest_weekly' ? targetEnabled : isAutomationEnabled('digest_weekly_enabled'),
           weekday: automaticMessagesForm.elements.digest_weekly_day.value,
           sendTime: automaticMessagesForm.elements.digest_weekly_time.value,
-          toleranceMinutes: Number(automaticMessagesForm.elements.digest_weekly_tolerance.value),
         },
         monthly: {
           enabled:
@@ -885,7 +877,6 @@ async function toggleAutomation(key, button) {
               : isAutomationEnabled('digest_monthly_enabled'),
           dayOfMonth: monthlyDay === 'last' ? 'last' : Number(monthlyDay),
           sendTime: automaticMessagesForm.elements.digest_monthly_time.value,
-          toleranceMinutes: Number(automaticMessagesForm.elements.digest_monthly_tolerance.value),
         },
         maxMessages: state.communityDigestConfiguration.maxMessages,
         maxCharacters: state.communityDigestConfiguration.maxCharacters,
@@ -1049,19 +1040,16 @@ automaticMessagesForm.addEventListener('submit', async (event) => {
     daily: {
       enabled: isAutomationEnabled('digest_daily_enabled'),
       sendTime: form.elements.digest_daily_time.value,
-      toleranceMinutes: Number(form.elements.digest_daily_tolerance.value),
     },
     weekly: {
       enabled: isAutomationEnabled('digest_weekly_enabled'),
       weekday: form.elements.digest_weekly_day.value,
       sendTime: form.elements.digest_weekly_time.value,
-      toleranceMinutes: Number(form.elements.digest_weekly_tolerance.value),
     },
     monthly: {
       enabled: isAutomationEnabled('digest_monthly_enabled'),
       dayOfMonth: monthlyDay === 'last' ? 'last' : Number(monthlyDay),
       sendTime: form.elements.digest_monthly_time.value,
-      toleranceMinutes: Number(form.elements.digest_monthly_tolerance.value),
     },
     maxMessages: state.communityDigestConfiguration.maxMessages,
     maxCharacters: state.communityDigestConfiguration.maxCharacters,

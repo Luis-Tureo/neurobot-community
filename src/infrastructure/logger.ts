@@ -56,7 +56,8 @@ export function createPrettyStream(activeLogLevel = 'info'): Writable {
   return new Writable({
     write(chunk: unknown, _encoding: string, callback: (error?: Error | null) => void) {
       try {
-        const rawString = typeof chunk === 'string' ? chunk : Buffer.from(chunk as Buffer).toString('utf8');
+        const rawString =
+          typeof chunk === 'string' ? chunk : Buffer.from(chunk as Buffer).toString('utf8');
         const record = JSON.parse(rawString) as Record<string, unknown>;
         const formatted = formatLogRecord(record, activeLogLevel, useColors);
         process.stdout.write(`${formatted}\n`, 'utf8');
@@ -69,7 +70,11 @@ export function createPrettyStream(activeLogLevel = 'info'): Writable {
   });
 }
 
-function formatLogRecord(record: Record<string, unknown>, activeLogLevel: string, useColors: boolean): string {
+function formatLogRecord(
+  record: Record<string, unknown>,
+  activeLogLevel: string,
+  useColors: boolean,
+): string {
   const levelNum = typeof record.level === 'number' ? record.level : 30;
   const timeStr = formatTimestamp(record.time);
   const levelLabel = formatLevelLabel(levelNum, useColors);
@@ -183,8 +188,13 @@ function resolveModuleTag(record: Record<string, unknown>): string {
   return 'Servidor';
 }
 
-function collectDetails(record: Record<string, unknown>, lines: string[], activeLogLevel: string): void {
+function collectDetails(
+  record: Record<string, unknown>,
+  lines: string[],
+  activeLogLevel: string,
+): void {
   const verbose = activeLogLevel === 'debug' || activeLogLevel === 'trace';
+  const errorLevel = typeof record.level === 'number' && record.level >= 50;
   const ignoredKeys = new Set([
     'level',
     'time',
@@ -210,6 +220,18 @@ function collectDetails(record: Record<string, unknown>, lines: string[], active
   }
   if (typeof record.participantCount === 'number') {
     lines.push(`Participantes: ${record.participantCount}`);
+  }
+  if (typeof record.period === 'string' && record.period.trim() !== '') {
+    lines.push(`Período: ${record.period}`);
+  }
+  if (typeof record.historyMessageCount === 'number') {
+    lines.push(`Mensajes recuperados: ${record.historyMessageCount}`);
+  }
+  if (typeof record.messageCount === 'number') {
+    lines.push(`Mensajes dentro del período: ${record.messageCount}`);
+  }
+  if (typeof record.pageCount === 'number') {
+    lines.push(`Páginas de historial: ${record.pageCount}`);
   }
   if (typeof record.source === 'string' && record.source.trim() !== '') {
     lines.push(`Fuente: ${record.source}`);
@@ -239,7 +261,11 @@ function collectDetails(record: Record<string, unknown>, lines: string[], active
     lines.push(`Errores temporales: ${record.temporaryErrors}`);
   }
 
-  if (verbose && typeof record.operation === 'string' && record.operation.trim() !== '') {
+  if (
+    (verbose || errorLevel) &&
+    typeof record.operation === 'string' &&
+    record.operation.trim() !== ''
+  ) {
     lines.push(`Operación: ${record.operation}`);
   }
 
@@ -247,12 +273,15 @@ function collectDetails(record: Record<string, unknown>, lines: string[], active
   if (
     typeof record.errorCode === 'string' &&
     record.errorCode.trim() !== '' &&
-    (verbose || !hasHumanReason)
+    (verbose || errorLevel || !hasHumanReason)
   ) {
     lines.push(`Código técnico: ${record.errorCode}`);
   }
   if (typeof record.errorMessage === 'string' && record.errorMessage.trim() !== '') {
     lines.push(`Error: ${record.errorMessage}`);
+  }
+  if (typeof record.causeCode === 'string' && record.causeCode.trim() !== '') {
+    lines.push(`Causa técnica: ${record.causeCode}`);
   }
   if (hasHumanReason) {
     lines.push(`Motivo: ${record.reason}`);
@@ -264,6 +293,10 @@ function collectDetails(record: Record<string, unknown>, lines: string[], active
     'skippedChats',
     'aliasCount',
     'participantCount',
+    'period',
+    'historyMessageCount',
+    'messageCount',
+    'pageCount',
     'source',
     'groupName',
     'retryAttempt',
@@ -274,6 +307,7 @@ function collectDetails(record: Record<string, unknown>, lines: string[], active
     'temporaryErrors',
     'operation',
     'errorCode',
+    'causeCode',
     'errorMessage',
     'reason',
     'errorStack',

@@ -1,15 +1,46 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Logger } from 'pino';
 import type { AIProvider } from '../src/ai/ai-provider.js';
 import { CommunityDigestService } from '../src/core/community-digest-service.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
+import { GroupMessageHistoryError } from '../src/messaging/messaging-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { Anonymizer } from '../src/security/anonymizer.js';
 
 const GROUP_ID = 'grupo-resumen@g.us';
 const NOW = new Date('2026-08-06T22:00:00.000Z');
+
+type CapturedDigestLog = {
+  level: string;
+  context: Record<string, unknown>;
+  message: string | undefined;
+};
+
+function createCapturedLogger(): { logger: Logger; entries: CapturedDigestLog[] } {
+  const entries: CapturedDigestLog[] = [];
+  const capture =
+    (level: string) =>
+    (first: unknown, second?: unknown): void => {
+      if (typeof first !== 'object' || first === null) return;
+      entries.push({
+        level,
+        context: first as Record<string, unknown>,
+        message: typeof second === 'string' ? second : undefined,
+      });
+    };
+  const logger = {
+    trace: capture('trace'),
+    debug: capture('debug'),
+    info: capture('info'),
+    warn: capture('warn'),
+    error: capture('error'),
+    fatal: capture('fatal'),
+  } as unknown as Logger;
+  return { logger, entries };
+}
 
 function createProvider(): AIProvider {
   return {
@@ -25,7 +56,11 @@ function createProvider(): AIProvider {
   };
 }
 
-function createSubject(referenceNow = NOW, provider = createProvider()) {
+function createSubject(
+  referenceNow = NOW,
+  provider = createProvider(),
+  logger: Logger = createLogger('silent'),
+) {
   const database = new AppDatabase(':memory:');
   database.migrate();
   database.synchronizeBotGroup('neurobot', {
@@ -47,7 +82,7 @@ function createSubject(referenceNow = NOW, provider = createProvider()) {
     database,
     client,
     provider,
-    createLogger('silent'),
+    logger,
     new Anonymizer('x'.repeat(32)),
     { botId: 'neurobot' },
   );
@@ -68,6 +103,44 @@ describe('resúmenes comunitarios', () => {
     }
   });
 
+  it('registra el pipeline con mensajes humanos, cantidades y sin contenido privado', async () => {
+    const captured = createCapturedLogger();
+    const { database, service } = createSubject(NOW, createProvider(), captured.logger);
+    try {
+      const result = await service.sendManual('daily', GROUP_ID, NOW);
+
+      expect(result.status).toBe('SENT');
+      expect(captured.entries.map((entry) => entry.message)).toEqual(
+        expect.arrayContaining([
+          'Iniciando prueba de resumen diario',
+          'Resolviendo chat del grupo',
+          'Recuperando historial',
+          'Historial recuperado',
+          'Generando resumen',
+          'Resumen generado',
+          'Enviando resumen',
+          'Resumen enviado correctamente',
+        ]),
+      );
+      expect(captured.entries.map((entry) => entry.context)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            operation: 'fetchGroupMessageHistory',
+            historyMessageCount: 1,
+            messageCount: 1,
+          }),
+        ]),
+      );
+      expect(JSON.stringify(captured.entries)).not.toContain('persona@example.com');
+      expect(JSON.stringify(captured.entries)).not.toContain('+56 9 1234 5678');
+      expect(JSON.stringify(captured.entries)).not.toContain(
+        'Evento seguro del resumen comunitario',
+      );
+    } finally {
+      database.close();
+    }
+  });
+
   it('elimina correos y teléfonos detectables del historial exportado', async () => {
     const { database, service } = createSubject();
     try {
@@ -82,13 +155,105 @@ describe('resúmenes comunitarios', () => {
     }
   });
 
+  it('filtra el resumen diario a las últimas 24 horas', async () => {
+    let context = '';
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async (request) => {
+        context = request.context;
+        return createProvider().generateGroundedResponse(request);
+      },
+    };
+    const { database, client, service } = createSubject(NOW, provider);
+    try {
+      client.recentGroupMessages.set(GROUP_ID, [
+        {
+          id: 'hace-30-horas',
+          body: 'Fuera de diario.',
+          timestampMs: NOW.getTime() - 30 * 60 * 60 * 1000,
+          fromMe: false,
+          participantId: null,
+        },
+        {
+          id: 'hace-20-horas',
+          body: 'Dentro diario veinte.',
+          timestampMs: NOW.getTime() - 20 * 60 * 60 * 1000,
+          fromMe: false,
+          participantId: null,
+        },
+        {
+          id: 'hace-5-horas',
+          body: 'Dentro diario cinco.',
+          timestampMs: NOW.getTime() - 5 * 60 * 60 * 1000,
+          fromMe: false,
+          participantId: null,
+        },
+      ]);
+
+      const result = await service.sendManual('daily', GROUP_ID, NOW);
+
+      expect(result).toMatchObject({ status: 'SENT', messageCount: 2 });
+      expect(context).not.toContain('Fuera de diario');
+      expect(context).toContain('Dentro diario veinte');
+      expect(context).toContain('Dentro diario cinco');
+    } finally {
+      database.close();
+    }
+  });
+
+  it('filtra el resumen semanal a los últimos siete días', async () => {
+    let context = '';
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async (request) => {
+        context = request.context;
+        return createProvider().generateGroundedResponse(request);
+      },
+    };
+    const { database, client, service } = createSubject(NOW, provider);
+    try {
+      client.recentGroupMessages.set(GROUP_ID, [
+        {
+          id: 'hace-10-dias',
+          body: 'Fuera de semanal.',
+          timestampMs: NOW.getTime() - 10 * 24 * 60 * 60 * 1000,
+          fromMe: false,
+          participantId: null,
+        },
+        {
+          id: 'hace-5-dias',
+          body: 'Dentro semanal cinco.',
+          timestampMs: NOW.getTime() - 5 * 24 * 60 * 60 * 1000,
+          fromMe: false,
+          participantId: null,
+        },
+        {
+          id: 'hace-1-dia',
+          body: 'Dentro semanal uno.',
+          timestampMs: NOW.getTime() - 24 * 60 * 60 * 1000,
+          fromMe: false,
+          participantId: null,
+        },
+      ]);
+
+      const result = await service.sendManual('weekly', GROUP_ID, NOW);
+
+      expect(result).toMatchObject({ status: 'SENT', messageCount: 2 });
+      expect(context).not.toContain('Fuera de semanal');
+      expect(context).toContain('Dentro semanal cinco');
+      expect(context).toContain('Dentro semanal uno');
+    } finally {
+      database.close();
+    }
+  });
+
   it('no envía un resumen antes de la hora configurada', async () => {
     const scheduled = new Date('2026-08-06T19:00:00.000Z');
     const { database, client, service } = createSubject(scheduled);
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      configuration.daily = { enabled: true, sendTime: '19:00' };
       service.saveConfiguration(configuration);
 
       await service.runDueTasks(new Date('2026-08-06T18:59:00.000Z'));
@@ -123,7 +288,7 @@ describe('resúmenes comunitarios', () => {
       database.replaceAutomationGroupIds('neurobot', [selectedGroupId]);
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      configuration.daily = { enabled: true, sendTime: '19:00' };
       service.saveConfiguration(configuration);
 
       await service.runDueTasks(scheduled);
@@ -133,17 +298,18 @@ describe('resúmenes comunitarios', () => {
     }
   });
 
-  it('deduplica una ventana de envío que cruza medianoche', async () => {
-    const afterMidnight = new Date('2026-08-07T00:10:00.000Z');
-    const { database, client, service } = createSubject(afterMidnight);
+  it('ejecuta solo en el minuto configurado y deduplica ese minuto', async () => {
+    const scheduled = new Date('2026-08-06T23:50:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.daily = { enabled: true, sendTime: '23:50', toleranceMinutes: 30 };
+      configuration.daily = { enabled: true, sendTime: '23:50' };
       service.saveConfiguration(configuration);
 
-      await service.runDueTasks(afterMidnight);
-      await service.runDueTasks(new Date('2026-08-07T00:15:00.000Z'));
+      await service.runDueTasks(new Date('2026-08-06T23:49:00.000Z'));
+      await service.runDueTasks(scheduled);
+      await service.runDueTasks(new Date('2026-08-06T23:50:30.000Z'));
 
       expect(client.sentMessages).toHaveLength(1);
     } finally {
@@ -211,6 +377,57 @@ describe('resumen diario — centro de pruebas', () => {
     }
   });
 
+  it('diferencia un grupo inexistente de un chat no disponible', async () => {
+    const { database, service } = createSubject();
+    try {
+      await expect(
+        service.sendManual('daily', 'grupo-inexistente@g.us', NOW),
+      ).resolves.toMatchObject({ status: 'FAILED', errorCode: 'GROUP_NOT_FOUND' });
+      database.synchronizeBotGroup('neurobot', {
+        id: 'grupo-sin-chat@g.us',
+        name: 'Grupo sin chat',
+        botIsMember: false,
+      });
+      await expect(service.sendManual('daily', 'grupo-sin-chat@g.us', NOW)).resolves.toMatchObject({
+        status: 'FAILED',
+        errorCode: 'GROUP_CHAT_NOT_AVAILABLE',
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it('conserva la causa original cuando falla el historial sin exponer identificadores', async () => {
+    const captured = createCapturedLogger();
+    const { database, client, service } = createSubject(NOW, createProvider(), captured.logger);
+    const originalCause = Object.assign(new Error('r'), { name: 'r' });
+    client.fetchGroupMessageHistory = async () => {
+      throw new GroupMessageHistoryError(
+        'CHAT_HISTORY_FAILED',
+        'loadEarlierGroupMessages',
+        originalCause,
+      );
+    };
+    try {
+      const result = await service.sendManual('daily', GROUP_ID, NOW);
+
+      expect(result).toMatchObject({ status: 'FAILED', errorCode: 'CHAT_HISTORY_FAILED' });
+      expect(captured.entries.map((entry) => entry.context)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            operation: 'loadEarlierGroupMessages',
+            errorCode: 'CHAT_HISTORY_FAILED',
+            errorName: 'r',
+            reason: 'r',
+          }),
+        ]),
+      );
+      expect(JSON.stringify(captured.entries)).not.toContain(GROUP_ID);
+    } finally {
+      database.close();
+    }
+  });
+
   it('caso 4: IA falla no intenta enviar a WhatsApp', async () => {
     const database = new AppDatabase(':memory:');
     database.migrate();
@@ -246,6 +463,7 @@ describe('resumen diario — centro de pruebas', () => {
     try {
       const result = await service.sendManual('daily', GROUP_ID, NOW);
       expect(result.status).toBe('FAILED');
+      expect(result.errorCode).toBe('AI_SUMMARY_FAILED');
       expect(client.sentMessages).toHaveLength(0);
     } finally {
       database.close();
@@ -288,7 +506,7 @@ describe('resumen diario — centro de pruebas', () => {
     try {
       const result = await service.sendManual('daily', GROUP_ID, NOW);
       expect(result.status).toBe('FAILED');
-      expect(result.errorCode).toBe('AI_EMPTY_RESPONSE');
+      expect(result.errorCode).toBe('AI_SUMMARY_FAILED');
       expect(client.sentMessages).toHaveLength(0);
     } finally {
       database.close();
@@ -314,7 +532,7 @@ describe('resumen diario — centro de pruebas', () => {
       client.failSending = true;
       const result = await service.sendManual('daily', GROUP_ID, NOW);
       expect(result.status).toBe('FAILED');
-      expect(result.errorCode).toBeTruthy();
+      expect(result.errorCode).toBe('SUMMARY_SEND_FAILED');
     } finally {
       database.close();
     }
@@ -445,7 +663,7 @@ describe('resumen diario — centro de pruebas', () => {
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.daily = { enabled: true, sendTime: '22:00', toleranceMinutes: 30 };
+      configuration.daily = { enabled: true, sendTime: '22:00' };
       service.saveConfiguration(configuration);
 
       await service.sendManual('daily', GROUP_ID, NOW);
@@ -513,7 +731,7 @@ describe('resumen diario — centro de pruebas', () => {
     }
   });
 
-  it('caso 4b: AI_NOT_CONFIGURED devuelve FAILED sin llamar a WhatsApp', async () => {
+  it('caso 4b: IA no configurada devuelve AI_SUMMARY_FAILED sin enviar', async () => {
     const database = new AppDatabase(':memory:');
     database.migrate();
     database.synchronizeBotGroup('neurobot', {
@@ -546,7 +764,7 @@ describe('resumen diario — centro de pruebas', () => {
     try {
       const result = await service.sendManual('daily', GROUP_ID, NOW);
       expect(result.status).toBe('FAILED');
-      expect(result.errorCode).toBe('AI_NOT_CONFIGURED');
+      expect(result.errorCode).toBe('AI_SUMMARY_FAILED');
       expect(client.sentMessages).toHaveLength(0);
     } finally {
       database.close();
@@ -565,11 +783,13 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
         enabled: true,
         weekday: 'Sun',
         sendTime: '19:00',
-        toleranceMinutes: 30,
       };
       service.saveConfiguration(configuration);
 
       await service.runDueTasks(new Date('2026-08-08T19:00:00.000Z'));
+      await service.runDueTasks(new Date('2026-08-09T18:59:00.000Z'));
+      await service.runDueTasks(new Date('2026-08-09T19:01:00.000Z'));
+      expect(client.sentMessages).toHaveLength(0);
       await service.runDueTasks(scheduled);
 
       expect(client.sentMessages).toHaveLength(1);
@@ -589,10 +809,11 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
         enabled: true,
         dayOfMonth: 'last',
         sendTime: '19:00',
-        toleranceMinutes: 30,
       };
       service.saveConfiguration(configuration);
 
+      await service.runDueTasks(new Date('2026-08-31T19:01:00.000Z'));
+      expect(client.sentMessages).toHaveLength(0);
       await service.runDueTasks(scheduled);
 
       expect(client.sentMessages).toHaveLength(1);
@@ -608,18 +829,16 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      configuration.daily = { enabled: true, sendTime: '19:00' };
       configuration.weekly = {
         enabled: true,
         weekday: 'Sun',
         sendTime: '19:00',
-        toleranceMinutes: 30,
       };
       configuration.monthly = {
         enabled: true,
         dayOfMonth: 'last',
         sendTime: '19:00',
-        toleranceMinutes: 30,
       };
       service.saveConfiguration(configuration);
 
@@ -642,7 +861,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.daily = { enabled: false, sendTime: '19:00', toleranceMinutes: 30 };
+      configuration.daily = { enabled: false, sendTime: '19:00' };
       service.saveConfiguration(configuration);
 
       await service.runDueTasks(scheduled);
@@ -654,7 +873,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     }
   });
 
-  it('reactiva una frecuencia con el mismo día, hora y tolerancia', async () => {
+  it('reactiva una frecuencia con el mismo día y hora', async () => {
     const scheduled = new Date('2026-08-07T20:15:00.000Z');
     const { database, client, service } = createSubject(scheduled);
     try {
@@ -664,7 +883,6 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
         enabled: false,
         weekday: 'Fri',
         sendTime: '20:15',
-        toleranceMinutes: 17,
       };
       service.saveConfiguration(configuration);
       const reactivated = service.configuration();
@@ -675,7 +893,6 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
         enabled: true,
         weekday: 'Fri',
         sendTime: '20:15',
-        toleranceMinutes: 17,
       });
       await service.runDueTasks(scheduled);
       expect(client.sentMessages).toHaveLength(1);
@@ -734,7 +951,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      configuration.daily = { enabled: true, sendTime: '19:00' };
       service.saveConfiguration(configuration);
 
       await service.runDueTasks(scheduled);
@@ -759,7 +976,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
       client.recentGroupMessages.set(GROUP_ID, []);
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      configuration.daily = { enabled: true, sendTime: '19:00' };
       service.saveConfiguration(configuration);
 
       await service.runDueTasks(scheduled);
@@ -825,7 +1042,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      configuration.daily = { enabled: true, sendTime: '19:00' };
       service.saveConfiguration(configuration);
       await service.runDueTasks(scheduled);
 
@@ -885,7 +1102,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      configuration.daily = { enabled: true, sendTime: '19:00' };
       service.saveConfiguration(configuration);
       await service.runDueTasks(scheduled);
 
@@ -894,7 +1111,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
         expect.arrayContaining([
           expect.objectContaining({
             event_type: 'COMMUNITY_DIGEST_WHATSAPP_SEND_FAILED',
-            error_code: 'WHATSAPP_SEND_FAILED',
+            error_code: 'SUMMARY_SEND_FAILED',
           }),
           expect.objectContaining({ event_type: 'COMMUNITY_DIGEST_COMPLETED' }),
         ]),
@@ -919,10 +1136,10 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      configuration.daily = { enabled: true, sendTime: '19:00' };
       service.saveConfiguration(configuration);
       await Promise.all([service.runDueTasks(scheduled), service.runDueTasks(scheduled)]);
-      await createRestartedService().runDueTasks(new Date('2026-08-31T19:10:00.000Z'));
+      await createRestartedService().runDueTasks(new Date('2026-08-31T19:00:30.000Z'));
 
       expect(client.sentMessages).toHaveLength(1);
       expect(
@@ -969,7 +1186,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     const firstService = createService(first);
     const configuration = firstService.configuration();
     configuration.timezone = 'UTC';
-    configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+    configuration.daily = { enabled: true, sendTime: '19:00' };
     firstService.saveConfiguration(configuration);
     await firstService.runDueTasks(scheduled);
     first.close();
@@ -977,7 +1194,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     const second = new AppDatabase(path);
     second.migrate();
     try {
-      await createService(second).runDueTasks(new Date('2026-08-31T19:10:00.000Z'));
+      await createService(second).runDueTasks(new Date('2026-08-31T19:00:30.000Z'));
       expect(client.sentMessages).toHaveLength(1);
     } finally {
       second.close();
@@ -991,7 +1208,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.daily = { enabled: true, sendTime: '18:00', toleranceMinutes: 0 };
+      configuration.daily = { enabled: true, sendTime: '18:00' };
       service.saveConfiguration(configuration);
       configuration.daily.sendTime = '19:00';
       service.saveConfiguration(configuration);
@@ -1019,7 +1236,6 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
         enabled: true,
         dayOfMonth: 'last',
         sendTime: '19:00',
-        toleranceMinutes: 0,
       };
       service.saveConfiguration(configuration);
       await service.runDueTasks(new Date(scheduled.getTime() - 24 * 60 * 60 * 1000));
@@ -1040,7 +1256,6 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
         enabled: true,
         dayOfMonth: 'last',
         sendTime: '19:00',
-        toleranceMinutes: 0,
       };
       service.saveConfiguration(configuration);
       await service.runDueTasks(new Date('2028-02-28T19:00:00.000Z'));
@@ -1061,7 +1276,6 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
         enabled: true,
         dayOfMonth: 31,
         sendTime: '19:00',
-        toleranceMinutes: 0,
       };
       service.saveConfiguration(configuration);
       await service.runDueTasks(scheduled);
@@ -1077,7 +1291,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     try {
       const configuration = service.configuration();
       configuration.timezone = 'America/Santiago';
-      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      configuration.daily = { enabled: true, sendTime: '19:00' };
       service.saveConfiguration(configuration);
       await service.runDueTasks(new Date('2026-08-31T22:59:00.000Z'));
       await service.runDueTasks(scheduled);
@@ -1102,18 +1316,16 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     );
     const configuration = firstService.configuration();
     configuration.timezone = 'UTC';
-    configuration.daily = { enabled: true, sendTime: '20:01', toleranceMinutes: 11 };
+    configuration.daily = { enabled: true, sendTime: '20:01' };
     configuration.weekly = {
       enabled: true,
       weekday: 'Fri',
       sendTime: '20:02',
-      toleranceMinutes: 12,
     };
     configuration.monthly = {
       enabled: true,
       dayOfMonth: 15,
       sendTime: '20:03',
-      toleranceMinutes: 13,
     };
     firstService.saveConfiguration(configuration);
     first.close();
@@ -1133,6 +1345,43 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     } finally {
       second.close();
       rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('carga configuraciones legacy con tolerancia y descarta ese campo', () => {
+    const { database, service } = createSubject();
+    try {
+      database.setSetting('community_digest_configuration:neurobot', {
+        timezone: 'UTC',
+        daily: { enabled: true, sendTime: '21:00', toleranceMinutes: 0 },
+        weekly: {
+          enabled: true,
+          weekday: 'Sun',
+          sendTime: '14:00',
+          toleranceMinutes: 5,
+        },
+        monthly: {
+          enabled: true,
+          dayOfMonth: 'last',
+          sendTime: '21:00',
+          toleranceMinutes: 5,
+        },
+        maxMessages: 500,
+        maxCharacters: 24_000,
+      });
+
+      const configuration = service.configuration();
+
+      expect(configuration).toMatchObject({
+        daily: { enabled: true, sendTime: '21:00' },
+        weekly: { enabled: true, weekday: 'Sun', sendTime: '14:00' },
+        monthly: { enabled: true, dayOfMonth: 'last', sendTime: '21:00' },
+      });
+      expect(configuration.daily).not.toHaveProperty('toleranceMinutes');
+      expect(configuration.weekly).not.toHaveProperty('toleranceMinutes');
+      expect(configuration.monthly).not.toHaveProperty('toleranceMinutes');
+    } finally {
+      database.close();
     }
   });
 

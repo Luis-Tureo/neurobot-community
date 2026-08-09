@@ -1,7 +1,12 @@
 import type { Logger } from 'pino';
 import type { AIProvider } from '../ai/ai-provider.js';
 import { serializeError } from '../infrastructure/safe-error.js';
-import type { MessagingClient, RecentGroupMessage } from '../messaging/messaging-client.js';
+import {
+  GroupMessageHistoryError,
+  type GroupMessageHistory,
+  type MessagingClient,
+  type RecentGroupMessage,
+} from '../messaging/messaging-client.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import { toLocalDateTime } from './automatic-message-service.js';
@@ -12,18 +17,16 @@ export type CommunityDigestMonthDay = number | 'last';
 
 export type CommunityDigestConfiguration = {
   timezone: string;
-  daily: { enabled: boolean; sendTime: string; toleranceMinutes: number };
+  daily: { enabled: boolean; sendTime: string };
   weekly: {
     enabled: boolean;
     weekday: CommunityDigestWeekday;
     sendTime: string;
-    toleranceMinutes: number;
   };
   monthly: {
     enabled: boolean;
     dayOfMonth: CommunityDigestMonthDay;
     sendTime: string;
-    toleranceMinutes: number;
   };
   maxMessages: number;
   maxCharacters: number;
@@ -39,9 +42,9 @@ export type CommunityDigestResult = {
 
 export const DEFAULT_COMMUNITY_DIGEST_CONFIGURATION: CommunityDigestConfiguration = {
   timezone: 'America/Santiago',
-  daily: { enabled: false, sendTime: '19:00', toleranceMinutes: 30 },
-  weekly: { enabled: false, weekday: 'Sun', sendTime: '19:00', toleranceMinutes: 60 },
-  monthly: { enabled: false, dayOfMonth: 'last', sendTime: '19:00', toleranceMinutes: 60 },
+  daily: { enabled: false, sendTime: '19:00' },
+  weekly: { enabled: false, weekday: 'Sun', sendTime: '19:00' },
+  monthly: { enabled: false, dayOfMonth: 'last', sendTime: '19:00' },
   maxMessages: 500,
   maxCharacters: 24_000,
 };
@@ -81,11 +84,32 @@ type DigestEventContext = {
   result: string;
   period?: CommunityDigestPeriod;
   groupHash?: string;
+  groupName?: string;
   itemCount?: number;
+  historyItemCount?: number;
+  pageCount?: number;
   errorCode?: string | null;
+  causeCode?: string | null;
+  operation?: string;
+  reason?: string;
+  errorName?: string;
+  errorStack?: string;
   window?: DigestWindow;
   at?: Date;
 };
+
+type LoadedDigestMessages = {
+  messages: RecentGroupMessage[];
+  history: GroupMessageHistory;
+};
+
+type StoredCommunityDigestConfiguration = Partial<CommunityDigestConfiguration> & {
+  daily?: Partial<CommunityDigestConfiguration['daily']> & { toleranceMinutes?: unknown };
+  weekly?: Partial<CommunityDigestConfiguration['weekly']> & { toleranceMinutes?: unknown };
+  monthly?: Partial<CommunityDigestConfiguration['monthly']> & { toleranceMinutes?: unknown };
+};
+
+const SUMMARIZABLE_MESSAGE_TYPES = new Set(['chat', 'image', 'video', 'document']);
 
 export class CommunityDigestService {
   private readonly botId: string;
@@ -144,7 +168,7 @@ export class CommunityDigestService {
       ...DEFAULT_COMMUNITY_DIGEST_CONFIGURATION,
       timezone: fallbackTimezone,
     };
-    const storedValue = this.database.getSetting<Partial<CommunityDigestConfiguration> | null>(
+    const storedValue = this.database.getSetting<StoredCommunityDigestConfiguration | null>(
       this.configurationKey(),
       {},
     );
@@ -185,11 +209,10 @@ export class CommunityDigestService {
     const due: DueDigest[] = [];
 
     if (configuration.daily.enabled) {
-      const scheduledDate = scheduledDateForWindow(
+      const scheduledDate = scheduledDateAtMinute(
         local.date,
         local.minuteOfDay,
         configuration.daily.sendTime,
-        configuration.daily.toleranceMinutes,
       );
       if (scheduledDate !== null) {
         due.push({ period: 'daily', scheduledDate, periodKey: scheduledDate });
@@ -197,11 +220,10 @@ export class CommunityDigestService {
     }
 
     if (configuration.weekly.enabled) {
-      const scheduledDate = scheduledDateForWindow(
+      const scheduledDate = scheduledDateAtMinute(
         local.date,
         local.minuteOfDay,
         configuration.weekly.sendTime,
-        configuration.weekly.toleranceMinutes,
       );
       if (
         scheduledDate !== null &&
@@ -216,11 +238,10 @@ export class CommunityDigestService {
     }
 
     if (configuration.monthly.enabled) {
-      const scheduledDate = scheduledDateForWindow(
+      const scheduledDate = scheduledDateAtMinute(
         local.date,
         local.minuteOfDay,
         configuration.monthly.sendTime,
-        configuration.monthly.toleranceMinutes,
       );
       if (
         scheduledDate !== null &&
@@ -252,7 +273,7 @@ export class CommunityDigestService {
             result: 'skipped',
             period,
             groupHash,
-            errorCode: 'GROUP_NOT_AVAILABLE',
+            errorCode: 'GROUP_CHAT_NOT_AVAILABLE',
             window,
             at: now,
           });
@@ -310,6 +331,10 @@ export class CommunityDigestService {
     now = this.now(),
   ): Promise<CommunityDigestResult> {
     const groupHash = this.anonymizer.identifier(groupId);
+    const group = this.database
+      .listBotGroups(this.botId, (identifier) => identifier)
+      .find((candidate) => candidate.groupHash === groupId);
+    const groupName = group?.name ?? 'Grupo sin nombre';
     const configuration = this.configuration();
     const local = toLocalDateTime(now, configuration.timezone);
     const window = digestWindow(
@@ -322,6 +347,7 @@ export class CommunityDigestService {
       result: 'started',
       period,
       groupHash,
+      groupName,
       window,
       at: now,
     });
@@ -330,22 +356,36 @@ export class CommunityDigestService {
         result: 'failed',
         period,
         groupHash,
+        groupName,
         errorCode: 'WHATSAPP_NOT_CONNECTED',
         window,
         at: now,
       });
       return failed(period, 'WHATSAPP_NOT_CONNECTED');
     }
+    if (group === undefined) {
+      this.event('COMMUNITY_DIGEST_MANUAL_FAILED', {
+        result: 'failed',
+        period,
+        groupHash,
+        groupName,
+        errorCode: 'GROUP_NOT_FOUND',
+        window,
+        at: now,
+      });
+      return failed(period, 'GROUP_NOT_FOUND');
+    }
     if (!this.database.canBotSendToGroup(this.botId, groupId)) {
       this.event('COMMUNITY_DIGEST_MANUAL_FAILED', {
         result: 'failed',
         period,
         groupHash,
-        errorCode: 'GROUP_NOT_AVAILABLE',
+        groupName,
+        errorCode: 'GROUP_CHAT_NOT_AVAILABLE',
         window,
         at: now,
       });
-      return failed(period, 'GROUP_NOT_AVAILABLE');
+      return failed(period, 'GROUP_CHAT_NOT_AVAILABLE');
     }
     const result = await this.send(period, groupId, now);
     this.event(
@@ -359,6 +399,7 @@ export class CommunityDigestService {
           result.status === 'SENT' ? 'sent' : result.status === 'SKIPPED' ? 'skipped' : 'failed',
         period,
         groupHash,
+        groupName,
         itemCount: result.messageCount,
         errorCode: result.errorCode,
         window,
@@ -381,7 +422,7 @@ export class CommunityDigestService {
       configuration.timezone,
       periodKeyForDate(period, local.date),
     );
-    const messages = await this.loadMessages(groupId, window);
+    const { messages } = await this.loadMessages(groupId, window);
     const title = `Historial ${periodLabel(period)} anonimizado`;
     const lines = messages.map((message) => {
       const timestamp = new Date(message.timestampMs).toISOString();
@@ -424,6 +465,10 @@ export class CommunityDigestService {
     periodKey?: string,
   ): Promise<CommunityDigestResult> {
     const groupHash = this.anonymizer.identifier(groupId);
+    const groupName =
+      this.database
+        .listBotGroups(this.botId, (identifier) => identifier)
+        .find((candidate) => candidate.groupHash === groupId)?.name ?? 'Grupo sin nombre';
     const configuration = this.configuration();
     const local = toLocalDateTime(now, configuration.timezone);
     const window = digestWindow(
@@ -436,28 +481,60 @@ export class CommunityDigestService {
       result: 'started',
       period,
       groupHash,
+      groupName,
       window,
       at: now,
     });
 
     let messages: RecentGroupMessage[];
+    this.event('COMMUNITY_DIGEST_CHAT_RESOLUTION_STARTED', {
+      result: 'started',
+      period,
+      groupHash,
+      groupName,
+      operation: 'resolveGroupChat',
+      window,
+      at: now,
+    });
+    this.event('COMMUNITY_DIGEST_HISTORY_STARTED', {
+      result: 'started',
+      period,
+      groupHash,
+      groupName,
+      operation: 'fetchGroupMessageHistory',
+      window,
+      at: now,
+    });
     try {
-      messages = await this.loadMessages(groupId, window);
+      const loaded = await this.loadMessages(groupId, window);
+      messages = loaded.messages;
       this.event('COMMUNITY_DIGEST_MESSAGES_LOADED', {
         result: 'loaded',
         period,
         groupHash,
+        groupName: loaded.history.groupName ?? groupName,
         itemCount: messages.length,
+        historyItemCount: loaded.history.messages.length,
+        pageCount: loaded.history.pageCount,
+        operation: 'fetchGroupMessageHistory',
         window,
         at: now,
       });
     } catch (error) {
-      const errorCode = safeErrorCode(error, 'CHAT_HISTORY_FAILED');
+      const errorCode =
+        error instanceof GroupMessageHistoryError ? error.code : 'CHAT_HISTORY_FAILED';
+      const details = digestErrorDetails(error, groupId);
       this.event('COMMUNITY_DIGEST_HISTORY_FAILED', {
         result: 'failed',
         period,
         groupHash,
+        groupName,
         errorCode,
+        operation:
+          error instanceof GroupMessageHistoryError ? error.operation : 'fetchGroupMessageHistory',
+        reason: details.message,
+        errorName: details.name,
+        ...(details.stack === undefined ? {} : { errorStack: details.stack }),
         window,
         at: now,
       });
@@ -469,6 +546,7 @@ export class CommunityDigestService {
         result: 'skipped',
         period,
         groupHash,
+        groupName,
         itemCount: 0,
         errorCode: 'NO_MESSAGES_IN_PERIOD',
         window,
@@ -488,8 +566,12 @@ export class CommunityDigestService {
         result: 'failed',
         period,
         groupHash,
+        groupName,
         itemCount: messages.length,
-        errorCode: 'AI_NOT_CONFIGURED',
+        errorCode: 'AI_SUMMARY_FAILED',
+        causeCode: 'AI_NOT_CONFIGURED',
+        operation: 'generateCommunityDigest',
+        reason: 'La IA no está configurada para este asistente.',
         window,
         at: now,
       });
@@ -498,7 +580,7 @@ export class CommunityDigestService {
         groupHash,
         window,
         now,
-        failed(period, 'AI_NOT_CONFIGURED', messages.length),
+        failed(period, 'AI_SUMMARY_FAILED', messages.length),
       );
     }
 
@@ -506,7 +588,9 @@ export class CommunityDigestService {
       result: 'started',
       period,
       groupHash,
+      groupName,
       itemCount: messages.length,
+      operation: 'generateCommunityDigest',
       window,
       at: now,
     });
@@ -517,18 +601,27 @@ export class CommunityDigestService {
         result: 'generated',
         period,
         groupHash,
+        groupName,
         itemCount: messages.length,
+        operation: 'generateCommunityDigest',
         window,
         at: now,
       });
     } catch (error) {
-      const errorCode = this.aiErrorCode(error);
+      const causeCode = this.aiErrorCode(error);
+      const details = digestErrorDetails(error, groupId);
       this.event('COMMUNITY_DIGEST_AI_FAILED', {
         result: 'failed',
         period,
         groupHash,
+        groupName,
         itemCount: messages.length,
-        errorCode,
+        errorCode: 'AI_SUMMARY_FAILED',
+        causeCode,
+        operation: 'generateCommunityDigest',
+        reason: details.message,
+        errorName: details.name,
+        ...(details.stack === undefined ? {} : { errorStack: details.stack }),
         window,
         at: now,
       });
@@ -537,7 +630,7 @@ export class CommunityDigestService {
         groupHash,
         window,
         now,
-        failed(period, errorCode, messages.length),
+        failed(period, 'AI_SUMMARY_FAILED', messages.length),
       );
     }
 
@@ -545,7 +638,9 @@ export class CommunityDigestService {
       result: 'started',
       period,
       groupHash,
+      groupName,
       itemCount: messages.length,
+      operation: 'sendMessage',
       window,
       at: now,
     });
@@ -553,13 +648,20 @@ export class CommunityDigestService {
       const heading = digestHeading(period);
       await this.client.sendMessage(groupId, `${heading}\n\n${summary}`.slice(0, 4000));
     } catch (error) {
-      const errorCode = safeErrorCode(error, 'WHATSAPP_SEND_FAILED');
+      const causeCode = safeErrorCode(error, 'WHATSAPP_SEND_FAILED');
+      const details = digestErrorDetails(error, groupId);
       this.event('COMMUNITY_DIGEST_WHATSAPP_SEND_FAILED', {
         result: 'failed',
         period,
         groupHash,
+        groupName,
         itemCount: messages.length,
-        errorCode,
+        errorCode: 'SUMMARY_SEND_FAILED',
+        causeCode,
+        operation: 'sendMessage',
+        reason: details.message,
+        errorName: details.name,
+        ...(details.stack === undefined ? {} : { errorStack: details.stack }),
         window,
         at: now,
       });
@@ -568,7 +670,7 @@ export class CommunityDigestService {
         groupHash,
         window,
         now,
-        failed(period, errorCode, messages.length),
+        failed(period, 'SUMMARY_SEND_FAILED', messages.length),
       );
     }
 
@@ -576,7 +678,9 @@ export class CommunityDigestService {
       result: 'sent',
       period,
       groupHash,
+      groupName,
       itemCount: messages.length,
+      operation: 'sendMessage',
       window,
       at: now,
     });
@@ -589,21 +693,34 @@ export class CommunityDigestService {
     });
   }
 
-  private async loadMessages(groupId: string, window: DigestWindow): Promise<RecentGroupMessage[]> {
-    if (this.client.fetchRecentGroupMessages === undefined) {
-      throw new Error('CHAT_HISTORY_UNAVAILABLE');
+  private async loadMessages(groupId: string, window: DigestWindow): Promise<LoadedDigestMessages> {
+    if (this.client.fetchGroupMessageHistory === undefined) {
+      throw new GroupMessageHistoryError(
+        'CHAT_HISTORY_FAILED',
+        'fetchGroupMessageHistory',
+        new Error('CHAT_HISTORY_UNAVAILABLE'),
+      );
     }
     const configuration = this.configuration();
-    const history = await this.client.fetchRecentGroupMessages(groupId, configuration.maxMessages);
-    return history
+    const history = await this.client.fetchGroupMessageHistory({
+      groupId,
+      periodStartMs: window.startMs,
+      periodEndMs: window.endMs,
+      maxMessages: configuration.maxMessages,
+    });
+    const messages = history.messages
       .filter(
         (message) =>
           !message.fromMe &&
           message.timestampMs >= window.startMs &&
           message.timestampMs <= window.endMs &&
-          message.body.trim() !== '',
+          message.body.trim() !== '' &&
+          (message.messageType === undefined ||
+            message.messageType === null ||
+            SUMMARIZABLE_MESSAGE_TYPES.has(message.messageType)),
       )
       .sort((left, right) => left.timestampMs - right.timestampMs);
+    return { messages, history };
   }
 
   private async generate(
@@ -717,22 +834,240 @@ export class CommunityDigestService {
         'No fue posible persistir un evento del resumen comunitario',
       );
     }
-    this.logger.info(
-      {
-        operation: eventType,
-        botId: this.botId,
-        result: context.result,
-        period: context.period ?? null,
-        periodKey: context.window?.periodKey ?? null,
-        periodStart: context.window?.startIso ?? null,
-        periodEnd: context.window?.endIso ?? null,
-        errorCode: context.errorCode ?? null,
-        groupHash: context.groupHash ?? null,
-        itemCount: context.itemCount ?? null,
-      },
-      'Evento seguro del resumen comunitario',
-    );
+    const descriptor = digestLogDescriptor(eventType, context.period);
+    const logContext = {
+      module: descriptor.module,
+      operation: context.operation ?? eventType,
+      eventType,
+      botId: this.botId,
+      result: context.result,
+      period: context.period === undefined ? null : periodLabel(context.period),
+      periodKey: context.window?.periodKey ?? null,
+      periodStart: context.window?.startIso ?? null,
+      periodEnd: context.window?.endIso ?? null,
+      errorCode: context.errorCode ?? null,
+      causeCode: context.causeCode ?? null,
+      groupHash: context.groupHash ?? null,
+      groupName: context.groupName ?? null,
+      messageCount: context.itemCount ?? null,
+      historyMessageCount: context.historyItemCount ?? null,
+      pageCount: context.pageCount ?? null,
+      reason: context.reason ?? null,
+      errorName: context.errorName ?? null,
+    };
+    if (descriptor.level === 'error') {
+      this.logger.error(logContext, descriptor.message);
+      if (context.errorStack !== undefined) {
+        this.logger.debug(
+          { ...logContext, errorStack: context.errorStack },
+          'Detalle técnico del error de resumen',
+        );
+      }
+      return;
+    }
+    if (descriptor.level === 'warn') {
+      this.logger.warn(logContext, descriptor.message);
+      return;
+    }
+    if (descriptor.level === 'debug') {
+      this.logger.debug(logContext, descriptor.message);
+      return;
+    }
+    this.logger.info(logContext, descriptor.message);
   }
+}
+
+function digestLogDescriptor(
+  eventType: string,
+  period?: CommunityDigestPeriod,
+): {
+  message: string;
+  module: 'Resumen' | 'IA' | 'WhatsApp';
+  level: 'debug' | 'info' | 'warn' | 'error';
+} {
+  const label = period === undefined ? 'comunitario' : periodLabel(period);
+  const descriptions: Record<
+    string,
+    {
+      message: string;
+      module: 'Resumen' | 'IA' | 'WhatsApp';
+      level: 'debug' | 'info' | 'warn' | 'error';
+    }
+  > = {
+    COMMUNITY_DIGEST_SCHEDULER_STARTED: {
+      message: 'Programador de resúmenes iniciado',
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_SCHEDULER_STOPPED: {
+      message: 'Programador de resúmenes detenido',
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_SCHEDULER_RECONFIGURED: {
+      message: 'Programación de resúmenes actualizada',
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_CONFIGURATION_UPDATED: {
+      message: 'Configuración de resúmenes guardada',
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_SCHEDULE_TRIGGERED: {
+      message: `Programación de resumen ${label} activada`,
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_MANUAL_STARTED: {
+      message: `Iniciando prueba de resumen ${label}`,
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_GROUP_STARTED: {
+      message: `Iniciando resumen ${label}`,
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_CHAT_RESOLUTION_STARTED: {
+      message: 'Resolviendo chat del grupo',
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_HISTORY_STARTED: {
+      message: 'Recuperando historial',
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_MESSAGES_LOADED: {
+      message: 'Historial recuperado',
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_HISTORY_FAILED: {
+      message: 'No fue posible recuperar el historial',
+      module: 'Resumen',
+      level: 'error',
+    },
+    COMMUNITY_DIGEST_SKIPPED_NO_MESSAGES: {
+      message: 'No hay mensajes dentro del período solicitado',
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_AI_STARTED: {
+      message: 'Generando resumen',
+      module: 'IA',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_AI_SUCCEEDED: {
+      message: 'Resumen generado',
+      module: 'IA',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_AI_FAILED: {
+      message: 'No fue posible generar el resumen',
+      module: 'IA',
+      level: 'error',
+    },
+    COMMUNITY_DIGEST_WHATSAPP_SEND_STARTED: {
+      message: 'Enviando resumen',
+      module: 'WhatsApp',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_WHATSAPP_SEND_SUCCEEDED: {
+      message: 'Resumen enviado correctamente',
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_WHATSAPP_SEND_FAILED: {
+      message: 'No fue posible enviar el resumen',
+      module: 'WhatsApp',
+      level: 'error',
+    },
+    COMMUNITY_DIGEST_MANUAL_SENT: {
+      message: `Prueba de resumen ${label} completada`,
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_MANUAL_SKIPPED: {
+      message: `Prueba de resumen ${label} omitida`,
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_MANUAL_FAILED: {
+      message: `Prueba de resumen ${label} fallida`,
+      module: 'Resumen',
+      level: 'error',
+    },
+    COMMUNITY_DIGEST_GROUP_FAILED: {
+      message: `Falló el procesamiento del resumen ${label}`,
+      module: 'Resumen',
+      level: 'error',
+    },
+    COMMUNITY_DIGEST_TICK_FAILED: {
+      message: 'Falló una ejecución del programador de resúmenes',
+      module: 'Resumen',
+      level: 'error',
+    },
+    COMMUNITY_DIGEST_GROUP_SKIPPED: {
+      message: 'Grupo omitido porque el chat no está disponible',
+      module: 'Resumen',
+      level: 'warn',
+    },
+    COMMUNITY_DIGEST_DUPLICATE_BLOCKED: {
+      message: 'Ejecución duplicada de resumen bloqueada',
+      module: 'Resumen',
+      level: 'debug',
+    },
+    COMMUNITY_DIGEST_COMPLETED: {
+      message: `Proceso de resumen ${label} finalizado`,
+      module: 'Resumen',
+      level: 'debug',
+    },
+  };
+  return (
+    descriptions[eventType] ?? {
+      message: 'Estado interno del resumen actualizado',
+      module: 'Resumen',
+      level: 'debug',
+    }
+  );
+}
+
+function digestErrorDetails(
+  error: unknown,
+  sensitiveGroupId: string,
+): { name: string; message: string; stack?: string } {
+  const cause =
+    error instanceof GroupMessageHistoryError && error.cause !== undefined ? error.cause : error;
+  const source = cause instanceof Error ? cause : new Error(String(cause));
+  const message = sanitizeDiagnosticText(source.message || source.name, sensitiveGroupId, 1200);
+  const stack =
+    typeof source.stack === 'string'
+      ? sanitizeDiagnosticText(source.stack, sensitiveGroupId, 6000)
+      : undefined;
+  return {
+    name: sanitizeDiagnosticText(source.name, sensitiveGroupId, 120),
+    message: message === '' ? 'Error técnico sin detalle disponible.' : message,
+    ...(stack === undefined || stack === '' ? {} : { stack }),
+  };
+}
+
+function sanitizeDiagnosticText(value: string, sensitiveGroupId: string, limit: number): string {
+  return value
+    .replaceAll(sensitiveGroupId, '[grupo omitido]')
+    .replace(
+      /[\w.-]{2,160}@(g\.us|c\.us|s\.whatsapp\.net|lid|newsletter|broadcast)/giu,
+      '[identificador omitido]',
+    )
+    .replace(/(?:\+?\d[\s().-]*){7,20}/gu, '[número omitido]')
+    .replace(/\b[A-Z0-9._%+-]{2,64}@[A-Z0-9.-]+\.[A-Z]{2,24}\b/giu, '[correo omitido]')
+    .replace(/\p{Cc}/gu, (character) =>
+      character === '\n' || character === '\r' || character === '\t' ? character : ' ',
+    )
+    .replace(/[\u202a-\u202e\u2066-\u2069]/gu, ' ')
+    .trim()
+    .slice(0, limit);
 }
 
 const COMMUNITY_DIGEST_WEEKDAYS: CommunityDigestWeekday[] = [
@@ -746,61 +1081,58 @@ const COMMUNITY_DIGEST_WEEKDAYS: CommunityDigestWeekday[] = [
 ];
 
 function normalizeConfiguration(
-  configuration: CommunityDigestConfiguration,
+  configuration: StoredCommunityDigestConfiguration,
   fallback: CommunityDigestConfiguration,
 ): CommunityDigestConfiguration {
   return {
-    timezone: isValidTimezone(configuration.timezone) ? configuration.timezone : fallback.timezone,
+    timezone:
+      typeof configuration.timezone === 'string' && isValidTimezone(configuration.timezone)
+        ? configuration.timezone
+        : fallback.timezone,
     daily: {
       enabled:
-        typeof configuration.daily.enabled === 'boolean'
+        typeof configuration.daily?.enabled === 'boolean'
           ? configuration.daily.enabled
           : fallback.daily.enabled,
-      sendTime: isValidSendTime(configuration.daily.sendTime)
-        ? configuration.daily.sendTime
-        : fallback.daily.sendTime,
-      toleranceMinutes: boundedInteger(
-        configuration.daily.toleranceMinutes,
-        0,
-        180,
-        fallback.daily.toleranceMinutes,
-      ),
+      sendTime:
+        typeof configuration.daily?.sendTime === 'string' &&
+        isValidSendTime(configuration.daily.sendTime)
+          ? configuration.daily.sendTime
+          : fallback.daily.sendTime,
     },
     weekly: {
       enabled:
-        typeof configuration.weekly.enabled === 'boolean'
+        typeof configuration.weekly?.enabled === 'boolean'
           ? configuration.weekly.enabled
           : fallback.weekly.enabled,
-      weekday: COMMUNITY_DIGEST_WEEKDAYS.includes(configuration.weekly.weekday)
-        ? configuration.weekly.weekday
-        : fallback.weekly.weekday,
-      sendTime: isValidSendTime(configuration.weekly.sendTime)
-        ? configuration.weekly.sendTime
-        : fallback.weekly.sendTime,
-      toleranceMinutes: boundedInteger(
-        configuration.weekly.toleranceMinutes,
-        0,
-        180,
-        fallback.weekly.toleranceMinutes,
-      ),
+      weekday:
+        configuration.weekly !== undefined &&
+        configuration.weekly.weekday !== undefined &&
+        COMMUNITY_DIGEST_WEEKDAYS.includes(configuration.weekly.weekday)
+          ? configuration.weekly.weekday
+          : fallback.weekly.weekday,
+      sendTime:
+        typeof configuration.weekly?.sendTime === 'string' &&
+        isValidSendTime(configuration.weekly.sendTime)
+          ? configuration.weekly.sendTime
+          : fallback.weekly.sendTime,
     },
     monthly: {
       enabled:
-        typeof configuration.monthly.enabled === 'boolean'
+        typeof configuration.monthly?.enabled === 'boolean'
           ? configuration.monthly.enabled
           : fallback.monthly.enabled,
-      dayOfMonth: isValidMonthDay(configuration.monthly.dayOfMonth)
-        ? configuration.monthly.dayOfMonth
-        : fallback.monthly.dayOfMonth,
-      sendTime: isValidSendTime(configuration.monthly.sendTime)
-        ? configuration.monthly.sendTime
-        : fallback.monthly.sendTime,
-      toleranceMinutes: boundedInteger(
-        configuration.monthly.toleranceMinutes,
-        0,
-        180,
-        fallback.monthly.toleranceMinutes,
-      ),
+      dayOfMonth:
+        configuration.monthly !== undefined &&
+        configuration.monthly.dayOfMonth !== undefined &&
+        isValidMonthDay(configuration.monthly.dayOfMonth)
+          ? configuration.monthly.dayOfMonth
+          : fallback.monthly.dayOfMonth,
+      sendTime:
+        typeof configuration.monthly?.sendTime === 'string' &&
+        isValidSendTime(configuration.monthly.sendTime)
+          ? configuration.monthly.sendTime
+          : fallback.monthly.sendTime,
     },
     maxMessages: boundedInteger(configuration.maxMessages, 20, 2000, fallback.maxMessages),
     maxCharacters: boundedInteger(
@@ -839,20 +1171,9 @@ function assertValidConfiguration(configuration: CommunityDigestConfiguration): 
   }
 }
 
-function assertValidSchedule(schedule: {
-  enabled: boolean;
-  sendTime: string;
-  toleranceMinutes: number;
-}): void {
+function assertValidSchedule(schedule: { enabled: boolean; sendTime: string }): void {
   if (typeof schedule.enabled !== 'boolean') throw codedError('INVALID_ENABLED_STATE');
   if (!isValidSendTime(schedule.sendTime)) throw codedError('INVALID_SEND_TIME');
-  if (
-    !Number.isInteger(schedule.toleranceMinutes) ||
-    schedule.toleranceMinutes < 0 ||
-    schedule.toleranceMinutes > 180
-  ) {
-    throw codedError('INVALID_TOLERANCE');
-  }
 }
 
 function codedError(code: string): Error {
@@ -861,8 +1182,18 @@ function codedError(code: string): Error {
   return error;
 }
 
-function boundedInteger(value: number, minimum: number, maximum: number, fallback: number): number {
-  return Number.isInteger(value) && value >= minimum && value <= maximum ? value : fallback;
+function boundedInteger(
+  value: number | undefined,
+  minimum: number,
+  maximum: number,
+  fallback: number,
+): number {
+  return typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= minimum &&
+    value <= maximum
+    ? value
+    : fallback;
 }
 
 function isValidSendTime(value: string): boolean {
@@ -1043,28 +1374,15 @@ function sanitizeBody(value: string): string {
     .slice(0, 1200);
 }
 
-function scheduledDateForWindow(
+function scheduledDateAtMinute(
   localDate: string,
   minuteOfDay: number,
   sendTime: string,
-  toleranceMinutes: number,
 ): string | null {
   const match = /^(\d{2}):(\d{2})$/u.exec(sendTime);
   if (match === null) return null;
   const target = Number(match[1]) * 60 + Number(match[2]);
-  const end = target + toleranceMinutes;
-
-  if (end < 1440) {
-    return minuteOfDay >= target && minuteOfDay <= end ? localDate : null;
-  }
-
-  if (minuteOfDay >= target) return localDate;
-  return minuteOfDay <= end - 1440 ? previousCalendarDate(localDate) : null;
-}
-
-function previousCalendarDate(value: string): string {
-  const [year = 0, month = 1, day = 1] = value.split('-').map(Number);
-  return new Date(Date.UTC(year, month - 1, day) - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return minuteOfDay === target ? localDate : null;
 }
 
 function weekdayForCalendarDate(value: string): CommunityDigestWeekday {

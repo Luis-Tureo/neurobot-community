@@ -83,7 +83,9 @@ describe('interfaz de mensajes automáticos', () => {
     expect(script).toContain('selectedAutomationGroupKeys: new Set()');
     expect(script).toContain('renderAutomationGroupSelector');
     expect(html).toContain('Esta selecci&oacute;n persistida es la fuente de verdad');
-    expect(script).toContain("identity.textContent = `ID ${String(group.key).slice(0, 6).toUpperCase()}`");
+    expect(script).toContain(
+      'identity.textContent = `ID ${String(group.key).slice(0, 6).toUpperCase()}`',
+    );
     expect(script).toContain('selectedGroupKeys: [...state.selectedAutomationGroupKeys]');
     expect(script).toContain(
       'Debes seleccionar al menos un grupo para guardar las automatizaciones.',
@@ -96,6 +98,10 @@ describe('interfaz de mensajes automáticos', () => {
       html.indexOf('id="section-automatic-messages"'),
       html.indexOf('id="section-polls"'),
     );
+    const digestSection = automaticSection.slice(
+      automaticSection.indexOf('Res&uacute;menes de conversaciones'),
+      automaticSection.indexOf('<h3>Bienvenida</h3>'),
+    );
     expect(automaticSection).toContain('Res&uacute;menes de conversaciones');
     expect(automaticSection).toContain('name="digest_daily_enabled"');
     expect(automaticSection).toContain('name="digest_daily_time"');
@@ -106,11 +112,22 @@ describe('interfaz de mensajes automáticos', () => {
     expect(automaticSection).toContain('name="digest_monthly_day"');
     expect(automaticSection).toContain('value="last"');
     expect(automaticSection).toContain('name="digest_monthly_time"');
+    expect(digestSection).not.toContain('Tolerancia (minutos)');
+    expect(digestSection).not.toContain('digest_daily_tolerance');
+    expect(digestSection).not.toContain('digest_weekly_tolerance');
+    expect(digestSection).not.toContain('digest_monthly_tolerance');
     expect(automaticSection.match(/id="automation-group-options"/gu)).toHaveLength(1);
     expect(script).toContain("api(botScopedPath('/api/automatic-messages/digests'))");
     expect(script).toContain('state.communityDigestConfiguration.maxMessages');
     expect(script).toContain("monthlyDay === 'last' ? 'last' : Number(monthlyDay)");
+    expect(script).not.toContain('digest_daily_tolerance');
+    expect(script).not.toContain('digest_weekly_tolerance');
+    expect(script).not.toContain('digest_monthly_tolerance');
     expect(styles).toContain('.digest-frequency-list');
+    expect(styles).toContain('grid-template-columns: repeat(3, minmax(0, 1fr));');
+    expect(styles).toContain('grid-template-columns: repeat(2, minmax(0, 1fr));');
+    expect(styles).toContain('.digest-frequency-fields--split');
+    expect(styles).toContain('justify-self: end;');
     expect(styles).toContain('[data-digest-frequency].is-disabled');
   });
 

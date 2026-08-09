@@ -23,13 +23,18 @@ import {
   getSerializedId,
   isParticipantId,
   isSupportedGroupId,
+  normalizeWhatsAppGroupId,
   whatsappIdentityAliases,
 } from './identifiers.js';
+import { normalizeMessageTimestamp } from './message-timestamp.js';
 import { describeMessageIdStructure, MessageIdentityResolver } from './message-identity.js';
-import type {
-  MessagingClient,
-  MessagingClientEvents,
-  SelectableMenuPayload,
+import {
+  GroupMessageHistoryError,
+  type GroupMessageHistory,
+  type GroupMessageHistoryRequest,
+  type MessagingClient,
+  type MessagingClientEvents,
+  type SelectableMenuPayload,
 } from './messaging-client.js';
 
 const { Client, LocalAuth, MessageMedia, Poll } = WhatsApp;
@@ -44,6 +49,314 @@ type BrowserChatSnapshot = {
   administratorIds?: string[] | null;
   adapterError?: { name: string; message: string };
 };
+
+type BrowserHistoryMessage = {
+  id: string;
+  body: string;
+  timestamp: number | string;
+  fromMe: boolean;
+  participantId: string | null;
+  messageType: string | null;
+};
+
+type BrowserHistoryFailure = {
+  status: 'CHAT_NOT_FOUND' | 'HISTORY_FAILED';
+  operation: string;
+  errorName: string;
+  errorMessage: string;
+  errorStack: string | null;
+};
+
+type BrowserHistorySuccess = {
+  status: 'SUCCESS';
+  resolvedChatId: string;
+  groupName: string | null;
+  resolvedChatType: 'group';
+  messages: BrowserHistoryMessage[];
+  cachedMessageCount: number;
+  loadedMessageCount: number;
+  pageCount: number;
+  reachedPeriodStart: boolean;
+  historyExhausted: boolean;
+  safetyLimitReached: boolean;
+};
+
+type BrowserHistoryResult = BrowserHistoryFailure | BrowserHistorySuccess;
+
+export async function readGroupMessageHistoryInBrowser(input: {
+  groupId: string;
+  periodStartMs: number;
+  maxMessages: number;
+}): Promise<BrowserHistoryResult> {
+  const whatsappWindow = globalThis as unknown as {
+    require: (moduleName: string) => Record<string, unknown>;
+    WWebJS?: {
+      getChat?: (chatId: string, options: { getAsModel: boolean }) => Promise<unknown>;
+    };
+  };
+
+  let chat: unknown = null;
+  try {
+    const collections = whatsappWindow.require('WAWebCollections');
+    const chatCollection = Reflect.get(collections, 'Chat');
+    const getModelsArray =
+      typeof chatCollection === 'object' && chatCollection !== null
+        ? Reflect.get(chatCollection, 'getModelsArray')
+        : null;
+    const chats =
+      typeof getModelsArray === 'function'
+        ? (Reflect.apply(getModelsArray, chatCollection, []) as unknown[])
+        : [];
+    for (const candidate of chats) {
+      if (typeof candidate !== 'object' || candidate === null) continue;
+      const rawId = Reflect.get(candidate, 'id');
+      const serializedId =
+        typeof rawId === 'object' && rawId !== null ? Reflect.get(rawId, '_serialized') : null;
+      if (serializedId === input.groupId) {
+        chat = candidate;
+        break;
+      }
+    }
+    if (chat === null && typeof whatsappWindow.WWebJS?.getChat === 'function') {
+      chat = await whatsappWindow.WWebJS.getChat(input.groupId, { getAsModel: false });
+    }
+  } catch (error) {
+    return {
+      status: 'CHAT_NOT_FOUND',
+      operation: 'resolveRawGroupChat',
+      errorName: error instanceof Error ? error.name : 'UnknownChatResolutionError',
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error && typeof error.stack === 'string' ? error.stack : null,
+    };
+  }
+
+  if (typeof chat !== 'object' || chat === null) {
+    return {
+      status: 'CHAT_NOT_FOUND',
+      operation: 'resolveRawGroupChat',
+      errorName: 'GroupChatNotFoundError',
+      errorMessage: 'El chat del grupo no está presente en la sesión activa.',
+      errorStack: null,
+    };
+  }
+
+  const rawChatId = Reflect.get(chat, 'id');
+  const resolvedChatId =
+    typeof rawChatId === 'object' && rawChatId !== null
+      ? Reflect.get(rawChatId, '_serialized')
+      : null;
+  const groupMetadata = Reflect.get(chat, 'groupMetadata');
+  const isGroup =
+    (typeof resolvedChatId === 'string' && resolvedChatId.endsWith('@g.us')) ||
+    (typeof groupMetadata === 'object' && groupMetadata !== null);
+  if (typeof resolvedChatId !== 'string' || !isGroup) {
+    return {
+      status: 'CHAT_NOT_FOUND',
+      operation: 'validateResolvedGroupChat',
+      errorName: 'ResolvedChatTypeError',
+      errorMessage: 'El chat resuelto no es un grupo compatible.',
+      errorStack: null,
+    };
+  }
+
+  let groupName: string | null = null;
+  const rawName =
+    Reflect.get(chat, 'formattedTitle') ??
+    Reflect.get(chat, 'name') ??
+    Reflect.get(chat, 'subject') ??
+    (typeof groupMetadata === 'object' && groupMetadata !== null
+      ? (Reflect.get(groupMetadata, 'subject') ?? Reflect.get(groupMetadata, 'name'))
+      : null);
+  if (typeof rawName === 'string' && rawName.trim() !== '')
+    groupName = rawName.trim().slice(0, 160);
+
+  const messagesById = new Map<string, BrowserHistoryMessage>();
+  let cachedMessageCount: number;
+  let loadedMessageCount = 0;
+  let pageCount = 0;
+  let reachedPeriodStart = false;
+  let historyExhausted = false;
+  let safetyLimitReached = false;
+  let historyOperation = 'readCachedGroupMessages';
+  const maximumPages = Math.min(50, Math.max(1, Math.ceil(input.maxMessages / 20)));
+
+  try {
+    const messageCollection = Reflect.get(chat, 'msgs');
+    const getModelsArray =
+      typeof messageCollection === 'object' && messageCollection !== null
+        ? Reflect.get(messageCollection, 'getModelsArray')
+        : null;
+    const cachedModels =
+      typeof getModelsArray === 'function'
+        ? (Reflect.apply(getModelsArray, messageCollection, []) as unknown[])
+        : [];
+    cachedMessageCount = cachedModels.length;
+
+    for (let index = cachedModels.length - 1; index >= 0; index -= 1) {
+      if (messagesById.size >= input.maxMessages) break;
+      const message = cachedModels[index];
+      if (typeof message !== 'object' || message === null) continue;
+      if (Reflect.get(message, 'isNotification') === true) continue;
+      const timestamp = Reflect.get(message, 't') ?? Reflect.get(message, 'timestamp');
+      if (typeof timestamp !== 'number' && typeof timestamp !== 'string') continue;
+      const rawMessageId = Reflect.get(message, 'id');
+      const serializedMessageId =
+        typeof rawMessageId === 'object' && rawMessageId !== null
+          ? (Reflect.get(rawMessageId, '_serialized') ?? Reflect.get(rawMessageId, 'id'))
+          : null;
+      const id =
+        typeof serializedMessageId === 'string' && serializedMessageId !== ''
+          ? serializedMessageId
+          : `cached-history-${index}`;
+      const rawBody = Reflect.get(message, 'body') ?? Reflect.get(message, 'caption');
+      const rawAuthor =
+        Reflect.get(message, 'author') ??
+        (typeof rawMessageId === 'object' && rawMessageId !== null
+          ? Reflect.get(rawMessageId, 'participant')
+          : null) ??
+        Reflect.get(message, 'from');
+      const participantId =
+        typeof rawAuthor === 'string'
+          ? rawAuthor
+          : typeof rawAuthor === 'object' && rawAuthor !== null
+            ? Reflect.get(rawAuthor, '_serialized')
+            : null;
+      const rawType = Reflect.get(message, 'type');
+      messagesById.set(id, {
+        id,
+        body: typeof rawBody === 'string' ? rawBody.slice(0, 4000) : '',
+        timestamp,
+        fromMe:
+          Reflect.get(message, 'fromMe') === true ||
+          (typeof rawMessageId === 'object' &&
+            rawMessageId !== null &&
+            Reflect.get(rawMessageId, 'fromMe') === true),
+        participantId: typeof participantId === 'string' ? participantId : null,
+        messageType: typeof rawType === 'string' ? rawType : null,
+      });
+    }
+
+    while (pageCount < maximumPages) {
+      let oldestTimestampMs: number | null = null;
+      for (const message of messagesById.values()) {
+        const numericTimestamp =
+          typeof message.timestamp === 'number'
+            ? message.timestamp
+            : /^\d+(?:\.\d+)?$/u.test(message.timestamp)
+              ? Number(message.timestamp)
+              : Number.NaN;
+        if (!Number.isFinite(numericTimestamp) || numericTimestamp < 0) continue;
+        const timestampMs =
+          numericTimestamp < 100_000_000_000
+            ? Math.trunc(numericTimestamp * 1000)
+            : numericTimestamp < 100_000_000_000_000
+              ? Math.trunc(numericTimestamp)
+              : null;
+        if (timestampMs === null) continue;
+        oldestTimestampMs =
+          oldestTimestampMs === null ? timestampMs : Math.min(oldestTimestampMs, timestampMs);
+      }
+      if (oldestTimestampMs !== null && oldestTimestampMs <= input.periodStartMs) {
+        reachedPeriodStart = true;
+        break;
+      }
+      if (messagesById.size >= input.maxMessages) {
+        safetyLimitReached = true;
+        break;
+      }
+
+      historyOperation = 'loadEarlierGroupMessages';
+      const loader = whatsappWindow.require('WAWebChatLoadMessages');
+      const loadEarlierMessages = Reflect.get(loader, 'loadEarlierMsgs');
+      if (typeof loadEarlierMessages !== 'function') {
+        throw new Error('WAWebChatLoadMessages.loadEarlierMsgs no está disponible.');
+      }
+      const loaded = await Reflect.apply(loadEarlierMessages, loader, [{ chat }]);
+      pageCount += 1;
+      const loadedModels = Array.isArray(loaded) ? loaded : [];
+      loadedMessageCount += loadedModels.length;
+      if (loadedModels.length === 0) {
+        historyExhausted = true;
+        break;
+      }
+
+      const sizeBeforePage = messagesById.size;
+      for (let index = loadedModels.length - 1; index >= 0; index -= 1) {
+        if (messagesById.size >= input.maxMessages) break;
+        const message = loadedModels[index];
+        if (typeof message !== 'object' || message === null) continue;
+        if (Reflect.get(message, 'isNotification') === true) continue;
+        const timestamp = Reflect.get(message, 't') ?? Reflect.get(message, 'timestamp');
+        if (typeof timestamp !== 'number' && typeof timestamp !== 'string') continue;
+        const rawMessageId = Reflect.get(message, 'id');
+        const serializedMessageId =
+          typeof rawMessageId === 'object' && rawMessageId !== null
+            ? (Reflect.get(rawMessageId, '_serialized') ?? Reflect.get(rawMessageId, 'id'))
+            : null;
+        const id =
+          typeof serializedMessageId === 'string' && serializedMessageId !== ''
+            ? serializedMessageId
+            : `loaded-history-${pageCount}-${index}`;
+        const rawBody = Reflect.get(message, 'body') ?? Reflect.get(message, 'caption');
+        const rawAuthor =
+          Reflect.get(message, 'author') ??
+          (typeof rawMessageId === 'object' && rawMessageId !== null
+            ? Reflect.get(rawMessageId, 'participant')
+            : null) ??
+          Reflect.get(message, 'from');
+        const participantId =
+          typeof rawAuthor === 'string'
+            ? rawAuthor
+            : typeof rawAuthor === 'object' && rawAuthor !== null
+              ? Reflect.get(rawAuthor, '_serialized')
+              : null;
+        const rawType = Reflect.get(message, 'type');
+        messagesById.set(id, {
+          id,
+          body: typeof rawBody === 'string' ? rawBody.slice(0, 4000) : '',
+          timestamp,
+          fromMe:
+            Reflect.get(message, 'fromMe') === true ||
+            (typeof rawMessageId === 'object' &&
+              rawMessageId !== null &&
+              Reflect.get(rawMessageId, 'fromMe') === true),
+          participantId: typeof participantId === 'string' ? participantId : null,
+          messageType: typeof rawType === 'string' ? rawType : null,
+        });
+      }
+      if (messagesById.size === sizeBeforePage) {
+        historyExhausted = true;
+        break;
+      }
+    }
+
+    if (pageCount >= maximumPages && !reachedPeriodStart && !historyExhausted) {
+      safetyLimitReached = true;
+    }
+  } catch (error) {
+    return {
+      status: 'HISTORY_FAILED',
+      operation: historyOperation,
+      errorName: error instanceof Error ? error.name : 'UnknownHistoryError',
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error && typeof error.stack === 'string' ? error.stack : null,
+    };
+  }
+
+  return {
+    status: 'SUCCESS',
+    resolvedChatId,
+    groupName,
+    resolvedChatType: 'group',
+    messages: [...messagesById.values()],
+    cachedMessageCount,
+    loadedMessageCount,
+    pageCount,
+    reachedPeriodStart,
+    historyExhausted,
+    safetyLimitReached,
+  };
+}
 
 export type WhatsAppAdapterOptions = {
   sessionPath: string;
@@ -136,6 +449,119 @@ export class WhatsAppWebAdapter implements MessagingClient {
     const client = this.requireReadyClient();
     const mentions = [...new Set(mentionIds.filter(isParticipantId))];
     await client.sendMessage(chatId, text, { mentions });
+  }
+
+  public async fetchGroupMessageHistory(
+    request: GroupMessageHistoryRequest,
+  ): Promise<GroupMessageHistory> {
+    const client = this.requireReadyClient();
+    const canonicalGroupId = normalizeWhatsAppGroupId(request.groupId);
+    if (canonicalGroupId === null) {
+      throw new GroupMessageHistoryError(
+        'GROUP_CHAT_NOT_AVAILABLE',
+        'normalizeWhatsAppGroupId',
+        new Error('El identificador seleccionado no corresponde a un grupo de WhatsApp.'),
+      );
+    }
+    if (
+      !Number.isFinite(request.periodStartMs) ||
+      !Number.isFinite(request.periodEndMs) ||
+      request.periodStartMs > request.periodEndMs
+    ) {
+      throw new GroupMessageHistoryError(
+        'CHAT_HISTORY_FAILED',
+        'validateHistoryPeriod',
+        new Error('El período solicitado no es válido.'),
+      );
+    }
+    const maxMessages = Math.max(20, Math.min(2000, Math.trunc(request.maxMessages)));
+    const page = client.pupPage;
+    if (page === undefined) {
+      throw new GroupMessageHistoryError(
+        'CHAT_HISTORY_FAILED',
+        'resolvePuppeteerPage',
+        new Error('El contexto Puppeteer de WhatsApp no está disponible.'),
+      );
+    }
+
+    this.logger.debug(
+      {
+        module: 'Resumen',
+        operation: 'resolveGroupChat',
+        identifierFormat: 'anonymized_hash',
+        selectedGroupId: this.hash(request.groupId),
+        canonicalSelectedGroupId: this.hash(canonicalGroupId),
+      },
+      'Resolviendo chat del grupo',
+    );
+
+    let result: BrowserHistoryResult;
+    try {
+      result = await page.evaluate(readGroupMessageHistoryInBrowser, {
+        groupId: canonicalGroupId,
+        periodStartMs: request.periodStartMs,
+        maxMessages,
+      });
+    } catch (error) {
+      throw new GroupMessageHistoryError('CHAT_HISTORY_FAILED', 'evaluateGroupHistory', error);
+    }
+
+    if (result.status !== 'SUCCESS') {
+      const cause = new Error(result.errorMessage);
+      cause.name = result.errorName;
+      if (result.errorStack !== null) cause.stack = result.errorStack;
+      throw new GroupMessageHistoryError(
+        result.status === 'CHAT_NOT_FOUND' ? 'GROUP_CHAT_NOT_AVAILABLE' : 'CHAT_HISTORY_FAILED',
+        result.operation,
+        cause,
+      );
+    }
+
+    const messages = result.messages.flatMap((message) => {
+      const timestampMs = normalizeMessageTimestamp(message.timestamp);
+      if (timestampMs === null) return [];
+      return [
+        {
+          id: message.id,
+          body: message.body,
+          timestampMs,
+          fromMe: message.fromMe,
+          participantId: message.participantId,
+          messageType: message.messageType,
+        },
+      ];
+    });
+
+    this.logger.debug(
+      {
+        module: 'Resumen',
+        operation: 'resolveGroupChat',
+        identifierFormat: 'anonymized_hash',
+        selectedGroupId: this.hash(request.groupId),
+        canonicalSelectedGroupId: this.hash(canonicalGroupId),
+        resolvedChatId: this.hash(result.resolvedChatId),
+        groupName: result.groupName ?? 'Grupo sin nombre',
+        resolvedChatType: result.resolvedChatType,
+        cachedMessageCount: result.cachedMessageCount,
+        loadedMessageCount: result.loadedMessageCount,
+        pageCount: result.pageCount,
+      },
+      'Chat del grupo resuelto',
+    );
+
+    return {
+      messages,
+      canonicalGroupId,
+      resolvedChatId: result.resolvedChatId,
+      groupName: result.groupName,
+      resolvedChatType: result.resolvedChatType,
+      cachedMessageCount: result.cachedMessageCount,
+      loadedMessageCount: result.loadedMessageCount,
+      pageCount: result.pageCount,
+      reachedPeriodStart: result.reachedPeriodStart,
+      historyExhausted: result.historyExhausted,
+      safetyLimitReached: result.safetyLimitReached,
+    };
   }
 
   public async resolveWelcomeParticipants(participantIds: string[]): Promise<WelcomeParticipant[]> {
@@ -502,11 +928,11 @@ export class WhatsAppWebAdapter implements MessagingClient {
             const rawContact = Reflect.get(chat, 'contact');
             const rawContactName =
               typeof rawContact === 'object' && rawContact !== null
-                ? Reflect.get(rawContact, 'name') ?? Reflect.get(rawContact, 'pushname')
+                ? (Reflect.get(rawContact, 'name') ?? Reflect.get(rawContact, 'pushname'))
                 : null;
             const rawGroupName =
               typeof groupMetadata === 'object' && groupMetadata !== null
-                ? Reflect.get(groupMetadata, 'subject') ?? Reflect.get(groupMetadata, 'name')
+                ? (Reflect.get(groupMetadata, 'subject') ?? Reflect.get(groupMetadata, 'name'))
                 : null;
             const rawName =
               Reflect.get(chat, 'formattedTitle') ??
@@ -1658,18 +2084,6 @@ function readBoolean(value: object, key: string): boolean | null {
   return typeof result === 'boolean' ? result : null;
 }
 
-function normalizeMessageTimestamp(value: unknown): number | null {
-  const numeric =
-    typeof value === 'number'
-      ? value
-      : typeof value === 'string' && /^\d{1,16}$/u.test(value)
-        ? Number(value)
-        : Number.NaN;
-  if (!Number.isFinite(numeric) || numeric <= 0) return null;
-  const milliseconds = numeric < 10_000_000_000 ? numeric * 1000 : numeric;
-  return Number.isSafeInteger(milliseconds) ? milliseconds : null;
-}
-
 function safeChatId(value: unknown): string | null {
   try {
     return typeof value === 'object' && value !== null
@@ -1708,10 +2122,10 @@ function readChatDisplayName(chat: unknown): string | null {
       Reflect.get(chat, 'name'),
       Reflect.get(chat, 'subject'),
       typeof metadata === 'object' && metadata !== null
-        ? Reflect.get(metadata, 'subject') ?? Reflect.get(metadata, 'name')
+        ? (Reflect.get(metadata, 'subject') ?? Reflect.get(metadata, 'name'))
         : null,
       typeof contact === 'object' && contact !== null
-        ? Reflect.get(contact, 'name') ?? Reflect.get(contact, 'pushname')
+        ? (Reflect.get(contact, 'name') ?? Reflect.get(contact, 'pushname'))
         : null,
     ];
     const name = candidates.find(

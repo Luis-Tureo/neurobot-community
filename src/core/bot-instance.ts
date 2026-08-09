@@ -2,7 +2,6 @@ import type { Logger } from 'pino';
 import type { AIProvider } from '../ai/ai-provider.js';
 import type { BotRecord } from '../domain/types.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
-import '../messaging/whatsapp-history-extension.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import { CommunityDigestService } from './community-digest-service.js';

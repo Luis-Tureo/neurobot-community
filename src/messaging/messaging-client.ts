@@ -34,7 +34,45 @@ export type RecentGroupMessage = {
   timestampMs: number;
   fromMe: boolean;
   participantId: string | null;
+  messageType?: string | null;
 };
+
+export type GroupMessageHistoryRequest = {
+  groupId: string;
+  periodStartMs: number;
+  periodEndMs: number;
+  maxMessages: number;
+};
+
+export type GroupMessageHistory = {
+  messages: RecentGroupMessage[];
+  canonicalGroupId: string;
+  resolvedChatId: string;
+  groupName: string | null;
+  resolvedChatType: 'group';
+  cachedMessageCount: number;
+  loadedMessageCount: number;
+  pageCount: number;
+  reachedPeriodStart: boolean;
+  historyExhausted: boolean;
+  safetyLimitReached: boolean;
+};
+
+export class GroupMessageHistoryError extends Error {
+  public readonly code: 'GROUP_CHAT_NOT_AVAILABLE' | 'CHAT_HISTORY_FAILED';
+  public readonly operation: string;
+
+  public constructor(
+    code: 'GROUP_CHAT_NOT_AVAILABLE' | 'CHAT_HISTORY_FAILED',
+    operation: string,
+    cause?: unknown,
+  ) {
+    super(code, cause === undefined ? undefined : { cause });
+    this.name = 'GroupMessageHistoryError';
+    this.code = code;
+    this.operation = operation;
+  }
+}
 
 export interface MessagingClient {
   setEvents(events: MessagingClientEvents): void;
@@ -44,7 +82,7 @@ export interface MessagingClient {
   sendMessageWithMentions?(chatId: string, text: string, mentionIds: string[]): Promise<void>;
   resolveWelcomeParticipants?(participantIds: string[]): Promise<WelcomeParticipant[]>;
   getGroupAdministratorIds?(chatId: string): Promise<string[]>;
-  fetchRecentGroupMessages?(chatId: string, limit: number): Promise<RecentGroupMessage[]>;
+  fetchGroupMessageHistory?(request: GroupMessageHistoryRequest): Promise<GroupMessageHistory>;
   sendMedia?(chatId: string, absolutePath: string, caption: string): Promise<void>;
   sendInteractiveMenu?(chatId: string, payload: InteractiveMenuPayload): Promise<boolean>;
   sendSelectableMenu?(chatId: string, payload: SelectableMenuPayload): Promise<boolean>;

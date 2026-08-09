@@ -155,13 +155,13 @@ describe('API administrativa', () => {
       });
       expect(current.statusCode).toBe(200);
       const configuration = current.json().configuration;
+      expect(JSON.stringify(configuration)).not.toContain('toleranceMinutes');
       configuration.daily.enabled = true;
       configuration.weekly.enabled = true;
       configuration.monthly = {
         enabled: true,
         dayOfMonth: 'last',
         sendTime: '20:15',
-        toleranceMinutes: 45,
       };
 
       const updated = await injectAuthenticated(app, auth, {
@@ -175,6 +175,7 @@ describe('API administrativa', () => {
         weekly: { enabled: true },
         monthly: configuration.monthly,
       });
+      expect(JSON.stringify(updated.json().configuration)).not.toContain('toleranceMinutes');
 
       const invalid = await injectAuthenticated(app, auth, {
         method: 'PATCH',
