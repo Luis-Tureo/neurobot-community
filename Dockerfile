@@ -22,15 +22,21 @@ RUN apt-get update \
 COPY package.json package-lock.json ./
 COPY scripts/verify-runtime.mjs ./scripts/verify-runtime.mjs
 
+# npm ci valida la versión de Node mediante preinstall y compila cualquier
+# dependencia nativa necesaria. Después descargamos explícitamente Chrome.
 RUN npm ci \
   && npx puppeteer browsers install chrome
 
 COPY . .
 
-# La imagen solo se publica si el proyecto completo pasa sus validaciones.
-RUN npm run check \
-  && npm prune --omit=dev \
-  && npm cache clean --force
+# El workflow ya ejecutó typecheck + lint + tests sobre un checkout limpio.
+# Dentro de Docker solo construimos el artefacto y preparamos dependencias de
+# producción. Así los archivos generados de Chrome no contaminan el lint.
+RUN npm run build \
+  && npm prune --omit=dev --ignore-scripts \
+  && test -f /app/dist/index.js \
+  && test -d /app/public \
+  && node --input-type=module -e "await import('better-sqlite3'); await import('whatsapp-web.js'); await import('puppeteer'); console.log('Dependencias de producción verificadas')"
 
 FROM node:24.19.0-bookworm-slim AS runtime
 
@@ -105,8 +111,23 @@ if [ -z "$CHROME_BIN" ]; then
 fi
 exec "$CHROME_BIN" --no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage "$@"
 EOF
+
 RUN chmod +x /usr/local/bin/neurobot-chrome \
   && mkdir -p /home/neurobot
+
+# Smoke tests de runtime: fallamos durante docker build, antes de publicar la
+# imagen, si falta Chrome, una librería compartida o el módulo nativo SQLite.
+RUN set -eux; \
+  CHROME_BIN="$(find /app/.cache/puppeteer/chrome -type f -path '*/chrome-linux64/chrome' -print -quit)"; \
+  test -n "$CHROME_BIN"; \
+  test -x "$CHROME_BIN"; \
+  "$CHROME_BIN" --version; \
+  MISSING_LIBS="$(ldd "$CHROME_BIN" | grep 'not found' || true)"; \
+  if [ -n "$MISSING_LIBS" ]; then echo "$MISSING_LIBS" >&2; exit 1; fi; \
+  node --input-type=module -e "await import('better-sqlite3'); await import('whatsapp-web.js'); console.log('Runtime Node verificado')"; \
+  /usr/local/bin/neurobot-chrome --headless=new --dump-dom about:blank >/tmp/chrome-smoke.html; \
+  test -s /tmp/chrome-smoke.html; \
+  rm -f /tmp/chrome-smoke.html
 
 LABEL org.opencontainers.image.source="https://github.com/Luis-Tureo/neurobot-community"
 
