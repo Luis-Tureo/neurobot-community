@@ -16,7 +16,11 @@ class FakeWhatsAppClient extends EventEmitter {
   public readonly getContactById = vi.fn(async (contactId: string) =>
     this.contactsById.get(contactId),
   );
-  public readonly getContactLidAndPhone = vi.fn(async () => this.lidMappings);
+  public readonly getContactLidAndPhone = vi.fn(async (userIds: string[]) =>
+    this.lidMappings.filter((mapping) =>
+      userIds.some((identifier) => identifier === mapping.lid || identifier === mapping.pn),
+    ),
+  );
   public pupPage:
     | {
         evaluate: ReturnType<typeof vi.fn>;
@@ -216,7 +220,7 @@ describe('adaptador de WhatsApp', () => {
     fake.emit('ready');
     fake.emit('ready');
     expect(states.filter((state) => state === 'authenticated')).toHaveLength(1);
-    expect(ready).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce());
   });
 
   it('elimina todos los listeners antes de destruir el cliente', async () => {
@@ -479,7 +483,7 @@ describe('adaptador de WhatsApp', () => {
     expect(received[0]?.id).toBe('same-event-id');
   });
 
-  it('detecta menciones del bot mediante mentionedJidList y objeto _data', async () => {
+  it('detecta menciones del bot mediante mentionedIds y el respaldo raw verificado', async () => {
     const { adapter, fake, received } = createSubject();
     await adapter.initialize();
     fake.emit('ready');
@@ -489,12 +493,53 @@ describe('adaptador de WhatsApp', () => {
         id: { _serialized: 'native-mention-id' },
         author: '56987654321@c.us',
         body: '@56900000000 hola',
-        mentionedJidList: ['56900000000@c.us'],
+        mentionedIds: ['56900000000@c.us'],
       }),
     );
-    await vi.waitFor(() => expect(received).toHaveLength(1));
+    fake.emit(
+      'message',
+      rawMessage({
+        id: { _serialized: 'native-mention-raw-id' },
+        author: '56987654321@c.us',
+        body: '@56900000000 otra consulta',
+        mentionedIds: undefined,
+        _data: { mentionedJidList: ['56900000000@c.us'] },
+      }),
+    );
+    await vi.waitFor(() => expect(received).toHaveLength(2));
     expect(received[0]?.mentionsBot).toBe(true);
     expect(received[0]?.botMentionToken).toBe('@56900000000');
+    expect(received[0]?.mentionedIds).toEqual(['56900000000@c.us']);
+    expect(received[1]?.mentionsBot).toBe(true);
+  });
+
+  it('resuelve el LID del propio bot antes de comparar una mención nativa', async () => {
+    const { adapter, fake, received } = createSubject();
+    fake.lidMappings = [{ lid: 'neurobot-real@lid', pn: '56900000000@c.us' }];
+    await adapter.initialize();
+    fake.emit('ready');
+    fake.emit(
+      'message',
+      rawMessage({
+        id: { _serialized: 'native-lid-mention-id' },
+        body: '@56900000000 ¿de qué se trata este grupo?',
+        mentionedIds: ['neurobot-real@lid'],
+        timestamp: 1_789_000_000,
+      }),
+    );
+
+    await vi.waitFor(() => expect(received).toHaveLength(1));
+    expect(received[0]).toMatchObject({
+      chatId: 'grupo-normal@g.us',
+      participantId: '56912345678@c.us',
+      timestampMs: 1_789_000_000_000,
+      mentionsBot: true,
+      mentionedIds: ['neurobot-real@lid'],
+      botMentionToken: '@neurobot-real',
+    });
+    expect(adapter.getOwnIdentifiers()).toEqual(
+      expect.arrayContaining(['56900000000@c.us', 'neurobot-real@lid']),
+    );
   });
 
   it('captura y registra una promesa rechazada por el procesador', async () => {

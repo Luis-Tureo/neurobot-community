@@ -444,6 +444,14 @@ const welcomeTemplateSchema = z
 
 const automaticMessagesSchema = z
   .object({
+    selectedGroupKeys: z
+      .array(z.string().length(20))
+      .min(1, 'Debes seleccionar al menos un grupo para guardar las automatizaciones.')
+      .max(500)
+      .refine(
+        (groupKeys) => new Set(groupKeys).size === groupKeys.length,
+        'La selección de grupos contiene elementos duplicados.',
+      ),
     timezone: z.string().trim().min(1).max(80),
     welcome: z
       .object({
@@ -509,6 +517,24 @@ const welcomePreviewSchema = z
     groupKey: z.string().length(20).optional(),
   })
   .strict();
+
+const welcomeGroupSettingSchema = z
+  .object({
+    groupKey: z.string().length(20),
+    enabled: z.boolean(),
+    inheritAssistantTemplate: z.boolean(),
+    customTemplate: welcomeTemplateSchema.nullable(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (!value.inheritAssistantTemplate && value.customTemplate === null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['customTemplate'],
+        message: 'Escribe un mensaje específico o utiliza el mensaje general.',
+      });
+    }
+  });
 
 const pollConfigurationSchema = z
   .object({
@@ -3567,6 +3593,9 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     const groups = context.database.listBotGroups(botId, (identifier) =>
       context.anonymizer.identifier(identifier),
     );
+    const authorizedGroups = groups
+      .filter((group) => group.active && !group.blocked && group.botIsMember === true)
+      .map((group) => ({ key: group.groupHash, name: group.name }));
     const groupNames = new Map(groups.map((group) => [group.groupHash, group.name]));
     const seen = new Set<string>();
     const deliveries = context.database.listScheduledDeliveries(200, botId).filter((delivery) => {
@@ -3581,12 +3610,19 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       templateCustomization: context.database.getAutomaticTemplateCustomization(botId),
       schedulerStarted: automaticMessagesFor(context, botId)?.isStarted() ?? false,
       welcomeStatus: automaticMessagesFor(context, botId)?.getWelcomeStatus() ?? null,
-      authorizedGroups: groups
-        .filter((group) => group.active && !group.blocked && group.botIsMember === true)
-        .map((group) => ({
-          key: group.groupHash,
-          name: group.name,
-        })),
+      authorizedGroups,
+      selectedGroupKeys: context.database
+        .listAutomationGroupIds(botId)
+        .map((groupId) => context.anonymizer.identifier(groupId)),
+      welcomeGroups: authorizedGroups.map((group) => {
+        const setting = context.database.getWelcomeGroupSetting(group.key, botId);
+        return {
+          ...group,
+          enabled: setting?.enabled ?? true,
+          inheritAssistantTemplate: setting?.inheritAssistantTemplate ?? true,
+          customTemplate: setting?.customTemplate ?? null,
+        };
+      }),
       lastDeliveries: deliveries.map((delivery) => ({
         taskType: delivery.taskType,
         groupKey: context.anonymizer.identifier(delivery.groupId),
@@ -3644,30 +3680,59 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
   app.patch(
     '/api/automatic-messages',
     { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
+    async (request, reply) => {
       const botId = parseBotIdQuery(request.query, context);
       const input = automaticMessagesSchema.parse(request.body);
+      const groupIds = input.selectedGroupKeys.map((groupKey) =>
+        context.database.resolveBotGroupKey(botId, groupKey, (identifier) =>
+          context.anonymizer.identifier(identifier),
+        ),
+      );
+      if (
+        groupIds.some(
+          (groupId) => groupId === null || !context.database.canBotSendToGroup(botId, groupId),
+        )
+      ) {
+        return reply.code(400).send({
+          error: 'Uno o más grupos seleccionados no existen o no están disponibles.',
+          code: 'AUTOMATION_GROUP_INVALID',
+        });
+      }
+      const resolvedGroupIds = groupIds.filter((groupId): groupId is string => groupId !== null);
+      const configurationInput = {
+        timezone: input.timezone,
+        welcome: input.welcome,
+        dailyGreeting: input.dailyGreeting,
+        dailyRules: input.dailyRules,
+      };
       const configuration = {
-        ...input,
-        welcome: { ...input.welcome, template: assertPlainText(input.welcome.template) },
+        ...configurationInput,
+        welcome: {
+          ...configurationInput.welcome,
+          template: assertPlainText(configurationInput.welcome.template),
+        },
         dailyGreeting: {
-          ...input.dailyGreeting,
+          ...configurationInput.dailyGreeting,
           templates: {
-            monday: assertPlainText(input.dailyGreeting.templates.monday),
-            weekday: assertPlainText(input.dailyGreeting.templates.weekday),
-            friday: assertPlainText(input.dailyGreeting.templates.friday),
-            weekend: assertPlainText(input.dailyGreeting.templates.weekend),
+            monday: assertPlainText(configurationInput.dailyGreeting.templates.monday),
+            weekday: assertPlainText(configurationInput.dailyGreeting.templates.weekday),
+            friday: assertPlainText(configurationInput.dailyGreeting.templates.friday),
+            weekend: assertPlainText(configurationInput.dailyGreeting.templates.weekend),
           },
         },
         dailyRules: {
-          ...input.dailyRules,
-          template: assertPlainText(input.dailyRules.template),
+          ...configurationInput.dailyRules,
+          template: assertPlainText(configurationInput.dailyRules.template),
         },
       };
-      context.database.saveAutomaticMessageConfiguration(configuration, botId);
+      context.database.saveAutomaticMessageConfigurationForGroups(
+        configuration,
+        resolvedGroupIds,
+        botId,
+      );
       automaticMessagesFor(context, botId)?.reconfigure();
       audit(context, 'automatic_messages_update', 'configuration', 'ok', botId);
-      return { updated: true, configuration };
+      return { updated: true, configuration, selectedGroupKeys: input.selectedGroupKeys };
     },
   );
 
@@ -3687,6 +3752,36 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
               context.anonymizer.identifier(identifier),
             ) ?? undefined);
       return { simulation: true, text: service.previewWelcome(input.fictitiousName, groupId) };
+    },
+  );
+
+  app.patch(
+    '/api/automatic-messages/welcome/groups',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request, reply) => {
+      const botId = parseBotIdQuery(request.query, context);
+      const input = welcomeGroupSettingSchema.parse(request.body);
+      const groupId = context.database.resolveBotGroupKey(botId, input.groupKey, (identifier) =>
+        context.anonymizer.identifier(identifier),
+      );
+      if (groupId === null || !context.database.canBotSendToGroup(botId, groupId)) {
+        return reply.code(404).send({
+          error: 'El grupo autorizado no existe.',
+          code: 'AUTHORIZED_GROUP_NOT_FOUND',
+        });
+      }
+      context.database.saveWelcomeGroupSetting(
+        input.groupKey,
+        {
+          enabled: input.enabled,
+          inheritAssistantTemplate: input.inheritAssistantTemplate,
+          customTemplate: input.inheritAssistantTemplate ? null : input.customTemplate,
+        },
+        botId,
+      );
+      automaticMessagesFor(context, botId)?.reconfigure();
+      audit(context, 'welcome_group_update', input.groupKey, 'ok', botId);
+      return { updated: true };
     },
   );
 
@@ -3803,6 +3898,12 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const services = pollServicesFor(context, botId);
       if (services === null) return pollServiceUnavailable(reply);
       const configuration = pollConfigurationSchema.parse(request.body);
+      if (context.database.listAutomationGroupIds(botId).length === 0) {
+        return reply.code(400).send({
+          error: 'Debes seleccionar al menos un grupo para guardar las automatizaciones.',
+          code: 'AUTOMATION_GROUP_REQUIRED',
+        });
+      }
       services.repository.saveConfiguration(configuration);
       services.scheduler.reconfigure();
       audit(context, 'poll_configuration_update', 'daily-poll', 'ok', botId);

@@ -225,6 +225,8 @@ describe('API administrativa', () => {
   });
 
   it('consulta y guarda mensajes automáticos con autenticación, CSRF y texto plano', async () => {
+    database.upsertDetectedGroup('grupo-automatico@g.us', 'Grupo automático');
+    database.setGroupAuthorized('grupo-automatico@g.us', true);
     const auth = await login(app);
     const read = await app.inject({
       method: 'GET',
@@ -232,7 +234,11 @@ describe('API administrativa', () => {
       headers: { cookie: auth.cookie },
     });
     expect(read.statusCode).toBe(200);
-    const configuration = read.json().configuration;
+    const configuration = {
+      ...read.json().configuration,
+      selectedGroupKeys: read.json().selectedGroupKeys,
+    };
+    expect(configuration.selectedGroupKeys).toHaveLength(1);
     expect(configuration).toMatchObject({
       timezone: 'America/Santiago',
       dailyGreeting: { sendTime: '08:00' },
@@ -259,6 +265,23 @@ describe('API administrativa', () => {
       welcome: { enabled: true },
       dailyGreeting: { sendTime: '09:10' },
     });
+    expect(database.listAutomationGroupIds('neurobot')).toEqual(['grupo-automatico@g.us']);
+
+    const previousConfiguration = database.getAutomaticMessageConfiguration();
+    for (const selectedGroupKeys of [
+      [],
+      [configuration.selectedGroupKeys[0], configuration.selectedGroupKeys[0]],
+      ['z'.repeat(20)],
+    ]) {
+      const invalid = await injectAuthenticated(app, auth, {
+        method: 'PATCH',
+        url: '/api/automatic-messages',
+        payload: { ...configuration, selectedGroupKeys },
+      });
+      expect(invalid.statusCode).toBe(400);
+      expect(database.getAutomaticMessageConfiguration()).toEqual(previousConfiguration);
+      expect(database.listAutomationGroupIds('neurobot')).toEqual(['grupo-automatico@g.us']);
+    }
 
     configuration.welcome.template = 'Bienvenida personalizada para restaurar';
     configuration.dailyRules.template = 'Reglas personalizadas para restaurar';
@@ -357,7 +380,7 @@ describe('API administrativa', () => {
     expect(sent.body).not.toContain('grupo-manual@g.us');
   });
 
-  it('previsualiza la bienvenida y retira la configuración por grupo', async () => {
+  it('previsualiza y persiste la configuración de bienvenida por grupo', async () => {
     database.upsertDetectedGroup('grupo-bienvenida@g.us', 'Grupo bienvenida');
     database.setGroupAuthorized('grupo-bienvenida@g.us', true);
     const auth = await login(app);
@@ -384,10 +407,27 @@ describe('API administrativa', () => {
         groupKey,
         enabled: true,
         inheritAssistantTemplate: false,
-        customTemplate: 'Hola {name}',
+        customTemplate: 'Hola {usuarios} a {grupo}',
       },
     });
-    expect(groupUpdate.statusCode).toBe(404);
+    expect(groupUpdate.statusCode).toBe(200);
+    expect(database.getWelcomeGroupSetting(groupKey)).toEqual({
+      enabled: true,
+      inheritAssistantTemplate: false,
+      customTemplate: 'Hola {usuarios} a {grupo}',
+    });
+    const refreshed = await app.inject({
+      method: 'GET',
+      url: '/api/automatic-messages',
+      headers: { cookie: auth.cookie },
+    });
+    expect(refreshed.json().welcomeGroups).toContainEqual({
+      key: groupKey,
+      name: 'Grupo bienvenida',
+      enabled: true,
+      inheritAssistantTemplate: false,
+      customTemplate: 'Hola {usuarios} a {grupo}',
+    });
     expect(JSON.stringify(database.getTechnicalEvents())).not.toContain('María');
   });
 

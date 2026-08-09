@@ -56,4 +56,5 @@ export interface MessagingClient {
   isReady(): boolean;
   isOwnIdentifier(identifier: string): boolean;
   getOwnIdentifier?(): string | null;
+  getOwnIdentifiers?(): readonly string[];
 }

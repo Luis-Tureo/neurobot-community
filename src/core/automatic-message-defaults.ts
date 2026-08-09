@@ -25,7 +25,7 @@ export const DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION: AutomaticMessageConfigurat
     groupSimultaneous: true,
     reconciliationIntervalSeconds: 120,
     template:
-      '¡Bienvenido/a, {name}! 👋\n\nTe damos la bienvenida a {communityName}. Este es un espacio de respeto, apoyo e inclusión.\n\nPuedes participar cuando te sientas cómodo/a. Para consultar al asistente, escribe {botAlias} seguido de tu pregunta.',
+      '👋 ¡Bienvenidos/as {usuarios} a {grupo}!\n\nEste es un espacio de respeto, apoyo e inclusión para personas neurodivergentes y quienes deseen aprender y compartir experiencias.\n\nPueden participar cuando se sientan cómodos/as.',
     includePublicName: true,
     enableRealMention: true,
     unknownNameFallback: 'nuevo/a integrante',

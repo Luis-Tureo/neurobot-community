@@ -9,7 +9,11 @@ import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import { normalizeText } from '../utils/text.js';
 import { ExpiringSet } from './expiring-cache.js';
-import { containsActivationAliasAtStart, detectBotActivation } from './bot-activation.js';
+import {
+  containsActivationAliasAtStart,
+  detectBotInvocation,
+  type BotInvocationMethod,
+} from './bot-activation.js';
 import type { ConversationFlowService } from './conversation-flow-service.js';
 import type { OutboundMessageQueueService } from './outbound-message-queue-service.js';
 import type { ModerationService } from '../moderation/moderation-service.js';
@@ -158,50 +162,80 @@ export class MessageProcessor {
     }
 
     const profile = this.database.getBotProfile(this.botId);
-    if (bot.capabilities.communitySingleTurnMode) {
-      const activation = detectBotActivation(
-        message,
-        message.botMentionToken ?? null,
-        this.database.listBotActivationAliases(this.botId),
-      );
-      if (activation.type === 'NOT_ACTIVATED') {
+    const reportedIdentifiers = this.client.getOwnIdentifiers?.() ?? [];
+    const fallbackIdentifier = this.client.getOwnIdentifier?.() ?? null;
+    const botIdentifiers =
+      reportedIdentifiers.length > 0
+        ? reportedIdentifiers
+        : fallbackIdentifier === null
+          ? []
+          : [fallbackIdentifier];
+    const invocation = detectBotInvocation(message, {
+      whatsappIdentifiers: botIdentifiers,
+      aliases: this.database.listBotActivationAliases(this.botId),
+    });
+    if (!invocation.invoked) {
+      if (
+        !bot.capabilities.communitySingleTurnMode &&
+        bot.capabilities.conversationContinuationEnabled &&
+        this.conversationFlow !== undefined &&
+        (await this.conversationFlow.handle(
+          message.chatId,
+          groupHash,
+          userHash,
+          message.body,
+          new Date(),
+          message.messageType === 'poll_vote',
+        ))
+      ) {
         this.logger.info(
-          {
-            operation: 'activationCheck',
-            reason: activation.rejectionReason,
-            activationType: activation.type,
-            ...context,
-          },
-          'El mensaje no activó al asistente de pregunta única',
+          { operation: 'activationCheck', reason: 'ACTIVE_MENU_SELECTION', ...context },
+          'Se procesó una selección del menú comunitario sin exigir una nueva mención',
         );
-        return 'ignored';
+        return 'responded';
       }
       this.logger.info(
         {
-          operation:
-            activation.type === 'REAL_MENTION' ? 'REAL_MENTION_RECEIVED' : 'TEXT_ALIAS_RECEIVED',
-          activationType: activation.type,
-          result: 'ACCEPTED',
+          operation: 'activationCheck',
+          reason: message.isReplyToBot ? 'REPLY_WITHOUT_MENTION' : invocation.rejectionReason,
+          invocationDetected: false,
+          invocationMethod: null,
           ...context,
         },
-        'El mensaje activó al asistente de pregunta única',
+        'El mensaje no activó al asistente',
       );
-      this.database.recordTechnicalEvent({
-        eventType:
-          activation.type === 'REAL_MENTION' ? 'REAL_MENTION_RECEIVED' : 'TEXT_ALIAS_RECEIVED',
-        botId: this.botId,
-        activationType: activation.type,
-        groupHash,
-        userHash,
+      return 'ignored';
+    }
+
+    const invocationEvent = invocationEventType(invocation.method);
+    this.logger.info(
+      {
+        operation: invocationEvent,
+        invocationDetected: true,
+        invocationMethod: invocation.method,
+        detectedMethods: invocation.detectedMethods,
         result: 'ACCEPTED',
-      });
+        ...context,
+      },
+      'El mensaje activó al asistente',
+    );
+    this.database.recordTechnicalEvent({
+      eventType: invocationEvent,
+      botId: this.botId,
+      activationType: invocation.method,
+      groupHash,
+      userHash,
+      result: 'ACCEPTED',
+    });
+
+    if (bot.capabilities.communitySingleTurnMode) {
       const interactionNow = new Date();
       const interactionPeriod = localInteractionPeriod(interactionNow, profile.timezone);
       const interaction = this.database.registerCommunityInteraction({
         botId: this.botId,
         profileId: profile.id,
         userHash,
-        queryHash: hashNormalizedQuestion(normalizeQuestionForCache(activation.question)),
+        queryHash: hashNormalizedQuestion(normalizeQuestionForCache(invocation.cleanedText)),
         localDate: interactionPeriod.date,
         hourBucket: interactionPeriod.hour,
         now: interactionNow,
@@ -223,7 +257,7 @@ export class MessageProcessor {
         return duplicate ? 'duplicate' : 'rate_limited';
       }
       const answer = await this.queryService.answerQuestion(
-        activation.question,
+        invocation.cleanedText,
         groupHash,
         userHash,
         new Date(),
@@ -250,7 +284,7 @@ export class MessageProcessor {
       this.database.recordTechnicalEvent({
         eventType: 'message_processed',
         botId: this.botId,
-        activationType: activation.type,
+        activationType: invocation.method,
         groupHash,
         userHash,
         result: sent ? answer.code : 'send_failed',
@@ -263,67 +297,7 @@ export class MessageProcessor {
           : 'responded'
         : 'send_failed';
     }
-    const aliasMentioned = containsActivationAlias(message.body, profile.activationAlias);
-    if (!message.mentionsBot && !aliasMentioned) {
-      if (
-        bot.capabilities.conversationContinuationEnabled &&
-        this.conversationFlow !== undefined &&
-        (await this.conversationFlow.handle(
-          message.chatId,
-          groupHash,
-          userHash,
-          message.body,
-          new Date(),
-          message.messageType === 'poll_vote',
-        ))
-      ) {
-        this.logger.info(
-          { operation: 'activationCheck', reason: 'ACTIVE_MENU_SELECTION', ...context },
-          'Se procesó una selección del menú comunitario sin exigir una nueva mención',
-        );
-        return 'responded';
-      }
-      this.logger.info(
-        {
-          operation: 'activationCheck',
-          reason: message.isReplyToBot ? 'REPLY_WITHOUT_MENTION' : 'NO_ACTIVATION_ALIAS',
-          ...context,
-        },
-        'El mensaje no contiene el alias de activación del bot',
-      );
-      return 'ignored';
-    }
-
-    const activationType = message.mentionsBot ? 'real_mention' : 'text_alias';
-    this.logger.info(
-      {
-        operation: message.mentionsBot ? 'REAL_MENTION_RECEIVED' : 'TEXT_ALIAS_RECEIVED',
-        activationType,
-        result: 'ACCEPTED',
-        ...context,
-      },
-      message.mentionsBot
-        ? 'Se recibió una mención real'
-        : 'Se recibió el alias público del asistente',
-    );
-    this.logger.info(
-      {
-        operation: 'activationCheck',
-        reason: 'ACTIVATION_ALIAS_ACCEPTED',
-        activationType,
-        ...context,
-      },
-      'El mensaje activó al asistente',
-    );
-    const effectiveMessage =
-      message.mentionsBot || !aliasMentioned
-        ? message
-        : {
-            ...message,
-            mentionsBot: true,
-            botMentionToken: profile.activationAlias,
-          };
-    const normalizedBody = normalizeText(message.body);
+    const normalizedBody = normalizeText(invocation.cleanedText);
     if (
       bot.capabilities.interactiveMenusEnabled &&
       this.conversationFlow !== undefined &&
@@ -377,8 +351,8 @@ export class MessageProcessor {
       { operation: 'commandNotDetected', reason: 'FREE_TEXT_QUERY', ...context },
       'El mensaje continuará como una consulta de texto',
     );
-    const answer = await this.queryService.answer(
-      effectiveMessage,
+    const answer = await this.queryService.answerQuestion(
+      invocation.cleanedText,
       groupHash,
       userHash,
       new Date(),
@@ -411,7 +385,7 @@ export class MessageProcessor {
     this.database.recordTechnicalEvent({
       eventType: 'message_processed',
       botId: this.botId,
-      activationType,
+      activationType: invocation.method,
       groupHash,
       userHash,
       result: sent ? answer.code : 'send_failed',
@@ -433,7 +407,12 @@ export class MessageProcessor {
     if (message.isChannel) return 'CHANNEL_MESSAGE';
     if (message.hasMedia) return 'UNSUPPORTED_MEDIA';
     if (typeof message.body !== 'string') return 'INVALID_BODY';
-    if (message.body.trim() === '') return 'EMPTY_BODY';
+    if (
+      message.body.trim() === '' &&
+      !message.mentionsBot &&
+      (message.mentionedIds?.length ?? 0) === 0
+    )
+      return 'EMPTY_BODY';
     if (message.body.length > this.options.maxMessageLength) return 'MESSAGE_TOO_LONG';
     return null;
   }
@@ -474,6 +453,17 @@ export class MessageProcessor {
 
 export function containsActivationAlias(body: string, alias: string): boolean {
   return containsActivationAliasAtStart(body, [alias]);
+}
+
+function invocationEventType(method: BotInvocationMethod): string {
+  switch (method) {
+    case 'native_mention':
+      return 'REAL_MENTION_RECEIVED';
+    case 'alias':
+      return 'TEXT_ALIAS_RECEIVED';
+    case 'phone_number':
+      return 'PHONE_NUMBER_RECEIVED';
+  }
 }
 
 function localInteractionPeriod(now: Date, timezone: string): { date: string; hour: string } {

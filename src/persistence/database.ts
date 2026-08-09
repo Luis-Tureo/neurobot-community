@@ -1897,6 +1897,38 @@ export class AppDatabase {
             updated_at = datetime('now');
         `,
       },
+      {
+        version: 27,
+        sql: `
+          UPDATE assistant_welcome_settings
+          SET template = '👋 ¡Bienvenidos/as {usuarios} a {grupo}!\n\nEste es un espacio de respeto, apoyo e inclusión para personas neurodivergentes y quienes deseen aprender y compartir experiencias.\n\nPueden participar cuando se sientan cómodos/as.',
+              updated_at = datetime('now')
+          WHERE template = '¡Bienvenido/a, {name}! 👋\n\nTe damos la bienvenida a {communityName}. Este es un espacio de respeto, apoyo e inclusión.\n\nPuedes participar cuando te sientas cómodo/a. Para consultar al asistente, escribe {botAlias} seguido de tu pregunta.';
+        `,
+      },
+      {
+        version: 28,
+        sql: `
+          CREATE TABLE bot_automation_scopes (
+            bot_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
+            updated_at TEXT NOT NULL
+          );
+          CREATE TABLE bot_automation_scope_groups (
+            bot_id TEXT NOT NULL,
+            group_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(bot_id, group_id),
+            FOREIGN KEY(bot_id) REFERENCES bot_automation_scopes(bot_id) ON DELETE CASCADE,
+            FOREIGN KEY(bot_id, group_id) REFERENCES bot_groups(bot_id, group_id) ON DELETE CASCADE
+          );
+          INSERT INTO bot_automation_scopes(bot_id, updated_at)
+          SELECT DISTINCT bot_id, datetime('now') FROM bot_groups
+          WHERE active = 1 AND blocked = 0 AND bot_is_member = 1;
+          INSERT INTO bot_automation_scope_groups(bot_id, group_id, created_at)
+          SELECT bot_id, group_id, datetime('now') FROM bot_groups
+          WHERE active = 1 AND blocked = 0 AND bot_is_member = 1;
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -2121,7 +2153,18 @@ export class AppDatabase {
         presentationCategory,
         'Presentación de la organización',
         'Comunidad Neurodivergente – Autismo y TDAH. Este grupo es un espacio comunitario de apoyo e información oficial sobre la comunidad, sus normas, grupos, actividades y canales de contacto.',
-        JSON.stringify(['comunidad', 'presentación', 'neurobot', 'grupo', 'este grupo', 'trata', 'de que se trata', 'objetivo', 'propósito', 'acerca']),
+        JSON.stringify([
+          'comunidad',
+          'presentación',
+          'neurobot',
+          'grupo',
+          'este grupo',
+          'trata',
+          'de que se trata',
+          'objetivo',
+          'propósito',
+          'acerca',
+        ]),
         now,
         now,
         profile.id,
@@ -2136,7 +2179,18 @@ export class AppDatabase {
          WHERE internal_source = 'perfil inicial' AND (keywords NOT LIKE '%grupo%')`,
       )
       .run(
-        JSON.stringify(['comunidad', 'presentación', 'neurobot', 'grupo', 'este grupo', 'trata', 'de que se trata', 'objetivo', 'propósito', 'acerca']),
+        JSON.stringify([
+          'comunidad',
+          'presentación',
+          'neurobot',
+          'grupo',
+          'este grupo',
+          'trata',
+          'de que se trata',
+          'objetivo',
+          'propósito',
+          'acerca',
+        ]),
       );
 
     const commandCategory: Record<string, string> = {
@@ -2667,6 +2721,19 @@ export class AppDatabase {
         )
         .run(configuration.dailyRules.template, now);
     }
+  }
+
+  public saveAutomaticMessageConfigurationForGroups(
+    configuration: AutomaticMessageConfiguration,
+    groupIds: string[],
+    botId = 'neurobot',
+  ): void {
+    this.assertAutomationGroupSelection(botId, groupIds);
+    const save = this.db.transaction(() => {
+      this.saveAutomaticMessageConfiguration(configuration, botId);
+      this.replaceAutomationGroupIdsUnchecked(botId, groupIds);
+    });
+    save();
   }
 
   public getWelcomeGroupSetting(
@@ -6078,7 +6145,9 @@ export class AppDatabase {
 
   public getCachedAnswerByHash(botId: string, normalizedQuestionHash: string): CachedAnswer | null {
     const row = this.db
-      .prepare('SELECT id FROM cached_answers WHERE bot_id = ? AND normalized_question_hash = ? LIMIT 1')
+      .prepare(
+        'SELECT id FROM cached_answers WHERE bot_id = ? AND normalized_question_hash = ? LIMIT 1',
+      )
       .get(botId, normalizedQuestionHash) as { id: number } | undefined;
     if (row === undefined) return null;
     return this.getCachedAnswer(botId, Number(row.id));
@@ -7045,7 +7114,10 @@ export class AppDatabase {
     const exact = value('ANSWER_CACHE_EXACT_HIT');
     const equivalent = value('ANSWER_CACHE_EQUIVALENT_HIT');
     return {
-      activations: value('REAL_MENTION_RECEIVED') + value('TEXT_ALIAS_RECEIVED'),
+      activations:
+        value('REAL_MENTION_RECEIVED') +
+        value('TEXT_ALIAS_RECEIVED') +
+        value('PHONE_NUMBER_RECEIVED'),
       localResponses: greetings + faqs + knowledge + exact + equivalent,
       greetings,
       faqs,
@@ -7083,7 +7155,8 @@ export class AppDatabase {
         this.db
           .prepare(
             `DELETE FROM technical_events WHERE bot_id = ? AND event_type IN (
-             'REAL_MENTION_RECEIVED', 'TEXT_ALIAS_RECEIVED', 'COMMUNITY_GREETING_LOCAL_RESPONSE',
+             'REAL_MENTION_RECEIVED', 'TEXT_ALIAS_RECEIVED', 'PHONE_NUMBER_RECEIVED',
+             'COMMUNITY_GREETING_LOCAL_RESPONSE',
              'LOCAL_FAQ_RESPONSE', 'KNOWLEDGE_DIRECT_RESPONSE', 'ANSWER_CACHE_EXACT_HIT',
              'ANSWER_CACHE_EQUIVALENT_HIT', 'ANSWER_CACHE_MISS', 'AI_CALL_SUCCESS',
              'AI_CALL_FAILED', 'AI_LIMIT_REACHED', 'OUT_OF_SCOPE_LOCAL_RESPONSE',
@@ -7255,6 +7328,65 @@ export class AppDatabase {
         )
         .all(botId) as Array<{ group_id: string }>
     ).map((row) => row.group_id);
+  }
+
+  public listAutomationGroupIds(botId: string): string[] {
+    const scope = this.db
+      .prepare('SELECT 1 FROM bot_automation_scopes WHERE bot_id = ?')
+      .get(botId);
+    if (scope === undefined) return this.listActiveBotGroupIds(botId);
+    return (
+      this.db
+        .prepare(
+          `SELECT selected.group_id
+           FROM bot_automation_scope_groups selected
+           INNER JOIN bot_groups groups
+             ON groups.bot_id = selected.bot_id AND groups.group_id = selected.group_id
+           WHERE selected.bot_id = ? AND groups.active = 1
+             AND groups.blocked = 0 AND groups.bot_is_member = 1
+           ORDER BY groups.name COLLATE NOCASE`,
+        )
+        .all(botId) as Array<{ group_id: string }>
+    ).map((row) => row.group_id);
+  }
+
+  public isAutomationGroupSelected(botId: string, groupId: string): boolean {
+    return this.listAutomationGroupIds(botId).includes(groupId);
+  }
+
+  public replaceAutomationGroupIds(botId: string, groupIds: string[]): void {
+    this.assertAutomationGroupSelection(botId, groupIds);
+    const replace = this.db.transaction(() =>
+      this.replaceAutomationGroupIdsUnchecked(botId, groupIds),
+    );
+    replace();
+  }
+
+  private assertAutomationGroupSelection(botId: string, groupIds: string[]): void {
+    if (groupIds.length === 0) {
+      throw new Error('Debes seleccionar al menos un grupo para guardar las automatizaciones.');
+    }
+    if (new Set(groupIds).size !== groupIds.length) {
+      throw new Error('La selección de grupos contiene elementos duplicados.');
+    }
+    if (groupIds.some((groupId) => !this.canBotSendToGroup(botId, groupId))) {
+      throw new Error('Uno o más grupos seleccionados no existen o no están disponibles.');
+    }
+  }
+
+  private replaceAutomationGroupIdsUnchecked(botId: string, groupIds: string[]): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO bot_automation_scopes(bot_id, updated_at) VALUES (?, ?)
+         ON CONFLICT(bot_id) DO UPDATE SET updated_at = excluded.updated_at`,
+      )
+      .run(botId, now);
+    this.db.prepare('DELETE FROM bot_automation_scope_groups WHERE bot_id = ?').run(botId);
+    const insert = this.db.prepare(
+      `INSERT INTO bot_automation_scope_groups(bot_id, group_id, created_at) VALUES (?, ?, ?)`,
+    );
+    for (const groupId of groupIds) insert.run(botId, groupId, now);
   }
 
   public setBotGroupBlocked(botId: string, groupId: string, blocked: boolean): boolean {

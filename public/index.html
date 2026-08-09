@@ -842,7 +842,15 @@
                     <strong id="ai-provider-current-name">Sin IA configurada</strong>
                   </div>
                 </div>
-                <div class="ai-token-display-line" style="font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+                <div
+                  class="ai-token-display-line"
+                  style="
+                    font-size: 0.88rem;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.35rem;
+                  "
+                >
                   <span class="muted">Token: </span>
                   <span id="ai-provider-token-status">No hay token configurado</span>
                 </div>
@@ -1033,6 +1041,37 @@
                 pruebas.
               </p>
               <form id="automatic-messages-form" class="automatic-messages-layout">
+                <article class="card inset automation-group-selector">
+                  <div class="section-heading">
+                    <div>
+                      <h3>Grupos para las automatizaciones</h3>
+                      <p id="automation-groups-help" class="muted">
+                        Selecciona uno o m&aacute;s grupos donde se ejecutar&aacute;n las
+                        automatizaciones.
+                      </p>
+                    </div>
+                  </div>
+                  <details class="lab-group-menu">
+                    <summary aria-describedby="automation-groups-help">
+                      <span id="automation-group-selection" aria-live="polite"
+                        >Seleccionar grupos</span
+                      >
+                      <span class="lab-group-chevron" aria-hidden="true">&#9662;</span>
+                    </summary>
+                    <div id="automation-group-options" class="lab-group-options"></div>
+                  </details>
+                  <div
+                    id="automation-group-chips"
+                    class="automation-group-chips"
+                    aria-label="Grupos seleccionados"
+                  ></div>
+                  <p
+                    id="automation-groups-error"
+                    class="field-error"
+                    role="alert"
+                    aria-live="assertive"
+                  ></p>
+                </article>
                 <article
                   class="card inset poll-weekly-schedule bot-only hidden"
                   data-module="polls"
@@ -1048,6 +1087,10 @@
                       <h3>Bienvenida</h3>
                       <p class="muted">Agrupa varios ingresos para evitar mensajes repetidos.</p>
                     </div>
+                    <label class="toggle"
+                      ><input name="welcome_enabled" type="checkbox" />
+                      <span id="welcome-enabled-label">Activar</span></label
+                    >
                   </div>
                   <label
                     >Mensaje<textarea
@@ -1057,6 +1100,50 @@
                       required
                     ></textarea>
                   </label>
+                  <div class="welcome-variables" aria-labelledby="welcome-variables-title">
+                    <p id="welcome-variables-title"><strong>Variables disponibles</strong></p>
+                    <ul>
+                      <li><code>{usuario}</code><span>Nuevo integrante individual</span></li>
+                      <li><code>{usuarios}</code><span>Uno o varios nuevos integrantes</span></li>
+                      <li><code>{grupo}</code><span>Nombre del grupo</span></li>
+                    </ul>
+                  </div>
+                  <label class="toggle"
+                    ><input name="welcome_mention" type="checkbox" /> Mencionar al nuevo
+                    integrante</label
+                  >
+                  <fieldset id="welcome-group-settings" class="welcome-group-settings">
+                    <legend>Configuración por grupo</legend>
+                    <label
+                      >Grupo<select name="welcome_group" aria-describedby="welcome-group-help">
+                        <option value="">No hay grupos autorizados</option>
+                      </select></label
+                    >
+                    <p id="welcome-group-help" class="muted">
+                      Cada grupo puede heredar el mensaje general o utilizar uno específico.
+                    </p>
+                    <label class="toggle"
+                      ><input name="welcome_group_enabled" type="checkbox" /> Bienvenida activa en
+                      este grupo</label
+                    >
+                    <label class="toggle"
+                      ><input name="welcome_group_inherit" type="checkbox" /> Usar el mensaje
+                      general</label
+                    >
+                    <label id="welcome-group-template-field"
+                      >Mensaje específico<textarea
+                        name="welcome_group_template"
+                        maxlength="2000"
+                        rows="4"
+                      ></textarea>
+                    </label>
+                    <div class="actions">
+                      <button id="save-welcome-group" class="secondary" type="button">
+                        Guardar configuración del grupo
+                      </button>
+                    </div>
+                    <p id="welcome-group-status" class="muted" aria-live="polite"></p>
+                  </fieldset>
                 </article>
 
                 <article class="card inset automatic-card" data-collapsible>

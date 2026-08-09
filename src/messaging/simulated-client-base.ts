@@ -143,6 +143,10 @@ export class SimulatedMessagingClient implements MessagingClient {
     return this.ownIdentifiers.values().next().value ?? null;
   }
 
+  public getOwnIdentifiers(): readonly string[] {
+    return [...this.ownIdentifiers];
+  }
+
   public emitState(
     state: Parameters<MessagingClientEvents['onStateChange']>[0],
     reason?: string,

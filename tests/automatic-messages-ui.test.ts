@@ -6,7 +6,7 @@ describe('interfaz de mensajes automáticos', () => {
   const script = readFileSync(resolve('public', 'app.js'), 'utf8');
   const styles = readFileSync(resolve('src', 'admin', 'panel.css'), 'utf8');
 
-  it('simplifica bienvenida y conserva las demás automatizaciones', () => {
+  it('configura bienvenida dinámica y conserva las demás automatizaciones', () => {
     expect(html).toContain('data-section="automatic-messages"');
     expect(html).toContain('id="section-automatic-messages"');
     expect(html).not.toContain('class="timezone-badge"');
@@ -14,14 +14,19 @@ describe('interfaz de mensajes automáticos', () => {
     expect(html).not.toContain('name="welcome_reconciliation_interval"');
     expect(html).not.toContain('id="welcome-runtime-status"');
     expect(html).not.toContain('id="automatic-message-group"');
-    expect(html).not.toContain('id="welcome-group-settings"');
+    expect(html).toContain('id="welcome-group-settings"');
+    expect(html).toContain('name="welcome_enabled"');
+    expect(html).toContain('name="welcome_mention"');
+    expect(html).toContain('{usuario}');
+    expect(html).toContain('{usuarios}');
+    expect(html).toContain('{grupo}');
     expect(html).toContain('name="greeting_monday"');
     expect(html).toContain('name="greeting_weekday"');
     expect(html).toContain('name="greeting_friday"');
     expect(html).toContain('name="greeting_weekend"');
     expect(html).toContain('name="rules_template"');
-    expect(script).not.toContain('renderWelcomeGroupSettings');
-    expect(script).not.toContain('/automatic-messages/welcome/groups');
+    expect(script).toContain('renderWelcomeGroupSettings');
+    expect(script).toContain('/automatic-messages/welcome/groups');
     expect(script).toContain('...state.automaticConfiguration.welcome');
     expect(html).not.toContain('id="greeting-preview"');
     expect(html).not.toContain('id="rules-preview"');
@@ -57,6 +62,26 @@ describe('interfaz de mensajes automáticos', () => {
     );
     expect(menuStyles).toContain('position: absolute;');
     expect(menuStyles).toContain('.poll-weekly-options label:has(input:checked)');
+  });
+
+  it('selecciona grupos reutilizables antes de la programación semanal', () => {
+    const automaticSection = html.slice(
+      html.indexOf('id="section-automatic-messages"'),
+      html.indexOf('id="section-polls"'),
+    );
+    expect(automaticSection).toContain('Grupos para las automatizaciones');
+    expect(automaticSection).toContain('id="automation-group-options"');
+    expect(automaticSection).toContain('id="automation-group-chips"');
+    expect(automaticSection.indexOf('Grupos para las automatizaciones')).toBeLessThan(
+      automaticSection.indexOf('Programación semanal de encuestas'),
+    );
+    expect(script).toContain('selectedAutomationGroupKeys: new Set()');
+    expect(script).toContain('renderAutomationGroupSelector');
+    expect(script).toContain('selectedGroupKeys: [...state.selectedAutomationGroupKeys]');
+    expect(script).toContain(
+      'Debes seleccionar al menos un grupo para guardar las automatizaciones.',
+    );
+    expect(styles).toContain('.automation-group-chip');
   });
 
   it('ofrece una sola restauración de textos junto al guardado general', () => {

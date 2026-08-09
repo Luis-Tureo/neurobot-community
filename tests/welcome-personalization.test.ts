@@ -3,6 +3,7 @@ import {
   renderWelcomeTemplate,
   resolvePublicWhatsAppName,
   sanitizeWhatsAppDisplayName,
+  sanitizeWhatsAppGroupName,
   validateWelcomeTemplate,
 } from '../src/core/welcome-personalization.js';
 
@@ -40,15 +41,48 @@ describe('personalización segura de bienvenidas', () => {
     expect(Array.from(sanitizeWhatsAppDisplayName('á'.repeat(100)) ?? '')).toHaveLength(60);
   });
 
-  it('rechaza variables desconocidas y renderiza solamente las permitidas', () => {
-    expect(() => validateWelcomeTemplate('Hola {codigo}')).toThrow('variable');
-    expect(renderWelcomeTemplate('Hola {name} en {groupName}', {
-      name: 'María', mention: '@María', communityName: 'Comunidad', groupName: 'General',
-      assistantName: 'Neurobot', botAlias: '@neurobot',
-    })).toBe('Hola María en General');
+  it('conserva el nombre real del grupo sin exponer un identificador técnico', () => {
+    expect(sanitizeWhatsAppGroupName('  Comunidad @Autismo 👋  ')).toBe(
+      'Comunidad @Autismo 👋',
+    );
+    expect(sanitizeWhatsAppGroupName('12345')).toBe('12345');
+    expect(sanitizeWhatsAppGroupName('12345@g.us')).toBeNull();
   });
 
-  it('agrupa nombres sin duplicarlos', () => {
+  it('rechaza variables desconocidas y renderiza solamente las permitidas', () => {
+    expect(() => validateWelcomeTemplate('Hola {codigo}')).toThrow('variable');
+    expect(
+      renderWelcomeTemplate('Hola {usuario} en {grupo}; {codigo}', {
+        usuario: 'María',
+        grupo: 'General',
+      }),
+    ).toBe('Hola María en General; {codigo}');
+  });
+
+  it('agrupa cualquier cantidad de nombres en español', () => {
+    expect(joinWelcomeNames(['María'])).toBe('María');
+    expect(joinWelcomeNames(['María', 'Pedro'])).toBe('María y Pedro');
     expect(joinWelcomeNames(['María', 'Pedro', 'Camila'])).toBe('María, Pedro y Camila');
+    expect(joinWelcomeNames(['María', 'Pedro', 'Camila', 'Juan'])).toBe(
+      'María, Pedro, Camila y Juan',
+    );
+  });
+
+  it('reemplaza todas las apariciones y mantiene compatibilidad con usuario individual', () => {
+    expect(
+      renderWelcomeTemplate('Hola {usuarios}. Nuevamente, {usuarios} en {grupo}.', {
+        usuario: 'María',
+        usuarios: 'María',
+        grupo: 'Comunidad Neurodivergente',
+      }),
+    ).toBe('Hola María. Nuevamente, María en Comunidad Neurodivergente.');
+    expect(renderWelcomeTemplate('¡Bienvenido/a {usuario}!', { usuario: 'María' })).toBe(
+      '¡Bienvenido/a María!',
+    );
+  });
+
+  it('tolera plantillas vacías y valores faltantes sin ejecutar contenido', () => {
+    expect(renderWelcomeTemplate('', {})).toBe('');
+    expect(renderWelcomeTemplate('{usuario}-{grupo}', { usuario: 'María' })).toBe('María-');
   });
 });

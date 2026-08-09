@@ -14,6 +14,7 @@ export type ActivationType = 'command' | 'mention' | 'reply';
 export type IncomingMessage = {
   id: string;
   replyToMessageId?: string;
+  timestampMs?: number;
   chatId: string;
   participantId: string;
   administratorId?: string | null;
@@ -27,6 +28,7 @@ export type IncomingMessage = {
   isBroadcast: boolean;
   isChannel: boolean;
   hasMedia: boolean;
+  mentionedIds?: string[];
   mentionsBot: boolean;
   botMentionToken?: string;
   isReplyToBot: boolean;

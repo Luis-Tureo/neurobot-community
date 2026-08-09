@@ -10,6 +10,7 @@ describe('persistencia SQLite', () => {
     database.migrate();
     expect(database.getMigrationVersions()).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+      27, 28,
     ]);
     expect(database.getBotProfile('neurobot')).toMatchObject({
       botName: 'Neurobot',
@@ -202,6 +203,35 @@ describe('persistencia SQLite', () => {
       sendTime: '21:15',
     });
     expect(second.claimScheduledDelivery('DAILY_RULES', 'grupo@g.us', '2026-08-02')).toBeNull();
+    second.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('persiste y reemplaza los grupos de automatización sin aceptar selecciones inválidas', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'asistente-automation-groups-'));
+    const path = join(directory, 'test.db');
+    const first = new AppDatabase(path);
+    first.migrate();
+    first.upsertDetectedGroup('grupo-a@g.us', 'Grupo A');
+    first.setGroupAuthorized('grupo-a@g.us', true);
+    first.upsertDetectedGroup('grupo-b@g.us', 'Grupo B');
+    first.setGroupAuthorized('grupo-b@g.us', true);
+    first.replaceAutomationGroupIds('neurobot', ['grupo-a@g.us', 'grupo-b@g.us']);
+    expect(first.listAutomationGroupIds('neurobot')).toEqual(['grupo-a@g.us', 'grupo-b@g.us']);
+    expect(() => first.replaceAutomationGroupIds('neurobot', [])).toThrow('al menos un grupo');
+    expect(() =>
+      first.replaceAutomationGroupIds('neurobot', ['grupo-a@g.us', 'grupo-a@g.us']),
+    ).toThrow('duplicados');
+    expect(() => first.replaceAutomationGroupIds('neurobot', ['inexistente@g.us'])).toThrow(
+      'no existen',
+    );
+    expect(first.listAutomationGroupIds('neurobot')).toEqual(['grupo-a@g.us', 'grupo-b@g.us']);
+    first.replaceAutomationGroupIds('neurobot', ['grupo-b@g.us']);
+    first.close();
+
+    const second = new AppDatabase(path);
+    second.migrate();
+    expect(second.listAutomationGroupIds('neurobot')).toEqual(['grupo-b@g.us']);
     second.close();
     rmSync(directory, { recursive: true, force: true });
   });

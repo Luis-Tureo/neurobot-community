@@ -166,7 +166,7 @@ export class CommunityDigestService {
 
     const runState = this.database.getSetting<Record<string, string>>(this.runStateKey(), {});
     for (const { period, scheduledDate } of due) {
-      for (const groupId of this.database.listActiveBotGroupIds(this.botId)) {
+      for (const groupId of this.database.listAutomationGroupIds(this.botId)) {
         const marker = `${period}:${this.anonymizer.identifier(groupId)}`;
         if (runState[marker] === scheduledDate) continue;
         const result = await this.send(period, groupId, now);

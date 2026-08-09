@@ -98,6 +98,38 @@ describe('resúmenes comunitarios', () => {
     }
   });
 
+  it('programa resúmenes únicamente para los grupos seleccionados', async () => {
+    const scheduled = new Date('2026-08-06T19:00:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
+    try {
+      const selectedGroupId = 'resumen-seleccionado@g.us';
+      database.synchronizeBotGroup('neurobot', {
+        id: selectedGroupId,
+        name: 'Resumen seleccionado',
+        botIsMember: true,
+      });
+      client.recentGroupMessages.set(selectedGroupId, [
+        {
+          id: 'selected-message',
+          body: 'Actividad comunitaria seleccionada.',
+          timestampMs: scheduled.getTime() - 60_000,
+          fromMe: false,
+          participantId: '56911111111@c.us',
+        },
+      ]);
+      database.replaceAutomationGroupIds('neurobot', [selectedGroupId]);
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.daily = { enabled: true, sendTime: '19:00', toleranceMinutes: 30 };
+      service.saveConfiguration(configuration);
+
+      await service.runDueTasks(scheduled);
+      expect(client.sentMessages.map((message) => message.chatId)).toEqual([selectedGroupId]);
+    } finally {
+      database.close();
+    }
+  });
+
   it('deduplica una ventana de envío que cruza medianoche', async () => {
     const afterMidnight = new Date('2026-08-07T00:10:00.000Z');
     const { database, client, service } = createSubject(afterMidnight);

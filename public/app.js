@@ -8,6 +8,9 @@ const state = {
   editingCommandId: null,
   automaticDefaults: null,
   automaticConfiguration: null,
+  automationGroups: [],
+  selectedAutomationGroupKeys: new Set(),
+  welcomeGroups: [],
   pollTemplates: [],
   pollData: null,
   selectedBotId: null,
@@ -676,8 +679,16 @@ async function loadAutomaticMessages() {
   const configuration = result.configuration;
   state.automaticConfiguration = configuration;
   state.automaticDefaults = result.defaultConfiguration;
+  state.automationGroups = result.authorizedGroups || [];
+  state.selectedAutomationGroupKeys = new Set(result.selectedGroupKeys || []);
+  state.welcomeGroups = result.welcomeGroups || [];
+  renderAutomationGroupSelector();
+  automaticMessagesForm.elements.welcome_enabled.checked = configuration.welcome.enabled;
   automaticMessagesForm.elements.welcome_template.value =
     configuration.welcome.template.trim() || result.defaultConfiguration.welcome.template;
+  automaticMessagesForm.elements.welcome_mention.checked = configuration.welcome.enableRealMention;
+  updateWelcomeEnabledLabel();
+  renderWelcomeGroupSettings();
   automaticMessagesForm.elements.greeting_enabled.checked = configuration.dailyGreeting.enabled;
   automaticMessagesForm.elements.greeting_time.value = configuration.dailyGreeting.sendTime;
   automaticMessagesForm.elements.greeting_tolerance.value =
@@ -720,16 +731,189 @@ async function loadAutomaticMessages() {
 
 automaticMessagesForm.addEventListener('input', updateAutomaticTemplateMetrics);
 
+automaticMessagesForm.elements.welcome_enabled.addEventListener(
+  'change',
+  updateWelcomeEnabledLabel,
+);
+automaticMessagesForm.elements.welcome_group.addEventListener('change', loadSelectedWelcomeGroup);
+automaticMessagesForm.elements.welcome_group_inherit.addEventListener(
+  'change',
+  updateWelcomeGroupTemplateState,
+);
+
+function renderAutomationGroupSelector() {
+  const options = document.querySelector('#automation-group-options');
+  const chips = document.querySelector('#automation-group-chips');
+  const summary = document.querySelector('#automation-group-selection');
+  const error = document.querySelector('#automation-groups-error');
+  const availableKeys = new Set(state.automationGroups.map((group) => group.key));
+  state.selectedAutomationGroupKeys = new Set(
+    [...state.selectedAutomationGroupKeys].filter((key) => availableKeys.has(key)),
+  );
+  options.replaceChildren();
+  chips.replaceChildren();
+
+  if (state.automationGroups.length === 0) {
+    const message = document.createElement('p');
+    message.className = 'muted';
+    message.textContent = 'No hay grupos autorizados disponibles.';
+    options.append(message);
+    summary.textContent = 'Sin grupos disponibles';
+  } else {
+    state.automationGroups.forEach((group) => {
+      const option = document.createElement('label');
+      option.className = 'lab-group-option';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = group.key;
+      checkbox.checked = state.selectedAutomationGroupKeys.has(group.key);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) state.selectedAutomationGroupKeys.add(group.key);
+        else state.selectedAutomationGroupKeys.delete(group.key);
+        renderAutomationGroupSelector();
+      });
+      const name = document.createElement('span');
+      name.textContent = group.name || 'Grupo sin nombre';
+      option.append(checkbox, name);
+      options.append(option);
+    });
+    const selectedGroups = state.automationGroups.filter((group) =>
+      state.selectedAutomationGroupKeys.has(group.key),
+    );
+    summary.textContent =
+      selectedGroups.length === 0
+        ? 'Seleccionar grupos'
+        : `${selectedGroups.length} grupo${selectedGroups.length === 1 ? '' : 's'} seleccionado${selectedGroups.length === 1 ? '' : 's'}`;
+    selectedGroups.forEach((group) => {
+      const chip = document.createElement('span');
+      chip.className = 'automation-group-chip';
+      const name = document.createElement('span');
+      name.textContent = group.name || 'Grupo sin nombre';
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = '\u00d7';
+      remove.setAttribute('aria-label', `Quitar ${name.textContent} de las automatizaciones`);
+      remove.addEventListener('click', () => {
+        state.selectedAutomationGroupKeys.delete(group.key);
+        renderAutomationGroupSelector();
+      });
+      chip.append(name, remove);
+      chips.append(chip);
+    });
+  }
+  error.textContent = '';
+}
+
+function updateWelcomeEnabledLabel() {
+  const enabled = automaticMessagesForm.elements.welcome_enabled.checked;
+  document.querySelector('#welcome-enabled-label').textContent = enabled ? 'Desactivar' : 'Activar';
+}
+
+function renderWelcomeGroupSettings() {
+  const selector = automaticMessagesForm.elements.welcome_group;
+  const previous = selector.value;
+  selector.replaceChildren();
+  state.welcomeGroups.forEach((group) => {
+    const option = document.createElement('option');
+    option.value = group.key;
+    option.textContent = group.name;
+    selector.append(option);
+  });
+  const hasGroups = state.welcomeGroups.length > 0;
+  selector.disabled = !hasGroups;
+  document.querySelector('#save-welcome-group').disabled = !hasGroups;
+  if (hasGroups) {
+    selector.value = state.welcomeGroups.some((group) => group.key === previous)
+      ? previous
+      : state.welcomeGroups[0].key;
+  } else {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No hay grupos autorizados';
+    selector.append(option);
+  }
+  loadSelectedWelcomeGroup();
+}
+
+function loadSelectedWelcomeGroup() {
+  const group = state.welcomeGroups.find(
+    (candidate) => candidate.key === automaticMessagesForm.elements.welcome_group.value,
+  );
+  const enabled = group?.enabled ?? false;
+  const inherits = group?.inheritAssistantTemplate ?? true;
+  automaticMessagesForm.elements.welcome_group_enabled.checked = enabled;
+  automaticMessagesForm.elements.welcome_group_enabled.disabled = !group;
+  automaticMessagesForm.elements.welcome_group_inherit.checked = inherits;
+  automaticMessagesForm.elements.welcome_group_inherit.disabled = !group;
+  automaticMessagesForm.elements.welcome_group_template.value = group?.customTemplate || '';
+  document.querySelector('#welcome-group-status').textContent = '';
+  updateWelcomeGroupTemplateState();
+}
+
+function updateWelcomeGroupTemplateState() {
+  const field = automaticMessagesForm.elements.welcome_group_template;
+  const inherits = automaticMessagesForm.elements.welcome_group_inherit.checked;
+  const hasGroup = automaticMessagesForm.elements.welcome_group.value !== '';
+  field.disabled = inherits || !hasGroup;
+  document
+    .querySelector('#welcome-group-template-field')
+    .classList.toggle('is-disabled', field.disabled);
+}
+
+document.querySelector('#save-welcome-group').addEventListener('click', async () => {
+  const form = automaticMessagesForm;
+  const groupKey = form.elements.welcome_group.value;
+  if (!groupKey) return;
+  const inheritAssistantTemplate = form.elements.welcome_group_inherit.checked;
+  const customTemplate = form.elements.welcome_group_template.value.trim();
+  const status = document.querySelector('#welcome-group-status');
+  if (!inheritAssistantTemplate && customTemplate === '') {
+    status.textContent = 'Escribe un mensaje específico o utiliza el mensaje general.';
+    return;
+  }
+  try {
+    await api(botScopedPath('/api/automatic-messages/welcome/groups'), {
+      method: 'PATCH',
+      body: JSON.stringify({
+        groupKey,
+        enabled: form.elements.welcome_group_enabled.checked,
+        inheritAssistantTemplate,
+        customTemplate: inheritAssistantTemplate ? null : customTemplate,
+      }),
+    });
+    const group = state.welcomeGroups.find((candidate) => candidate.key === groupKey);
+    if (group) {
+      group.enabled = form.elements.welcome_group_enabled.checked;
+      group.inheritAssistantTemplate = inheritAssistantTemplate;
+      group.customTemplate = inheritAssistantTemplate ? null : customTemplate;
+    }
+    status.textContent = 'Configuración del grupo guardada.';
+    showNotice('Configuración del grupo guardada.');
+  } catch (error) {
+    status.textContent = error.message;
+    showNotice(error.message, true);
+  }
+});
+
 automaticMessagesForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   if (!state.automaticConfiguration) return;
+  if (state.selectedAutomationGroupKeys.size === 0) {
+    const message = 'Debes seleccionar al menos un grupo para guardar las automatizaciones.';
+    document.querySelector('#automation-groups-error').textContent = message;
+    document.querySelector('.automation-group-selector summary').focus();
+    showNotice(message, true);
+    return;
+  }
   const payload = {
+    selectedGroupKeys: [...state.selectedAutomationGroupKeys],
     timezone: state.selectedBotTimezone,
     welcome: {
       ...state.automaticConfiguration.welcome,
-      enabled: true,
+      enabled: form.elements.welcome_enabled.checked,
       template: form.elements.welcome_template.value,
+      enableRealMention: form.elements.welcome_mention.checked,
     },
     dailyGreeting: {
       enabled: form.elements.greeting_enabled.checked,

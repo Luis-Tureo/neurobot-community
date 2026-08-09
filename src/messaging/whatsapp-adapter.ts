@@ -82,6 +82,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
     string,
     { identifiers: string[]; expiresAt: number }
   >();
+  private botIdentityResolution: Promise<void> = Promise.resolve();
 
   public constructor(
     private readonly options: WhatsAppAdapterOptions,
@@ -367,7 +368,15 @@ export class WhatsAppWebAdapter implements MessagingClient {
   }
 
   public getOwnIdentifier(): string | null {
+    for (const identifier of this.botIdentifiers) {
+      const phone = canonicalPhoneIdentity(identifier);
+      if (phone !== null) return phone;
+    }
     return getSerializedId(this.client?.info?.wid);
+  }
+
+  public getOwnIdentifiers(): readonly string[] {
+    return [...this.botIdentifiers];
   }
 
   public async getGroupAdministratorIds(chatId: string): Promise<string[]> {
@@ -517,6 +526,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
       this.readyHandled = false;
       this.ready = false;
       this.botIdentifiers.clear();
+      this.botIdentityResolution = Promise.resolve();
     }
     const operationGeneration = this.generation;
     this.registerHandlers(client, operationGeneration);
@@ -538,6 +548,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
     this.authenticatedHandled = false;
     this.readyHandled = false;
     this.botIdentifiers.clear();
+    this.botIdentityResolution = Promise.resolve();
     this.selectableMenuPolls.clear();
     if (client === null) return;
     client.removeAllListeners();
@@ -608,6 +619,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
       this.readyHandled = true;
       this.ready = true;
       this.captureBotIdentifiers(client);
+      this.botIdentityResolution = this.resolveBotIdentifierAliases(client, generation);
       this.logger.info(
         {
           operation: 'clientReady',
@@ -619,16 +631,18 @@ export class WhatsAppWebAdapter implements MessagingClient {
         },
         'El cliente de WhatsApp está listo.',
       );
-      void Promise.resolve(this.events?.onReady()).catch((error: unknown) => {
-        this.logger.error(
-          {
-            ...serializeError(error, 'READY_PROCESSING_FAILED', false),
-            operation: 'readyProcessingFailed',
-            clientGeneration: generation,
-          },
-          'Falló la validación segura posterior a ready',
-        );
-      });
+      void this.botIdentityResolution
+        .then(() => this.events?.onReady())
+        .catch((error: unknown) => {
+          this.logger.error(
+            {
+              ...serializeError(error, 'READY_PROCESSING_FAILED', false),
+              operation: 'readyProcessingFailed',
+              clientGeneration: generation,
+            },
+            'Falló la validación segura posterior a ready',
+          );
+        });
     });
     client.on('auth_failure', (message: string) => {
       if (!this.isCurrent(client, generation)) return;
@@ -993,12 +1007,15 @@ export class WhatsAppWebAdapter implements MessagingClient {
         return;
       }
       const body = rawBody;
-      if (body.trim() === '') {
-        this.logAdaptationRejected('EMPTY_BODY', { messageType, messageHash });
-        return;
-      }
       if (body.length > this.options.maxMessageLength) {
         this.logAdaptationRejected('MESSAGE_TOO_LONG', { messageType });
+        return;
+      }
+      await this.botIdentityResolution;
+      const mentionedIds = this.extractNativeMentionIds(message);
+      const botMentionId = mentionedIds.find((identifier) => this.isOwnIdentifier(identifier));
+      if (body.trim() === '' && botMentionId === undefined) {
+        this.logAdaptationRejected('EMPTY_BODY', { messageType, messageHash });
         return;
       }
 
@@ -1064,14 +1081,15 @@ export class WhatsAppWebAdapter implements MessagingClient {
       const administratorId = isGroup
         ? await this.resolveGroupAdministratorIdentity(chatId, participantId)
         : null;
-      const botMention = this.detectBotMention(message);
       const isReplyToBot = await this.detectReplyToBot(message);
+      const timestampMs = normalizeMessageTimestamp(readUnknown(message, 'timestamp'));
 
       const incoming: IncomingMessage = {
         id: messageIdentity.deduplicationId,
         ...(messageIdentity.replyToMessageId === undefined
           ? {}
           : { replyToMessageId: messageIdentity.replyToMessageId }),
+        ...(timestampMs === null ? {} : { timestampMs }),
         chatId,
         participantId: participantId ?? `unknown:${messageIdentity.deduplicationId}`,
         administratorId,
@@ -1085,8 +1103,9 @@ export class WhatsAppWebAdapter implements MessagingClient {
         isBroadcast: false,
         isChannel: false,
         hasMedia: false,
-        mentionsBot: botMention.detected,
-        ...(botMention.token === undefined ? {} : { botMentionToken: botMention.token }),
+        mentionedIds,
+        mentionsBot: botMentionId !== undefined,
+        ...(botMentionId === undefined ? {} : { botMentionToken: mentionToken(botMentionId) }),
         isReplyToBot,
       };
       const context = {
@@ -1096,6 +1115,8 @@ export class WhatsAppWebAdapter implements MessagingClient {
         userHash: this.hash(incoming.participantId),
         groupIdSource,
         identitySource: messageIdentity.source,
+        invocationDetected: botMentionId !== undefined,
+        nativeMentionCount: mentionedIds.length,
       };
       this.logger.info(
         {
@@ -1436,34 +1457,21 @@ export class WhatsAppWebAdapter implements MessagingClient {
     }
   }
 
-  private detectBotMention(message: object): { detected: boolean; token?: string } {
-    if (this.botIdentifiers.size === 0) return { detected: false };
+  private extractNativeMentionIds(message: object): string[] {
     const candidates: unknown[] = [];
-    const directKeys = [
-      'mentionedIds',
-      'mentionedJidList',
-      'mentionedLidList',
-      'mentions',
-      'mentionedJids',
-    ];
-    for (const key of directKeys) {
-      const val = readUnknown(message, key);
-      if (Array.isArray(val)) candidates.push(...val);
-    }
+    const publicMentionIds = readUnknown(message, 'mentionedIds');
+    if (Array.isArray(publicMentionIds)) candidates.push(...publicMentionIds);
     const data = readUnknown(message, '_data');
     if (typeof data === 'object' && data !== null) {
-      for (const key of directKeys) {
-        const val = readUnknown(data, key);
-        if (Array.isArray(val)) candidates.push(...val);
-      }
+      const rawMentionIds = readUnknown(data, 'mentionedJidList');
+      if (Array.isArray(rawMentionIds)) candidates.push(...rawMentionIds);
     }
+    const identifiers = new Set<string>();
     for (const entry of candidates) {
       const id = getSerializedId(entry);
-      if (id !== null && this.isOwnIdentifier(id)) {
-        return { detected: true, token: mentionToken(id) };
-      }
+      if (id !== null && isParticipantId(id)) identifiers.add(id);
     }
-    return { detected: false };
+    return [...identifiers];
   }
 
   private async detectReplyToBot(message: object): Promise<boolean> {
@@ -1494,6 +1502,54 @@ export class WhatsAppWebAdapter implements MessagingClient {
       const id = getSerializedId(readUnknown(info, key));
       if (id === null) continue;
       for (const alias of whatsappIdentityAliases(id)) this.botIdentifiers.add(alias);
+    }
+  }
+
+  private async resolveBotIdentifierAliases(
+    client: WhatsAppClient,
+    generation: number,
+  ): Promise<void> {
+    const seedIdentifiers = [
+      ...new Set(
+        [...this.botIdentifiers]
+          .map((identifier) => {
+            const phone = canonicalPhoneIdentity(identifier);
+            if (phone !== null) return phone;
+            return classifyWhatsAppId(identifier) === 'lid' ? identifier : null;
+          })
+          .filter((identifier): identifier is string => identifier !== null),
+      ),
+    ];
+    if (seedIdentifiers.length === 0) return;
+    try {
+      const mappings = await client.getContactLidAndPhone(seedIdentifiers);
+      if (!this.isCurrent(client, generation)) return;
+      for (const mapping of mappings) {
+        for (const value of [mapping.lid, mapping.pn]) {
+          for (const alias of whatsappIdentityAliases(value)) this.botIdentifiers.add(alias);
+        }
+      }
+      this.logger.info(
+        {
+          operation: 'botIdentityAliasesResolved',
+          identifierCount: this.botIdentifiers.size,
+          hasPhoneIdentity: [...this.botIdentifiers].some(
+            (identifier) => canonicalPhoneIdentity(identifier) !== null,
+          ),
+          hasLidIdentity: [...this.botIdentifiers].some((identifier) =>
+            identifier.endsWith('@lid'),
+          ),
+        },
+        'Se resolvieron las identidades seguras de la cuenta vinculada',
+      );
+    } catch (error) {
+      this.logger.warn(
+        {
+          ...serializeError(error, 'BOT_IDENTITY_ALIAS_RESOLUTION_FAILED', false),
+          operation: 'botIdentityAliasesResolutionFailed',
+        },
+        'No se pudo resolver una identidad alternativa de la cuenta vinculada',
+      );
     }
   }
 
@@ -1546,6 +1602,18 @@ function readString(value: object, key: string): string | null {
 function readBoolean(value: object, key: string): boolean | null {
   const result = readUnknown(value, key);
   return typeof result === 'boolean' ? result : null;
+}
+
+function normalizeMessageTimestamp(value: unknown): number | null {
+  const numeric =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && /^\d{1,16}$/u.test(value)
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  const milliseconds = numeric < 10_000_000_000 ? numeric * 1000 : numeric;
+  return Number.isSafeInteger(milliseconds) ? milliseconds : null;
 }
 
 function safeChatId(value: unknown): string | null {

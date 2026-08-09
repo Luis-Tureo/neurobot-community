@@ -1,4 +1,4 @@
-import { detectBotActivation } from '../src/core/bot-activation.js';
+import { detectBotActivation, detectBotInvocation } from '../src/core/bot-activation.js';
 import type { IncomingMessage } from '../src/domain/types.js';
 
 function message(body: string, overrides: Partial<IncomingMessage> = {}): IncomingMessage {
@@ -69,11 +69,100 @@ describe('detector central de activación', () => {
   );
 
   it('acepta alias adicionales configurados sin coincidencias parciales', () => {
-    expect(detectBotActivation(message('@neuroayuda normas'), null, ['@neurobot', '@neuroayuda'])).toMatchObject({
+    expect(
+      detectBotActivation(message('@neuroayuda normas'), null, ['@neurobot', '@neuroayuda']),
+    ).toMatchObject({
       type: 'TEXT_ALIAS',
       question: 'normas',
       detectedAlias: '@neuroayuda',
     });
-    expect(detectBotActivation(message('@neuroayudante normas'), null, ['@neuroayuda']).type).toBe('NOT_ACTIVATED');
+    expect(detectBotActivation(message('@neuroayudante normas'), null, ['@neuroayuda']).type).toBe(
+      'NOT_ACTIVATED',
+    );
+  });
+});
+
+describe('invocación unificada de Neurobot', () => {
+  const identity = {
+    whatsappIdentifiers: ['56900000000@c.us', 'bot-neurobot@lid'],
+    aliases: ['@neurobot'],
+  } as const;
+
+  it.each([
+    ['@neurobot hola', 'alias', 'hola'],
+    ['@Neurobot hola', 'alias', 'hola'],
+    ['@NEUROBOT ¿cuál es tu número?', 'alias', '¿cuál es tu número?'],
+  ])('normaliza el alias seguro %s', (body, method, cleanedText) => {
+    expect(detectBotInvocation(message(body), identity)).toMatchObject({
+      invoked: true,
+      method,
+      cleanedText,
+    });
+  });
+
+  it('usa la metadata nativa aunque no exista @neurobot en el texto', () => {
+    expect(
+      detectBotInvocation(
+        message('@56900000000 ¿de qué se trata este grupo?', {
+          mentionedIds: ['bot-neurobot@lid'],
+        }),
+        identity,
+      ),
+    ).toMatchObject({
+      invoked: true,
+      method: 'native_mention',
+      cleanedText: '¿de qué se trata este grupo?',
+      detectedMentionIds: ['bot-neurobot@lid'],
+    });
+  });
+
+  it.each([
+    ['+56900000000 hola', 'hola'],
+    ['56900000000 hola', 'hola'],
+    ['+56 9 0000 0000 hola', 'hola'],
+    ['+56-9-0000-0000 ¿cuáles son las reglas?', '¿cuáles son las reglas?'],
+    ['56900000000@c.us hola', 'hola'],
+    ['56900000000@s.whatsapp.net hola', 'hola'],
+  ])('reconoce solo el teléfono completo configurado: %s', (body, cleanedText) => {
+    expect(detectBotInvocation(message(body), identity)).toMatchObject({
+      invoked: true,
+      method: 'phone_number',
+      cleanedText,
+      normalizedPhoneNumber: '56900000000@c.us',
+    });
+  });
+
+  it.each([
+    '+56911111111 hola',
+    'El número +56900000000 es de Pedro',
+    '569000000001 hola',
+    'Hola a todos',
+  ])('no activa números ajenos ni menciones contextuales: %s', (body) => {
+    expect(detectBotInvocation(message(body), identity).invoked).toBe(false);
+  });
+
+  it('prioriza la mención nativa y limpia alias, mención y teléfono una sola vez', () => {
+    expect(
+      detectBotInvocation(
+        message('@neurobot @56900000000 +56 9 0000 0000 ¿qué es este grupo?', {
+          mentionedIds: ['bot-neurobot@lid'],
+        }),
+        identity,
+      ),
+    ).toMatchObject({
+      invoked: true,
+      method: 'native_mention',
+      cleanedText: '¿qué es este grupo?',
+      detectedMethods: ['native_mention', 'alias', 'phone_number'],
+    });
+  });
+
+  it('devuelve una pregunta vacía segura para una mención sin texto adicional', () => {
+    expect(
+      detectBotInvocation(
+        message('@56900000000', { mentionedIds: ['56900000000@c.us'] }),
+        identity,
+      ),
+    ).toMatchObject({ invoked: true, method: 'native_mention', cleanedText: '' });
   });
 });

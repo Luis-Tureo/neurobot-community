@@ -158,7 +158,7 @@ export class PollService {
       return result;
     }
 
-    const groups = this.database.listActiveBotGroupIds(this.repository.botId);
+    const groups = this.database.listAutomationGroupIds(this.repository.botId);
     const scheduledTemplates = dueSchedule.templateIds
       .map((templateId) => this.repository.template(templateId))
       .filter(

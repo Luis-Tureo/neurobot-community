@@ -246,21 +246,21 @@ describe('servicio y programador de encuestas', () => {
     expect(toSantiagoDateTime(new Date('2026-07-06T17:00:00Z')).time).toBe('13:00');
   });
 
-  it('envía una encuesta nativa por grupo y una sola vez al día', async () => {
+  it('envía encuestas solo a los grupos seleccionados y una sola vez al día', async () => {
     const { database, repository, client, service } = createSubject();
     try {
       enablePolls(repository);
       database.upsertDetectedGroup('segundo@g.us', 'Segundo grupo');
       database.setGroupAuthorized('segundo@g.us', true);
+      database.replaceAutomationGroupIds('neurobot', ['segundo@g.us']);
       await service.runDueTasks();
       await service.runDueTasks();
-      expect(client.sentPolls).toHaveLength(2);
-      expect(client.sentPolls[0]).toMatchObject({ chatId: GROUP_ID, allowMultipleAnswers: false });
-      expect(client.sentPolls[1]?.question).toBe(client.sentPolls[0]?.question);
-      expect(database.listPollSendHistory()).toMatchObject([
-        { status: 'SENT', attempts: 1 },
-        { status: 'SENT', attempts: 1 },
-      ]);
+      expect(client.sentPolls).toHaveLength(1);
+      expect(client.sentPolls[0]).toMatchObject({
+        chatId: 'segundo@g.us',
+        allowMultipleAnswers: false,
+      });
+      expect(database.listPollSendHistory()).toMatchObject([{ status: 'SENT', attempts: 1 }]);
     } finally {
       database.close();
     }
