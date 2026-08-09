@@ -207,9 +207,29 @@ function installDigestDesktopLayoutAdjustment() {
   const style = document.createElement('style');
   style.id = 'digest-desktop-layout-adjustment';
   style.textContent = `
-    #status-quick-actions > button.status-switch {
-      order: 1;
-      justify-self: end;
+    @media (min-width: 821px) {
+      .status-action-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        overflow-x: visible;
+      }
+
+      .status-action-row > #restart-connection,
+      .status-action-row > #change-bot-number,
+      #status-quick-actions > button.danger {
+        flex: 0 1 13.5rem;
+        width: 13.5rem;
+        min-width: 11rem;
+      }
+
+      #status-quick-actions > button.status-switch {
+        order: 1;
+        flex: 0 0 7.25rem;
+        width: 7.25rem;
+        min-width: 7.25rem;
+        margin-left: auto;
+      }
     }
 
     @media (min-width: 1101px) {
