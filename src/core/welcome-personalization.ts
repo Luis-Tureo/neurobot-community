@@ -19,6 +19,9 @@ export const WELCOME_TEMPLATE_VARIABLES = [
   'botAlias',
 ] as const;
 
+const PLURAL_UNKNOWN_WELCOME_NAME = 'nuevos integrantes';
+const UNKNOWN_WELCOME_NAME_PATTERN = /^(?:nuevo\/a|nueva\/o|nuevo|nueva)\s+integrante$/iu;
+
 type ContactLike = {
   id?: { _serialized?: unknown } | string | null;
   number?: unknown;
@@ -111,16 +114,48 @@ export function renderWelcomeTemplate(
 ): string {
   if (template.length === 0) return '';
   const allowed = new Set<string>(WELCOME_TEMPLATE_VARIABLES);
-  return template.normalize('NFKC').replace(/\{([^{}]+)\}/gu, (match, key: string) => {
+  const rendered = template.normalize('NFKC').replace(/\{([^{}]+)\}/gu, (match, key: string) => {
     if (!allowed.has(key)) return match;
     return values[key as keyof typeof values] ?? '';
   });
+  const recipientLabel = values.usuarios ?? values.usuario ?? values.name;
+  if (!representsMultipleWelcomeRecipients(recipientLabel)) return rendered;
+  return rendered.replace(/\bbienvenido\/a\b/giu, pluralizeWelcomeGreeting);
 }
 
 export function joinWelcomeNames(names: string[]): string {
   if (names.length <= 1) return names[0] ?? '';
+  const publicNames = names.filter((name) => !isUnknownWelcomeName(name));
+  const unknownCount = names.length - publicNames.length;
+  if (unknownCount > 0) {
+    return joinSpanishList([...publicNames, PLURAL_UNKNOWN_WELCOME_NAME]);
+  }
+  return joinSpanishList(names);
+}
+
+function joinSpanishList(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
   if (names.length === 2) return `${names[0]} y ${names[1]}`;
   return `${names.slice(0, -1).join(', ')} y ${names.at(-1)}`;
+}
+
+function isUnknownWelcomeName(value: string): boolean {
+  return UNKNOWN_WELCOME_NAME_PATTERN.test(value.replace(/^@/u, '').normalize('NFKC').trim());
+}
+
+function representsMultipleWelcomeRecipients(value: string | undefined): boolean {
+  if (value === undefined || value.length === 0) return false;
+  return (
+    value.toLocaleLowerCase('es').includes(PLURAL_UNKNOWN_WELCOME_NAME) ||
+    value.includes(', ') ||
+    value.includes(' y ')
+  );
+}
+
+function pluralizeWelcomeGreeting(match: string): string {
+  if (match === match.toUpperCase()) return 'BIENVENIDOS';
+  if (match[0] === match[0]?.toUpperCase()) return 'Bienvenidos';
+  return 'bienvenidos';
 }
 
 function serializedContactId(value: ContactLike['id']): string | null {
