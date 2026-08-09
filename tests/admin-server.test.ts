@@ -323,6 +323,11 @@ describe('API administrativa', () => {
     expect(denied.statusCode).toBe(403);
 
     configuration.welcome.enabled = true;
+    configuration.welcome.batchWindowSeconds = 300;
+    configuration.welcome.groupSimultaneous = false;
+    configuration.welcome.enableRealMention = false;
+    configuration.welcome.multipleJoinMode = 'INDIVIDUAL';
+    configuration.welcome.sendDelaySeconds = 60;
     configuration.dailyGreeting.sendTime = '09:10';
     const updated = await injectAuthenticated(app, auth, {
       method: 'PATCH',
@@ -331,7 +336,14 @@ describe('API administrativa', () => {
     });
     expect(updated.statusCode).toBe(200);
     expect(database.getAutomaticMessageConfiguration()).toMatchObject({
-      welcome: { enabled: true },
+      welcome: {
+        enabled: true,
+        batchWindowSeconds: 10,
+        groupSimultaneous: true,
+        enableRealMention: true,
+        multipleJoinMode: 'GROUPED',
+        sendDelaySeconds: 10,
+      },
       dailyGreeting: { sendTime: '09:10' },
     });
     expect(database.listAutomationGroupIds('neurobot')).toEqual(['grupo-automatico@g.us']);
@@ -449,7 +461,7 @@ describe('API administrativa', () => {
     expect(sent.body).not.toContain('grupo-manual@g.us');
   });
 
-  it('previsualiza y persiste la configuración de bienvenida por grupo', async () => {
+  it('previsualiza la bienvenida y elimina la segunda configuración por grupo', async () => {
     database.upsertDetectedGroup('grupo-bienvenida@g.us', 'Grupo bienvenida');
     database.setGroupAuthorized('grupo-bienvenida@g.us', true);
     const auth = await login(app);
@@ -479,24 +491,13 @@ describe('API administrativa', () => {
         customTemplate: 'Hola {usuarios} a {grupo}',
       },
     });
-    expect(groupUpdate.statusCode).toBe(200);
-    expect(database.getWelcomeGroupSetting(groupKey)).toEqual({
-      enabled: true,
-      inheritAssistantTemplate: false,
-      customTemplate: 'Hola {usuarios} a {grupo}',
-    });
+    expect(groupUpdate.statusCode).toBe(404);
     const refreshed = await app.inject({
       method: 'GET',
       url: '/api/automatic-messages',
       headers: { cookie: auth.cookie },
     });
-    expect(refreshed.json().welcomeGroups).toContainEqual({
-      key: groupKey,
-      name: 'Grupo bienvenida',
-      enabled: true,
-      inheritAssistantTemplate: false,
-      customTemplate: 'Hola {usuarios} a {grupo}',
-    });
+    expect(refreshed.json()).not.toHaveProperty('welcomeGroups');
     expect(JSON.stringify(database.getTechnicalEvents())).not.toContain('María');
   });
 

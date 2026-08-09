@@ -265,7 +265,21 @@ describe('mensajes automáticos', () => {
         participantIds: ['56922222222@c.us', '56933333333@c.us'],
         eventId: 'join-2',
       });
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(client.sentMessages).toHaveLength(1);
+      const restarted = new AutomaticMessageService(
+        database,
+        client,
+        createLogger('silent'),
+        new Anonymizer('x'.repeat(32)),
+        { retryDelayMs: 0, sleep: async () => undefined },
+      );
+      await restarted.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['56911111111@c.us'],
+        eventId: 'join-1',
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages).toHaveLength(1);
       expect(database.listScheduledDeliveries()[0]).toMatchObject({
         taskType: 'WELCOME',
@@ -301,7 +315,7 @@ describe('mensajes automáticos', () => {
         participantIds: ['persona-no-seleccionada@lid'],
         eventId: 'not-selected',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages).toHaveLength(0);
       expect(
         database
@@ -339,7 +353,7 @@ describe('mensajes automáticos', () => {
         eventId: 'bot-added',
         subtype: 'linked_group_join',
       });
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages).toHaveLength(0);
 
       await service.handleGroupJoin({
@@ -348,7 +362,7 @@ describe('mensajes automáticos', () => {
         eventId: 'new-after-bot',
         subtype: 'add',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages).toHaveLength(1);
     } finally {
       service.stop();
@@ -356,40 +370,34 @@ describe('mensajes automáticos', () => {
     }
   });
 
-  it('agrupa nuevos ingresos y limita las bienvenidas a una por minuto por grupo', async () => {
+  it('vuelve a dar la bienvenida cuando la misma persona sale y reingresa', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-05T12:00:00Z'));
     const { database, client, service } = createSubject();
     try {
-      enableWelcome(database, 1);
+      enableWelcome(database);
       await service.handleGroupJoin({
         groupId: GROUP_ID,
-        participantIds: ['primero@lid'],
+        participantIds: ['anita@lid'],
         eventId: 'first',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages).toHaveLength(1);
 
+      service.handleGroupLeave({
+        groupId: GROUP_ID,
+        type: 'LEAVE',
+        botAffected: false,
+        participantIds: ['anita@lid'],
+      });
       await service.handleGroupJoin({
         groupId: GROUP_ID,
-        participantIds: ['segundo@lid'],
-        eventId: 'second',
+        participantIds: ['anita@lid'],
+        eventId: 'reentry',
       });
       await vi.advanceTimersByTimeAsync(10_000);
-      await service.handleGroupJoin({
-        groupId: GROUP_ID,
-        participantIds: ['tercero@lid'],
-        eventId: 'third',
-      });
-      await vi.advanceTimersByTimeAsync(50_000);
-
       expect(client.sentMessages).toHaveLength(2);
-      expect(client.sentMessages[1]?.text).toContain('¡Bienvenidos/as');
-      expect(
-        database
-          .getTechnicalEvents()
-          .some((event) => event.event_type === 'WELCOME_SENT' && event.item_count === 2),
-      ).toBe(true);
+      expect(client.sentMessages[1]?.mentionIds).toEqual(['anita@lid']);
     } finally {
       service.stop();
       database.close();
@@ -414,7 +422,7 @@ describe('mensajes automáticos', () => {
         ],
         eventId: 'public-name',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages).toHaveLength(1);
       expect(client.sentMessages[0]).toMatchObject({
         chatId: GROUP_ID,
@@ -428,34 +436,150 @@ describe('mensajes automáticos', () => {
     }
   });
 
-  it('agrupa tres participantes y sus menciones en un solo mensaje', async () => {
+  it('agrupa ingresos a los 0, 5 y 8 segundos desde que se abre la ventana', async () => {
     vi.useFakeTimers();
     const { database, client, service } = createSubject();
     try {
       enableWelcome(database, 5);
-      const participantIds = ['maria@lid', 'pedro@lid', 'camila@lid'];
       await service.handleGroupJoin({
         groupId: GROUP_ID,
-        participantIds,
-        participants: ['María', 'Pedro', 'Camila'].map((displayName, index) => ({
-          participantId: participantIds[index] as string,
-          displayName,
-          nameSource: 'PUSHNAME',
-          mentionId: participantIds[index] as string,
-        })),
-        eventId: 'three-participants',
+        participantIds: ['maria@lid'],
+        participants: [
+          {
+            participantId: 'maria@lid',
+            displayName: 'María',
+            nameSource: 'PUSHNAME',
+            mentionId: 'maria@lid',
+          },
+        ],
+        eventId: 'maria',
       });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['pedro@lid'],
+        participants: [
+          {
+            participantId: 'pedro@lid',
+            displayName: 'Pedro',
+            nameSource: 'PUSHNAME',
+            mentionId: 'pedro@lid',
+          },
+        ],
+        eventId: 'pedro',
+      });
+      await vi.advanceTimersByTimeAsync(3_000);
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['camila@lid'],
+        participants: [
+          {
+            participantId: 'camila@lid',
+            displayName: 'Camila',
+            nameSource: 'PUSHNAME',
+            mentionId: 'camila@lid',
+          },
+        ],
+        eventId: 'camila',
+      });
+      expect(client.sentMessages).toHaveLength(0);
       await vi.advanceTimersByTimeAsync(2_000);
       expect(client.sentMessages).toHaveLength(1);
       expect(client.sentMessages[0]?.text).toContain('María, Pedro y Camila');
-      expect(client.sentMessages[0]?.mentionIds).toEqual(participantIds);
+      expect(client.sentMessages[0]?.mentionIds).toEqual(['maria@lid', 'pedro@lid', 'camila@lid']);
     } finally {
       service.stop();
       database.close();
     }
   });
 
-  it('envía nombres sin metadata cuando la mención está desactivada', async () => {
+  it('mantiene buffers independientes para dos grupos seleccionados', async () => {
+    vi.useFakeTimers();
+    const { database, client, service } = createSubject();
+    const secondGroupId = 'grupo-b@g.us';
+    try {
+      database.upsertDetectedGroup(secondGroupId, 'Grupo B');
+      database.setGroupAuthorized(secondGroupId, true);
+      const anonymizer = new Anonymizer('x'.repeat(32));
+      database.markWelcomeGroupBaselineInitialized(anonymizer.identifier(secondGroupId));
+      database.replaceAutomationGroupIds('neurobot', [GROUP_ID, secondGroupId]);
+      enableWelcome(database);
+
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['anita@lid'],
+        eventId: 'group-a-event',
+      });
+      await service.handleGroupJoin({
+        groupId: secondGroupId,
+        participantIds: ['pedro@lid'],
+        eventId: 'group-b-event',
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(client.sentMessages).toHaveLength(2);
+      expect(client.sentMessages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ chatId: GROUP_ID, mentionIds: ['anita@lid'] }),
+          expect.objectContaining({ chatId: secondGroupId, mentionIds: ['pedro@lid'] }),
+        ]),
+      );
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
+  it('envía el evento directo aunque falle el descubrimiento de grupos', async () => {
+    vi.useFakeTimers();
+    const { database, client, service } = createSubject(false);
+    try {
+      enableWelcome(database);
+      client.listGroupsFailures.push(new Error('getChats unavailable'));
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['anita@lid'],
+        eventId: 'direct-event-without-chat-snapshot',
+      });
+      await expect(client.listGroups()).rejects.toThrow('getChats unavailable');
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]?.mentionIds).toEqual(['anita@lid']);
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
+  it('no aplica silencio ni backoff antispam a una bienvenida válida', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-05T12:00:00Z'));
+    const { database, client, service } = createSubject();
+    try {
+      enableWelcome(database);
+      database.setSilence(GROUP_ID, new Date('2026-01-05T13:00:00Z'));
+      database.setAutomaticGroupBackoff(
+        GROUP_ID,
+        new Date('2026-01-05T13:00:00Z'),
+        'LEGACY_SPAM_BACKOFF',
+      );
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['anita@lid'],
+        eventId: 'welcome-ignores-spam-controls',
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]?.mentionIds).toEqual(['anita@lid']);
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
+  it('mantiene obligatoria la mención nativa aunque una configuración antigua diga lo contrario', async () => {
     vi.useFakeTimers();
     const { database, client, service } = createSubject();
     try {
@@ -476,16 +600,16 @@ describe('mensajes automáticos', () => {
         ],
         eventId: 'mention-disabled',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages[0]?.text).toContain('María');
-      expect(client.sentMessages[0]?.mentionIds).toBeUndefined();
+      expect(client.sentMessages[0]?.mentionIds).toEqual(['persona@lid']);
     } finally {
       service.stop();
       database.close();
     }
   });
 
-  it('usa el nombre cuando el cliente no soporta menciones nativas', async () => {
+  it('falla de forma explícita cuando el cliente no soporta menciones nativas', async () => {
     vi.useFakeTimers();
     const { database, client, service } = createSubject();
     try {
@@ -504,10 +628,13 @@ describe('mensajes automáticos', () => {
         ],
         eventId: 'mention-unsupported',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
-      expect(client.sentMessages).toHaveLength(1);
-      expect(client.sentMessages[0]?.text).toContain('María');
-      expect(client.sentMessages[0]?.mentionIds).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(client.sentMessages).toHaveLength(0);
+      expect(database.listScheduledDeliveries()[0]).toMatchObject({
+        status: 'FAILED',
+        attempts: 2,
+        errorCode: 'WELCOME_NATIVE_MENTION_UNAVAILABLE',
+      });
     } finally {
       service.stop();
       database.close();
@@ -524,7 +651,7 @@ describe('mensajes automáticos', () => {
         participantIds: ['56912345678@c.us'],
         eventId: 'missing-public-name',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages[0]?.text).toContain('nuevo/a integrante');
       expect(client.sentMessages[0]?.text).not.toContain('56912345678');
       expect(client.sentMessages[0]?.text).not.toContain('@c.us');
@@ -555,7 +682,7 @@ describe('mensajes automáticos', () => {
         ],
         eventId: 'legacy-template',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages[0]?.text).toBe('Texto personalizado conservado.');
     } finally {
       service.stop();
@@ -584,7 +711,7 @@ describe('mensajes automáticos', () => {
         ],
         eventId: 'legacy-heading',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages).toHaveLength(1);
       expect(client.sentMessages[0]?.text).toBe('¡Bienvenido/a Luis a Grupo autorizado! 👋');
     } finally {
@@ -623,14 +750,10 @@ describe('mensajes automáticos', () => {
         eventId: 'real-group-join',
         source: 'group_join',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(10_000);
 
       expect(client.sentMessages).toHaveLength(1);
-      expect(
-        database
-          .getTechnicalEvents()
-          .some((event) => event.event_type === 'WELCOME_DUPLICATE_SUPPRESSED'),
-      ).toBe(true);
+      expect(client.sentMessages[0]?.mentionIds).toEqual(['nuevo@lid']);
     } finally {
       service.stop();
       database.close();
@@ -663,15 +786,11 @@ describe('mensajes automáticos', () => {
         eventId: 'reconciliation-phone',
         source: 'reconciliation',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(10_000);
 
       expect(client.sentMessages).toHaveLength(1);
       expect(client.sentMessages[0]?.text).toContain('Luis');
-      expect(
-        database
-          .getTechnicalEvents()
-          .some((event) => event.event_type === 'WELCOME_DUPLICATE_SUPPRESSED'),
-      ).toBe(true);
+      expect(client.sentMessages[0]?.mentionIds).toEqual(['persona@lid']);
     } finally {
       service.stop();
       database.close();
@@ -695,7 +814,7 @@ describe('mensajes automáticos', () => {
         })),
         eventId: 'many',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages).toHaveLength(1);
       expect(client.sentMessages[0]?.text).toContain(
         'Persona 1, Persona 2, Persona 3, Persona 4, Persona 5 y Persona 6',
@@ -707,7 +826,7 @@ describe('mensajes automáticos', () => {
     }
   });
 
-  it('si falla la mención envía la bienvenida sin cancelar el saludo', async () => {
+  it('reintenta una vez la misma mención nativa si WhatsApp falla', async () => {
     vi.useFakeTimers();
     const { database, client, service } = createSubject();
     try {
@@ -728,21 +847,18 @@ describe('mensajes automáticos', () => {
         ],
         eventId: 'mention-fallback',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages).toHaveLength(1);
       expect(client.sentMessages[0]?.text).toContain('María');
-      expect(
-        database
-          .getTechnicalEvents()
-          .some((event) => event.event_type === 'WELCOME_REAL_MENTION_FAILED'),
-      ).toBe(true);
+      expect(client.sentMessages[0]?.mentionIds).toEqual(['persona@lid']);
+      expect(client.sendMessageWithMentions).toHaveBeenCalledTimes(2);
     } finally {
       service.stop();
       database.close();
     }
   });
 
-  it('usa la plantilla específica del grupo antes de la global', async () => {
+  it('ignora la configuración heredada por grupo y usa la plantilla general', async () => {
     vi.useFakeTimers();
     const { database, client, service } = createSubject();
     try {
@@ -772,16 +888,17 @@ describe('mensajes automáticos', () => {
         ],
         eventId: 'off',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
-      expect(client.sentMessages[0]?.text).toBe('Hola María a Grupo autorizado');
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(client.sentMessages[0]?.text).toContain('¡Bienvenido/a María a Grupo autorizado!');
       expect(client.sentMessages[0]?.text).not.toContain('Grupo B');
+      expect(client.sentMessages[0]?.text).not.toContain('Hola María');
     } finally {
       service.stop();
       database.close();
     }
   });
 
-  it('no envía cuando la bienvenida está desactivada para el grupo', async () => {
+  it('ignora el apagado heredado por grupo porque manda el selector general', async () => {
     vi.useFakeTimers();
     const { database, client, service } = createSubject();
     try {
@@ -797,11 +914,9 @@ describe('mensajes automáticos', () => {
         participantIds: ['persona@lid'],
         eventId: 'group-disabled',
       });
-      await vi.advanceTimersByTimeAsync(2_000);
-      expect(client.sentMessages).toHaveLength(0);
-      expect(
-        database.getTechnicalEvents().some((event) => event.event_type === 'WELCOME_DISABLED'),
-      ).toBe(true);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]?.mentionIds).toEqual(['persona@lid']);
       const participantHash = new Anonymizer('x'.repeat(32)).fingerprint([
         'joined-participant',
         GROUP_ID,
@@ -854,7 +969,7 @@ describe('mensajes automáticos', () => {
         participantIds: ['56911111111@c.us'],
         eventId: 'unauthorized',
       });
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages).toHaveLength(0);
       expect(
         database
@@ -883,6 +998,28 @@ describe('mensajes automáticos', () => {
     }
   });
 
+  it('limpia un lote pendiente aunque el planificador todavía no se haya iniciado', async () => {
+    vi.useFakeTimers();
+    const { database, client, service } = createSubject();
+    try {
+      enableWelcome(database);
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['anita@lid'],
+        eventId: 'pending-before-stop',
+      });
+      expect(vi.getTimerCount()).toBe(1);
+
+      service.stop();
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(client.sentMessages).toHaveLength(0);
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
   it('crea una línea base sin saludar miembros antiguos y detecta sólo uno nuevo', async () => {
     vi.useFakeTimers();
     const { database, client, service } = createSubject(false);
@@ -898,7 +1035,7 @@ describe('mensajes automáticos', () => {
       ];
       service.start();
       await service.reconcileWelcomeParticipants();
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages).toHaveLength(0);
 
       client.groups[0] = {
@@ -908,7 +1045,7 @@ describe('mensajes automáticos', () => {
         participantIds: ['antiguo@lid', 'nuevo@lid'],
       };
       await service.reconcileWelcomeParticipants();
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(client.sentMessages).toHaveLength(1);
       expect(client.sentMessages[0]?.chatId).toBe(GROUP_ID);
       expect(
@@ -958,7 +1095,7 @@ describe('mensajes automáticos', () => {
       ];
 
       await service.reconcileWelcomeParticipants();
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(10_000);
 
       expect(client.sentMessages).toHaveLength(0);
       const newGroupHash = new Anonymizer('x'.repeat(32)).identifier(newGroupId);
@@ -976,7 +1113,7 @@ describe('mensajes automáticos', () => {
         participantIds: ['existente-uno@lid', 'existente-dos@lid', 'ingreso-posterior@lid'],
       };
       await service.reconcileWelcomeParticipants();
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(10_000);
 
       expect(client.sentMessages).toHaveLength(1);
       expect(client.sentMessages[0]?.chatId).toBe(newGroupId);

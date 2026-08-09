@@ -828,10 +828,27 @@ export class WhatsAppWebAdapter implements MessagingClient {
       if (!this.isCurrent(client, generation)) return;
       const groupId = getSerializedId(notification.chatId);
       if (!isSupportedGroupId(groupId)) return;
-      const botAffected = Array.isArray(notification.recipientIds)
-        ? notification.recipientIds.some((identifier) => this.isOwnIdentifier(identifier))
-        : false;
-      await this.notifyGroupChanged(groupId, 'LEAVE', botAffected, generation);
+      const rawParticipantIds = Array.isArray(notification.recipientIds)
+        ? notification.recipientIds.map(getSerializedId).filter(isParticipantId)
+        : [];
+      const botAffected = rawParticipantIds.some((identifier) => this.isOwnIdentifier(identifier));
+      const canonicalIdentities = await this.resolveCanonicalParticipantIdentities(
+        client,
+        rawParticipantIds,
+      );
+      const participantIds = [
+        ...new Set(
+          rawParticipantIds
+            .map(
+              (identifier) =>
+                canonicalIdentities.get(normalizeParticipantId(identifier)) ??
+                canonicalPhoneIdentity(identifier) ??
+                normalizeParticipantId(identifier),
+            )
+            .filter((identifier) => !this.isOwnIdentifier(identifier)),
+        ),
+      ];
+      await this.notifyGroupChanged(groupId, 'LEAVE', botAffected, generation, participantIds);
     });
     client.on('group_update', async (notification: GroupNotification) => {
       if (!this.isCurrent(client, generation)) return;
@@ -1364,7 +1381,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
       }
 
       if (collapsedAliases > 0) {
-        this.logger.info(
+        this.logger.debug(
           {
             operation: 'WELCOME_IDENTITY_ALIASES_COLLAPSED',
             aliasCount: collapsedAliases,
@@ -1438,10 +1455,16 @@ export class WhatsAppWebAdapter implements MessagingClient {
     type: 'JOIN' | 'LEAVE' | 'UPDATE',
     botAffected: boolean,
     generation: number,
+    participantIds: string[] = [],
   ): Promise<void> {
     if (this.events?.onGroupChanged === undefined) return;
     try {
-      await this.events.onGroupChanged({ groupId, type, botAffected });
+      await this.events.onGroupChanged({
+        groupId,
+        type,
+        botAffected,
+        ...(participantIds.length === 0 ? {} : { participantIds }),
+      });
     } catch (error) {
       this.logger.error(
         {

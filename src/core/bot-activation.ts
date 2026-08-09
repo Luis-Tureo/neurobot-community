@@ -49,6 +49,7 @@ export function detectBotInvocation(
   message: IncomingMessage,
   botIdentity: BotInvocationIdentity,
 ): BotInvocationResult {
+  const body = normalizeInvocationText(message.body);
   const aliases = normalizedAliases(botIdentity.aliases);
   const identityAliases = new Set(
     botIdentity.whatsappIdentifiers.flatMap((identifier) => whatsappIdentityAliases(identifier)),
@@ -72,9 +73,9 @@ export function detectBotInvocation(
       ])
     : [];
 
-  let leading = stripLeadingInvocations(message.body, aliases, phoneIdentities, nativeTokens);
+  let leading = stripLeadingInvocations(body, aliases, phoneIdentities, nativeTokens);
   if (nativeMentionDetected && !leading.nativeMentionRemoved) {
-    const withoutNativeMention = removeNativeMention(message.body, nativeTokens);
+    const withoutNativeMention = removeNativeMention(body, nativeTokens);
     leading = mergeLeadingResults(
       leading,
       stripLeadingInvocations(withoutNativeMention, aliases, phoneIdentities, nativeTokens),
@@ -99,7 +100,7 @@ export function detectBotInvocation(
     };
   }
 
-  const normalizedBody = message.body.normalize('NFKC').toLocaleLowerCase('es');
+  const normalizedBody = body.toLocaleLowerCase('es');
   const aliasAppearsLater = aliases.some((alias) =>
     normalizedBody.includes(alias.toLocaleLowerCase('es')),
   );
@@ -300,7 +301,13 @@ function mentionTokens(values: readonly string[]): string[] {
 }
 
 function cleanQuestion(value: string): string {
-  return value.replace(/^[\s,:;.\-\u2013\u2014]+/u, '').trim();
+  return normalizeInvocationText(value)
+    .replace(/^[\s,:;.\-\u2013\u2014]+/u, '')
+    .trim();
+}
+
+function normalizeInvocationText(value: string): string {
+  return value.normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF]/gu, '');
 }
 
 function normalizedAliases(aliases: readonly string[]): string[] {

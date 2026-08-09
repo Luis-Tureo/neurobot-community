@@ -34,9 +34,34 @@
             Usuario
             <input name="username" value="admin" autocomplete="username" required />
           </label>
-          <label>
+          <label class="password-field-group">
             Contraseña
-            <input name="password" type="password" autocomplete="current-password" required />
+            <div class="password-input-wrapper">
+              <input name="password" type="password" autocomplete="current-password" required />
+              <button
+                type="button"
+                id="toggle-login-password"
+                class="password-toggle-btn"
+                aria-label="Mostrar contraseña"
+                aria-pressed="false"
+                title="Mostrar u ocultar contraseña"
+              >
+                <svg
+                  class="eye-icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </button>
+            </div>
           </label>
           <button class="login-submit" type="submit">Ingresar</button>
         </form>
@@ -855,9 +880,6 @@
                   <span id="ai-provider-token-status">No hay token configurado</span>
                 </div>
                 <div class="ai-provider-summary-actions">
-                  <button id="toggle-ai-enabled" class="ai-enable-action" type="button">
-                    Activar IA
-                  </button>
                   <button id="test-ai-connection" class="secondary" type="button">
                     Probar conexión
                   </button>
@@ -869,6 +891,9 @@
                     aria-expanded="false"
                   >
                     Cambiar IA
+                  </button>
+                  <button id="toggle-ai-enabled" class="ai-enable-action" type="button">
+                    Activar IA
                   </button>
                 </div>
               </article>
@@ -1093,9 +1118,14 @@
                   <div class="digest-frequency-list">
                     <fieldset data-digest-frequency="daily">
                       <legend>Resumen diario</legend>
-                      <label class="toggle"
-                        ><input name="digest_daily_enabled" type="checkbox" /> Activar</label
+                      <input name="digest_daily_enabled" type="hidden" value="false" />
+                      <button
+                        type="button"
+                        class="automation-toggle-btn secondary"
+                        data-automation-toggle="digest_daily"
                       >
+                        Activar
+                      </button>
                       <div class="digest-frequency-fields">
                         <label
                           >Hora<input name="digest_daily_time" type="time" step="60" required
@@ -1112,9 +1142,14 @@
                     </fieldset>
                     <fieldset data-digest-frequency="weekly">
                       <legend>Resumen semanal</legend>
-                      <label class="toggle"
-                        ><input name="digest_weekly_enabled" type="checkbox" /> Activar</label
+                      <input name="digest_weekly_enabled" type="hidden" value="false" />
+                      <button
+                        type="button"
+                        class="automation-toggle-btn secondary"
+                        data-automation-toggle="digest_weekly"
                       >
+                        Activar
+                      </button>
                       <div class="digest-frequency-fields">
                         <label
                           >D&iacute;a<select name="digest_weekly_day" required>
@@ -1142,9 +1177,14 @@
                     </fieldset>
                     <fieldset data-digest-frequency="monthly">
                       <legend>Resumen mensual</legend>
-                      <label class="toggle"
-                        ><input name="digest_monthly_enabled" type="checkbox" /> Activar</label
+                      <input name="digest_monthly_enabled" type="hidden" value="false" />
+                      <button
+                        type="button"
+                        class="automation-toggle-btn secondary"
+                        data-automation-toggle="digest_monthly"
                       >
+                        Activar
+                      </button>
                       <div class="digest-frequency-fields">
                         <label
                           >D&iacute;a<select name="digest_monthly_day" required>
@@ -1207,10 +1247,22 @@
                       <h3>Bienvenida</h3>
                       <p class="muted">Agrupa varios ingresos para evitar mensajes repetidos.</p>
                     </div>
-                    <label class="toggle"
-                      ><input name="welcome_enabled" type="checkbox" />
-                      <span id="welcome-enabled-label">Activar</span></label
+                    <input name="welcome_enabled" type="hidden" value="false" />
+                    <button
+                      type="button"
+                      class="automation-toggle-btn secondary"
+                      data-automation-toggle="welcome"
                     >
+                      Activar
+                    </button>
+                  </div>
+                  <div class="welcome-variables" aria-labelledby="welcome-variables-title">
+                    <p id="welcome-variables-title"><strong>Variables disponibles</strong></p>
+                    <ul>
+                      <li><code>{usuario}</code><span>Nuevo integrante individual</span></li>
+                      <li><code>{usuarios}</code><span>Uno o varios nuevos integrantes</span></li>
+                      <li><code>{grupo}</code><span>Nombre del grupo</span></li>
+                    </ul>
                   </div>
                   <label
                     >Mensaje<textarea
@@ -1220,50 +1272,6 @@
                       required
                     ></textarea>
                   </label>
-                  <div class="welcome-variables" aria-labelledby="welcome-variables-title">
-                    <p id="welcome-variables-title"><strong>Variables disponibles</strong></p>
-                    <ul>
-                      <li><code>{usuario}</code><span>Nuevo integrante individual</span></li>
-                      <li><code>{usuarios}</code><span>Uno o varios nuevos integrantes</span></li>
-                      <li><code>{grupo}</code><span>Nombre del grupo</span></li>
-                    </ul>
-                  </div>
-                  <label class="toggle"
-                    ><input name="welcome_mention" type="checkbox" /> Mencionar al nuevo
-                    integrante</label
-                  >
-                  <fieldset id="welcome-group-settings" class="welcome-group-settings">
-                    <legend>Configuración por grupo</legend>
-                    <label
-                      >Grupo<select name="welcome_group" aria-describedby="welcome-group-help">
-                        <option value="">No hay grupos autorizados</option>
-                      </select></label
-                    >
-                    <p id="welcome-group-help" class="muted">
-                      Cada grupo puede heredar el mensaje general o utilizar uno específico.
-                    </p>
-                    <label class="toggle"
-                      ><input name="welcome_group_enabled" type="checkbox" /> Bienvenida activa en
-                      este grupo</label
-                    >
-                    <label class="toggle"
-                      ><input name="welcome_group_inherit" type="checkbox" /> Usar el mensaje
-                      general</label
-                    >
-                    <label id="welcome-group-template-field"
-                      >Mensaje específico<textarea
-                        name="welcome_group_template"
-                        maxlength="2000"
-                        rows="4"
-                      ></textarea>
-                    </label>
-                    <div class="actions">
-                      <button id="save-welcome-group" class="secondary" type="button">
-                        Guardar configuración del grupo
-                      </button>
-                    </div>
-                    <p id="welcome-group-status" class="muted" aria-live="polite"></p>
-                  </fieldset>
                 </article>
 
                 <article class="card inset automatic-card" data-collapsible>
@@ -1274,9 +1282,14 @@
                         Selecciona automáticamente la plantilla según el día local.
                       </p>
                     </div>
-                    <label class="toggle"
-                      ><input name="greeting_enabled" type="checkbox" /> Activar</label
+                    <input name="greeting_enabled" type="hidden" value="false" />
+                    <button
+                      type="button"
+                      class="automation-toggle-btn secondary"
+                      data-automation-toggle="greeting"
                     >
+                      Activar
+                    </button>
                   </div>
                   <div class="form-row">
                     <label>Hora<input name="greeting_time" type="time" step="60" required /></label>
@@ -1331,9 +1344,14 @@
                         El texto se envía completo, sin modificaciones automáticas.
                       </p>
                     </div>
-                    <label class="toggle"
-                      ><input name="rules_enabled" type="checkbox" /> Activar</label
+                    <input name="rules_enabled" type="hidden" value="false" />
+                    <button
+                      type="button"
+                      class="automation-toggle-btn secondary"
+                      data-automation-toggle="rules"
                     >
+                      Activar
+                    </button>
                   </div>
                   <div class="form-row">
                     <label>Hora<input name="rules_time" type="time" step="60" required /></label>

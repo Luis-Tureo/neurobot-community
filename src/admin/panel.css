@@ -1424,25 +1424,6 @@ label.toggle input {
   background: #ecfeff;
   font-weight: 750;
 }
-.welcome-group-settings {
-  display: grid;
-  gap: 0.85rem;
-  margin: 0;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 0.85rem;
-}
-.welcome-group-settings legend {
-  padding: 0 0.35rem;
-  font-weight: 800;
-}
-.welcome-group-settings .muted,
-.welcome-group-settings .actions {
-  margin: 0;
-}
-.welcome-group-settings .is-disabled {
-  opacity: 0.62;
-}
 @media (max-width: 560px) {
   .welcome-variables li {
     grid-template-columns: 1fr;
@@ -2205,6 +2186,24 @@ button:focus-visible,
 
 body.login-mode {
   min-height: 100vh;
+  position: relative;
+  background: radial-gradient(
+    circle at 50% 30%,
+    rgba(99, 102, 241, 0.08) 0%,
+    rgba(248, 250, 252, 1) 70%
+  );
+  transition: background 0.5s ease;
+}
+
+@keyframes loginCardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .login-mode .shell {
@@ -2250,9 +2249,15 @@ body.login-mode {
 #login-view {
   width: 100%;
   margin: 0;
-  padding: 1.5rem;
+  padding: 1.75rem;
   border-radius: 1.25rem;
-  box-shadow: 0 1rem 2.5rem rgba(79, 70, 229, 0.08);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow:
+    0 1.25rem 3rem -0.5rem rgba(79, 70, 229, 0.12),
+    0 0.25rem 1rem -0.25rem rgba(0, 0, 0, 0.04);
+  animation: loginCardFadeIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .login-heading {
@@ -2286,19 +2291,110 @@ body.login-mode {
 #login-form input {
   min-height: 3rem;
   padding: 0.75rem 0.9rem;
-  border-color: var(--line);
+  border: 1.5px solid var(--line);
   background: var(--canvas);
+  border-radius: 0.75rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+#login-form input:hover {
+  border-color: #a5b4fc;
 }
 
 #login-form input:focus {
-  background: white;
+  background: #ffffff;
+  border-color: #4f46e5;
+  outline: none;
+  box-shadow: 0 0 0 3.5px rgba(99, 102, 241, 0.2);
+}
+
+.password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.password-input-wrapper input {
+  width: 100%;
+  padding-right: 2.75rem !important;
+}
+
+.password-toggle-btn {
+  position: absolute;
+  right: 0.6rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.password-toggle-btn:hover {
+  color: #1e293b;
+  background-color: #f1f5f9;
+}
+
+.password-toggle-btn:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: 1px;
 }
 
 #login-form .login-submit {
   width: 100%;
   min-height: 3rem;
-  margin-top: 0.25rem;
+  margin-top: 0.5rem;
   border-radius: 0.75rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  background: linear-gradient(135deg, #4f46e5, #4338ca);
+  border: none;
+  color: #ffffff;
+  box-shadow: 0 0.35rem 1rem rgba(79, 70, 229, 0.25);
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease,
+    opacity 0.15s ease;
+}
+
+#login-form .login-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 0.5rem 1.25rem rgba(79, 70, 229, 0.35);
+  background: linear-gradient(135deg, #4338ca, #3730a3);
+}
+
+#login-form .login-submit:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 0.2rem 0.5rem rgba(79, 70, 229, 0.2);
+}
+
+#login-form .login-submit:disabled,
+#login-form .login-submit.is-loading {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.login-mode,
+  #login-view,
+  #login-form input,
+  .password-toggle-btn,
+  #login-form .login-submit {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 @media (max-width: 820px) {

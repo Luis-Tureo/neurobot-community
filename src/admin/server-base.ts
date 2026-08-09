@@ -17,6 +17,7 @@ import { CatalogService } from '../core/catalog-service.js';
 import {
   AUTOMATIC_TEMPLATE_KEYS,
   DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION,
+  WELCOME_BATCH_WINDOW_SECONDS,
 } from '../core/automatic-message-defaults.js';
 import { messageMetrics } from '../core/brief-message-defaults.js';
 import {
@@ -517,24 +518,6 @@ const welcomePreviewSchema = z
     groupKey: z.string().length(20).optional(),
   })
   .strict();
-
-const welcomeGroupSettingSchema = z
-  .object({
-    groupKey: z.string().length(20),
-    enabled: z.boolean(),
-    inheritAssistantTemplate: z.boolean(),
-    customTemplate: welcomeTemplateSchema.nullable(),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (!value.inheritAssistantTemplate && value.customTemplate === null) {
-      context.addIssue({
-        code: 'custom',
-        path: ['customTemplate'],
-        message: 'Escribe un mensaje específico o utiliza el mensaje general.',
-      });
-    }
-  });
 
 const pollConfigurationSchema = z
   .object({
@@ -3614,15 +3597,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       selectedGroupKeys: context.database
         .listAutomationGroupIds(botId)
         .map((groupId) => context.anonymizer.identifier(groupId)),
-      welcomeGroups: authorizedGroups.map((group) => {
-        const setting = context.database.getWelcomeGroupSetting(group.key, botId);
-        return {
-          ...group,
-          enabled: setting?.enabled ?? true,
-          inheritAssistantTemplate: setting?.inheritAssistantTemplate ?? true,
-          customTemplate: setting?.customTemplate ?? null,
-        };
-      }),
       lastDeliveries: deliveries.map((delivery) => ({
         taskType: delivery.taskType,
         groupKey: context.anonymizer.identifier(delivery.groupId),
@@ -3709,6 +3683,12 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         ...configurationInput,
         welcome: {
           ...configurationInput.welcome,
+          batchWindowSeconds: WELCOME_BATCH_WINDOW_SECONDS,
+          groupSimultaneous: true,
+          includePublicName: true,
+          enableRealMention: true,
+          multipleJoinMode: 'GROUPED' as const,
+          sendDelaySeconds: WELCOME_BATCH_WINDOW_SECONDS,
           template: assertPlainText(configurationInput.welcome.template),
         },
         dailyGreeting: {
@@ -3752,36 +3732,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
               context.anonymizer.identifier(identifier),
             ) ?? undefined);
       return { simulation: true, text: service.previewWelcome(input.fictitiousName, groupId) };
-    },
-  );
-
-  app.patch(
-    '/api/automatic-messages/welcome/groups',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const input = welcomeGroupSettingSchema.parse(request.body);
-      const groupId = context.database.resolveBotGroupKey(botId, input.groupKey, (identifier) =>
-        context.anonymizer.identifier(identifier),
-      );
-      if (groupId === null || !context.database.canBotSendToGroup(botId, groupId)) {
-        return reply.code(404).send({
-          error: 'El grupo autorizado no existe.',
-          code: 'AUTHORIZED_GROUP_NOT_FOUND',
-        });
-      }
-      context.database.saveWelcomeGroupSetting(
-        input.groupKey,
-        {
-          enabled: input.enabled,
-          inheritAssistantTemplate: input.inheritAssistantTemplate,
-          customTemplate: input.inheritAssistantTemplate ? null : input.customTemplate,
-        },
-        botId,
-      );
-      automaticMessagesFor(context, botId)?.reconfigure();
-      audit(context, 'welcome_group_update', input.groupKey, 'ok', botId);
-      return { updated: true };
     },
   );
 

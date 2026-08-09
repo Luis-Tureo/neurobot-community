@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import BetterSqlite3 from 'better-sqlite3';
 import { AppDatabase } from '../src/persistence/database.js';
 
 describe('persistencia SQLite', () => {
@@ -10,7 +11,7 @@ describe('persistencia SQLite', () => {
     database.migrate();
     expect(database.getMigrationVersions()).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-      27, 28,
+      27, 28, 29, 30,
     ]);
     expect(database.getBotProfile('neurobot')).toMatchObject({
       botName: 'Neurobot',
@@ -183,7 +184,7 @@ describe('persistencia SQLite', () => {
       timezone: 'America/Santiago',
       welcome: {
         enabled: true,
-        batchWindowSeconds: 5,
+        batchWindowSeconds: 10,
         groupSimultaneous: true,
         reconciliationIntervalSeconds: 120,
       },
@@ -277,6 +278,48 @@ describe('persistencia SQLite', () => {
     database.close();
   });
 
+  it('migra solo el mensaje de bienvenida predeterminado anterior', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'neurobot-welcome-default-'));
+    const previousDefault =
+      '👋 ¡Bienvenidos/as {usuarios} a {grupo}!\n\nEste es un espacio de respeto, apoyo e inclusión para personas neurodivergentes y quienes deseen aprender y compartir experiencias.\n\nPueden participar cuando se sientan cómodos/as.';
+    const nextDefault =
+      '¡Bienvenido/a {usuarios} a {grupo}! 👋\n\nEste es un espacio de respeto, apoyo e inclusión para personas neurodivergentes y quienes deseen aprender y compartir experiencias.\n\nPuedes participar cuando te sientas cómodo/a.';
+
+    const migrateTemplate = (filename: string, template: string): string => {
+      const path = join(directory, filename);
+      const seeded = new AppDatabase(path);
+      try {
+        seeded.migrate();
+        const configuration = seeded.getAutomaticMessageConfiguration();
+        configuration.welcome.template = template;
+        seeded.saveAutomaticMessageConfiguration(configuration);
+      } finally {
+        seeded.close();
+      }
+
+      const raw = new BetterSqlite3(path);
+      raw.prepare('DELETE FROM migrations WHERE version = 29').run();
+      raw.close();
+
+      const migrated = new AppDatabase(path);
+      try {
+        migrated.migrate();
+        return migrated.getAutomaticMessageConfiguration().welcome.template;
+      } finally {
+        migrated.close();
+      }
+    };
+
+    try {
+      expect(migrateTemplate('default.sqlite', previousDefault)).toBe(nextDefault);
+      expect(migrateTemplate('custom.sqlite', 'Mensaje personalizado intacto.')).toBe(
+        'Mensaje personalizado intacto.',
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
   it('persiste bienvenida pública por asistente y configuración anonimizada por grupo', () => {
     const database = new AppDatabase(':memory:');
     database.migrate();
@@ -288,7 +331,7 @@ describe('persistencia SQLite', () => {
         unknownNameFallback: 'nuevo/a integrante',
         multipleJoinMode: 'GROUPED',
         maximumGroupedNames: 5,
-        sendDelaySeconds: 2,
+        sendDelaySeconds: 10,
       });
       configuration.welcome.template = 'Hola {name} en {groupName}';
       database.saveAutomaticMessageConfiguration(configuration, 'neurobot');

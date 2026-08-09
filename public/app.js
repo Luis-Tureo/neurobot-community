@@ -11,7 +11,6 @@ const state = {
   communityDigestConfiguration: null,
   automationGroups: [],
   selectedAutomationGroupKeys: new Set(),
-  welcomeGroups: [],
   pollTemplates: [],
   pollData: null,
   selectedBotId: null,
@@ -90,9 +89,33 @@ function authenticated(value) {
   }
 }
 
+const passwordToggleBtn = document.querySelector('#toggle-login-password');
+if (passwordToggleBtn) {
+  passwordToggleBtn.addEventListener('click', () => {
+    const passwordInput = document.querySelector('#login-form input[name="password"]');
+    if (!passwordInput) return;
+    const isHidden = passwordInput.type === 'password';
+    passwordInput.type = isHidden ? 'text' : 'password';
+    passwordToggleBtn.setAttribute('aria-pressed', String(isHidden));
+    passwordToggleBtn.setAttribute(
+      'aria-label',
+      isHidden ? 'Ocultar contraseña' : 'Mostrar contraseña',
+    );
+  });
+}
+
 document.querySelector('#login-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const data = new FormData(event.currentTarget);
+  const form = event.currentTarget;
+  const submitBtn = form.querySelector('.login-submit');
+  const data = new FormData(form);
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.classList.add('is-loading');
+    submitBtn.textContent = 'Ingresando...';
+  }
+
   try {
     const result = await api('/api/auth/login', {
       method: 'POST',
@@ -103,6 +126,12 @@ document.querySelector('#login-form').addEventListener('submit', async (event) =
     await loadAll();
   } catch (error) {
     showNotice(error.message, true);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.classList.remove('is-loading');
+      submitBtn.textContent = 'Ingresar';
+    }
   }
 });
 
@@ -687,15 +716,13 @@ async function loadAutomaticMessages() {
   state.automaticDefaults = result.defaultConfiguration;
   state.automationGroups = result.authorizedGroups || [];
   state.selectedAutomationGroupKeys = new Set(result.selectedGroupKeys || []);
-  state.welcomeGroups = result.welcomeGroups || [];
   renderAutomationGroupSelector();
-  automaticMessagesForm.elements.welcome_enabled.checked = configuration.welcome.enabled;
+  setHiddenEnabledValue('welcome_enabled', configuration.welcome.enabled);
   automaticMessagesForm.elements.welcome_template.value =
     configuration.welcome.template.trim() || result.defaultConfiguration.welcome.template;
-  automaticMessagesForm.elements.welcome_mention.checked = configuration.welcome.enableRealMention;
-  updateWelcomeEnabledLabel();
-  renderWelcomeGroupSettings();
-  automaticMessagesForm.elements.greeting_enabled.checked = configuration.dailyGreeting.enabled;
+  updateAutomationToggleButton('welcome', configuration.welcome.enabled);
+  setHiddenEnabledValue('greeting_enabled', configuration.dailyGreeting.enabled);
+  updateAutomationToggleButton('greeting', configuration.dailyGreeting.enabled);
   automaticMessagesForm.elements.greeting_time.value = configuration.dailyGreeting.sendTime;
   automaticMessagesForm.elements.greeting_tolerance.value =
     configuration.dailyGreeting.toleranceMinutes;
@@ -711,22 +738,25 @@ async function loadAutomaticMessages() {
   automaticMessagesForm.elements.greeting_weekend.value =
     configuration.dailyGreeting.templates.weekend.trim() ||
     result.defaultConfiguration.dailyGreeting.templates.weekend;
-  automaticMessagesForm.elements.rules_enabled.checked = configuration.dailyRules.enabled;
+  setHiddenEnabledValue('rules_enabled', configuration.dailyRules.enabled);
+  updateAutomationToggleButton('rules', configuration.dailyRules.enabled);
   automaticMessagesForm.elements.rules_time.value = configuration.dailyRules.sendTime;
   automaticMessagesForm.elements.rules_tolerance.value = configuration.dailyRules.toleranceMinutes;
   automaticMessagesForm.elements.rules_template.value =
     configuration.dailyRules.template.trim() || result.defaultConfiguration.dailyRules.template;
-  automaticMessagesForm.elements.digest_daily_enabled.checked = digestConfiguration.daily.enabled;
+  setHiddenEnabledValue('digest_daily_enabled', digestConfiguration.daily.enabled);
+  updateAutomationToggleButton('digest_daily', digestConfiguration.daily.enabled);
   automaticMessagesForm.elements.digest_daily_time.value = digestConfiguration.daily.sendTime;
   automaticMessagesForm.elements.digest_daily_tolerance.value =
     digestConfiguration.daily.toleranceMinutes;
-  automaticMessagesForm.elements.digest_weekly_enabled.checked = digestConfiguration.weekly.enabled;
+  setHiddenEnabledValue('digest_weekly_enabled', digestConfiguration.weekly.enabled);
+  updateAutomationToggleButton('digest_weekly', digestConfiguration.weekly.enabled);
   automaticMessagesForm.elements.digest_weekly_day.value = digestConfiguration.weekly.weekday;
   automaticMessagesForm.elements.digest_weekly_time.value = digestConfiguration.weekly.sendTime;
   automaticMessagesForm.elements.digest_weekly_tolerance.value =
     digestConfiguration.weekly.toleranceMinutes;
-  automaticMessagesForm.elements.digest_monthly_enabled.checked =
-    digestConfiguration.monthly.enabled;
+  setHiddenEnabledValue('digest_monthly_enabled', digestConfiguration.monthly.enabled);
+  updateAutomationToggleButton('digest_monthly', digestConfiguration.monthly.enabled);
   automaticMessagesForm.elements.digest_monthly_day.value = String(
     digestConfiguration.monthly.dayOfMonth,
   );
@@ -755,31 +785,143 @@ async function loadAutomaticMessages() {
 
 automaticMessagesForm.addEventListener('input', updateAutomaticTemplateMetrics);
 
-for (const frequency of ['daily', 'weekly', 'monthly']) {
-  automaticMessagesForm.elements[`digest_${frequency}_enabled`].addEventListener(
-    'change',
-    updateDigestControlStates,
-  );
+document.querySelectorAll('[data-automation-toggle]').forEach((btn) => {
+  btn.addEventListener('click', async (event) => {
+    const key = event.currentTarget.dataset.automationToggle;
+    await toggleAutomation(key, event.currentTarget);
+  });
+});
+
+function setHiddenEnabledValue(name, enabled) {
+  const input = automaticMessagesForm.elements[name];
+  if (input) {
+    if (input.type === 'checkbox') input.checked = Boolean(enabled);
+    else input.value = String(Boolean(enabled));
+  }
 }
 
-automaticMessagesForm.elements.welcome_enabled.addEventListener(
-  'change',
-  updateWelcomeEnabledLabel,
-);
-automaticMessagesForm.elements.welcome_group.addEventListener('change', loadSelectedWelcomeGroup);
-automaticMessagesForm.elements.welcome_group_inherit.addEventListener(
-  'change',
-  updateWelcomeGroupTemplateState,
-);
+function isAutomationEnabled(name) {
+  const input = automaticMessagesForm.elements[name];
+  if (!input) return false;
+  return input.type === 'checkbox' ? input.checked : input.value === 'true';
+}
+
+function updateAutomationToggleButton(key, enabled) {
+  const button = document.querySelector(`[data-automation-toggle="${key}"]`);
+  if (!button) return;
+  button.textContent = enabled ? 'Desactivar' : 'Activar';
+  button.classList.toggle('danger', enabled);
+  button.classList.toggle('secondary', !enabled);
+  button.setAttribute('aria-pressed', String(enabled));
+}
+
+async function toggleAutomation(key, button) {
+  const currentEnabled = isAutomationEnabled(`${key}_enabled`);
+  const targetEnabled = !currentEnabled;
+  button.disabled = true;
+  button.textContent = targetEnabled ? 'Activando...' : 'Desactivando...';
+
+  try {
+    if (key === 'welcome' || key === 'greeting' || key === 'rules') {
+      const payload = {
+        selectedGroupKeys: [...state.selectedAutomationGroupKeys],
+        timezone: state.selectedBotTimezone,
+        welcome: {
+          ...state.automaticConfiguration.welcome,
+          enabled: key === 'welcome' ? targetEnabled : isAutomationEnabled('welcome_enabled'),
+          template: automaticMessagesForm.elements.welcome_template.value,
+          enableRealMention: true,
+        },
+        dailyGreeting: {
+          enabled: key === 'greeting' ? targetEnabled : isAutomationEnabled('greeting_enabled'),
+          sendTime: automaticMessagesForm.elements.greeting_time.value,
+          toleranceMinutes: Number(automaticMessagesForm.elements.greeting_tolerance.value),
+          templates: {
+            monday: automaticMessagesForm.elements.greeting_monday.value,
+            weekday: automaticMessagesForm.elements.greeting_weekday.value,
+            friday: automaticMessagesForm.elements.greeting_friday.value,
+            weekend: automaticMessagesForm.elements.greeting_weekend.value,
+          },
+        },
+        dailyRules: {
+          enabled: key === 'rules' ? targetEnabled : isAutomationEnabled('rules_enabled'),
+          sendTime: automaticMessagesForm.elements.rules_time.value,
+          toleranceMinutes: Number(automaticMessagesForm.elements.rules_tolerance.value),
+          template: automaticMessagesForm.elements.rules_template.value,
+        },
+      };
+      await api(botScopedPath('/api/automatic-messages'), {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+    } else {
+      const monthlyDay = automaticMessagesForm.elements.digest_monthly_day.value;
+      const digestPayload = {
+        timezone: state.selectedBotTimezone,
+        daily: {
+          enabled:
+            key === 'digest_daily' ? targetEnabled : isAutomationEnabled('digest_daily_enabled'),
+          sendTime: automaticMessagesForm.elements.digest_daily_time.value,
+          toleranceMinutes: Number(automaticMessagesForm.elements.digest_daily_tolerance.value),
+        },
+        weekly: {
+          enabled:
+            key === 'digest_weekly' ? targetEnabled : isAutomationEnabled('digest_weekly_enabled'),
+          weekday: automaticMessagesForm.elements.digest_weekly_day.value,
+          sendTime: automaticMessagesForm.elements.digest_weekly_time.value,
+          toleranceMinutes: Number(automaticMessagesForm.elements.digest_weekly_tolerance.value),
+        },
+        monthly: {
+          enabled:
+            key === 'digest_monthly'
+              ? targetEnabled
+              : isAutomationEnabled('digest_monthly_enabled'),
+          dayOfMonth: monthlyDay === 'last' ? 'last' : Number(monthlyDay),
+          sendTime: automaticMessagesForm.elements.digest_monthly_time.value,
+          toleranceMinutes: Number(automaticMessagesForm.elements.digest_monthly_tolerance.value),
+        },
+        maxMessages: state.communityDigestConfiguration.maxMessages,
+        maxCharacters: state.communityDigestConfiguration.maxCharacters,
+      };
+      await api(botScopedPath('/api/automatic-messages/digests'), {
+        method: 'PATCH',
+        body: JSON.stringify(digestPayload),
+      });
+    }
+
+    setHiddenEnabledValue(`${key}_enabled`, targetEnabled);
+    updateAutomationToggleButton(key, targetEnabled);
+    updateDigestControlStates();
+    await loadAutomaticMessages();
+
+    const labels = {
+      welcome: `Bienvenida ${targetEnabled ? 'activada' : 'desactivada'} correctamente.`,
+      greeting: `Buenos días ${targetEnabled ? 'activado' : 'desactivado'} correctamente.`,
+      rules: `Reglas diarias ${targetEnabled ? 'activadas' : 'desactivadas'} correctamente.`,
+      digest_daily: `Resumen diario ${targetEnabled ? 'activado' : 'desactivado'} correctamente.`,
+      digest_weekly: `Resumen semanal ${targetEnabled ? 'activado' : 'desactivado'} correctamente.`,
+      digest_monthly: `Resumen mensual ${targetEnabled ? 'activado' : 'desactivado'} correctamente.`,
+    };
+    showNotice(labels[key] || 'Automatización actualizada correctamente.');
+  } catch (error) {
+    updateAutomationToggleButton(key, currentEnabled);
+    showNotice(
+      error.message || 'No se pudo actualizar la automatización. Inténtalo nuevamente.',
+      true,
+    );
+  } finally {
+    button.disabled = false;
+  }
+}
 
 function updateDigestControlStates() {
   for (const frequency of ['daily', 'weekly', 'monthly']) {
-    const enabled = automaticMessagesForm.elements[`digest_${frequency}_enabled`].checked;
+    const enabled = isAutomationEnabled(`digest_${frequency}_enabled`);
     const fieldset = document.querySelector(`[data-digest-frequency="${frequency}"]`);
     fieldset?.classList.toggle('is-disabled', !enabled);
     fieldset?.setAttribute('aria-disabled', String(!enabled));
     fieldset
-      ?.querySelectorAll('input:not([type="checkbox"]), select')
+      ?.querySelectorAll('input:not([type="checkbox"]):not([type="hidden"]), select')
       .forEach((field) => (field.disabled = !enabled));
   }
 }
@@ -847,97 +989,6 @@ function renderAutomationGroupSelector() {
   error.textContent = '';
 }
 
-function updateWelcomeEnabledLabel() {
-  const enabled = automaticMessagesForm.elements.welcome_enabled.checked;
-  document.querySelector('#welcome-enabled-label').textContent = enabled ? 'Desactivar' : 'Activar';
-}
-
-function renderWelcomeGroupSettings() {
-  const selector = automaticMessagesForm.elements.welcome_group;
-  const previous = selector.value;
-  selector.replaceChildren();
-  state.welcomeGroups.forEach((group) => {
-    const option = document.createElement('option');
-    option.value = group.key;
-    option.textContent = group.name;
-    selector.append(option);
-  });
-  const hasGroups = state.welcomeGroups.length > 0;
-  selector.disabled = !hasGroups;
-  document.querySelector('#save-welcome-group').disabled = !hasGroups;
-  if (hasGroups) {
-    selector.value = state.welcomeGroups.some((group) => group.key === previous)
-      ? previous
-      : state.welcomeGroups[0].key;
-  } else {
-    const option = document.createElement('option');
-    option.value = '';
-    option.textContent = 'No hay grupos autorizados';
-    selector.append(option);
-  }
-  loadSelectedWelcomeGroup();
-}
-
-function loadSelectedWelcomeGroup() {
-  const group = state.welcomeGroups.find(
-    (candidate) => candidate.key === automaticMessagesForm.elements.welcome_group.value,
-  );
-  const enabled = group?.enabled ?? false;
-  const inherits = group?.inheritAssistantTemplate ?? true;
-  automaticMessagesForm.elements.welcome_group_enabled.checked = enabled;
-  automaticMessagesForm.elements.welcome_group_enabled.disabled = !group;
-  automaticMessagesForm.elements.welcome_group_inherit.checked = inherits;
-  automaticMessagesForm.elements.welcome_group_inherit.disabled = !group;
-  automaticMessagesForm.elements.welcome_group_template.value = group?.customTemplate || '';
-  document.querySelector('#welcome-group-status').textContent = '';
-  updateWelcomeGroupTemplateState();
-}
-
-function updateWelcomeGroupTemplateState() {
-  const field = automaticMessagesForm.elements.welcome_group_template;
-  const inherits = automaticMessagesForm.elements.welcome_group_inherit.checked;
-  const hasGroup = automaticMessagesForm.elements.welcome_group.value !== '';
-  field.disabled = inherits || !hasGroup;
-  document
-    .querySelector('#welcome-group-template-field')
-    .classList.toggle('is-disabled', field.disabled);
-}
-
-document.querySelector('#save-welcome-group').addEventListener('click', async () => {
-  const form = automaticMessagesForm;
-  const groupKey = form.elements.welcome_group.value;
-  if (!groupKey) return;
-  const inheritAssistantTemplate = form.elements.welcome_group_inherit.checked;
-  const customTemplate = form.elements.welcome_group_template.value.trim();
-  const status = document.querySelector('#welcome-group-status');
-  if (!inheritAssistantTemplate && customTemplate === '') {
-    status.textContent = 'Escribe un mensaje específico o utiliza el mensaje general.';
-    return;
-  }
-  try {
-    await api(botScopedPath('/api/automatic-messages/welcome/groups'), {
-      method: 'PATCH',
-      body: JSON.stringify({
-        groupKey,
-        enabled: form.elements.welcome_group_enabled.checked,
-        inheritAssistantTemplate,
-        customTemplate: inheritAssistantTemplate ? null : customTemplate,
-      }),
-    });
-    const group = state.welcomeGroups.find((candidate) => candidate.key === groupKey);
-    if (group) {
-      group.enabled = form.elements.welcome_group_enabled.checked;
-      group.inheritAssistantTemplate = inheritAssistantTemplate;
-      group.customTemplate = inheritAssistantTemplate ? null : customTemplate;
-    }
-    status.textContent = 'Configuración del grupo guardada.';
-    showNotice('Configuración del grupo guardada.');
-  } catch (error) {
-    status.textContent = error.message;
-    showNotice(error.message, true);
-  }
-});
-
 automaticMessagesForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
@@ -954,12 +1005,12 @@ automaticMessagesForm.addEventListener('submit', async (event) => {
     timezone: state.selectedBotTimezone,
     welcome: {
       ...state.automaticConfiguration.welcome,
-      enabled: form.elements.welcome_enabled.checked,
+      enabled: isAutomationEnabled('welcome_enabled'),
       template: form.elements.welcome_template.value,
-      enableRealMention: form.elements.welcome_mention.checked,
+      enableRealMention: true,
     },
     dailyGreeting: {
-      enabled: form.elements.greeting_enabled.checked,
+      enabled: isAutomationEnabled('greeting_enabled'),
       sendTime: form.elements.greeting_time.value,
       toleranceMinutes: Number(form.elements.greeting_tolerance.value),
       templates: {
@@ -970,7 +1021,7 @@ automaticMessagesForm.addEventListener('submit', async (event) => {
       },
     },
     dailyRules: {
-      enabled: form.elements.rules_enabled.checked,
+      enabled: isAutomationEnabled('rules_enabled'),
       sendTime: form.elements.rules_time.value,
       toleranceMinutes: Number(form.elements.rules_tolerance.value),
       template: form.elements.rules_template.value,
@@ -980,18 +1031,18 @@ automaticMessagesForm.addEventListener('submit', async (event) => {
   const digestPayload = {
     timezone: state.selectedBotTimezone,
     daily: {
-      enabled: form.elements.digest_daily_enabled.checked,
+      enabled: isAutomationEnabled('digest_daily_enabled'),
       sendTime: form.elements.digest_daily_time.value,
       toleranceMinutes: Number(form.elements.digest_daily_tolerance.value),
     },
     weekly: {
-      enabled: form.elements.digest_weekly_enabled.checked,
+      enabled: isAutomationEnabled('digest_weekly_enabled'),
       weekday: form.elements.digest_weekly_day.value,
       sendTime: form.elements.digest_weekly_time.value,
       toleranceMinutes: Number(form.elements.digest_weekly_tolerance.value),
     },
     monthly: {
-      enabled: form.elements.digest_monthly_enabled.checked,
+      enabled: isAutomationEnabled('digest_monthly_enabled'),
       dayOfMonth: monthlyDay === 'last' ? 'last' : Number(monthlyDay),
       sendTime: form.elements.digest_monthly_time.value,
       toleranceMinutes: Number(form.elements.digest_monthly_tolerance.value),

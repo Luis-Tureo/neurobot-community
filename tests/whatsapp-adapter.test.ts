@@ -743,6 +743,69 @@ describe('adaptador de WhatsApp', () => {
     });
   });
 
+  it('mantiene separados dos usuarios reales aunque ambos tengan alias LID', async () => {
+    const { adapter, fake, groupJoins } = createSubject();
+    fake.lidMappings = [
+      { lid: 'anita@lid', pn: '56911111111@c.us' },
+      { lid: 'pedro@lid', pn: '56922222222@c.us' },
+    ];
+    await adapter.initialize();
+    fake.emit('ready');
+    fake.emit('group_join', {
+      chatId: 'grupo-normal@g.us',
+      id: { _serialized: 'join-two-real-users' },
+      recipientIds: ['anita@lid', 'pedro@lid'],
+      type: 'add',
+      getRecipients: vi.fn(async () => [
+        { id: { _serialized: 'anita@lid' }, pushname: 'Anita' },
+        { id: { _serialized: 'pedro@lid' }, pushname: 'Pedro' },
+      ]),
+    });
+
+    await vi.waitFor(() => expect(groupJoins).toHaveLength(1));
+    expect(groupJoins[0]?.participantIds).toEqual(['56911111111@c.us', '56922222222@c.us']);
+    expect(groupJoins[0]?.participants).toEqual([
+      expect.objectContaining({ participantId: '56911111111@c.us', mentionId: 'anita@lid' }),
+      expect.objectContaining({ participantId: '56922222222@c.us', mentionId: 'pedro@lid' }),
+    ]);
+  });
+
+  it('envía las menciones mediante la metadata mentions de whatsapp-web.js', async () => {
+    const { adapter, fake } = createSubject();
+    await adapter.initialize();
+    fake.emit('ready');
+
+    await adapter.sendMessageWithMentions('grupo-normal@g.us', 'Hola Anita y Pedro', [
+      'anita@lid',
+      'pedro@lid',
+      'anita@lid',
+    ]);
+
+    expect(fake.sendMessage).toHaveBeenCalledWith('grupo-normal@g.us', 'Hola Anita y Pedro', {
+      mentions: ['anita@lid', 'pedro@lid'],
+    });
+  });
+
+  it('propaga la identidad canónica de quien sale sin generar una bienvenida', async () => {
+    const { adapter, fake, groupChanges, groupJoins } = createSubject();
+    fake.lidMappings = [{ lid: 'anita@lid', pn: '56911111111@c.us' }];
+    await adapter.initialize();
+    fake.emit('ready');
+    fake.emit('group_leave', {
+      chatId: 'grupo-normal@g.us',
+      recipientIds: ['anita@lid'],
+    });
+
+    await vi.waitFor(() => expect(groupChanges).toHaveLength(1));
+    expect(groupChanges[0]).toEqual({
+      groupId: 'grupo-normal@g.us',
+      type: 'LEAVE',
+      botAffected: false,
+      participantIds: ['56911111111@c.us'],
+    });
+    expect(groupJoins).toHaveLength(0);
+  });
+
   it('notifica salida del bot y actualizaciones del grupo una sola vez', async () => {
     const { adapter, fake, groupChanges } = createSubject();
     await adapter.initialize();
@@ -754,9 +817,11 @@ describe('adaptador de WhatsApp', () => {
     fake.emit('group_update', { chatId: 'grupo-normal@g.us' });
 
     await vi.waitFor(() => expect(groupChanges).toHaveLength(2));
-    expect(groupChanges).toEqual([
-      { groupId: 'grupo-normal@g.us', type: 'LEAVE', botAffected: true },
-      { groupId: 'grupo-normal@g.us', type: 'UPDATE', botAffected: false },
-    ]);
+    expect(groupChanges).toEqual(
+      expect.arrayContaining([
+        { groupId: 'grupo-normal@g.us', type: 'LEAVE', botAffected: true },
+        { groupId: 'grupo-normal@g.us', type: 'UPDATE', botAffected: false },
+      ]),
+    );
   });
 });

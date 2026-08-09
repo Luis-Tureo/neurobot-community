@@ -6,6 +6,7 @@ import {
   AUTOMATIC_TEMPLATE_KEYS,
   DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION,
   LEGACY_AUTOMATIC_TEMPLATES,
+  WELCOME_BATCH_WINDOW_SECONDS,
 } from '../core/automatic-message-defaults.js';
 import {
   BRIEF_COMMAND_DEFAULTS,
@@ -1929,6 +1930,39 @@ export class AppDatabase {
           WHERE active = 1 AND blocked = 0 AND bot_is_member = 1;
         `,
       },
+      {
+        version: 29,
+        sql: `
+          UPDATE assistant_welcome_settings
+          SET template = '¡Bienvenido/a {usuarios} a {grupo}! 👋\n\nEste es un espacio de respeto, apoyo e inclusión para personas neurodivergentes y quienes deseen aprender y compartir experiencias.\n\nPuedes participar cuando te sientas cómodo/a.',
+              updated_at = datetime('now')
+          WHERE template = '👋 ¡Bienvenidos/as {usuarios} a {grupo}!\n\nEste es un espacio de respeto, apoyo e inclusión para personas neurodivergentes y quienes deseen aprender y compartir experiencias.\n\nPueden participar cuando se sientan cómodos/as.';
+
+          UPDATE bot_automatic_configurations
+          SET configuration_json = json_set(
+                configuration_json,
+                '$.welcome.template',
+                '¡Bienvenido/a {usuarios} a {grupo}! 👋\n\nEste es un espacio de respeto, apoyo e inclusión para personas neurodivergentes y quienes deseen aprender y compartir experiencias.\n\nPuedes participar cuando te sientas cómodo/a.'
+              ),
+              updated_at = datetime('now')
+          WHERE json_extract(configuration_json, '$.welcome.template') =
+                '👋 ¡Bienvenidos/as {usuarios} a {grupo}!\n\nEste es un espacio de respeto, apoyo e inclusión para personas neurodivergentes y quienes deseen aprender y compartir experiencias.\n\nPueden participar cuando se sientan cómodos/as.';
+        `,
+      },
+      {
+        version: 30,
+        sql: `
+          CREATE TABLE bot_welcome_event_deduplication (
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            event_hash TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(bot_id, event_hash)
+          );
+          CREATE INDEX idx_welcome_event_deduplication_expiry
+            ON bot_welcome_event_deduplication(bot_id, expires_at);
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -2703,7 +2737,8 @@ export class AppDatabase {
     botId = 'neurobot',
   ): void {
     const now = new Date().toISOString();
-    const customized = automaticCustomization(configuration);
+    const normalizedConfiguration = normalizeAutomaticWelcomeRules(configuration);
+    const customized = automaticCustomization(normalizedConfiguration);
     const result = this.db
       .prepare(
         `INSERT INTO bot_automatic_configurations(bot_id, configuration_json, customized_json, updated_at)
@@ -2711,15 +2746,15 @@ export class AppDatabase {
          ON CONFLICT(bot_id) DO UPDATE SET configuration_json = excluded.configuration_json,
            customized_json = excluded.customized_json, updated_at = excluded.updated_at`,
       )
-      .run(botId, JSON.stringify(configuration), JSON.stringify(customized), now);
+      .run(botId, JSON.stringify(normalizedConfiguration), JSON.stringify(customized), now);
     if (result.changes !== 1) throw new Error('No fue posible guardar la automatización.');
-    this.saveAssistantWelcomeSettings(configuration.welcome, botId);
+    this.saveAssistantWelcomeSettings(normalizedConfiguration.welcome, botId);
     if (botId === 'neurobot') {
       this.db
         .prepare(
           `UPDATE commands SET response = ?, custom = 1, updated_at = ? WHERE name = 'reglas'`,
         )
-        .run(configuration.dailyRules.template, now);
+        .run(normalizedConfiguration.dailyRules.template, now);
     }
   }
 
@@ -2830,8 +2865,8 @@ export class AppDatabase {
           send_delay_seconds: number;
         }
       | undefined;
-    if (row === undefined) return configuration;
-    return {
+    if (row === undefined) return normalizeAutomaticWelcomeRules(configuration);
+    return normalizeAutomaticWelcomeRules({
       ...configuration,
       welcome: {
         ...configuration.welcome,
@@ -2845,7 +2880,7 @@ export class AppDatabase {
         maximumGroupedNames: row.maximum_grouped_names,
         sendDelaySeconds: row.send_delay_seconds,
       },
-    };
+    });
   }
 
   private saveAssistantWelcomeSettings(
@@ -2971,6 +3006,19 @@ export class AppDatabase {
       .run(botId, groupHash, participantHash, new Date().toISOString());
   }
 
+  public removeWelcomeBaselineParticipant(
+    groupHash: string,
+    participantHash: string,
+    botId = 'neurobot',
+  ): number {
+    return this.db
+      .prepare(
+        `DELETE FROM bot_welcome_baseline
+         WHERE bot_id = ? AND group_hash = ? AND participant_hash = ?`,
+      )
+      .run(botId, groupHash, participantHash).changes;
+  }
+
   public isWelcomeGroupBaselineInitialized(groupHash: string, botId = 'neurobot'): boolean {
     const row = this.db
       .prepare(
@@ -2996,24 +3044,18 @@ export class AppDatabase {
       .run(botId, groupHash, now, now);
   }
 
-  public claimWelcomeParticipant(
-    groupHash: string,
-    participantHash: string,
-    source: string,
-    expiresAt: Date,
-    botId = 'neurobot',
-  ): boolean {
+  public claimWelcomeEvent(eventHash: string, expiresAt: Date, botId = 'neurobot'): boolean {
     const now = new Date().toISOString();
     this.db
-      .prepare('DELETE FROM bot_welcome_deduplication WHERE bot_id = ? AND expires_at <= ?')
+      .prepare('DELETE FROM bot_welcome_event_deduplication WHERE bot_id = ? AND expires_at <= ?')
       .run(botId, now);
     const result = this.db
       .prepare(
-        `INSERT OR IGNORE INTO bot_welcome_deduplication(
-         bot_id, group_hash, participant_hash, source, expires_at, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO bot_welcome_event_deduplication(
+         bot_id, event_hash, expires_at, created_at
+       ) VALUES (?, ?, ?, ?)`,
       )
-      .run(botId, groupHash, participantHash, source, expiresAt.toISOString(), now);
+      .run(botId, eventHash, expiresAt.toISOString(), now);
     return result.changes === 1;
   }
 
@@ -9518,6 +9560,23 @@ function defaultAutomaticConfiguration(timezone: string): AutomaticMessageConfig
       templates: { ...DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyGreeting.templates },
     },
     dailyRules: { ...DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.dailyRules, enabled: false },
+  };
+}
+
+function normalizeAutomaticWelcomeRules(
+  configuration: AutomaticMessageConfiguration,
+): AutomaticMessageConfiguration {
+  return {
+    ...configuration,
+    welcome: {
+      ...configuration.welcome,
+      batchWindowSeconds: WELCOME_BATCH_WINDOW_SECONDS,
+      groupSimultaneous: true,
+      includePublicName: true,
+      enableRealMention: true,
+      multipleJoinMode: 'GROUPED',
+      sendDelaySeconds: WELCOME_BATCH_WINDOW_SECONDS,
+    },
   };
 }
 

@@ -243,47 +243,21 @@ export function hashNormalizedQuestion(normalizedQuestion: string): string {
 
 export function isCommunityGreeting(question: string): boolean {
   const normalized = normalizeQuestionForCache(question).replace(/\s*,\s*/gu, ' ');
-  if (
-    new Set([
-      'hola',
-      'holi',
-      'buenos dias',
-      'buen dia',
-      'buenas',
-      'buenas tardes',
-      'buenas noches',
-      'hola neurobot',
-      'hola bot',
-      'quien eres',
-      'para que sirves',
-      'que puedes hacer',
-      'como funcionas',
-      'de que se trata este grupo',
-      'de que trata este grupo',
-      'de que es este grupo',
-      'de que trata el grupo',
-      'de que es el grupo',
-      'de que se trata la comunidad',
-      'de que trata la comunidad',
-      'de que es la comunidad',
-      'de que se trata este chat',
-      'de que trata este chat',
-      'de que se trata',
-      'de que trata',
-      'cual es el objetivo de este grupo',
-      'cual es el objetivo del grupo',
-      'cual es el proposito de este grupo',
-      'cual es el proposito del grupo',
-      'para que es este grupo',
-      'para que sirve este grupo',
-      'que hacen en este grupo',
-    ]).has(normalized)
-  ) {
-    return true;
-  }
-  return /^(?:de\s+qu[eé]\s+(?:se\s+trata|trata|es)|cu[aá]l\s+es\s+el\s+(?:objetivo|prop[oó]sito)\s+de)\s+(?:este\s+grupo|el\s+grupo|la\s+comunidad|este\s+chat)$/iu.test(
-    normalized,
-  );
+  return new Set([
+    'hola',
+    'holi',
+    'buenos dias',
+    'buen dia',
+    'buenas',
+    'buenas tardes',
+    'buenas noches',
+    'hola neurobot',
+    'hola bot',
+    'quien eres',
+    'para que sirves',
+    'que puedes hacer',
+    'como funcionas',
+  ]).has(normalized);
 }
 
 export function containsRestrictedClinicalAcronym(question: string): boolean {

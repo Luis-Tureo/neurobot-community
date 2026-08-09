@@ -1,6 +1,8 @@
 import type { AutomaticMessageConfiguration } from '../domain/types.js';
 
 export const AUTOMATIC_MESSAGE_TIMEZONE = 'America/Santiago' as const;
+export const WELCOME_BATCH_WINDOW_SECONDS = 10 as const;
+export const WELCOME_BATCH_WINDOW_MS = WELCOME_BATCH_WINDOW_SECONDS * 1000;
 
 export const LEGACY_AUTOMATIC_TEMPLATES = {
   WELCOME:
@@ -21,17 +23,17 @@ export const DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION: AutomaticMessageConfigurat
   timezone: AUTOMATIC_MESSAGE_TIMEZONE,
   welcome: {
     enabled: false,
-    batchWindowSeconds: 5,
+    batchWindowSeconds: WELCOME_BATCH_WINDOW_SECONDS,
     groupSimultaneous: true,
     reconciliationIntervalSeconds: 120,
     template:
-      '👋 ¡Bienvenidos/as {usuarios} a {grupo}!\n\nEste es un espacio de respeto, apoyo e inclusión para personas neurodivergentes y quienes deseen aprender y compartir experiencias.\n\nPueden participar cuando se sientan cómodos/as.',
+      '¡Bienvenido/a {usuarios} a {grupo}! 👋\n\nEste es un espacio de respeto, apoyo e inclusión para personas neurodivergentes y quienes deseen aprender y compartir experiencias.\n\nPuedes participar cuando te sientas cómodo/a.',
     includePublicName: true,
     enableRealMention: true,
     unknownNameFallback: 'nuevo/a integrante',
     multipleJoinMode: 'GROUPED',
     maximumGroupedNames: 5,
-    sendDelaySeconds: 2,
+    sendDelaySeconds: WELCOME_BATCH_WINDOW_SECONDS,
   },
   dailyGreeting: {
     enabled: false,

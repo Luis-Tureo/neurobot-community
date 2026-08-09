@@ -223,6 +223,9 @@ export class BotInstance {
         await options.onGroupJoin?.(bot.id, event);
       },
       onGroupChanged: async (event) => {
+        if (this.communityServicesEnabled && event.type === 'LEAVE') {
+          this.automaticMessages.handleGroupLeave(event);
+        }
         await this.discovery.handleGroupChange(event);
       },
     });

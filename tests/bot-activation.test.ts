@@ -92,6 +92,8 @@ describe('invocación unificada de Neurobot', () => {
     ['@neurobot hola', 'alias', 'hola'],
     ['@Neurobot hola', 'alias', 'hola'],
     ['@NEUROBOT ¿cuál es tu número?', 'alias', '¿cuál es tu número?'],
+    ['@Neurobot para que sirve este grupo?', 'alias', 'para que sirve este grupo?'],
+    ['@Neurobot\u200B qué actividades se hacen aquí?', 'alias', 'qué actividades se hacen aquí?'],
   ])('normaliza el alias seguro %s', (body, method, cleanedText) => {
     expect(detectBotInvocation(message(body), identity)).toMatchObject({
       invoked: true,
@@ -116,6 +118,21 @@ describe('invocación unificada de Neurobot', () => {
     });
   });
 
+  it('conserva una pregunta general cuando la metadata nativa marca la mención', () => {
+    expect(
+      detectBotInvocation(
+        message('@56900000000 para que sirve este grupo?', {
+          mentionedIds: ['bot-neurobot@lid'],
+        }),
+        identity,
+      ),
+    ).toMatchObject({
+      invoked: true,
+      method: 'native_mention',
+      cleanedText: 'para que sirve este grupo?',
+    });
+  });
+
   it.each([
     ['+56900000000 hola', 'hola'],
     ['56900000000 hola', 'hola'],
@@ -123,6 +140,7 @@ describe('invocación unificada de Neurobot', () => {
     ['+56-9-0000-0000 ¿cuáles son las reglas?', '¿cuáles son las reglas?'],
     ['56900000000@c.us hola', 'hola'],
     ['56900000000@s.whatsapp.net hola', 'hola'],
+    ['+56900000000 para que sirve este grupo?', 'para que sirve este grupo?'],
   ])('reconoce solo el teléfono completo configurado: %s', (body, cleanedText) => {
     expect(detectBotInvocation(message(body), identity)).toMatchObject({
       invoked: true,

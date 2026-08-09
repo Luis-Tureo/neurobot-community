@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import type { Logger } from 'pino';
-import type { AssistantQueryService } from '../ai/assistant-query-service.js';
+import type { AssistantQueryResult, AssistantQueryService } from '../ai/assistant-query-service.js';
 import { hashNormalizedQuestion, normalizeQuestionForCache } from '../ai/answer-cache-service.js';
 import type { ConnectionSnapshot, IncomingMessage } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
@@ -227,6 +227,27 @@ export class MessageProcessor {
       userHash,
       result: 'ACCEPTED',
     });
+    const cleanedTextEmpty = invocation.cleanedText.trim() === '';
+    this.logger.debug(
+      {
+        operation: 'BOT_QUERY_EXTRACTED',
+        botId: this.botId,
+        invocationMethod: invocation.method,
+        cleanedTextEmpty,
+        textLength: invocation.cleanedText.length,
+        ...context,
+      },
+      'La consulta posterior a la invocación fue extraída sin registrar su contenido',
+    );
+    this.database.recordTechnicalEvent({
+      eventType: 'BOT_QUERY_EXTRACTED',
+      botId: this.botId,
+      activationType: invocation.method,
+      groupHash,
+      userHash,
+      result: cleanedTextEmpty ? 'EMPTY' : 'PRESERVED',
+      itemCount: invocation.cleanedText.length,
+    });
 
     if (bot.capabilities.communitySingleTurnMode) {
       const interactionNow = new Date();
@@ -270,6 +291,7 @@ export class MessageProcessor {
           );
         },
       );
+      this.recordSelectedRoute(answer.code, invocation.method, context);
       if (answer.coalesced) {
         this.database.recordTechnicalEvent({
           eventType: 'GROUP_DUPLICATE_RESPONSE_COALESCED',
@@ -281,6 +303,7 @@ export class MessageProcessor {
         return 'responded';
       }
       const sent = await this.safeSend(message.chatId, answer.text, context);
+      if (sent) this.recordResponseSent(answer.code, invocation.method, context);
       this.database.recordTechnicalEvent({
         eventType: 'message_processed',
         botId: this.botId,
@@ -365,6 +388,7 @@ export class MessageProcessor {
         );
       },
     );
+    this.recordSelectedRoute(answer.code, invocation.method, context);
     if (answer.coalesced) {
       this.database.recordTechnicalEvent({
         eventType: 'GROUP_DUPLICATE_RESPONSE_COALESCED',
@@ -377,6 +401,7 @@ export class MessageProcessor {
     }
     const sent = await this.safeSend(message.chatId, answer.text, context);
     if (sent) {
+      this.recordResponseSent(answer.code, invocation.method, context);
       this.logger.info(
         { operation: 'AI_RESPONSE_SENT', result: answer.code, ...context },
         'La respuesta fue enviada al grupo',
@@ -448,6 +473,58 @@ export class MessageProcessor {
       );
       return false;
     }
+  }
+
+  private recordSelectedRoute(
+    route: AssistantQueryResult['code'],
+    invocationMethod: BotInvocationMethod,
+    context: { groupHash: string; userHash: string; messageHash: string },
+  ): void {
+    const fallbackUsed = route === 'MENTION_PROMPT';
+    this.logger.debug(
+      {
+        operation: 'BOT_ROUTE_SELECTED',
+        botId: this.botId,
+        invocationMethod,
+        route,
+        fallbackUsed,
+        ...context,
+      },
+      'Se seleccionó una ruta para responder la consulta',
+    );
+    this.database.recordTechnicalEvent({
+      eventType: 'BOT_ROUTE_SELECTED',
+      botId: this.botId,
+      activationType: invocationMethod,
+      groupHash: context.groupHash,
+      userHash: context.userHash,
+      result: route,
+    });
+  }
+
+  private recordResponseSent(
+    route: AssistantQueryResult['code'],
+    invocationMethod: BotInvocationMethod,
+    context: { groupHash: string; userHash: string; messageHash: string },
+  ): void {
+    this.logger.info(
+      {
+        operation: 'BOT_RESPONSE_SENT',
+        botId: this.botId,
+        invocationMethod,
+        route,
+        ...context,
+      },
+      'El asistente envió una única respuesta al grupo',
+    );
+    this.database.recordTechnicalEvent({
+      eventType: 'BOT_RESPONSE_SENT',
+      botId: this.botId,
+      activationType: invocationMethod,
+      groupHash: context.groupHash,
+      userHash: context.userHash,
+      result: route,
+    });
   }
 }
 

@@ -16,6 +16,7 @@ import { AppDatabase } from '../src/persistence/database.js';
 
 class CountingProvider implements AIProvider {
   public calls = 0;
+  public readonly requests: GroundedResponseRequest[] = [];
   public response = 'Respuesta oficial sintetizada para la comunidad.';
   public failure: Error | null = null;
   public delayMs = 0;
@@ -27,9 +28,10 @@ class CountingProvider implements AIProvider {
     return { successful: true };
   }
   public async generateGroundedResponse(
-    _request: GroundedResponseRequest,
+    request: GroundedResponseRequest,
   ): Promise<GroundedResponseResult> {
     this.calls += 1;
+    this.requests.push(request);
     if (this.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.delayMs));
     if (this.failure !== null) throw this.failure;
     return { text: this.response, usage: { inputTokens: 30, outputTokens: 10, totalTokens: 40 } };
@@ -114,9 +116,6 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     'para qué sirves',
     'qué puedes hacer',
     'cómo funcionas',
-    'de qué se trata este grupo',
-    'de que trata este grupo',
-    'cuál es el objetivo de este grupo',
   ])('responde el saludo local %s sin consumir Groq', async (question) => {
     const { database, provider, service, profileId } = setup();
     const result = await service.answerQuestion(question, 'group', 'user');
@@ -126,6 +125,49 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     expect(database.getAIUsageSummary(profileId, '2026-08-03', '2026-08').requests).toBe(0);
     database.close();
   });
+
+  it.each([
+    ['para que sirve este grupo?', 'sirve'],
+    ['qué actividades se hacen aquí?', 'actividades'],
+  ])(
+    'envía la pregunta general %s al flujo de IA en vez de presentar al bot',
+    async (question, lookupTerm) => {
+      const { database, provider, service, profileId } = setup();
+      addKnowledge(database, profileId, {
+        title: 'Fuente oficial',
+        content: `La referencia oficial incluye información sobre ${lookupTerm}.`,
+        keywords: [],
+      });
+
+      const result = await service.answerQuestion(question, 'group', 'user');
+
+      expect(result.code).toBe('AI_RESPONSE');
+      expect(result.text).toBe(provider.response);
+      expect(provider.requests).toHaveLength(1);
+      expect(provider.requests[0]?.question).toBe(question);
+      expect(result.text).not.toContain('Soy Neurobot');
+      expect(
+        database
+          .getTechnicalEvents()
+          .some((event) => event.event_type === 'BOT_AI_REQUEST_STARTED'),
+      ).toBe(true);
+      database.close();
+    },
+  );
+
+  it.each(['de qué se trata este grupo?', 'cuál es el objetivo de este grupo?'])(
+    'enruta la pregunta comunitaria %s fuera de la presentación genérica',
+    async (question) => {
+      const { database, provider, service } = setup();
+
+      const result = await service.answerQuestion(question, 'group', 'user');
+
+      expect(result.code).not.toBe('COMMUNITY_GREETING');
+      expect(result.text).not.toContain('Soy Neurobot');
+      expect(provider.calls).toBeLessThanOrEqual(1);
+      database.close();
+    },
+  );
 
   it('prioriza una FAQ administrativa y no llama a Groq', async () => {
     const { database, provider, service } = setup();

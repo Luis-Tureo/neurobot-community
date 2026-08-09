@@ -16,13 +16,21 @@ import { SecretVault } from './security/secret-vault.js';
 
 async function main(): Promise<void> {
   const environment = loadEnvironment();
+  if (process.platform === 'win32') {
+    try {
+      process.stdout.setEncoding('utf8');
+      process.stderr.setEncoding('utf8');
+    } catch {
+      /* Ignorar si la consola no admite cambio de encoding directo. */
+    }
+  }
   if (await isApplicationAlreadyRunning(environment.panelHost, environment.panelPort)) {
     process.stdout.write(
-      `El panel ya estÃ¡ funcionando en http://${displayHost(environment.panelHost)}:${environment.panelPort}. No es necesario iniciar otra copia.\n`,
+      `El panel ya está funcionando en http://${displayHost(environment.panelHost)}:${environment.panelPort}. No es necesario iniciar otra copia.\n`,
     );
     return;
   }
-  const logger = createLogger(environment.logLevel);
+  const logger = createLogger(environment.logLevel, environment.developmentMode);
   const database = new AppDatabase(environment.databasePath);
   database.migrate();
   database.setBotSessionPath('neurobot', environment.sessionPath);

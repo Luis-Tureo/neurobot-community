@@ -199,6 +199,7 @@ export class AssistantQueryService {
           }
           this.log('AI_QUOTA_RESERVED', 'RESERVED', groupHash, userHash);
           try {
+            this.log('BOT_AI_REQUEST_STARTED', 'STARTED', groupHash, userHash);
             const generated = await this.provider.generateGroundedResponse({
               systemInstruction,
               question,

@@ -14,9 +14,9 @@ describe('interfaz de mensajes automáticos', () => {
     expect(html).not.toContain('name="welcome_reconciliation_interval"');
     expect(html).not.toContain('id="welcome-runtime-status"');
     expect(html).not.toContain('id="automatic-message-group"');
-    expect(html).toContain('id="welcome-group-settings"');
+    expect(html).not.toContain('id="welcome-group-settings"');
     expect(html).toContain('name="welcome_enabled"');
-    expect(html).toContain('name="welcome_mention"');
+    expect(html).not.toContain('name="welcome_mention"');
     expect(html).toContain('{usuario}');
     expect(html).toContain('{usuarios}');
     expect(html).toContain('{grupo}');
@@ -25,8 +25,12 @@ describe('interfaz de mensajes automáticos', () => {
     expect(html).toContain('name="greeting_friday"');
     expect(html).toContain('name="greeting_weekend"');
     expect(html).toContain('name="rules_template"');
-    expect(script).toContain('renderWelcomeGroupSettings');
-    expect(script).toContain('/automatic-messages/welcome/groups');
+    expect(script).not.toContain('renderWelcomeGroupSettings');
+    expect(script).not.toContain('/automatic-messages/welcome/groups');
+    expect(html).not.toContain('Tiempo de espera');
+    expect(html.indexOf('Variables disponibles')).toBeLessThan(
+      html.indexOf('name="welcome_template"'),
+    );
     expect(script).toContain('...state.automaticConfiguration.welcome');
     expect(html).not.toContain('id="greeting-preview"');
     expect(html).not.toContain('id="rules-preview"');

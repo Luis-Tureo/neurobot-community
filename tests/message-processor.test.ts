@@ -18,6 +18,7 @@ import { Anonymizer } from '../src/security/anonymizer.js';
 
 class FakeAIProvider implements AIProvider {
   public calls = 0;
+  public readonly requests: GroundedResponseRequest[] = [];
   public response = 'Estas son las normas oficiales del grupo.';
 
   public isConfigured(): boolean {
@@ -27,9 +28,10 @@ class FakeAIProvider implements AIProvider {
     return { successful: true };
   }
   public async generateGroundedResponse(
-    _request: GroundedResponseRequest,
+    request: GroundedResponseRequest,
   ): Promise<GroundedResponseResult> {
     this.calls += 1;
+    this.requests.push(request);
     return { text: this.response, usage: { inputTokens: 30, outputTokens: 10, totalTokens: 40 } };
   }
   public getModelInformation(): { provider: string; model: string } {
@@ -65,6 +67,24 @@ function enableAI(database: AppDatabase, botId = 'neurobot'): void {
   const profile = database.getBotProfile(botId);
   const settings = database.getAISettings(profile.id);
   database.saveAISettings({ ...settings, enabled: true, userCooldownSeconds: 0 });
+}
+
+function addGeneralKnowledge(database: AppDatabase, keyword: string): void {
+  const profile = database.getBotProfile('neurobot');
+  const category = database.listKnowledgeCategories(profile.id)[0];
+  if (category === undefined) throw new Error('Falta la categoría de conocimiento de prueba.');
+  database.saveKnowledgeEntry({
+    id: 0,
+    profileId: profile.id,
+    categoryId: category.id,
+    title: 'Información oficial',
+    content: 'Esta fuente contiene información oficial de la comunidad.',
+    keywords: [keyword],
+    synonyms: [],
+    enabled: true,
+    priority: 100,
+    internalSource: 'Documento oficial revisado',
+  });
 }
 
 function createProcessor(input: {
@@ -132,6 +152,78 @@ describe('procesamiento por mención real y por modo', () => {
     );
     expect(client.sentMessages).toHaveLength(1);
     expect(provider.calls).toBe(0);
+  });
+
+  it('preserva la pregunta sobre el propósito del grupo y la entrega a la IA', async () => {
+    addGeneralKnowledge(database, 'sirve');
+
+    await expect(
+      processor.process(
+        message({ id: 'group-purpose', body: '@Neurobot para que sirve este grupo?' }),
+      ),
+    ).resolves.toBe('responded');
+
+    expect(provider.requests).toHaveLength(1);
+    expect(provider.requests[0]?.question).toBe('para que sirve este grupo?');
+    expect(client.sentMessages).toHaveLength(1);
+    expect(client.sentMessages[0]?.text).toBe(provider.response);
+    expect(client.sentMessages[0]?.text).not.toContain('Soy Neurobot');
+    expect(database.getTechnicalEvents()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event_type: 'BOT_QUERY_EXTRACTED', result: 'PRESERVED' }),
+        expect.objectContaining({ event_type: 'BOT_ROUTE_SELECTED', result: 'AI_RESPONSE' }),
+        expect.objectContaining({ event_type: 'BOT_RESPONSE_SENT', result: 'AI_RESPONSE' }),
+      ]),
+    );
+  });
+
+  it('preserva la pregunta posterior a una mención nativa', async () => {
+    addGeneralKnowledge(database, 'sirve');
+    client.ownIdentifiers.add('56900000000@c.us');
+    client.ownIdentifiers.add('neurobot-real@lid');
+
+    await expect(
+      processor.process(
+        message({
+          id: 'native-group-purpose',
+          body: '@56900000000 para que sirve este grupo?',
+          mentionedIds: ['neurobot-real@lid'],
+        }),
+      ),
+    ).resolves.toBe('responded');
+
+    expect(provider.requests[0]?.question).toBe('para que sirve este grupo?');
+    expect(client.sentMessages).toHaveLength(1);
+  });
+
+  it('preserva la pregunta posterior al número completo del bot', async () => {
+    addGeneralKnowledge(database, 'sirve');
+    client.ownIdentifiers.add('56900000000@c.us');
+
+    await expect(
+      processor.process(
+        message({
+          id: 'phone-group-purpose',
+          body: '+56 9 0000 0000 para que sirve este grupo?',
+        }),
+      ),
+    ).resolves.toBe('responded');
+
+    expect(provider.requests[0]?.question).toBe('para que sirve este grupo?');
+    expect(client.sentMessages).toHaveLength(1);
+  });
+
+  it('envía una pregunta general no clasificada al flujo de IA', async () => {
+    addGeneralKnowledge(database, 'actividades');
+
+    await expect(
+      processor.process(
+        message({ id: 'general-query', body: '@Neurobot qué actividades se hacen aquí?' }),
+      ),
+    ).resolves.toBe('responded');
+
+    expect(provider.requests[0]?.question).toBe('qué actividades se hacen aquí?');
+    expect(client.sentMessages[0]?.text).toBe(provider.response);
   });
 
   it('acepta @neurobot sin distinguir mayúsculas y evita coincidencias parciales', async () => {
@@ -270,10 +362,11 @@ describe('procesamiento por mención real y por modo', () => {
       ),
     ).resolves.toBe('responded');
 
+    const identity = new Anonymizer('x'.repeat(32));
     expect(answerQuestion).toHaveBeenCalledWith(
       '¿de qué se trata este grupo?',
-      expect.any(String),
-      expect.any(String),
+      identity.identifier('group-1@g.us'),
+      identity.identifier('56912345678@c.us'),
       expect.any(Date),
       expect.any(Function),
     );

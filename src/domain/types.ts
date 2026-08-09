@@ -58,6 +58,7 @@ export type GroupChangeEvent = {
   groupId: string;
   type: 'JOIN' | 'LEAVE' | 'UPDATE';
   botAffected: boolean;
+  participantIds?: string[];
 };
 
 export type GroupJoinEvent = {
