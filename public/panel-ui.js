@@ -202,6 +202,20 @@ function configureCollapsible(card) {
   setOpen(card.dataset.open === 'true');
 }
 
+function installDigestDesktopLayoutAdjustment() {
+  if (document.querySelector('#digest-desktop-layout-adjustment')) return;
+  const style = document.createElement('style');
+  style.id = 'digest-desktop-layout-adjustment';
+  style.textContent = `
+    @media (min-width: 1101px) {
+      .digest-frequency-list {
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 1.2fr);
+      }
+    }
+  `;
+  document.head.append(style);
+}
+
 function revealActiveNavigationGroup() {
   const active = document.querySelector('.tabs button[data-section].active');
   active?.scrollIntoView({ block: 'nearest' });
@@ -209,6 +223,7 @@ function revealActiveNavigationGroup() {
 
 function initializePanelUi() {
   installPollConfigurationEnabledGuard();
+  installDigestDesktopLayoutAdjustment();
   configureWeeklyPollScheduleCard();
   document.querySelectorAll('[data-collapsible]').forEach(configureCollapsible);
   document.querySelectorAll('.tabs button[data-section]').forEach((button) => {
