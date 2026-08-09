@@ -270,175 +270,6 @@ function installPanelEnhancementStyles() {
         grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 1.2fr);
       }
     }
-
-    .ai-usage-dashboard {
-      display: grid;
-      gap: 1rem;
-      margin-top: 0.25rem;
-    }
-
-    .ai-usage-provider-summary {
-      display: grid;
-      gap: 0.45rem;
-      border: 1px solid #cbd5e1;
-      border-radius: 0.85rem;
-      background: #ffffff;
-      padding: 1rem;
-    }
-
-    .ai-usage-provider-summary strong {
-      color: #0f172a;
-    }
-
-    .ai-usage-provider-summary p {
-      margin: 0;
-      color: #475569;
-      font-size: 0.86rem;
-      line-height: 1.5;
-    }
-
-    .ai-usage-provider-note {
-      border-left: 4px solid #4f46e5;
-      padding-left: 0.75rem;
-    }
-
-    .ai-budget-alert {
-      margin: 0;
-      border-radius: 0.75rem;
-      padding: 0.75rem 0.9rem;
-      font-size: 0.86rem;
-      font-weight: 700;
-    }
-
-    .ai-budget-alert[data-level='ok'] {
-      color: #065f46;
-      background: #ecfdf5;
-      border: 1px solid #a7f3d0;
-    }
-
-    .ai-budget-alert[data-level='warning'] {
-      color: #92400e;
-      background: #fffbeb;
-      border: 1px solid #fde68a;
-    }
-
-    .ai-budget-alert[data-level='critical'] {
-      color: #991b1b;
-      background: #fef2f2;
-      border: 1px solid #fecaca;
-    }
-
-    .ai-budget-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0.85rem;
-    }
-
-    .ai-budget-card {
-      display: grid;
-      gap: 0.6rem;
-      min-width: 0;
-      border: 1px solid #e2e8f0;
-      border-radius: 0.85rem;
-      background: #f8fafc;
-      padding: 0.95rem;
-    }
-
-    .ai-budget-card[data-level='warning'] {
-      border-color: #fbbf24;
-      background: #fffbeb;
-    }
-
-    .ai-budget-card[data-level='critical'] {
-      border-color: #f87171;
-      background: #fef2f2;
-    }
-
-    .ai-budget-card h4 {
-      margin: 0;
-      color: #0f172a;
-      font-size: 0.92rem;
-    }
-
-    .ai-budget-values {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 0.5rem;
-    }
-
-    .ai-budget-values span {
-      display: grid;
-      gap: 0.15rem;
-      min-width: 0;
-      color: #64748b;
-      font-size: 0.72rem;
-    }
-
-    .ai-budget-values strong {
-      overflow-wrap: anywhere;
-      color: #0f172a;
-      font-size: 0.9rem;
-    }
-
-    .ai-budget-card progress {
-      width: 100%;
-      height: 0.65rem;
-      accent-color: #4f46e5;
-    }
-
-    .ai-budget-card[data-level='warning'] progress {
-      accent-color: #d97706;
-    }
-
-    .ai-budget-card[data-level='critical'] progress {
-      accent-color: #dc2626;
-    }
-
-    .ai-budget-meta {
-      margin: 0;
-      color: #64748b;
-      font-size: 0.76rem;
-      line-height: 1.4;
-    }
-
-    .ai-global-limit-summary {
-      margin: 0;
-      color: #475569;
-      font-size: 0.8rem;
-      line-height: 1.5;
-    }
-
-    .ai-usage-loading,
-    .ai-usage-error {
-      margin: 0;
-      border-radius: 0.75rem;
-      padding: 0.85rem;
-      font-size: 0.86rem;
-    }
-
-    .ai-usage-loading {
-      color: #475569;
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-    }
-
-    .ai-usage-error {
-      color: #991b1b;
-      background: #fef2f2;
-      border: 1px solid #fecaca;
-    }
-
-    @media (max-width: 820px) {
-      .ai-budget-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    @media (max-width: 520px) {
-      .ai-budget-values {
-        grid-template-columns: 1fr;
-      }
-    }
   `;
   document.head.append(style);
 }
@@ -481,6 +312,24 @@ function usageLevel(percent) {
   return 'ok';
 }
 
+function levelCardClasses(level) {
+  if (level === 'critical') return 'border-red-300 bg-red-50';
+  if (level === 'warning') return 'border-amber-300 bg-amber-50';
+  return 'border-slate-200 bg-white';
+}
+
+function levelProgressClasses(level) {
+  if (level === 'critical') return 'accent-red-600';
+  if (level === 'warning') return 'accent-amber-600';
+  return 'accent-indigo-600';
+}
+
+function levelAlertClasses(level) {
+  if (level === 'critical') return 'border-red-200 bg-red-50 text-red-800';
+  if (level === 'warning') return 'border-amber-200 bg-amber-50 text-amber-800';
+  return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+}
+
 function createBudgetMetric({ title, consumed, limit, reset }) {
   const safeConsumed = safeNumber(consumed);
   const safeLimit = safeNumber(limit);
@@ -489,38 +338,53 @@ function createBudgetMetric({ title, consumed, limit, reset }) {
   const level = usageLevel(percent);
 
   const card = document.createElement('article');
-  card.className = 'ai-budget-card';
+  card.className = `grid min-w-0 gap-4 rounded-2xl border p-5 shadow-sm ${levelCardClasses(level)}`;
   card.dataset.level = level;
 
+  const headingRow = document.createElement('div');
+  headingRow.className = 'flex items-center justify-between gap-3';
   const heading = document.createElement('h4');
+  heading.className = 'm-0 text-sm font-bold text-slate-950';
   heading.textContent = title;
+  const percentageBadge = document.createElement('span');
+  percentageBadge.className =
+    'shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold tabular-nums text-slate-700';
+  percentageBadge.textContent = `${percent.toFixed(1)}%`;
+  headingRow.append(heading, percentageBadge);
 
   const values = document.createElement('div');
-  values.className = 'ai-budget-values';
+  values.className = 'grid grid-cols-1 gap-2 sm:grid-cols-3';
   [
     ['Consumido', safeConsumed],
     ['Límite', safeLimit],
     ['Disponible', available],
   ].forEach(([label, value]) => {
-    const item = document.createElement('span');
+    const item = document.createElement('div');
+    item.className = 'grid min-w-0 gap-1 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-slate-200';
     const caption = document.createElement('small');
+    caption.className = 'text-xs font-semibold text-slate-500';
     caption.textContent = label;
     const strong = document.createElement('strong');
+    strong.className = 'break-words text-base font-extrabold tabular-nums text-slate-950';
     strong.textContent = formatMetricNumber(value);
     item.append(caption, strong);
     values.append(item);
   });
 
+  const progressWrap = document.createElement('div');
+  progressWrap.className = 'grid gap-2';
   const progress = document.createElement('progress');
+  progress.className = `h-2.5 w-full overflow-hidden rounded-full bg-slate-200 ${levelProgressClasses(level)}`;
   progress.max = 100;
   progress.value = Math.min(100, percent);
   progress.setAttribute('aria-label', `${title}: ${percent.toFixed(1)}% consumido`);
 
   const meta = document.createElement('p');
-  meta.className = 'ai-budget-meta';
+  meta.className = 'm-0 text-xs font-medium leading-5 text-slate-500';
   meta.textContent = `${percent.toFixed(1)}% consumido${reset ? ` · Reinicio: ${reset}` : ''}`;
+  progressWrap.append(progress, meta);
 
-  card.append(heading, values, progress, meta);
+  card.append(headingRow, values, progressWrap);
   return { card, percent };
 }
 
@@ -533,7 +397,7 @@ function ensureAIUsageDashboard() {
 
   dashboard = document.createElement('div');
   dashboard.id = 'ai-usage-limits-dashboard';
-  dashboard.className = 'ai-usage-dashboard';
+  dashboard.className = 'mt-5 grid gap-5';
   statisticsCards.insertAdjacentElement('afterend', dashboard);
   return dashboard;
 }
@@ -589,21 +453,51 @@ function renderAIUsageDashboard(dashboard, aiData, globalData) {
 
   dashboard.replaceChildren();
 
+  const header = document.createElement('div');
+  header.className = 'grid gap-1';
+  const title = document.createElement('h3');
+  title.className = 'm-0 text-lg font-extrabold tracking-tight text-slate-950';
+  title.textContent = 'Consumo y límites de IA';
+  const subtitle = document.createElement('p');
+  subtitle.className = 'm-0 text-sm leading-6 text-slate-500';
+  subtitle.textContent = 'Consulta el uso registrado por Neurobot y el margen disponible de cada límite interno.';
+  header.append(title, subtitle);
+
   const providerSummary = document.createElement('section');
-  providerSummary.className = 'ai-usage-provider-summary';
+  providerSummary.className = 'grid gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm';
+
+  const providerHeader = document.createElement('div');
+  providerHeader.className = 'flex flex-wrap items-center justify-between gap-3';
+  const providerCopy = document.createElement('div');
+  providerCopy.className = 'grid gap-1';
+  const providerLabel = document.createElement('span');
+  providerLabel.className = 'text-xs font-bold tracking-wide text-indigo-600 uppercase';
+  providerLabel.textContent = 'Proveedor y modelo';
   const providerHeading = document.createElement('strong');
+  providerHeading.className = 'text-base font-extrabold text-slate-950';
   providerHeading.textContent = `${providerDisplayName(aiData)} · ${modelDisplayName(aiData)}`;
+  providerCopy.append(providerLabel, providerHeading);
+
+  const internalBadge = document.createElement('span');
+  internalBadge.className =
+    'rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700';
+  internalBadge.textContent = 'Límites internos de Neurobot';
+  providerHeader.append(providerCopy, internalBadge);
+
   const providerNote = document.createElement('p');
-  providerNote.className = 'ai-usage-provider-note';
+  providerNote.className =
+    'm-0 rounded-xl border border-indigo-100 bg-indigo-50 p-4 text-sm leading-6 text-indigo-900';
   providerNote.textContent =
-    'Cuota reportada por el proveedor: no disponible mediante la integración actual. Los límites y la disponibilidad mostrados abajo son cálculos internos de Neurobot basados en su configuración y consumo registrado.';
+    'La cuota real del proveedor no está disponible mediante la integración actual. Los valores mostrados son cálculos internos de Neurobot basados en su configuración y consumo registrado.';
+
   const globalSummary = document.createElement('p');
-  globalSummary.className = 'ai-global-limit-summary';
-  globalSummary.textContent = `Límites globales configurados para la instalación: ${globalLimitSummary(globalData?.limits)}`;
-  providerSummary.append(providerHeading, providerNote, globalSummary);
+  globalSummary.className =
+    'm-0 rounded-xl bg-slate-50 px-4 py-3 text-xs font-medium leading-5 text-slate-600 ring-1 ring-slate-200';
+  globalSummary.textContent = `Límites globales de la instalación: ${globalLimitSummary(globalData?.limits)}`;
+  providerSummary.append(providerHeader, providerNote, globalSummary);
 
   const grid = document.createElement('div');
-  grid.className = 'ai-budget-grid';
+  grid.className = 'grid grid-cols-1 gap-4 xl:grid-cols-2';
   const percentages = [];
   metrics.forEach((metric) => {
     const result = createBudgetMetric(metric);
@@ -612,17 +506,18 @@ function renderAIUsageDashboard(dashboard, aiData, globalData) {
   });
 
   const highestPercent = Math.max(0, ...percentages);
+  const level = usageLevel(highestPercent);
   const alert = document.createElement('p');
-  alert.className = 'ai-budget-alert';
-  alert.dataset.level = usageLevel(highestPercent);
+  alert.className = `m-0 rounded-xl border px-4 py-3 text-sm font-semibold leading-5 ${levelAlertClasses(level)}`;
+  alert.dataset.level = level;
   alert.textContent =
     highestPercent >= 95
       ? 'Alerta crítica: al menos uno de los límites internos de Neurobot alcanzó el 95% o más.'
       : highestPercent >= 80
-        ? 'Alerta: al menos uno de los límites internos de Neurobot alcanzó el 80% o más.'
+        ? 'Atención: al menos uno de los límites internos de Neurobot alcanzó el 80% o más.'
         : 'Consumo dentro de los límites internos configurados en Neurobot.';
 
-  dashboard.append(providerSummary, alert, grid);
+  dashboard.append(header, providerSummary, alert, grid);
 }
 
 async function refreshAIUsageDashboard(botId = selectedBotIdFromHash()) {
@@ -632,7 +527,8 @@ async function refreshAIUsageDashboard(botId = selectedBotIdFromHash()) {
 
   const requestSequence = ++aiUsageRequestSequence;
   const loading = document.createElement('p');
-  loading.className = 'ai-usage-loading';
+  loading.className =
+    'm-0 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-600';
   loading.textContent = 'Actualizando consumo, límites y tokens disponibles…';
   dashboard.replaceChildren(loading);
 
@@ -646,7 +542,8 @@ async function refreshAIUsageDashboard(botId = selectedBotIdFromHash()) {
   } catch (error) {
     if (requestSequence !== aiUsageRequestSequence) return;
     const message = document.createElement('p');
-    message.className = 'ai-usage-error';
+    message.className =
+      'm-0 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800';
     message.textContent = error.message || 'No fue posible cargar el consumo y los límites de IA.';
     dashboard.replaceChildren(message);
   }
