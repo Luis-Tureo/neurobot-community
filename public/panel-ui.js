@@ -212,11 +212,25 @@ function installDigestDesktopLayoutAdjustment() {
         display: flex;
         align-items: center;
         gap: 0.75rem;
+        width: 100%;
         overflow-x: visible;
       }
 
       .status-action-row > #restart-connection,
-      .status-action-row > #change-bot-number,
+      .status-action-row > #change-bot-number {
+        flex: 0 1 13.5rem;
+        width: 13.5rem;
+        min-width: 11rem;
+      }
+
+      #status-quick-actions.status-action-dynamic {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+
       #status-quick-actions > button.danger {
         flex: 0 1 13.5rem;
         width: 13.5rem;
