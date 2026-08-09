@@ -4,14 +4,15 @@ FROM node:24.19.0-bookworm-slim AS build
 
 WORKDIR /app
 
-# Puppeteer descarga Chrome durante npm ci. Guardamos el navegador dentro
-# del árbol de la aplicación para poder copiarlo a la imagen de ejecución.
+# Puppeteer guarda Chrome dentro de la propia imagen para que el runtime
+# no dependa del navegador disponible en Azure App Service.
 ENV PUPPETEER_CACHE_DIR=/app/.cache/puppeteer
 
 COPY package.json package-lock.json ./
 COPY scripts/verify-runtime.mjs ./scripts/verify-runtime.mjs
 
-RUN npm ci
+RUN npm ci \
+  && npx puppeteer browsers install chrome
 
 COPY . .
 
@@ -22,8 +23,9 @@ RUN npm run check \
 
 FROM node:24.19.0-bookworm-slim AS runtime
 
-# Dependencias Linux requeridas por Chrome for Testing / Puppeteer.
-# Lista basada en la documentación oficial de Puppeteer para Debian/Ubuntu.
+# Dependencias Linux requeridas por Chrome for Testing / Puppeteer sobre
+# Debian Bookworm. En Bookworm el paquete de soporte de GCC se llama
+# libgcc-s1 (libgcc1 ya no existe en los repositorios de esta distribución).
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -38,7 +40,7 @@ RUN apt-get update \
     libexpat1 \
     libfontconfig1 \
     libgbm1 \
-    libgcc1 \
+    libgcc-s1 \
     libglib2.0-0 \
     libgtk-3-0 \
     libnspr4 \
