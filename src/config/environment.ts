@@ -6,15 +6,20 @@ const optionalTrimmedString = z.preprocess(
   z.string().trim().optional(),
 );
 
-const optionalPort = z.preprocess(
+const optionalPanelPort = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.coerce.number().int().min(1024).max(65_535).optional(),
+);
+
+const optionalPlatformPort = z.preprocess(
   (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
   z.coerce.number().int().min(1).max(65_535).optional(),
 );
 
 const environmentSchema = z.object({
   PANEL_HOST: optionalTrimmedString,
-  PANEL_PORT: optionalPort,
-  PORT: optionalPort,
+  PANEL_PORT: optionalPanelPort,
+  PORT: optionalPlatformPort,
   DATA_ROOT: optionalTrimmedString,
   WEBSITE_SITE_NAME: optionalTrimmedString,
   HOME: optionalTrimmedString,
