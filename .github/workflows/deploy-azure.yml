@@ -5,68 +5,108 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      deploy_container:
+        description: 'Cambiar Azure App Service para usar la imagen publicada'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
+  packages: write
   id-token: write
 
 env:
   AZURE_CLIENT_ID: 08de1185-b271-4533-9583-b43599f9d283
   AZURE_TENANT_ID: 3bb118c0-bb1e-4418-87e5-d176550897cb
   AZURE_SUBSCRIPTION_ID: c8f1120a-a5f2-4c59-be76-e3118c5f03ce
+  AZURE_RESOURCE_GROUP: neurobot-community-ltureo
   AZURE_WEBAPP_NAME: neurobot-community
   NODE_VERSION: 24.19.0
-  PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.cache/puppeteer
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/luis-tureo/neurobot-community
 
 jobs:
-  build-and-deploy:
+  build-publish-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      - name: Verify runtime
-        run: |
-          node --version
-          npm --version
-          npm run runtime:check
-
       - name: Install dependencies
         run: npm ci
 
-      - name: Build application
-        run: npm run build
+      - name: Verify project
+        run: npm run check
 
-      - name: Remove development dependencies
-        run: npm prune --omit=dev
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Prepare deployment package
-        shell: bash
-        run: |
-          rm -rf deploy
-          mkdir -p deploy
-          cp -R dist public node_modules package.json package-lock.json deploy/
-          if [ -d .cache ]; then
-            cp -R .cache deploy/.cache
-          fi
+      - name: Build and publish container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Login to Azure with OIDC
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy_container
         uses: azure/login@v2
         with:
           client-id: ${{ env.AZURE_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Deploy to Azure App Service
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          slot-name: Production
-          package: ./deploy
+      - name: Configure persistent Azure container runtime
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy_container
+        shell: bash
+        run: |
+          az webapp config appsettings set \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            --settings \
+              WEBSITES_ENABLE_APP_SERVICE_STORAGE=true \
+              WEBSITES_PORT=8080 \
+              PORT=8080 \
+              PANEL_HOST=0.0.0.0 \
+              DATA_ROOT=/home/neurobot \
+              PUPPETEER_CACHE_DIR=/app/.cache/puppeteer \
+              CHROME_EXECUTABLE_PATH=/usr/local/bin/neurobot-chrome \
+            >/dev/null
+
+          az webapp config container set \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            --docker-custom-image-name "${IMAGE_NAME}:latest" \
+            >/dev/null
+
+          az webapp config set \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            --always-on true \
+            >/dev/null
+
+          az webapp restart \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME"
+
+      - name: Show deployed image
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy_container
+        run: echo "Azure configurado con ${IMAGE_NAME}:latest"
