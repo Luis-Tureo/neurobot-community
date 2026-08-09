@@ -55,4 +55,11 @@ describe('centro de pruebas de automatizaciones', () => {
     expect(script).toContain("headers['x-csrf-token']");
     expect(script).toContain('/api/automatic-messages/digests/send-test');
   });
+
+  it('interpreta correctamente estados SKIPPED y FAILED del resumen', () => {
+    expect(script).toContain("result.status === 'SKIPPED'");
+    expect(script).toContain("result.status === 'FAILED'");
+    expect(script).toContain('result.error');
+    expect(script).toContain('result.errorCode');
+  });
 });

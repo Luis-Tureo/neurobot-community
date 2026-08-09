@@ -274,11 +274,17 @@ function sendPollTest(groupKey) {
   });
 }
 
-function sendDigestTest(period, groupKey) {
-  return api(botPath('/api/automatic-messages/digests/send-test'), {
+async function sendDigestTest(period, groupKey) {
+  const result = await api(botPath('/api/automatic-messages/digests/send-test'), {
     method: 'POST',
     body: JSON.stringify({ groupKey, period, confirmed: true }),
   });
+  if (result.status === 'SKIPPED' || result.status === 'FAILED') {
+    const error = new Error(result.error || 'La prueba no pudo completarse.');
+    error.code = result.errorCode;
+    throw error;
+  }
+  return result;
 }
 
 async function loadModule() {

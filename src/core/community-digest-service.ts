@@ -183,11 +183,29 @@ export class CommunityDigestService {
     groupId: string,
     now = this.now(),
   ): Promise<CommunityDigestResult> {
-    if (!this.client.isReady()) return failed(period, 'WHATSAPP_NOT_CONNECTED');
+    const groupHash = this.anonymizer.identifier(groupId);
+    this.event('COMMUNITY_DIGEST_MANUAL_STARTED', 'started', null, groupHash);
+    if (!this.client.isReady()) {
+      this.event('COMMUNITY_DIGEST_MANUAL_FAILED', 'failed', 'WHATSAPP_NOT_CONNECTED', groupHash);
+      return failed(period, 'WHATSAPP_NOT_CONNECTED');
+    }
     if (!this.database.canBotSendToGroup(this.botId, groupId)) {
+      this.event('COMMUNITY_DIGEST_MANUAL_FAILED', 'failed', 'GROUP_NOT_AVAILABLE', groupHash);
       return failed(period, 'GROUP_NOT_AVAILABLE');
     }
-    return this.send(period, groupId, now);
+    const result = await this.send(period, groupId, now);
+    this.event(
+      result.status === 'SENT'
+        ? 'COMMUNITY_DIGEST_MANUAL_SENT'
+        : result.status === 'SKIPPED'
+          ? 'COMMUNITY_DIGEST_MANUAL_SKIPPED'
+          : 'COMMUNITY_DIGEST_MANUAL_FAILED',
+      result.status === 'SENT' ? 'sent' : result.status === 'SKIPPED' ? 'skipped' : 'failed',
+      result.errorCode,
+      groupHash,
+      result.messageCount,
+    );
+    return result;
   }
 
   public async exportHistory(
@@ -324,7 +342,11 @@ export class CommunityDigestService {
       timeoutMs: 45_000,
     });
     const summary = response.text.trim().slice(0, 3500);
-    if (summary === '') throw new Error('AI_EMPTY_RESPONSE');
+    if (summary === '') {
+      const error = new Error('AI_EMPTY_RESPONSE');
+      (error as Error & { code: string }).code = 'AI_EMPTY_RESPONSE';
+      throw error;
+    }
     return summary;
   }
 

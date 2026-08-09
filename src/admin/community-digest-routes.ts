@@ -132,8 +132,11 @@ export function registerCommunityDigestRoutes(
           .send({ error: 'El grupo no está disponible.', code: 'GROUP_NOT_AVAILABLE' });
       }
       const result = await service.sendManual(input.period, groupId);
-      const statusCode = result.status === 'SENT' ? 200 : result.status === 'SKIPPED' ? 409 : 502;
-      return reply.code(statusCode).send(result);
+      if (result.status === 'SENT') return reply.code(200).send(result);
+      const statusCode = result.status === 'SKIPPED' ? 200 : 502;
+      return reply
+        .code(statusCode)
+        .send({ ...result, error: digestErrorMessage(result.errorCode) });
     },
   );
 
@@ -187,4 +190,25 @@ function isValidTimezone(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function digestErrorMessage(errorCode: string | null): string {
+  const messages: Record<string, string> = {
+    NO_MESSAGES_IN_PERIOD: 'No se encontraron conversaciones para el período seleccionado.',
+    AI_NOT_CONFIGURED: 'La IA no está configurada para este asistente.',
+    AI_EMPTY_RESPONSE: 'La IA no pudo generar un resumen.',
+    WHATSAPP_NOT_CONNECTED: 'WhatsApp no está conectado.',
+    GROUP_NOT_AVAILABLE: 'El grupo no está disponible.',
+    CHAT_HISTORY_UNAVAILABLE: 'El historial de mensajes no está disponible.',
+    AI_TIMEOUT: 'La solicitud a la IA excedió el tiempo máximo.',
+    AI_NETWORK_ERROR: 'No fue posible conectar con el proveedor de IA.',
+    AI_INVALID_KEY: 'Las credenciales del proveedor de IA no son válidas.',
+    AI_MODEL_UNAVAILABLE: 'El modelo de IA no está disponible.',
+    AI_PROVIDER_RATE_LIMITED: 'Se alcanzó la cuota del proveedor de IA.',
+    AI_INVALID_RESPONSE: 'El proveedor de IA devolvió una respuesta inválida.',
+    AI_TEMPORARY_ERROR: 'Error temporal del proveedor de IA.',
+    AI_PERMANENT_ERROR: 'Error permanente del proveedor de IA.',
+  };
+  if (errorCode === null) return 'La prueba no pudo completarse.';
+  return messages[errorCode] ?? 'La prueba no pudo completarse.';
 }
