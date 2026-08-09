@@ -191,15 +191,15 @@ function createModule() {
           <p class="muted">Escribe como un integrante y revisa la respuesta que produciría el pipeline real del asistente.</p>
         </div>
       </div>
-      <div class="section-heading-actions">
-        <button id="lab-clear-chat" class="secondary" type="button">Limpiar conversación</button>
-      </div>
       <form id="lab-chat-form" class="lab-chat-form">
         <label for="lab-chat-question">Pregunta de prueba</label>
         <textarea id="lab-chat-question" rows="3" maxlength="3000" placeholder="Ejemplo: ¿De qué se trata este grupo?" required></textarea>
         <div class="lab-chat-actions">
           <p class="muted">No se envía a WhatsApp. Si el pipeline necesita consultar la IA real, el consumo de tokens sí se registra.</p>
-          <button id="lab-chat-send" type="submit">Enviar al bot</button>
+          <div class="lab-chat-action-buttons">
+            <button id="lab-clear-chat" class="secondary" type="button">Limpiar conversación</button>
+            <button id="lab-chat-send" type="submit">Enviar al bot</button>
+          </div>
         </div>
       </form>
       <div id="lab-chat-container" class="lab-chat-container hidden">
