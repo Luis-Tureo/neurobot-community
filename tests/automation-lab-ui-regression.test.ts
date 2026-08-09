@@ -6,18 +6,39 @@ const panelUi = readFileSync('public/panel-ui.js', 'utf8');
 const styles = readFileSync('src/admin/panel.css', 'utf8');
 
 describe('requerimiento 20 - Centro de pruebas', () => {
-  it('usa el componente colapsable compartido en las tres secciones solicitadas', () => {
+  it('mantiene colapsables solo el simulador y las opciones de prueba', () => {
     const collapsibleCards = labScript.match(/data-collapsible data-open="true"/g) ?? [];
 
-    expect(collapsibleCards).toHaveLength(3);
-    expect(labScript).toContain('Validación del funcionamiento del bot');
-    expect(labScript).toContain('Simulador conversacional con IA');
-    expect(labScript).toContain('Opciones de prueba');
+    expect(collapsibleCards).toHaveLength(2);
+    expect(labScript).toContain('<article class="card inset lab-bot-validation-card">');
+    expect(labScript).not.toContain(
+      '<article class="card inset lab-bot-validation-card" data-collapsible',
+    );
+    expect(labScript).toContain(
+      '<article class="card inset lab-ai-simulator-card" data-collapsible data-open="true">',
+    );
+    expect(labScript).toContain(
+      '<article class="card inset lab-test-options-card" data-collapsible data-open="true">',
+    );
     expect(labScript).toContain("section.querySelectorAll('[data-collapsible]')");
     expect(panelUi).toContain('export function configureCollapsible(card)');
     expect(panelUi).toContain('window.configureCollapsible = configureCollapsible');
     expect(panelUi).toContain("button.textContent = open ? '−' : '+'");
     expect(panelUi).toContain("button.setAttribute('aria-expanded', String(open))");
+  });
+
+  it('oculta Limpiar conversación junto con el contenido cuando el simulador está colapsado', () => {
+    const simulatorStart = labScript.indexOf('lab-ai-simulator-card');
+    const clearAction = labScript.indexOf('id="lab-clear-chat"', simulatorStart);
+    const simulatorForm = labScript.indexOf('id="lab-chat-form"', simulatorStart);
+    const headingClose = labScript.indexOf('</div>\n      <div class="section-heading-actions">', simulatorStart);
+
+    expect(simulatorStart).toBeGreaterThanOrEqual(0);
+    expect(headingClose).toBeGreaterThan(simulatorStart);
+    expect(clearAction).toBeGreaterThan(headingClose);
+    expect(simulatorForm).toBeGreaterThan(clearAction);
+    expect(styles).toContain("[data-collapsible].is-collapsed > :not(.section-heading)");
+    expect(styles).toContain('display: none !important;');
   });
 
   it('mantiene contadores independientes de 30 segundos y limpia los resultados', () => {
