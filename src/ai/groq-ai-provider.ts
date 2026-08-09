@@ -25,10 +25,30 @@ export class GroqAIProvider implements AIProvider {
   public async testConnection(timeoutMs = 15_000): Promise<AIProviderConnectionResult> {
     if (!this.isConfigured()) return { successful: false, errorCode: 'AI_NOT_CONFIGURED' };
     try {
-      await this.performRequest(`${this.endpoint}/models/${encodeURIComponent(this.model)}`, {
-        method: 'GET',
-      }, timeoutMs, false);
-      return { successful: true };
+      // Se usa el endpoint de listado documentado por Groq en vez de construir una
+      // ruta con el ID del modelo. Algunos IDs válidos contienen una barra (por
+      // ejemplo, openai/gpt-oss-20b), lo que hace innecesariamente frágil una
+      // comprobación basada en /models/{model}. El listado valida la credencial y
+      // permite confirmar que el modelo configurado está realmente disponible.
+      const response = await this.performRequest(
+        `${this.endpoint}/models`,
+        { method: 'GET' },
+        timeoutMs,
+        false,
+      );
+      const value: unknown = await response.json().catch(() => null);
+      if (!isRecord(value) || !Array.isArray(value.data)) {
+        return { successful: false, errorCode: 'AI_INVALID_RESPONSE' };
+      }
+      const modelAvailable = value.data.some(
+        (entry) =>
+          isRecord(entry) &&
+          entry.id === this.model &&
+          (entry.active === undefined || entry.active === true),
+      );
+      return modelAvailable
+        ? { successful: true }
+        : { successful: false, errorCode: 'AI_MODEL_UNAVAILABLE' };
     } catch (error) {
       return { successful: false, errorCode: this.classifyProviderError(error) };
     }
