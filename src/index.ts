@@ -51,8 +51,8 @@ async function main(): Promise<void> {
     environment.aiProvider,
   );
   const sessionManager = new WhatsAppSessionManager(
-    resolve(process.cwd(), 'data', 'whatsapp-sessions'),
-    resolve(process.cwd(), 'backups', 'sessions'),
+    resolve(environment.dataRoot, 'data', 'whatsapp-sessions'),
+    resolve(environment.dataRoot, 'backups', 'sessions'),
   );
   const multiBotManager = new MultiBotManager(
     database,
@@ -66,7 +66,7 @@ async function main(): Promise<void> {
       maxReconnectDelayMs: environment.maxReconnectDelayMs,
       developmentMode: environment.developmentMode,
       secretVault: vault,
-      mediaRoot: resolve(process.cwd(), 'data', 'media'),
+      mediaRoot: resolve(environment.dataRoot, 'data', 'media'),
       ...(environment.chromeExecutablePath === undefined
         ? {}
         : { chromeExecutablePath: environment.chromeExecutablePath }),
