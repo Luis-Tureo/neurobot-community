@@ -1,3 +1,5 @@
+import './state-metrics-ui.js';
+
 const structure = new WeakSet();
 
 function ensureStatusSwitchStructure(button) {
