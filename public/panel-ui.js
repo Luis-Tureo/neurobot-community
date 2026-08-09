@@ -207,6 +207,11 @@ function installDigestDesktopLayoutAdjustment() {
   const style = document.createElement('style');
   style.id = 'digest-desktop-layout-adjustment';
   style.textContent = `
+    #status-quick-actions > button.status-switch {
+      order: 1;
+      justify-self: end;
+    }
+
     @media (min-width: 1101px) {
       .digest-frequency-list {
         grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 1.2fr);
