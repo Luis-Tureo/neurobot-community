@@ -12,4 +12,13 @@ describe('estado y estadísticas', () => {
     expect(metricsUi).toContain("legacyCards.classList.add('hidden')");
     expect(metricsUi).not.toContain('legacyArticle?.classList.add');
   });
+
+  it('deja únicamente el nombre del modelo encima de las métricas nuevas', () => {
+    expect(metricsUi).toContain('function simplifyAIUsageHeader()');
+    expect(metricsUi).toContain("rawHeading.split('·').at(-1)");
+    expect(metricsUi).toContain("providerSummary.replaceChildren(model)");
+    expect(metricsUi).toContain("dashboard.querySelectorAll(':scope > p').forEach((item) => item.remove())");
+    expect(metricsUi).toContain('descriptiveHeader?.remove()');
+    expect(metricsUi).toContain('new window.MutationObserver');
+  });
 });
