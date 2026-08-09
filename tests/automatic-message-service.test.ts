@@ -9,7 +9,7 @@ import { Anonymizer } from '../src/security/anonymizer.js';
 
 const GROUP_ID = 'grupo-autorizado@g.us';
 
-function createSubject(baselineInitialized = true) {
+function createSubject(baselineInitialized = true, logger = createLogger('silent')) {
   const database = new AppDatabase(':memory:');
   database.migrate();
   database.upsertDetectedGroup(GROUP_ID, 'Grupo autorizado');
@@ -22,11 +22,11 @@ function createSubject(baselineInitialized = true) {
   const service = new AutomaticMessageService(
     database,
     client,
-    createLogger('silent'),
+    logger,
     anonymizer,
     { retryDelayMs: 0, sleep: async () => undefined },
   );
-  return { database, client, service };
+  return { database, client, service, logger };
 }
 
 function enableGreeting(database: AppDatabase): void {
@@ -332,6 +332,60 @@ describe('mensajes automáticos', () => {
     }
   });
 
+  it('normaliza el JID del evento y lo compara exactamente con la selección persistida', async () => {
+    vi.useFakeTimers();
+    const { database, client, service } = createSubject();
+    try {
+      enableWelcome(database);
+      await service.handleGroupJoin({
+        groupId: `  ${GROUP_ID.toUpperCase()}  `,
+        participantIds: ['persona-canonica@lid'],
+        eventId: 'canonical-group-id',
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]?.chatId).toBe(GROUP_ID);
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
+  it('registra en DEBUG la comparación segura de identidades sin exponer JID completos', async () => {
+    const logger = createLogger('silent');
+    const debug = vi.spyOn(logger, 'debug');
+    const { database, service } = createSubject(true, logger);
+    try {
+      const selectedGroupId = 'otro-grupo@g.us';
+      database.upsertDetectedGroup(selectedGroupId, 'Otro grupo');
+      database.setGroupAuthorized(selectedGroupId, true);
+      database.replaceAutomationGroupIds('neurobot', [selectedGroupId]);
+      enableWelcome(database);
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['persona@lid'],
+        eventId: 'safe-group-diagnostic',
+      });
+      const diagnostic = debug.mock.calls
+        .map(([details]) => details)
+        .find(
+          (details) =>
+            typeof details === 'object' &&
+            details !== null &&
+            'matchResult' in details,
+        );
+      expect(diagnostic).toMatchObject({ matchResult: false });
+      const serialized = JSON.stringify(diagnostic);
+      expect(serialized).toContain('eventGroupId');
+      expect(serialized).toContain('canonicalSelectedGroupIds');
+      expect(serialized).not.toContain(GROUP_ID);
+      expect(serialized).not.toContain(selectedGroupId);
+    } finally {
+      service.stop();
+      database.close();
+    }
+  });
+
   it('crea la línea base cuando el bot entra y no saluda a miembros existentes', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-05T12:00:00Z'));
@@ -552,7 +606,7 @@ describe('mensajes automáticos', () => {
     }
   });
 
-  it('no aplica silencio ni backoff antispam a una bienvenida válida', async () => {
+  it('no aplica silencio administrativo ni backoff de envío a una bienvenida válida', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-05T12:00:00Z'));
     const { database, client, service } = createSubject();
@@ -562,12 +616,12 @@ describe('mensajes automáticos', () => {
       database.setAutomaticGroupBackoff(
         GROUP_ID,
         new Date('2026-01-05T13:00:00Z'),
-        'LEGACY_SPAM_BACKOFF',
+        'RECENT_SEND_FAILURE',
       );
       await service.handleGroupJoin({
         groupId: GROUP_ID,
         participantIds: ['anita@lid'],
-        eventId: 'welcome-ignores-spam-controls',
+        eventId: 'welcome-ignores-temporary-pauses',
       });
       await vi.advanceTimersByTimeAsync(10_000);
 
@@ -852,77 +906,6 @@ describe('mensajes automáticos', () => {
       expect(client.sentMessages[0]?.text).toContain('María');
       expect(client.sentMessages[0]?.mentionIds).toEqual(['persona@lid']);
       expect(client.sendMessageWithMentions).toHaveBeenCalledTimes(2);
-    } finally {
-      service.stop();
-      database.close();
-    }
-  });
-
-  it('ignora la configuración heredada por grupo y usa la plantilla general', async () => {
-    vi.useFakeTimers();
-    const { database, client, service } = createSubject();
-    try {
-      enableWelcome(database, 5);
-      const groupHash = new Anonymizer('x'.repeat(32)).identifier(GROUP_ID);
-      const otherGroupHash = new Anonymizer('x'.repeat(32)).identifier('grupo-b@g.us');
-      database.saveWelcomeGroupSetting(groupHash, {
-        enabled: true,
-        customTemplate: 'Hola {usuarios} a {grupo}',
-        inheritAssistantTemplate: false,
-      });
-      database.saveWelcomeGroupSetting(otherGroupHash, {
-        enabled: true,
-        customTemplate: 'Plantilla exclusiva del Grupo B',
-        inheritAssistantTemplate: false,
-      });
-      await service.handleGroupJoin({
-        groupId: GROUP_ID,
-        participantIds: ['persona@lid'],
-        participants: [
-          {
-            participantId: 'persona@lid',
-            displayName: 'María',
-            nameSource: 'PUSHNAME',
-            mentionId: 'persona@lid',
-          },
-        ],
-        eventId: 'off',
-      });
-      await vi.advanceTimersByTimeAsync(10_000);
-      expect(client.sentMessages[0]?.text).toContain('¡Bienvenido/a María a Grupo autorizado!');
-      expect(client.sentMessages[0]?.text).not.toContain('Grupo B');
-      expect(client.sentMessages[0]?.text).not.toContain('Hola María');
-    } finally {
-      service.stop();
-      database.close();
-    }
-  });
-
-  it('ignora el apagado heredado por grupo porque manda el selector general', async () => {
-    vi.useFakeTimers();
-    const { database, client, service } = createSubject();
-    try {
-      enableWelcome(database, 5);
-      const groupHash = new Anonymizer('x'.repeat(32)).identifier(GROUP_ID);
-      database.saveWelcomeGroupSetting(groupHash, {
-        enabled: false,
-        customTemplate: null,
-        inheritAssistantTemplate: true,
-      });
-      await service.handleGroupJoin({
-        groupId: GROUP_ID,
-        participantIds: ['persona@lid'],
-        eventId: 'group-disabled',
-      });
-      await vi.advanceTimersByTimeAsync(10_000);
-      expect(client.sentMessages).toHaveLength(1);
-      expect(client.sentMessages[0]?.mentionIds).toEqual(['persona@lid']);
-      const participantHash = new Anonymizer('x'.repeat(32)).fingerprint([
-        'joined-participant',
-        GROUP_ID,
-        'persona@lid',
-      ]);
-      expect(database.hasWelcomeBaselineParticipant(groupHash, participantHash)).toBe(true);
     } finally {
       service.stop();
       database.close();

@@ -21,10 +21,18 @@ describe('Requerimiento #3 — Reordenar y diferenciar botones de gestión de IA
     expect(posToggleAI).toBeGreaterThan(posChangeAI);
   });
 
-  it('diferencia visualmente las acciones con clases CSS específicas para estado activo e inactivo', () => {
-    expect(script).toContain("toggleButton.textContent = currentProvider.enabled ? 'Desactivar IA' : 'Activar IA'");
-    expect(script).toContain("toggleButton.classList.toggle('danger-primary', currentProvider.enabled)");
-    expect(script).toContain("toggleButton.classList.toggle('ai-enable-action', !currentProvider.enabled)");
-    expect(styles).toContain('button.ai-enable-action');
+  it('representa la activación como un único interruptor accesible con estados diferenciados', () => {
+    const toggleMarkup = html.slice(
+      html.indexOf('id="toggle-ai-enabled"'),
+      html.indexOf('</button>', html.indexOf('id="toggle-ai-enabled"')),
+    );
+
+    expect(toggleMarkup).toContain('class="status-switch"');
+    expect(toggleMarkup).toContain('role="switch"');
+    expect(toggleMarkup).toContain('aria-checked="false"');
+    expect(script).toContain('setStatusSwitchState(toggleButton, {');
+    expect(script).toContain('checked: currentProvider.enabled');
+    expect(styles).toContain("button.status-switch[data-status='active']");
+    expect(styles).toContain("button.status-switch[data-status='active'] .status-switch__knob");
   });
 });

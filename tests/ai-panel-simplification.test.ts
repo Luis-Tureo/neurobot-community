@@ -20,7 +20,8 @@ describe('módulo mínimo de inteligencia artificial', () => {
       /id="ai-provider-current-name"[\s\S]*?class="ai-token-display-line"[\s\S]*?class="ai-provider-summary-actions"/u,
     );
     expect(html).toContain('id="toggle-ai-enabled"');
-    expect(html).toContain('class="ai-enable-action"');
+    expect(html).toContain('class="status-switch"');
+    expect(html).toContain('role="switch"');
     expect(html).toContain('Cambiar IA');
     expect(html).toContain('id="cancel-ai-provider-form"');
     expect(html).toContain('name="displayName"');
@@ -30,8 +31,8 @@ describe('módulo mínimo de inteligencia artificial', () => {
       html.indexOf('ai-provider-history-card'),
     );
     expect(providerForm).not.toContain('name="enabled"');
-    expect(html).toContain('Activar IA');
-    expect(script).toContain('Desactivar IA');
+    expect(html).toContain('aria-label="Activar inteligencia artificial"');
+    expect(script).toContain("ariaLabel: 'inteligencia artificial'");
     expect(html).toContain('Guardar configuración');
     expect(html).toContain('Historial de cambios de IA');
     expect(html).toContain('id="ai-provider-history"');
@@ -39,8 +40,8 @@ describe('módulo mínimo de inteligencia artificial', () => {
     expect(script).toContain('/ai/provider');
     expect(script).toContain('saveAIProviderWithCompatibility');
     expect(script).toContain('setAIProviderEditorOpen(true)');
-    expect(script).toContain("currentProvider.enabled ? 'Desactivar IA' : 'Activar IA'");
-    expect(script).toContain("classList.toggle('danger-primary', currentProvider.enabled)");
+    expect(script).toContain('setStatusSwitchState(toggleButton, {');
+    expect(script).toContain('checked: currentProvider.enabled');
     expect(script).toContain('if (error.status !== 404) throw error;');
     expect(script).toContain('/ai-key');
     expect(script).toContain('/ai/settings');

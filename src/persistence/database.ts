@@ -2500,11 +2500,6 @@ export class AppDatabase {
       professional_warning:
         'Esta información es solamente una orientación general y no reemplaza una evaluación médica, psicológica o profesional.',
       log_level: 'info',
-      user_rate_limit: 3,
-      group_rate_limit: 10,
-      rate_window_seconds: 60,
-      user_cooldown_seconds: 5,
-      repeat_window_seconds: 120,
       require_authorized_admin_in_group: true,
       group_archive_after_hours: 24,
       group_delete_after_days: 30,
@@ -2769,78 +2764,6 @@ export class AppDatabase {
       this.replaceAutomationGroupIdsUnchecked(botId, groupIds);
     });
     save();
-  }
-
-  public getWelcomeGroupSetting(
-    groupHash: string,
-    botId = 'neurobot',
-  ): { enabled: boolean; customTemplate: string | null; inheritAssistantTemplate: boolean } | null {
-    const row = this.db
-      .prepare(
-        `SELECT enabled, custom_template, inherit_assistant_template
-      FROM assistant_group_welcome_settings WHERE assistant_id=? AND group_hash=?`,
-      )
-      .get(botId, groupHash) as
-      | { enabled: number; custom_template: string | null; inherit_assistant_template: number }
-      | undefined;
-    return row === undefined
-      ? null
-      : {
-          enabled: row.enabled === 1,
-          customTemplate: row.custom_template,
-          inheritAssistantTemplate: row.inherit_assistant_template === 1,
-        };
-  }
-
-  public listWelcomeGroupSettings(botId = 'neurobot'): Array<{
-    groupHash: string;
-    enabled: boolean;
-    customTemplate: string | null;
-    inheritAssistantTemplate: boolean;
-  }> {
-    return (
-      this.db
-        .prepare(
-          `SELECT group_hash, enabled, custom_template, inherit_assistant_template
-      FROM assistant_group_welcome_settings WHERE assistant_id=? ORDER BY group_hash`,
-        )
-        .all(botId) as Array<{
-        group_hash: string;
-        enabled: number;
-        custom_template: string | null;
-        inherit_assistant_template: number;
-      }>
-    ).map((row) => ({
-      groupHash: row.group_hash,
-      enabled: row.enabled === 1,
-      customTemplate: row.custom_template,
-      inheritAssistantTemplate: row.inherit_assistant_template === 1,
-    }));
-  }
-
-  public saveWelcomeGroupSetting(
-    groupHash: string,
-    setting: { enabled: boolean; customTemplate: string | null; inheritAssistantTemplate: boolean },
-    botId = 'neurobot',
-  ): void {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO assistant_group_welcome_settings(
-      assistant_id,group_hash,enabled,custom_template,inherit_assistant_template,created_at,updated_at
-    ) VALUES(?,?,?,?,?,?,?) ON CONFLICT(assistant_id,group_hash) DO UPDATE SET
-      enabled=excluded.enabled,custom_template=excluded.custom_template,
-      inherit_assistant_template=excluded.inherit_assistant_template,updated_at=excluded.updated_at`,
-      )
-      .run(
-        botId,
-        groupHash,
-        setting.enabled ? 1 : 0,
-        setting.customTemplate,
-        setting.inheritAssistantTemplate ? 1 : 0,
-        now,
-        now,
-      );
   }
 
   private mergeWelcomeSettings(
@@ -6419,88 +6342,6 @@ export class AppDatabase {
       .run(now, now, owner.bot_id, entryId).changes;
   }
 
-  public registerCommunityInteraction(input: {
-    botId: string;
-    profileId: number;
-    userHash: string;
-    queryHash: string;
-    localDate: string;
-    hourBucket: string;
-    now?: Date;
-  }):
-    | { allowed: true }
-    | {
-        allowed: false;
-        reason: 'DUPLICATE_QUERY' | 'INTERACTION_COOLDOWN' | 'INTERACTION_HOURLY_LIMIT';
-      } {
-    const register = this.db.transaction(() => {
-      const now = input.now ?? new Date();
-      const nowIso = now.toISOString();
-      const settings = this.getAISettings(input.profileId);
-      this.db
-        .prepare('DELETE FROM bot_interaction_usage WHERE last_activation_at < ?')
-        .run(new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString());
-      const latest = this.db
-        .prepare(
-          `SELECT last_activation_at, last_query_at, last_query_hash FROM bot_interaction_usage
-         WHERE bot_id = ? AND user_hash = ? ORDER BY last_activation_at DESC LIMIT 1`,
-        )
-        .get(input.botId, input.userHash) as
-        | {
-            last_activation_at: string;
-            last_query_at: string;
-            last_query_hash: string;
-          }
-        | undefined;
-      if (
-        latest !== undefined &&
-        latest.last_query_hash === input.queryHash &&
-        now.getTime() - new Date(latest.last_query_at).getTime() <
-          settings.duplicateQueryWindowSeconds * 1000
-      ) {
-        return { allowed: false as const, reason: 'DUPLICATE_QUERY' as const };
-      }
-      if (
-        latest !== undefined &&
-        now.getTime() - new Date(latest.last_activation_at).getTime() <
-          settings.interactionCooldownSeconds * 1000
-      ) {
-        return { allowed: false as const, reason: 'INTERACTION_COOLDOWN' as const };
-      }
-      const hourly = this.db
-        .prepare(
-          `SELECT activations FROM bot_interaction_usage
-         WHERE bot_id = ? AND user_hash = ? AND local_date = ? AND hour_bucket = ?`,
-        )
-        .get(input.botId, input.userHash, input.localDate, input.hourBucket) as
-        { activations: number } | undefined;
-      if ((hourly?.activations ?? 0) >= settings.interactionHourlyLimit) {
-        return { allowed: false as const, reason: 'INTERACTION_HOURLY_LIMIT' as const };
-      }
-      this.db
-        .prepare(
-          `INSERT INTO bot_interaction_usage(
-           bot_id, user_hash, local_date, hour_bucket, activations,
-           last_activation_at, last_query_hash, last_query_at
-         ) VALUES (?, ?, ?, ?, 1, ?, ?, ?)
-         ON CONFLICT(bot_id, user_hash, local_date, hour_bucket) DO UPDATE SET
-           activations = activations + 1, last_activation_at = excluded.last_activation_at,
-           last_query_hash = excluded.last_query_hash, last_query_at = excluded.last_query_at`,
-        )
-        .run(
-          input.botId,
-          input.userHash,
-          input.localDate,
-          input.hourBucket,
-          nowIso,
-          input.queryHash,
-          nowIso,
-        );
-      return { allowed: true as const };
-    });
-    return register();
-  }
-
   public getAISettings(profileId: number): AISettings {
     const row = this.db.prepare('SELECT * FROM ai_settings WHERE profile_id = ?').get(profileId) as
       Record<string, number | string> | undefined;
@@ -6516,9 +6357,8 @@ export class AppDatabase {
         `UPDATE ai_settings SET enabled = ?, provider = ?, question_max_chars = ?,
            context_max_tokens = ?, input_max_tokens = ?, response_max_tokens = ?,
            response_max_chars = ?, response_max_lines = ?, temperature = ?,
-           user_hourly_limit = ?, user_daily_limit = ?, user_cooldown_seconds = ?,
-           interaction_hourly_limit = ?, interaction_cooldown_seconds = ?,
-           duplicate_query_window_seconds = ?, group_hourly_limit = ?, group_daily_limit = ?, global_daily_limit = ?,
+           user_hourly_limit = ?, user_daily_limit = ?,
+           group_hourly_limit = ?, group_daily_limit = ?, global_daily_limit = ?,
            global_monthly_limit = ?, global_daily_token_limit = ?,
            global_monthly_token_limit = ?, timeout_ms = ?, updated_at = ? WHERE profile_id = ?`,
       )
@@ -6534,10 +6374,6 @@ export class AppDatabase {
         settings.temperature,
         settings.userHourlyLimit,
         settings.userDailyLimit,
-        settings.userCooldownSeconds,
-        settings.interactionHourlyLimit,
-        settings.interactionCooldownSeconds,
-        settings.duplicateQueryWindowSeconds,
         settings.groupHourlyLimit,
         settings.groupDailyLimit,
         settings.globalDailyLimit,
@@ -6666,9 +6502,6 @@ export class AppDatabase {
       initialRetryDelaySeconds: row.initial_retry_delay_seconds ?? 2,
       maximumRetryDelaySeconds: row.maximum_retry_delay_seconds ?? 15,
       waitNoticeSeconds: row.wait_notice_seconds ?? 5,
-      userCooldownSeconds: row.user_cooldown_seconds ?? 10,
-      duplicateWindowSeconds: row.duplicate_window_seconds ?? 15,
-      singleFlightWindowSeconds: row.single_flight_window_seconds ?? 60,
       outboundMessageIntervalMs: row.outbound_message_interval_ms ?? 1000,
       suggestedRetrySeconds: row.suggested_retry_seconds ?? 60,
     };
@@ -6681,7 +6514,6 @@ export class AppDatabase {
         `UPDATE assistant_ai_queue_settings SET
       max_concurrent=?, max_queue_size=?, max_queue_wait_seconds=?, provider_timeout_seconds=?,
       max_retries=?, initial_retry_delay_seconds=?, maximum_retry_delay_seconds=?, wait_notice_seconds=?,
-      user_cooldown_seconds=?, duplicate_window_seconds=?, single_flight_window_seconds=?,
       outbound_message_interval_ms=?, suggested_retry_seconds=?, updated_at=? WHERE assistant_id=?`,
       )
       .run(
@@ -6693,9 +6525,6 @@ export class AppDatabase {
         settings.initialRetryDelaySeconds,
         settings.maximumRetryDelaySeconds,
         settings.waitNoticeSeconds,
-        settings.userCooldownSeconds,
-        settings.duplicateWindowSeconds,
-        settings.singleFlightWindowSeconds,
         settings.outboundMessageIntervalMs,
         settings.suggestedRetrySeconds,
         now,
@@ -7172,7 +7001,6 @@ export class AppDatabase {
       outOfScope: value('OUT_OF_SCOPE_LOCAL_RESPONSE'),
       noInformation: value('KNOWLEDGE_NOT_FOUND'),
       avoidedAICalls: greetings + faqs + knowledge + exact + equivalent,
-      duplicateQueries: value('DUPLICATE_QUERY_SUPPRESSED'),
       coalescedQueries: value('CONCURRENT_QUERY_COALESCED'),
     };
   }
@@ -7202,7 +7030,7 @@ export class AppDatabase {
              'LOCAL_FAQ_RESPONSE', 'KNOWLEDGE_DIRECT_RESPONSE', 'ANSWER_CACHE_EXACT_HIT',
              'ANSWER_CACHE_EQUIVALENT_HIT', 'ANSWER_CACHE_MISS', 'AI_CALL_SUCCESS',
              'AI_CALL_FAILED', 'AI_LIMIT_REACHED', 'OUT_OF_SCOPE_LOCAL_RESPONSE',
-             'KNOWLEDGE_NOT_FOUND', 'DUPLICATE_QUERY_SUPPRESSED', 'CONCURRENT_QUERY_COALESCED'
+             'KNOWLEDGE_NOT_FOUND', 'CONCURRENT_QUERY_COALESCED'
            )`,
           )
           .run(owner.bot_id);
@@ -7390,10 +7218,6 @@ export class AppDatabase {
         )
         .all(botId) as Array<{ group_id: string }>
     ).map((row) => row.group_id);
-  }
-
-  public isAutomationGroupSelected(botId: string, groupId: string): boolean {
-    return this.listAutomationGroupIds(botId).includes(groupId);
   }
 
   public replaceAutomationGroupIds(botId: string, groupIds: string[]): void {
@@ -9190,10 +9014,6 @@ function mapAISettings(row: Record<string, number | string>): AISettings {
     temperature: Number(row.temperature),
     userHourlyLimit: Number(row.user_hourly_limit),
     userDailyLimit: Number(row.user_daily_limit),
-    userCooldownSeconds: Number(row.user_cooldown_seconds),
-    interactionHourlyLimit: Number(row.interaction_hourly_limit),
-    interactionCooldownSeconds: Number(row.interaction_cooldown_seconds),
-    duplicateQueryWindowSeconds: Number(row.duplicate_query_window_seconds),
     groupHourlyLimit: Number(row.group_hourly_limit),
     groupDailyLimit: Number(row.group_daily_limit),
     globalDailyLimit: Number(row.global_daily_limit),
@@ -9336,9 +9156,6 @@ function validateKnowledgeEntry(input: {
 
 function validateAISettings(settings: AISettings): void {
   const integers: Array<[number, number, number, string]> = [
-    [settings.interactionHourlyLimit, 1, 5000, 'activaciones por usuario y hora'],
-    [settings.interactionCooldownSeconds, 0, 3600, 'espera entre activaciones'],
-    [settings.duplicateQueryWindowSeconds, 0, 3600, 'ventana de consulta duplicada'],
     [settings.questionMaxChars, 1, 3000, 'pregunta máxima'],
     [settings.contextMaxTokens, 1, 7000, 'contexto máximo'],
     [settings.inputMaxTokens, 1, 10_000, 'entrada máxima'],
@@ -9347,7 +9164,6 @@ function validateAISettings(settings: AISettings): void {
     [settings.responseMaxLines, 1, 50, 'líneas de respuesta'],
     [settings.userHourlyLimit, 1, 500, 'límite por usuario y hora'],
     [settings.userDailyLimit, 1, 1000, 'límite por usuario y día'],
-    [settings.userCooldownSeconds, 0, 3600, 'espera por usuario'],
     [settings.groupHourlyLimit, 1, 2000, 'límite por grupo y hora'],
     [settings.groupDailyLimit, 1, 10_000, 'límite por grupo y día'],
     [settings.globalDailyLimit, 1, 100_000, 'límite diario'],

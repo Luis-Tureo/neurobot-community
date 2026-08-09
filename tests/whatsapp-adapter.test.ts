@@ -268,7 +268,8 @@ describe('adaptador de WhatsApp', () => {
   });
 
   it('usa una lectura mínima cuando getChats falla dentro de WhatsApp Web', async () => {
-    const { adapter, fake } = createSubject();
+    const captured = createCapturedLogger();
+    const { adapter, fake } = createSubject({ logger: captured.logger });
     fake.getChats.mockRejectedValueOnce(Object.assign(new Error('r'), { name: 'r' }));
     fake.pupPage = {
       evaluate: vi.fn(async () => [
@@ -292,6 +293,46 @@ describe('adaptador de WhatsApp', () => {
     expect(fake.pupPage.evaluate).toHaveBeenCalledOnce();
     expect(fake.getChatById).toHaveBeenCalledWith('grupo-normal@g.us');
     expect(adapter.getLastGroupListSource()).toBe('MINIMAL_CHAT_SNAPSHOT');
+    expect(captured.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: 'warn',
+          first: expect.objectContaining({
+            module: 'WhatsApp',
+            operation: 'getChats',
+            errorCode: 'GROUP_LIST_FETCH_FAILED',
+            recovery: 'Se utilizará una lectura mínima compatible',
+          }),
+          second: 'No se pudo obtener la lista completa de chats',
+        }),
+        expect.objectContaining({
+          level: 'debug',
+          first: expect.objectContaining({ errorStack: expect.any(String) }),
+        }),
+      ]),
+    );
+    const warning = captured.entries.find((entry) => entry.level === 'warn');
+    expect(JSON.stringify(warning)).not.toContain('errorStack');
+  });
+
+  it('recupera el nombre real si la lectura mínima no lo incluye', async () => {
+    const { adapter, fake } = createSubject();
+    fake.getChats.mockRejectedValueOnce(new Error('fallo recuperable'));
+    fake.pupPage = {
+      evaluate: vi.fn(async () => [
+        { id: 'grupo-normal@g.us', name: null, isGroup: true },
+      ]),
+    };
+    fake.chatsById.set('grupo-normal@g.us', {
+      subject: 'Nombre recuperado',
+      participants: [],
+    });
+    await adapter.initialize();
+    fake.emit('ready');
+
+    await expect(adapter.listGroups()).resolves.toMatchObject([
+      { id: 'grupo-normal@g.us', name: 'Nombre recuperado' },
+    ]);
   });
 
   it('resuelve participantes @lid durante la sincronización sin registrarlos', async () => {

@@ -23,7 +23,6 @@ import { OutboundMessageQueueService } from './outbound-message-queue-service.js
 
 export type BotInstanceOptions = {
   maxMessageLength: number;
-  repeatWindowMs: number;
   maxReconnectAttempts: number;
   maxReconnectDelayMs: number;
   developmentMode: boolean;
@@ -123,7 +122,6 @@ export class BotInstance {
       () => this.connection.snapshot(),
       {
         maxMessageLength: options.maxMessageLength,
-        repeatWindowMs: options.repeatWindowMs,
         developmentMode: options.developmentMode,
       },
       bot.id,

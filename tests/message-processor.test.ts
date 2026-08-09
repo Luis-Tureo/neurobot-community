@@ -66,7 +66,7 @@ function message(overrides: Partial<IncomingMessage> = {}): IncomingMessage {
 function enableAI(database: AppDatabase, botId = 'neurobot'): void {
   const profile = database.getBotProfile(botId);
   const settings = database.getAISettings(profile.id);
-  database.saveAISettings({ ...settings, enabled: true, userCooldownSeconds: 0 });
+  database.saveAISettings({ ...settings, enabled: true });
 }
 
 function addGeneralKnowledge(database: AppDatabase, keyword: string): void {
@@ -110,7 +110,7 @@ function createProcessor(input: {
     new Anonymizer('x'.repeat(32)),
     input.logger ?? createLogger('silent'),
     () => ({ state: 'connected', lastConnectedAt: null, reconnectAttempt: 0, lastErrorCode: null }),
-    { maxMessageLength: 2000, repeatWindowMs: 120_000 },
+    { maxMessageLength: 2000 },
     botId,
     input.flow,
   );
@@ -396,22 +396,17 @@ describe('procesamiento por mención real y por modo', () => {
     expect(provider.calls).toBe(0);
   });
 
-  it('suprime dos mensajes distintos con la misma consulta durante la ventana de duplicados', async () => {
+  it('responde dos mensajes distintos aunque contengan la misma consulta', async () => {
     await expect(
       processor.process(message({ id: 'query-1', body: '@neurobot hola' })),
     ).resolves.toBe('responded');
     await expect(
       processor.process(message({ id: 'query-2', body: '@neurobot hola' })),
-    ).resolves.toBe('duplicate');
-    expect(client.sentMessages).toHaveLength(1);
-    expect(
-      database
-        .getTechnicalEvents()
-        .some((event) => event.event_type === 'DUPLICATE_QUERY_SUPPRESSED'),
-    ).toBe(true);
+    ).resolves.toBe('responded');
+    expect(client.sentMessages).toHaveLength(2);
   });
 
-  it('permite que usuarios distintos consulten lo mismo sin compartir el antispam personal', async () => {
+  it('permite que usuarios distintos consulten lo mismo consecutivamente', async () => {
     await processor.process(
       message({ id: 'query-user-1', participantId: 'user-1@lid', body: '@neurobot hola' }),
     );
@@ -419,6 +414,13 @@ describe('procesamiento por mención real y por modo', () => {
       message({ id: 'query-user-2', participantId: 'user-2@lid', body: '@neurobot hola' }),
     );
     expect(client.sentMessages).toHaveLength(2);
+  });
+
+  it('responde varias consultas legítimas consecutivas sin enfriamiento', async () => {
+    await processor.process(message({ id: 'query-sequence-1', body: '@neurobot hola' }));
+    await processor.process(message({ id: 'query-sequence-2', body: '@neurobot ayuda' }));
+    await processor.process(message({ id: 'query-sequence-3', body: '@neurobot hola otra vez' }));
+    expect(client.sentMessages).toHaveLength(3);
   });
 
   it('rechaza una consulta claramente fuera de tema sin consumir IA', async () => {

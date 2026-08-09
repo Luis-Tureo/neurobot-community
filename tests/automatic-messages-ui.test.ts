@@ -26,6 +26,7 @@ describe('interfaz de mensajes automáticos', () => {
     expect(html).toContain('name="greeting_weekend"');
     expect(html).toContain('name="rules_template"');
     expect(script).not.toContain('renderWelcomeGroupSettings');
+    expect(script).not.toContain('saveWelcomeGroupSetting');
     expect(script).not.toContain('/automatic-messages/welcome/groups');
     expect(html).not.toContain('Tiempo de espera');
     expect(html.indexOf('Variables disponibles')).toBeLessThan(
@@ -81,6 +82,8 @@ describe('interfaz de mensajes automáticos', () => {
     );
     expect(script).toContain('selectedAutomationGroupKeys: new Set()');
     expect(script).toContain('renderAutomationGroupSelector');
+    expect(html).toContain('Esta selecci&oacute;n persistida es la fuente de verdad');
+    expect(script).toContain("identity.textContent = `ID ${String(group.key).slice(0, 6).toUpperCase()}`");
     expect(script).toContain('selectedGroupKeys: [...state.selectedAutomationGroupKeys]');
     expect(script).toContain(
       'Debes seleccionar al menos un grupo para guardar las automatizaciones.',

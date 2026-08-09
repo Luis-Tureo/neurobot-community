@@ -14,7 +14,7 @@ describe('cola de solicitudes de IA por asistente', () => {
     database = new AppDatabase(':memory:');
     database.migrate();
     database.saveAIQueueSettings('neurobot', {
-      ...database.getAIQueueSettings('neurobot'), userCooldownSeconds: 0,
+      ...database.getAIQueueSettings('neurobot'),
       initialRetryDelaySeconds: 1, maximumRetryDelaySeconds: 1,
     });
   });
@@ -34,9 +34,9 @@ describe('cola de solicitudes de IA por asistente', () => {
     let release: () => void = () => undefined;
     let notices = 0;
     let queuedCalls = 0;
-    const active = queue.run({ flightKey: 'active', userKey: 'active', classifyError: classify,
+    const active = queue.run({ flightKey: 'active', classifyError: classify,
       operation: () => new Promise<string>((resolve) => { release = () => resolve('ok'); }) });
-    const queued = queue.run({ flightKey: 'queued', userKey: 'queued', classifyError: classify,
+    const queued = queue.run({ flightKey: 'queued', classifyError: classify,
       onWaitNotice: async () => { notices += 1; }, operation: async () => { queuedCalls += 1; return 'late'; } });
     const assertion = expect(queued).rejects.toMatchObject({ code: 'AI_QUEUE_EXPIRED' });
     await vi.advanceTimersByTimeAsync(1_000);
@@ -54,7 +54,7 @@ describe('cola de solicitudes de IA por asistente', () => {
     const releases: Array<() => void> = [];
     const started: number[] = [];
     const operation = (id: number) => queue.run({
-      flightKey: `q-${id}`, userKey: `u-${id}`, classifyError: classify,
+      flightKey: `q-${id}`, classifyError: classify,
       operation: async () => new Promise<number>((resolve) => { started.push(id); releases.push(() => resolve(id)); }),
     });
     const requests = [1, 2, 3, 4].map(operation);
@@ -74,10 +74,10 @@ describe('cola de solicitudes de IA por asistente', () => {
     });
     const queue = new AIRequestQueueService(database, createLogger('silent'), 'neurobot');
     let release: () => void = () => undefined;
-    const first = queue.run({ flightKey: 'a', userKey: 'a', classifyError: classify,
+    const first = queue.run({ flightKey: 'a', classifyError: classify,
       operation: () => new Promise<string>((resolve) => { release = () => resolve('ok'); }) });
-    const second = queue.run({ flightKey: 'b', userKey: 'b', classifyError: classify, operation: async () => 'ok' });
-    await expect(queue.run({ flightKey: 'c', userKey: 'c', classifyError: classify, operation: async () => 'ok' }))
+    const second = queue.run({ flightKey: 'b', classifyError: classify, operation: async () => 'ok' });
+    await expect(queue.run({ flightKey: 'c', classifyError: classify, operation: async () => 'ok' }))
       .rejects.toMatchObject({ code: 'AI_QUEUE_FULL', retryAfterSeconds: 60 });
     release();
     await Promise.all([first, second]);
@@ -87,7 +87,7 @@ describe('cola de solicitudes de IA por asistente', () => {
     const queue = new AIRequestQueueService(database, createLogger('silent'), 'neurobot');
     let calls = 0;
     let release: () => void = () => undefined;
-    const operation = () => queue.run({ flightKey: 'misma', userKey: `u-${Math.random()}`, classifyError: classify,
+    const operation = () => queue.run({ flightKey: 'misma', classifyError: classify,
       operation: () => new Promise<string>((resolve) => { calls += 1; release = () => resolve('respuesta'); }) });
     const first = operation();
     const second = operation();
@@ -106,7 +106,7 @@ describe('cola de solicitudes de IA por asistente', () => {
     const queue = new AIRequestQueueService(database, createLogger('silent'), 'neurobot', Date.now,
       async (milliseconds) => { waits.push(milliseconds); }, () => 0.5);
     let calls = 0;
-    const recovered = await queue.run({ flightKey: 'retry', userKey: 'retry', classifyError: classify,
+    const recovered = await queue.run({ flightKey: 'retry', classifyError: classify,
       operation: async () => {
         calls += 1;
         if (calls === 1) throw new AIProviderError('AI_PROVIDER_RATE_LIMITED', 'temporal', true, 7);
@@ -118,7 +118,7 @@ describe('cola de solicitudes de IA por asistente', () => {
     expect(waits).toHaveLength(2);
     expect(waits[0]).toBe(7_000);
     let permanentCalls = 0;
-    await expect(queue.run({ flightKey: 'permanent', userKey: 'permanent', classifyError: classify,
+    await expect(queue.run({ flightKey: 'permanent', classifyError: classify,
       operation: async () => { permanentCalls += 1; throw new AIProviderError('AI_INVALID_KEY', 'permanente'); } }))
       .rejects.toMatchObject({ code: 'AI_INVALID_KEY' });
     expect(permanentCalls).toBe(1);
@@ -140,7 +140,7 @@ describe('cola de solicitudes de IA por asistente', () => {
     const queue = new AIRequestQueueService(database, createLogger('silent'), 'neurobot');
     const releases: Array<() => void> = [];
     const requests = Array.from({ length: 25 }, (_, index) => queue.run({
-      flightKey: `carga-${index}`, userKey: `persona-${index}`, classifyError: classify,
+      flightKey: `carga-${index}`, classifyError: classify,
       operation: () => new Promise<number>((resolve) => { releases.push(() => resolve(index)); }),
     }));
     const guarded = requests.map((request) => request.then(
@@ -157,16 +157,12 @@ describe('cola de solicitudes de IA por asistente', () => {
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(2);
   });
 
-  it('aplica la pausa solamente a la misma persona', async () => {
-    database.saveAIQueueSettings('neurobot', {
-      ...database.getAIQueueSettings('neurobot'), userCooldownSeconds: 10,
-    });
+  it('acepta consultas consecutivas sin pausa artificial', async () => {
     const queue = new AIRequestQueueService(database, createLogger('silent'), 'neurobot');
-    await queue.run({ flightKey: 'primera', userKey: 'persona-a', classifyError: classify, operation: async () => 'ok' });
-    await expect(queue.run({ flightKey: 'segunda', userKey: 'persona-a', classifyError: classify, operation: async () => 'no' }))
-      .rejects.toMatchObject({ code: 'AI_USER_COOLDOWN' });
-    await expect(queue.run({ flightKey: 'tercera', userKey: 'persona-b', classifyError: classify, operation: async () => 'ok' }))
-      .resolves.toMatchObject({ value: 'ok' });
+    await expect(queue.run({ flightKey: 'primera', classifyError: classify, operation: async () => 'uno' }))
+      .resolves.toMatchObject({ value: 'uno' });
+    await expect(queue.run({ flightKey: 'segunda', classifyError: classify, operation: async () => 'dos' }))
+      .resolves.toMatchObject({ value: 'dos' });
   });
 
   it('abre el circuito después de cinco fallos temporales', async () => {
@@ -175,11 +171,11 @@ describe('cola de solicitudes de IA por asistente', () => {
     });
     const queue = new AIRequestQueueService(database, createLogger('silent'), 'neurobot');
     for (let index = 0; index < 5; index += 1) {
-      await expect(queue.run({ flightKey: `fallo-${index}`, userKey: `u-${index}`, classifyError: classify,
+      await expect(queue.run({ flightKey: `fallo-${index}`, classifyError: classify,
         operation: async () => { throw new AIProviderError('AI_TEMPORARY_ERROR', 'temporal', true); } }))
         .rejects.toMatchObject({ code: 'AI_TEMPORARY_ERROR' });
     }
-    await expect(queue.run({ flightKey: 'bloqueada', userKey: 'bloqueada', classifyError: classify,
+    await expect(queue.run({ flightKey: 'bloqueada', classifyError: classify,
       operation: async () => 'no debe ejecutarse' })).rejects.toBeInstanceOf(AIQueueError);
     expect(queue.snapshot().providerHealth).toMatchObject({ circuitState: 'OPEN', state: 'UNAVAILABLE' });
   });
@@ -189,11 +185,11 @@ describe('cola de solicitudes de IA por asistente', () => {
     database.saveAIQueueSettings('neurobot', { ...database.getAIQueueSettings('neurobot'), maxRetries: 0 });
     const queue = new AIRequestQueueService(database, createLogger('silent'), 'neurobot', () => now);
     for (let index = 0; index < 5; index += 1) {
-      await expect(queue.run({ flightKey: `temporal-${index}`, userKey: `persona-${index}`, classifyError: classify,
+      await expect(queue.run({ flightKey: `temporal-${index}`, classifyError: classify,
         operation: async () => { throw new AIProviderError('AI_TEMPORARY_ERROR', 'temporal', true); } })).rejects.toBeInstanceOf(Error);
     }
     now += 61_000;
-    await expect(queue.run({ flightKey: 'prueba-recuperacion', userKey: 'persona-prueba', classifyError: classify,
+    await expect(queue.run({ flightKey: 'prueba-recuperacion', classifyError: classify,
       operation: async () => 'recuperado' })).resolves.toMatchObject({ value: 'recuperado' });
     expect(queue.snapshot().providerHealth).toMatchObject({ circuitState: 'CLOSED', state: 'AVAILABLE' });
   });
@@ -203,9 +199,9 @@ describe('cola de solicitudes de IA por asistente', () => {
     const queue = new AIRequestQueueService(database, createLogger('silent'), 'neurobot');
     let release: () => void = () => undefined;
     let queuedCalls = 0;
-    const active = queue.run({ flightKey: 'activa-reinicio', userKey: 'activa', classifyError: classify,
+    const active = queue.run({ flightKey: 'activa-reinicio', classifyError: classify,
       operation: () => new Promise<string>((resolve) => { release = () => resolve('ok'); }) });
-    const pending = queue.run({ flightKey: 'pendiente-reinicio', userKey: 'pendiente', classifyError: classify,
+    const pending = queue.run({ flightKey: 'pendiente-reinicio', classifyError: classify,
       operation: async () => { queuedCalls += 1; return 'no'; } });
     const pendingAssertion = expect(pending).rejects.toMatchObject({ code: 'AI_QUEUE_CANCELLED' });
     await vi.waitFor(() => expect(queue.snapshot().waiting).toBe(1));

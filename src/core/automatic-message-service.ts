@@ -10,7 +10,11 @@ import type {
   WelcomeParticipant,
 } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
-import { normalizeWhatsAppIdentity, isSupportedGroupId } from '../messaging/identifiers.js';
+import {
+  isSupportedGroupId,
+  normalizeWhatsAppGroupId,
+  normalizeWhatsAppIdentity,
+} from '../messaging/identifiers.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
@@ -150,7 +154,8 @@ export class AutomaticMessageService {
     const now = this.now();
     const configuration = this.database.getAutomaticMessageConfiguration(this.botId);
     const local = toLocalDateTime(now, configuration.timezone);
-    const groupHash = this.hash(event.groupId);
+    const canonicalGroupId = normalizeWhatsAppGroupId(event.groupId);
+    const groupHash = this.hash(canonicalGroupId ?? event.groupId);
     this.database.updateWelcomeRuntime({ lastDetectedAt: now.toISOString() }, this.botId);
     this.record(
       'GROUP_JOIN_EVENT_RECEIVED',
@@ -181,13 +186,13 @@ export class AutomaticMessageService {
     if (event.subtype === 'linked_group_join') {
       this.record('COMMUNITY_LINKED_JOIN_DETECTED', 'WELCOME', groupHash, 'detected', null, local);
     }
-    if (!isSupportedGroupId(event.groupId)) {
+    if (canonicalGroupId === null) {
       this.record('WELCOME_SKIPPED', 'WELCOME', groupHash, 'skipped', 'PRIVATE_CHAT', local);
       return;
     }
     const eventIdentifierHash = this.anonymizer.fingerprint([
       'welcome-event',
-      event.groupId,
+      canonicalGroupId,
       event.eventId ?? String(event.timestamp ?? ''),
       ...event.participantIds.map(normalizeWelcomeParticipantIdentity).sort(),
     ]);
@@ -207,7 +212,7 @@ export class AutomaticMessageService {
 
     if (event.subtype === 'linked_group_join') {
       const baselineInitialized = await this.tryInitializeWelcomeGroupBaseline(
-        event.groupId,
+        canonicalGroupId,
         groupHash,
       );
       this.record(
@@ -223,8 +228,30 @@ export class AutomaticMessageService {
     }
 
     const groupWelcome = this.resolveWelcome(configuration);
-    if (!this.database.isAutomationGroupSelected(this.botId, event.groupId)) {
-      this.rememberWelcomeParticipants(event.groupId, groupHash, event.participantIds);
+    const selectedGroupIds = this.database.listAutomationGroupIds(this.botId);
+    const canonicalSelectedGroupIds = selectedGroupIds
+      .map((groupId) => normalizeWhatsAppGroupId(groupId))
+      .filter((groupId): groupId is string => groupId !== null);
+    const canonicalSelectedGroups = new Set(canonicalSelectedGroupIds);
+    const matchResult = canonicalSelectedGroups.has(canonicalGroupId);
+    this.logger.debug(
+      {
+        module: 'Bienvenida',
+        operation: 'WELCOME_GROUP_SELECTION_CHECK',
+        eventGroupId: safeGroupIdDiagnostic(event.groupId, (value) => this.hash(value)),
+        canonicalEventGroupId: safeGroupIdDiagnostic(canonicalGroupId, (value) => this.hash(value)),
+        selectedGroupIds: selectedGroupIds.map((groupId) =>
+          safeGroupIdDiagnostic(groupId, (value) => this.hash(value)),
+        ),
+        canonicalSelectedGroupIds: canonicalSelectedGroupIds.map((groupId) =>
+          safeGroupIdDiagnostic(groupId, (value) => this.hash(value)),
+        ),
+        matchResult,
+      },
+      'Se comparó el grupo del evento con la selección persistida',
+    );
+    if (!matchResult) {
+      this.rememberWelcomeParticipants(canonicalGroupId, groupHash, event.participantIds);
       this.record(
         'WELCOME_SKIPPED',
         'WELCOME',
@@ -237,15 +264,15 @@ export class AutomaticMessageService {
       return;
     }
     if (!groupWelcome.enabled) {
-      this.rememberWelcomeParticipants(event.groupId, groupHash, event.participantIds);
+      this.rememberWelcomeParticipants(canonicalGroupId, groupHash, event.participantIds);
       this.record('WELCOME_DISABLED', 'WELCOME', groupHash, 'skipped', 'WELCOME_DISABLED', local);
       this.record('WELCOME_SKIPPED', 'WELCOME', groupHash, 'skipped', 'WELCOME_DISABLED', local);
       return;
     }
-    if (!this.database.canSendToGroup(event.groupId)) {
+    if (!this.database.canSendToGroup(canonicalGroupId)) {
       const blocked =
         this.botId === 'neurobot' &&
-        this.database.getGroupById(event.groupId)?.status === 'ARCHIVED';
+        this.database.getGroupById(canonicalGroupId)?.status === 'ARCHIVED';
       this.record(
         blocked ? 'GROUP_BLOCKED' : 'GROUP_INACTIVE',
         'WELCOME',
@@ -273,7 +300,7 @@ export class AutomaticMessageService {
     const normalizedEventParticipants = [...new Set(canonicalEventParticipants)].sort();
     const eventFingerprint = this.anonymizer.fingerprint([
       'group-join',
-      event.groupId,
+      canonicalGroupId,
       event.eventId ?? String(event.timestamp ?? ''),
       ...normalizedEventParticipants,
     ]);
@@ -317,7 +344,7 @@ export class AutomaticMessageService {
       }
       const participantHash = this.anonymizer.fingerprint([
         'joined-participant',
-        event.groupId,
+        canonicalGroupId,
         canonicalParticipantId,
       ]);
       this.database.addWelcomeBaselineParticipant(groupHash, participantHash, this.botId);
@@ -417,7 +444,7 @@ export class AutomaticMessageService {
         this.record('WELCOME_NAME_SANITIZED', 'WELCOME', groupHash, 'sanitized', null, local);
       }
     }
-    const existing = this.welcomeBatches.get(event.groupId);
+    const existing = this.welcomeBatches.get(canonicalGroupId);
     if (existing !== undefined) {
       for (const [participantHash, participant] of resolvedParticipants) {
         if (existing.participants.has(participantHash)) continue;
@@ -429,13 +456,13 @@ export class AutomaticMessageService {
 
     const batchId = randomUUID();
     const timer = setTimeout(() => {
-      void this.flushWelcome(event.groupId).catch((error: unknown) => {
+      void this.flushWelcome(canonicalGroupId).catch((error: unknown) => {
         const details = serializeError(error, 'WELCOME_BATCH_FAILED', false);
         this.record('SCHEDULED_MESSAGE_FAILED', 'WELCOME', groupHash, 'failed', details.errorCode);
       });
     }, WELCOME_BATCH_WINDOW_MS);
     timer.unref?.();
-    this.welcomeBatches.set(event.groupId, {
+    this.welcomeBatches.set(canonicalGroupId, {
       id: batchId,
       participants: resolvedParticipants,
       timer,
@@ -1095,14 +1122,14 @@ export class AutomaticMessageService {
   private async getGroupRejection(
     groupId: string,
     now: Date,
-    ignoreSpamControls = false,
+    bypassTemporaryPauses = false,
   ): Promise<string | null> {
     if (!isSupportedGroupId(groupId)) return 'PRIVATE_CHAT';
     if (this.botId === 'neurobot') {
       if (!this.database.isGroupAuthorized(groupId)) return 'GROUP_NOT_AUTHORIZED';
       if (!this.database.canSendToGroup(groupId)) return 'GROUP_INACTIVE';
       if (!this.database.getSetting('bot_enabled', true)) return 'BOT_DISABLED';
-      if (!ignoreSpamControls && this.database.getSilenceRemainingMs(groupId, now) > 0) {
+      if (!bypassTemporaryPauses && this.database.getSilenceRemainingMs(groupId, now) > 0) {
         return 'GROUP_SILENCED';
       }
     } else {
@@ -1110,7 +1137,7 @@ export class AutomaticMessageService {
       if (this.database.getBot(this.botId)?.enabled !== true) return 'BOT_DISABLED';
     }
     if (
-      !ignoreSpamControls &&
+      !bypassTemporaryPauses &&
       this.database.getAutomaticGroupBackoffRemainingMs(groupId, now, this.botId) > 0
     ) {
       return 'GROUP_TEMPORARILY_DISABLED';
@@ -1153,19 +1180,32 @@ export class AutomaticMessageService {
     attempt?: number,
     source?: string,
   ): void {
+    const presentation = automaticLogPresentation(eventType, errorCode);
+    const groupName =
+      groupHash === null || presentation.level === 'debug'
+        ? undefined
+        : this.database
+            .listBotGroups(this.botId, (identifier) => this.hash(identifier))
+            .find((group) => group.groupHash === groupHash)?.name;
     const fields = {
+      module: taskType === 'WELCOME' ? 'Bienvenida' : 'Automatizaciones',
       operation: eventType,
       taskType,
       groupHash,
+      ...(groupName === undefined ? {} : { groupName }),
       localDate: local.date,
       localTime: local.time,
       result,
       attempt: attempt ?? null,
       errorCode,
+      ...(errorCode === null ? {} : { reason: automaticRejectionReason(errorCode) }),
       participantCount: itemCount ?? null,
       eventIdentifier: source ?? null,
     };
-    this.logger.info(fields, 'Evento de mensajes automáticos');
+    if (presentation.level === 'error') this.logger.error(fields, presentation.message);
+    else if (presentation.level === 'warn') this.logger.warn(fields, presentation.message);
+    else if (presentation.level === 'info') this.logger.info(fields, presentation.message);
+    else this.logger.debug(fields, presentation.message);
     try {
       this.database.recordTechnicalEvent({
         botId: this.botId,
@@ -1191,6 +1231,115 @@ export class AutomaticMessageService {
   private hash(groupId: string): string {
     return this.anonymizer.identifier(groupId);
   }
+}
+
+function safeGroupIdDiagnostic(
+  value: string,
+  hash: (identifier: string) => string,
+): {
+  hash: string;
+  representation: 'SERIALIZED_GROUP_JID' | 'UNSUPPORTED';
+  suffix: '@g.us' | null;
+  length: number;
+  canonical: boolean;
+} {
+  const canonical = normalizeWhatsAppGroupId(value);
+  return {
+    hash: hash(value),
+    representation: canonical === null ? 'UNSUPPORTED' : 'SERIALIZED_GROUP_JID',
+    suffix: canonical === null ? null : '@g.us',
+    length: value.length,
+    canonical: canonical === value,
+  };
+}
+
+function automaticLogPresentation(
+  eventType: string,
+  errorCode: string | null,
+): { level: 'debug' | 'info' | 'warn' | 'error'; message: string } {
+  if (eventType === 'WELCOME_EVENT_RECEIVED') {
+    return { level: 'info', message: 'Evento de entrada recibido' };
+  }
+  if (eventType === 'WELCOME_GROUP_RESOLVED') {
+    return { level: 'info', message: 'Grupo identificado' };
+  }
+  if (eventType === 'WELCOME_PARTICIPANTS_DETECTED') {
+    return { level: 'info', message: 'Participante identificado' };
+  }
+  if (eventType === 'WELCOME_BATCH_OPENED') {
+    return { level: 'info', message: 'Esperando ventana de agrupación' };
+  }
+  if (eventType === 'WELCOME_MESSAGE_RENDERED') {
+    return { level: 'info', message: 'Mensaje preparado' };
+  }
+  if (eventType === 'WELCOME_MENTIONS_RESOLVED') {
+    return { level: 'info', message: 'Menciones nativas preparadas' };
+  }
+  if (eventType === 'WELCOME_SEND_STARTED') {
+    return { level: 'info', message: 'Enviando mensaje' };
+  }
+  if (eventType === 'WELCOME_SENT') {
+    return { level: 'info', message: 'Bienvenida enviada' };
+  }
+  if (eventType === 'WELCOME_SEND_FAILED') {
+    return { level: 'error', message: 'No se pudo enviar la bienvenida' };
+  }
+  if (eventType === 'WELCOME_SKIPPED') {
+    const expectedSkip = new Set([
+      'DUPLICATE_JOIN_EVENT',
+      'DUPLICATE_EVENT',
+      'SELF_PARTICIPANT',
+      'NO_NEW_PARTICIPANTS',
+      'PRIVATE_CHAT',
+      'BOT_JOIN_BASELINE_CREATED',
+      'BASELINE_PENDING',
+    ]).has(errorCode ?? '');
+    return {
+      level: expectedSkip ? 'debug' : 'warn',
+      message: 'Bienvenida omitida',
+    };
+  }
+  if (eventType === 'AUTOMATIC_SCHEDULER_STARTED') {
+    return { level: 'info', message: 'Programador de automatizaciones iniciado' };
+  }
+  if (eventType === 'AUTOMATIC_SCHEDULER_STOPPED') {
+    return { level: 'info', message: 'Programador de automatizaciones detenido' };
+  }
+  if (eventType === 'AUTOMATIC_SCHEDULER_RECONFIGURED') {
+    return { level: 'info', message: 'Programación de automatizaciones actualizada' };
+  }
+  if (eventType === 'SCHEDULED_MESSAGE_FAILED') {
+    return { level: 'error', message: 'Falló un mensaje automático' };
+  }
+  if (eventType.endsWith('_SENT')) {
+    return { level: 'info', message: 'Mensaje automático enviado' };
+  }
+  return { level: 'debug', message: 'Evento técnico de automatizaciones' };
+}
+
+function automaticRejectionReason(errorCode: string): string {
+  const descriptions: Record<string, string> = {
+    GROUP_NOT_SELECTED_FOR_AUTOMATIONS: 'grupo no seleccionado para automatizaciones',
+    WELCOME_DISABLED: 'bienvenida desactivada',
+    GROUP_NOT_AUTHORIZED: 'grupo no autorizado',
+    GROUP_INACTIVE: 'grupo inactivo',
+    GROUP_BLOCKED: 'grupo bloqueado',
+    BOT_DISABLED: 'asistente desactivado',
+    WHATSAPP_NOT_CONNECTED: 'WhatsApp no está conectado',
+    WELCOME_TEMPLATE_EMPTY: 'mensaje de bienvenida vacío',
+    WELCOME_NATIVE_MENTION_UNAVAILABLE: 'mención nativa no disponible',
+    WELCOME_NATIVE_MENTION_FAILED: 'falló la mención nativa',
+    DUPLICATE_JOIN_EVENT: 'evento de ingreso duplicado',
+    DUPLICATE_EVENT: 'evento ya procesado',
+    SELF_PARTICIPANT: 'el participante era la propia cuenta del bot',
+    NO_NEW_PARTICIPANTS: 'no se identificaron participantes nuevos',
+    PRIVATE_CHAT: 'el evento no pertenece a un grupo compatible',
+    GROUP_SILENCED: 'el grupo está pausado por un administrador',
+    GROUP_TEMPORARILY_DISABLED: 'el grupo está en recuperación temporal',
+    BOT_JOIN_BASELINE_CREATED: 'se creó la línea base al incorporar el bot',
+    BASELINE_PENDING: 'la línea base de participantes aún no está disponible',
+  };
+  return descriptions[errorCode] ?? errorCode;
 }
 
 export function toSantiagoDateTime(date: Date): LocalDateTime {

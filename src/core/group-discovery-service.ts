@@ -346,6 +346,7 @@ export class GroupDiscoveryService {
         this.callbacks.onLoaded();
         this.logger.info(
           {
+            module: 'Grupos',
             operation: 'getChats',
             connectionState,
             retryAttempt,
@@ -377,6 +378,7 @@ export class GroupDiscoveryService {
         this.logger.warn(
           {
             ...details,
+            module: 'Grupos',
             operation: 'getChats',
             connectionState,
             retryAttempt,

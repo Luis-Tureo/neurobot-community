@@ -18,11 +18,6 @@ const environmentSchema = z.object({
     (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
     z.string().min(12).max(128).optional(),
   ),
-  USER_RATE_LIMIT: z.coerce.number().int().min(1).max(100).default(3),
-  GROUP_RATE_LIMIT: z.coerce.number().int().min(1).max(500).default(10),
-  RATE_WINDOW_SECONDS: z.coerce.number().int().min(10).max(3600).default(60),
-  USER_COOLDOWN_SECONDS: z.coerce.number().int().min(0).max(3600).default(5),
-  REPEAT_WINDOW_SECONDS: z.coerce.number().int().min(0).max(86_400).default(120),
   MAX_MESSAGE_LENGTH: z.coerce.number().int().min(100).max(10_000).default(2000),
   MAX_RECONNECT_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(8),
   MAX_RECONNECT_DELAY_SECONDS: z.coerce.number().int().min(5).max(3600).default(300),
@@ -46,11 +41,6 @@ export type Environment = {
   anonymizationSecret: string;
   panelSessionSecret: string;
   panelInitialPassword?: string;
-  userRateLimit: number;
-  groupRateLimit: number;
-  rateWindowMs: number;
-  userCooldownMs: number;
-  repeatWindowMs: number;
   maxMessageLength: number;
   maxReconnectAttempts: number;
   maxReconnectDelayMs: number;
@@ -86,11 +76,6 @@ export function loadEnvironment(
     ...(value.PANEL_INITIAL_PASSWORD === undefined
       ? {}
       : { panelInitialPassword: value.PANEL_INITIAL_PASSWORD }),
-    userRateLimit: value.USER_RATE_LIMIT,
-    groupRateLimit: value.GROUP_RATE_LIMIT,
-    rateWindowMs: value.RATE_WINDOW_SECONDS * 1000,
-    userCooldownMs: value.USER_COOLDOWN_SECONDS * 1000,
-    repeatWindowMs: value.REPEAT_WINDOW_SECONDS * 1000,
     maxMessageLength: value.MAX_MESSAGE_LENGTH,
     maxReconnectAttempts: value.MAX_RECONNECT_ATTEMPTS,
     maxReconnectDelayMs: value.MAX_RECONNECT_DELAY_SECONDS * 1000,

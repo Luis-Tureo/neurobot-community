@@ -54,6 +54,65 @@ describe('sistema de logger y formato amigable', () => {
     }
   });
 
+  it('presenta un skip de bienvenida con mensaje y motivo humanos', () => {
+    let output = '';
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      output += String(chunk);
+      return true;
+    });
+
+    try {
+      const logger = createLogger('info', true);
+      logger.warn(
+        {
+          module: 'Bienvenida',
+          operation: 'WELCOME_SKIPPED',
+          reason: 'grupo no seleccionado para automatizaciones',
+          groupName: 'Comunidad Neurodivergente',
+          participantCount: 1,
+        },
+        'Bienvenida omitida',
+      );
+
+      expect(output).toContain('WARN');
+      expect(output).toContain('[Bienvenida] Bienvenida omitida');
+      expect(output).toContain('Motivo: grupo no seleccionado para automatizaciones');
+      expect(output).toContain('Grupo: Comunidad Neurodivergente');
+      expect(output).toContain('Participantes: 1');
+      expect(output).not.toContain('{"level"');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('mantiene compacto un warning recuperable y deja el stack fuera de INFO', () => {
+    let output = '';
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      output += String(chunk);
+      return true;
+    });
+
+    try {
+      const logger = createLogger('info', true);
+      logger.warn(
+        {
+          module: 'WhatsApp',
+          operation: 'getChats',
+          fallback: 'minimalChatSnapshot',
+          recovery: 'Se utilizará una lectura mínima compatible',
+          errorCode: 'GROUP_LIST_FETCH_FAILED',
+          errorStack: 'Error: fallo\n at detalle-privado.js:1',
+        },
+        'No se pudo obtener la lista completa de chats',
+      );
+      expect(output).toContain('[WhatsApp] No se pudo obtener la lista completa de chats');
+      expect(output).toContain('Se utilizará una lectura mínima compatible');
+      expect(output).not.toContain('detalle-privado');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('sanitiza datos sensibles como apiKey, token, password y cookie', () => {
     let output = '';
     const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {

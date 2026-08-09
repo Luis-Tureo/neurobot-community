@@ -18,7 +18,16 @@ function configureCollapsible(card) {
   button.addEventListener('click', () => {
     setOpen(card.classList.contains('is-collapsed'));
   });
-  heading.append(button);
+  let actions = heading.querySelector(':scope > .section-heading-actions');
+  if (!actions) {
+    actions = document.createElement('div');
+    actions.className = 'section-heading-actions';
+    heading
+      .querySelectorAll(':scope > .status-switch, :scope > [data-automation-toggle]')
+      .forEach((control) => actions.append(control));
+    heading.append(actions);
+  }
+  actions.append(button);
   card.dataset.collapsibleReady = 'true';
   setOpen(card.dataset.open === 'true');
 }

@@ -18,19 +18,24 @@ async function main(): Promise<void> {
   const environment = loadEnvironment();
   if (process.platform === 'win32') {
     try {
-      process.stdout.setEncoding('utf8');
-      process.stderr.setEncoding('utf8');
+      process.stdout.setDefaultEncoding('utf8');
+      process.stderr.setDefaultEncoding('utf8');
     } catch {
       /* Ignorar si la consola no admite cambio de encoding directo. */
     }
   }
+  const logger = createLogger(environment.logLevel, environment.developmentMode);
   if (await isApplicationAlreadyRunning(environment.panelHost, environment.panelPort)) {
-    process.stdout.write(
-      `El panel ya está funcionando en http://${displayHost(environment.panelHost)}:${environment.panelPort}. No es necesario iniciar otra copia.\n`,
+    logger.info(
+      {
+        module: 'Servidor',
+        host: displayHost(environment.panelHost),
+        port: environment.panelPort,
+      },
+      'El panel ya está funcionando; no es necesario iniciar otra copia',
     );
     return;
   }
-  const logger = createLogger(environment.logLevel, environment.developmentMode);
   const database = new AppDatabase(environment.databasePath);
   database.migrate();
   database.setBotSessionPath('neurobot', environment.sessionPath);
@@ -57,8 +62,6 @@ async function main(): Promise<void> {
     logger,
     {
       maxMessageLength: environment.maxMessageLength,
-      repeatWindowMs:
-        database.getSetting('repeat_window_seconds', environment.repeatWindowMs / 1000) * 1000,
       maxReconnectAttempts: environment.maxReconnectAttempts,
       maxReconnectDelayMs: environment.maxReconnectDelayMs,
       developmentMode: environment.developmentMode,
@@ -116,7 +119,7 @@ async function main(): Promise<void> {
 
   await server.listen({ host: environment.panelHost, port: environment.panelPort });
   logger.info(
-    { host: environment.panelHost, port: environment.panelPort },
+    { module: 'Servidor', host: environment.panelHost, port: environment.panelPort },
     'Panel administrativo local iniciado',
   );
   void multiBotManager.startAll().catch((error: unknown) => {

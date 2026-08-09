@@ -38,7 +38,6 @@ export type AssistantQueryResult = {
     | 'AI_QUEUE_FULL'
     | 'AI_QUEUE_EXPIRED'
     | 'AI_QUEUE_WAIT'
-    | 'AI_USER_COOLDOWN'
     | 'AI_CIRCUIT_OPEN'
     | 'AI_RESPONSE_REJECTED';
 };
@@ -174,7 +173,6 @@ export class AssistantQueryService {
     try {
       const flight = await this.queue.run({
         flightKey: `${this.botId}:${knowledgeVersion(fragments)}:community-v1:${hashNormalizedQuestion(normalizeQuestionForCache(question))}`,
-        userKey: `${groupHash}:${userHash}`,
         classifyError: (error) => this.provider.classifyProviderError(error),
         ...(onWaitNotice === undefined ? {} : { onWaitNotice }),
         operation: async (): Promise<AssistantQueryResult> => {
@@ -255,11 +253,6 @@ export class AssistantQueryService {
           return {
             text: `No pude atender tu consulta a tiempo porque hay mucha actividad. Intenta nuevamente en ${retry} segundos.`,
             code: 'AI_QUEUE_EXPIRED',
-          };
-        if (error.code === 'AI_USER_COOLDOWN')
-          return {
-            text: 'Espera unos segundos antes de enviar otra pregunta nueva.',
-            code: 'AI_USER_COOLDOWN',
           };
         if (error.code === 'AI_CIRCUIT_OPEN')
           return {

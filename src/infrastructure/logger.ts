@@ -149,14 +149,14 @@ function resolveModuleTag(record: Record<string, unknown>): string {
   const msg = typeof record.msg === 'string' ? record.msg : '';
   const combined = `${op} ${src} ${event} ${msg}`.toLowerCase();
 
+  if (/welcome|bienvenida|alias/i.test(combined)) {
+    return 'Bienvenida';
+  }
   if (/getchats|whatsapp|send_message|client|session|jid|participant/i.test(combined)) {
     return 'WhatsApp';
   }
   if (/group|group_sync|groupdiscovery/i.test(combined)) {
     return 'Grupos';
-  }
-  if (/welcome|bienvenida|alias/i.test(combined)) {
-    return 'Bienvenida';
   }
   if (/digest|resumen|communitydigest/i.test(combined)) {
     return 'Resumen';
@@ -184,6 +184,7 @@ function resolveModuleTag(record: Record<string, unknown>): string {
 }
 
 function collectDetails(record: Record<string, unknown>, lines: string[], activeLogLevel: string): void {
+  const verbose = activeLogLevel === 'debug' || activeLogLevel === 'trace';
   const ignoredKeys = new Set([
     'level',
     'time',
@@ -207,6 +208,9 @@ function collectDetails(record: Record<string, unknown>, lines: string[], active
   if (typeof record.aliasCount === 'number') {
     lines.push(`Alias detectados: ${record.aliasCount}`);
   }
+  if (typeof record.participantCount === 'number') {
+    lines.push(`Participantes: ${record.participantCount}`);
+  }
   if (typeof record.source === 'string' && record.source.trim() !== '') {
     lines.push(`Fuente: ${record.source}`);
   }
@@ -218,6 +222,9 @@ function collectDetails(record: Record<string, unknown>, lines: string[], active
   }
   if (typeof record.reconnectAttempt === 'number') {
     lines.push(`Intento de reconexión: ${record.reconnectAttempt}`);
+  }
+  if (typeof record.recovery === 'string' && record.recovery.trim() !== '') {
+    lines.push(record.recovery.trim());
   }
 
   if (isRecord(record.summary)) {
@@ -232,19 +239,22 @@ function collectDetails(record: Record<string, unknown>, lines: string[], active
     lines.push(`Errores temporales: ${record.temporaryErrors}`);
   }
 
-  if (typeof record.operation === 'string' && record.operation.trim() !== '') {
-    const handledOps = new Set(['getchats', 'welcome_identity_aliases_collapsed']);
-    if (!handledOps.has(record.operation.toLowerCase())) {
-      lines.push(`Operación: ${record.operation}`);
-    }
+  if (verbose && typeof record.operation === 'string' && record.operation.trim() !== '') {
+    lines.push(`Operación: ${record.operation}`);
   }
 
-  if (typeof record.errorCode === 'string' && record.errorCode.trim() !== '') {
-    lines.push(`Código de error: ${record.errorCode}`);
+  const hasHumanReason = typeof record.reason === 'string' && record.reason.trim() !== '';
+  if (
+    typeof record.errorCode === 'string' &&
+    record.errorCode.trim() !== '' &&
+    (verbose || !hasHumanReason)
+  ) {
+    lines.push(`Código técnico: ${record.errorCode}`);
   }
   if (typeof record.errorMessage === 'string' && record.errorMessage.trim() !== '') {
     lines.push(`Error: ${record.errorMessage}`);
-  } else if (typeof record.reason === 'string' && record.reason.trim() !== '') {
+  }
+  if (hasHumanReason) {
     lines.push(`Motivo: ${record.reason}`);
   }
 
@@ -253,10 +263,13 @@ function collectDetails(record: Record<string, unknown>, lines: string[], active
     'active',
     'skippedChats',
     'aliasCount',
+    'participantCount',
     'source',
     'groupName',
     'retryAttempt',
     'reconnectAttempt',
+    'recovery',
+    'fallback',
     'summary',
     'temporaryErrors',
     'operation',
@@ -266,24 +279,25 @@ function collectDetails(record: Record<string, unknown>, lines: string[], active
     'errorStack',
   ]);
 
-  for (const [key, value] of Object.entries(record)) {
-    if (ignoredKeys.has(key) || handledExplicitKeys.has(key)) continue;
-    if (value === null || value === undefined) continue;
+  if (verbose) {
+    for (const [key, value] of Object.entries(record)) {
+      if (ignoredKeys.has(key) || handledExplicitKeys.has(key)) continue;
+      if (value === null || value === undefined) continue;
 
-    if (typeof value === 'object') {
-      try {
-        lines.push(`${formatKeyLabel(key)}: ${JSON.stringify(value)}`);
-      } catch {
-        lines.push(`${formatKeyLabel(key)}: [Objeto]`);
+      if (typeof value === 'object') {
+        try {
+          lines.push(`${formatKeyLabel(key)}: ${JSON.stringify(value)}`);
+        } catch {
+          lines.push(`${formatKeyLabel(key)}: [Objeto]`);
+        }
+      } else {
+        lines.push(`${formatKeyLabel(key)}: ${String(value)}`);
       }
-    } else {
-      lines.push(`${formatKeyLabel(key)}: ${String(value)}`);
     }
   }
 
   if (typeof record.errorStack === 'string' && record.errorStack.trim() !== '') {
-    const isDebugOrTrace = activeLogLevel === 'debug' || activeLogLevel === 'trace';
-    if (isDebugOrTrace) {
+    if (verbose) {
       lines.push('Stack trace:');
       const stackLines = record.errorStack.trim().split('\n');
       stackLines.forEach((sLine) => {

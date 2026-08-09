@@ -27,7 +27,9 @@ describe('centro de pruebas de automatizaciones', () => {
     expect(script).not.toContain('Grupo de prueba');
     expect(script).not.toContain("id: 'moderation'");
     expect(script).toContain('Grupos para las pruebas');
-    expect(script).toContain('Selecciona uno o más grupos.');
+    expect(script).toContain('Esta selección solo define dónde se ejecuta la prueba.');
+    expect(script).toContain('No cambia los grupos persistidos en Automatizaciones.');
+    expect(script).toContain("identity.textContent = `ID ${String(group.key).slice(0, 6).toUpperCase()}`");
     expect(script).toContain('selectedGroupKeys');
     expect(script).toContain('for (const groupKey of groupKeys)');
     expect(script).toContain('await test.run(groupKey)');

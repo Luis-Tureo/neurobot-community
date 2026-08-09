@@ -1,4 +1,5 @@
 import { confirmAction, requestInputs, showMessage, showToast } from './ui-feedback.js';
+import { createStatusSwitch, setStatusSwitchState } from './status-switch.js';
 
 const panelState = {
   csrfToken: null,
@@ -465,9 +466,11 @@ async function loadModerationGroup() {
     ? `Configuración preparada\nReglas interpretadas: ${values.interpretedRules || 0}\nCategorías detectadas: ${values.categoryCount || 0}\nCondiciones preparadas: ${values.preparedConditions || 0}\nPatrones de spam: ${values.spamPatterns || 0}\nPatrones de privacidad: ${values.privacyPatterns || 0}\nExcepciones: ${values.exceptionCount || 0}\nPruebas preparadas: ${values.generatedTestCount || 0}`
     : 'Guarda las reglas y prepara la moderación para ver un resumen.';
   const toggle = document.querySelector('#moderation-toggle');
-  toggle.textContent = profile.enabled ? 'Desactivar moderación' : 'Activar moderación';
-  toggle.classList.toggle('danger', profile.enabled);
-  toggle.disabled = !profile.enabled && !data.progress.ready;
+  setStatusSwitchState(toggle, {
+    checked: profile.enabled,
+    disabled: !profile.enabled && !data.progress.ready,
+    ariaLabel: 'moderación del grupo',
+  });
 }
 
 function moderationStatusLabel(status) {
@@ -554,9 +557,17 @@ function renderModerationRules(rules) {
       `${rule.category} · ${rule.severity} · ${rule.score} puntos · ${rule.enabled ? 'Activa' : 'Borrador'}`,
     );
     const actions = node('div', undefined, 'actions');
-    actions.append(
-      actionButton('Editar', 'secondary', () => editModerationRule(rule)),
-      actionButton(rule.enabled ? 'Desactivar' : 'Activar', 'secondary', async () => {
+    const statusSwitch = createStatusSwitch({
+      checked: rule.enabled,
+      ariaLabel: `regla ${rule.name}`,
+    });
+    statusSwitch.addEventListener('click', async () => {
+      setStatusSwitchState(statusSwitch, {
+        checked: rule.enabled,
+        loading: true,
+        ariaLabel: `regla ${rule.name}`,
+      });
+      try {
         await panelApi(
           `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/rules/${rule.id}`,
           {
@@ -565,7 +576,17 @@ function renderModerationRules(rules) {
           },
         );
         await loadModeration();
-      }),
+      } catch (error) {
+        setStatusSwitchState(statusSwitch, {
+          checked: rule.enabled,
+          ariaLabel: `regla ${rule.name}`,
+        });
+        notify(friendlyPanelError(error), true);
+      }
+    });
+    actions.append(
+      actionButton('Editar', 'secondary', () => editModerationRule(rule)),
+      statusSwitch,
       actionButton('Eliminar', 'danger', async () => {
         if (
           !(await confirmAction('¿Eliminar esta regla?', {
@@ -786,8 +807,14 @@ function bindSimpleModeration() {
     });
   bindTest('#moderation-allowed-test', 'ALLOW');
   bindTest('#moderation-warning-test', 'WARNING');
-  document.querySelector('#moderation-toggle').addEventListener('click', async () => {
+  document.querySelector('#moderation-toggle').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
     const enabled = !panelState.moderationGroup.profile.enabled;
+    setStatusSwitchState(button, {
+      checked: !enabled,
+      loading: true,
+      ariaLabel: 'moderación del grupo',
+    });
     try {
       await panelApi(
         `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/moderation/groups/${encodeURIComponent(panelState.moderationGroupHash)}/activation`,
@@ -800,6 +827,10 @@ function bindSimpleModeration() {
           : 'Moderación desactivada para este grupo.',
       );
     } catch (error) {
+      setStatusSwitchState(button, {
+        checked: !enabled,
+        ariaLabel: 'moderación del grupo',
+      });
       notify(error.message, true);
     }
   });
@@ -867,13 +898,27 @@ async function loadBotSummary(refreshForms = true) {
   const quickActionsContainer = document.querySelector('#status-quick-actions');
   if (quickActionsContainer) {
     quickActionsContainer.replaceChildren();
-    quickActionsContainer.append(
-      actionButton(
-        result.bot.enabled ? 'Desactivar asistente' : 'Activar asistente',
-        result.bot.enabled ? 'secondary' : 'primary',
-        async () => toggleBot(result.bot),
-      ),
-    );
+    const botSwitch = createStatusSwitch({
+      checked: result.bot.enabled,
+      ariaLabel: 'asistente',
+    });
+    botSwitch.addEventListener('click', async () => {
+      setStatusSwitchState(botSwitch, {
+        checked: result.bot.enabled,
+        loading: true,
+        ariaLabel: 'asistente',
+      });
+      try {
+        await toggleBot(result.bot);
+      } catch (error) {
+        setStatusSwitchState(botSwitch, {
+          checked: result.bot.enabled,
+          ariaLabel: 'asistente',
+        });
+        notify(friendlyPanelError(error), true);
+      }
+    });
+    quickActionsContainer.append(botSwitch);
     quickActionsContainer.append(
       actionButton('Eliminar bot', 'danger', async () => sendBotToTrash(result.bot)),
     );
@@ -1486,10 +1531,10 @@ async function loadAI() {
   document.querySelector('#ai-provider-current-name').textContent =
     currentProvider.name || 'Sin IA configurada';
   const toggleButton = document.querySelector('#toggle-ai-enabled');
-  toggleButton.textContent = currentProvider.enabled ? 'Desactivar IA' : 'Activar IA';
-  toggleButton.classList.toggle('danger-primary', currentProvider.enabled);
-  toggleButton.classList.toggle('ai-enable-action', !currentProvider.enabled);
-  toggleButton.setAttribute('aria-pressed', String(currentProvider.enabled));
+  setStatusSwitchState(toggleButton, {
+    checked: currentProvider.enabled,
+    ariaLabel: 'inteligencia artificial',
+  });
   const providerForm = document.querySelector('#ai-provider-form');
   providerForm.elements.displayName.value = currentProvider.name || 'Groq';
   providerForm.elements.apiKey.value = '';
@@ -1659,7 +1704,7 @@ async function toggleBot(bot) {
       menuType: detail.bot.menuType,
     }),
   });
-  await loadBots();
+  await Promise.all([loadBots(), loadBotSummary(false)]);
   notify(detail.bot.enabled ? 'Asistente desactivado.' : 'Asistente activado.');
 }
 
@@ -1848,8 +1893,13 @@ function configureForms() {
   });
   document.querySelector('#toggle-ai-enabled').addEventListener('click', async (event) => {
     const button = event.currentTarget;
-    const enabled = !panelState.aiCurrentProvider?.enabled;
-    button.disabled = true;
+    const currentEnabled = Boolean(panelState.aiCurrentProvider?.enabled);
+    const enabled = !currentEnabled;
+    setStatusSwitchState(button, {
+      checked: currentEnabled,
+      loading: true,
+      ariaLabel: 'inteligencia artificial',
+    });
     try {
       await saveAIProviderWithCompatibility({
         displayName: panelState.aiCurrentProvider?.name || 'Groq',
@@ -1859,9 +1909,16 @@ function configureForms() {
       notify(`Inteligencia artificial ${enabled ? 'activada' : 'desactivada'}.`);
     } catch (error) {
       await loadAI().catch(() => {});
+      setStatusSwitchState(button, {
+        checked: currentEnabled,
+        ariaLabel: 'inteligencia artificial',
+      });
       notify(error.message, true);
     } finally {
-      button.disabled = false;
+      setStatusSwitchState(button, {
+        checked: Boolean(panelState.aiCurrentProvider?.enabled),
+        ariaLabel: 'inteligencia artificial',
+      });
     }
   });
   document.querySelector('#section-moderation')?.remove();

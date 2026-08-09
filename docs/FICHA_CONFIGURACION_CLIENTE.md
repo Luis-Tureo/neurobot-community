@@ -5,7 +5,7 @@
 - Saludo de Neurobot editable desde el perfil.
 - FAQ y respuestas guardadas administrables desde el panel.
 - Solo las respuestas reales, válidas y exitosas de Groq consumen cuota de IA.
-- Límites antispam y cuotas de IA configurables por bot.
+- Cuotas operativas de IA configurables por bot, independientes de la idempotencia de mensajes.
 - Restablecimiento de contadores protegido por contraseña y confirmación.
 
 Complete esta ficha antes de crear o vincular el asistente. No escriba contraseñas, códigos QR ni claves de API en este documento.

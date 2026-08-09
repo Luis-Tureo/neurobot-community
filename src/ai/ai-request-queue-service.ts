@@ -6,7 +6,6 @@ import { AIProviderError, type AIProviderErrorCode } from './ai-provider.js';
 export type AIQueueErrorCode =
   | 'AI_QUEUE_FULL'
   | 'AI_QUEUE_EXPIRED'
-  | 'AI_USER_COOLDOWN'
   | 'AI_CIRCUIT_OPEN'
   | 'AI_QUEUE_CANCELLED';
 
@@ -28,7 +27,6 @@ type QueueItem = {
 
 type RunInput<T> = {
   flightKey: string;
-  userKey: string;
   operation: () => Promise<T>;
   classifyError: (error: unknown) => AIProviderErrorCode;
   onWaitNotice?: () => Promise<void>;
@@ -37,9 +35,6 @@ type RunInput<T> = {
 export class AIRequestQueueService {
   private readonly waiting: QueueItem[] = [];
   private readonly flights = new Map<string, Promise<{ value: unknown; coalesced: boolean }>>();
-  private readonly flightUsers = new Map<string, Set<string>>();
-  private readonly completedFlights = new Map<string, { value: unknown; expiresAt: number }>();
-  private readonly userAcceptedAt = new Map<string, number>();
   private active = 0;
   private consecutiveFailures = 0;
   private circuitState: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
@@ -61,56 +56,27 @@ export class AIRequestQueueService {
 
   public async run<T>(input: RunInput<T>): Promise<{ value: T; coalesced: boolean }> {
     const settings = this.settings();
-    this.cleanupExpired(settings);
     this.event('AI_QUEUE_REQUEST_RECEIVED', 'received');
-    const completed = this.completedFlights.get(input.flightKey);
-    if (completed !== undefined && completed.expiresAt > this.now()) {
-      this.metric('coalescedCount');
-      this.event('SINGLE_FLIGHT_REQUEST_JOINED', 'recently_completed');
-      return { value: completed.value as T, coalesced: true };
-    }
-    if (completed !== undefined) this.completedFlights.delete(input.flightKey);
     const existing = this.flights.get(input.flightKey) as Promise<{ value: T; coalesced: boolean }> | undefined;
     if (existing !== undefined) {
-      const users = this.flightUsers.get(input.flightKey);
-      if (users?.has(input.userKey) === true) {
-        this.metric('duplicateSuppressedCount');
-        this.event('DUPLICATE_PENDING_QUERY_SUPPRESSED', 'duplicate_suppressed');
-      } else {
-        users?.add(input.userKey);
-        this.metric('coalescedCount');
-        this.event('SINGLE_FLIGHT_REQUEST_JOINED', 'coalesced');
-      }
+      this.metric('coalescedCount');
+      this.event('SINGLE_FLIGHT_REQUEST_JOINED', 'coalesced');
       const joined = await existing;
       return { value: joined.value, coalesced: true };
     }
     this.assertCircuit(settings.suggestedRetrySeconds);
-    const now = this.now();
-    const lastAccepted = this.userAcceptedAt.get(input.userKey) ?? 0;
-    if (settings.userCooldownSeconds > 0 && now - lastAccepted < settings.userCooldownSeconds * 1000) {
-      this.event('AI_QUEUE_REQUEST_CANCELLED', 'user_cooldown');
-      throw new AIQueueError('AI_USER_COOLDOWN', Math.max(1, Math.ceil((settings.userCooldownSeconds * 1000 - (now - lastAccepted)) / 1000)));
-    }
     if (this.waiting.length >= settings.maxQueueSize) {
       this.metric('rejectedCount');
       this.event('AI_QUEUE_FULL', 'rejected');
       throw new AIQueueError('AI_QUEUE_FULL', settings.suggestedRetrySeconds);
     }
-    this.userAcceptedAt.set(input.userKey, now);
     const promise = this.enqueue(input, settings);
     this.flights.set(input.flightKey, promise as Promise<{ value: unknown; coalesced: boolean }>);
-    this.flightUsers.set(input.flightKey, new Set([input.userKey]));
     try {
-      const result = await promise;
-      this.completedFlights.set(input.flightKey, {
-        value: result.value,
-        expiresAt: this.now() + settings.singleFlightWindowSeconds * 1000,
-      });
-      return result;
+      return await promise;
     } finally {
       if (this.flights.get(input.flightKey) === promise) {
         this.flights.delete(input.flightKey);
-        this.flightUsers.delete(input.flightKey);
       }
     }
   }
@@ -300,17 +266,6 @@ export class AIRequestQueueService {
 
   private settings(): AIQueueSettings {
     return this.database.getAIQueueSettings(this.botId);
-  }
-
-  private cleanupExpired(settings: AIQueueSettings): void {
-    const now = this.now();
-    for (const [key, completed] of this.completedFlights) {
-      if (completed.expiresAt <= now) this.completedFlights.delete(key);
-    }
-    const userRetentionMs = Math.max(settings.userCooldownSeconds, settings.duplicateWindowSeconds, 1) * 1000;
-    for (const [key, acceptedAt] of this.userAcceptedAt) {
-      if (now - acceptedAt >= userRetentionMs) this.userAcceptedAt.delete(key);
-    }
   }
 
   private metric(field: keyof Omit<AIQueueMetrics, 'averageWaitMs' | 'maximumWaitMs'>, waitMs = 0): void {

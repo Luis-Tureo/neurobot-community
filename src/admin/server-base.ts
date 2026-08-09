@@ -135,10 +135,6 @@ const aiSettingsSchema = z
     temperature: z.number().min(0).max(1),
     userHourlyLimit: z.number().int().min(1).max(500),
     userDailyLimit: z.number().int().min(1).max(1000),
-    userCooldownSeconds: z.number().int().min(0).max(3600),
-    interactionHourlyLimit: z.number().int().min(1).max(5000),
-    interactionCooldownSeconds: z.number().int().min(0).max(3600),
-    duplicateQueryWindowSeconds: z.number().int().min(0).max(3600),
     groupHourlyLimit: z.number().int().min(1).max(2000),
     groupDailyLimit: z.number().int().min(1).max(10_000),
     globalDailyLimit: z.number().int().min(1).max(100_000),
@@ -414,11 +410,6 @@ const settingsSchema = z
     fallback_response: z.string().trim().min(1).max(4000).optional(),
     professional_warning: z.string().trim().min(1).max(1000).optional(),
     log_level: z.enum(['error', 'warn', 'info', 'debug']).optional(),
-    user_rate_limit: z.number().int().min(1).max(100).optional(),
-    group_rate_limit: z.number().int().min(1).max(500).optional(),
-    rate_window_seconds: z.number().int().min(10).max(3600).optional(),
-    user_cooldown_seconds: z.number().int().min(0).max(3600).optional(),
-    repeat_window_seconds: z.number().int().min(0).max(86_400).optional(),
     require_authorized_admin_in_group: z.boolean().optional(),
     group_archive_after_hours: z.number().int().min(1).max(720).optional(),
     group_delete_after_days: z.number().int().min(1).max(3650).optional(),
@@ -580,9 +571,6 @@ const aiQueueSettingsSchema = z
     initialRetryDelaySeconds: z.number().int().min(1).max(30),
     maximumRetryDelaySeconds: z.number().int().min(1).max(60),
     waitNoticeSeconds: z.number().int().min(1).max(60),
-    userCooldownSeconds: z.number().int().min(0).max(300),
-    duplicateWindowSeconds: z.number().int().min(0).max(300),
-    singleFlightWindowSeconds: z.number().int().min(1).max(300),
     outboundMessageIntervalMs: z.number().int().min(0).max(10_000),
     suggestedRetrySeconds: z.number().int().min(5).max(600),
   })
@@ -1634,9 +1622,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         initialRetryDelaySeconds: 2,
         maximumRetryDelaySeconds: 15,
         waitNoticeSeconds: 5,
-        userCooldownSeconds: 10,
-        duplicateWindowSeconds: 15,
-        singleFlightWindowSeconds: 60,
         outboundMessageIntervalMs: 1000,
         suggestedRetrySeconds: 60,
       });
@@ -4514,9 +4499,6 @@ function exceedsSafeDefaults(settings: z.infer<typeof aiSettingsSchema>): boolea
     settings.temperature > 0.2 ||
     settings.userHourlyLimit > 20 ||
     settings.userDailyLimit > 50 ||
-    settings.interactionHourlyLimit > 60 ||
-    settings.interactionCooldownSeconds > 3 ||
-    settings.duplicateQueryWindowSeconds > 15 ||
     settings.groupHourlyLimit > 150 ||
     settings.groupDailyLimit > 500 ||
     settings.globalDailyLimit > 500 ||

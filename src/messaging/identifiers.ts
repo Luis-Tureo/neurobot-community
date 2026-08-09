@@ -69,6 +69,16 @@ export function normalizeWhatsAppIdentity(value: unknown): string | null {
 }
 
 /**
+ * Produces the only representation accepted for a WhatsApp group throughout
+ * the application. Group JIDs have no safe alias conversion: two different
+ * `@g.us` values always represent different groups.
+ */
+export function normalizeWhatsAppGroupId(value: unknown): string | null {
+  const serialized = getSerializedId(value);
+  return isSupportedGroupId(serialized) ? serialized : null;
+}
+
+/**
  * Returns every safe representation that can identify the same WhatsApp account
  * without guessing a phone number from a LID. A phone identity is represented as
  * both @c.us and @s.whatsapp.net so events from different WhatsApp Web internals

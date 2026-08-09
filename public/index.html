@@ -892,8 +892,15 @@
                   >
                     Cambiar IA
                   </button>
-                  <button id="toggle-ai-enabled" class="ai-enable-action" type="button">
-                    Activar IA
+                  <button
+                    id="toggle-ai-enabled"
+                    class="status-switch"
+                    type="button"
+                    role="switch"
+                    aria-checked="false"
+                    aria-label="Activar inteligencia artificial"
+                  >
+                    Inactivo
                   </button>
                 </div>
               </article>
@@ -961,55 +968,6 @@
                     <option>debug</option>
                   </select></label
                 >
-                <div class="form-row">
-                  <label
-                    >Máximo por usuario<input
-                      name="user_rate_limit"
-                      type="number"
-                      min="1"
-                      max="100"
-                      required
-                    />
-                  </label>
-                  <label
-                    >Máximo por grupo<input
-                      name="group_rate_limit"
-                      type="number"
-                      min="1"
-                      max="500"
-                      required
-                    />
-                  </label>
-                </div>
-                <div class="form-row">
-                  <label
-                    >Ventana (segundos)<input
-                      name="rate_window_seconds"
-                      type="number"
-                      min="10"
-                      max="3600"
-                      required
-                    />
-                  </label>
-                  <label
-                    >Enfriamiento (segundos)<input
-                      name="user_cooldown_seconds"
-                      type="number"
-                      min="0"
-                      max="3600"
-                      required
-                    />
-                  </label>
-                </div>
-                <label
-                  >Prevención de repetición (segundos)<input
-                    name="repeat_window_seconds"
-                    type="number"
-                    min="0"
-                    max="86400"
-                    required
-                  />
-                </label>
                 <fieldset>
                   <legend>Vigencia de grupos</legend>
                   <label class="toggle"
@@ -1072,7 +1030,8 @@
                       <h3>Grupos para las automatizaciones</h3>
                       <p id="automation-groups-help" class="muted">
                         Selecciona uno o m&aacute;s grupos donde se ejecutar&aacute;n las
-                        automatizaciones.
+                        automatizaciones. Esta selecci&oacute;n persistida es la fuente de verdad para
+                        los env&iacute;os reales.
                       </p>
                     </div>
                   </div>
@@ -1121,10 +1080,12 @@
                       <input name="digest_daily_enabled" type="hidden" value="false" />
                       <button
                         type="button"
-                        class="automation-toggle-btn secondary"
+                        class="status-switch automation-toggle-btn"
                         data-automation-toggle="digest_daily"
+                        role="switch"
+                        aria-checked="false"
                       >
-                        Activar
+                        Inactivo
                       </button>
                       <div class="digest-frequency-fields">
                         <label
@@ -1145,10 +1106,12 @@
                       <input name="digest_weekly_enabled" type="hidden" value="false" />
                       <button
                         type="button"
-                        class="automation-toggle-btn secondary"
+                        class="status-switch automation-toggle-btn"
                         data-automation-toggle="digest_weekly"
+                        role="switch"
+                        aria-checked="false"
                       >
-                        Activar
+                        Inactivo
                       </button>
                       <div class="digest-frequency-fields">
                         <label
@@ -1180,10 +1143,12 @@
                       <input name="digest_monthly_enabled" type="hidden" value="false" />
                       <button
                         type="button"
-                        class="automation-toggle-btn secondary"
+                        class="status-switch automation-toggle-btn"
                         data-automation-toggle="digest_monthly"
+                        role="switch"
+                        aria-checked="false"
                       >
-                        Activar
+                        Inactivo
                       </button>
                       <div class="digest-frequency-fields">
                         <label
@@ -1250,10 +1215,12 @@
                     <input name="welcome_enabled" type="hidden" value="false" />
                     <button
                       type="button"
-                      class="automation-toggle-btn secondary"
+                      class="status-switch automation-toggle-btn"
                       data-automation-toggle="welcome"
+                      role="switch"
+                      aria-checked="false"
                     >
-                      Activar
+                      Inactivo
                     </button>
                   </div>
                   <div class="welcome-variables" aria-labelledby="welcome-variables-title">
@@ -1285,10 +1252,12 @@
                     <input name="greeting_enabled" type="hidden" value="false" />
                     <button
                       type="button"
-                      class="automation-toggle-btn secondary"
+                      class="status-switch automation-toggle-btn"
                       data-automation-toggle="greeting"
+                      role="switch"
+                      aria-checked="false"
                     >
-                      Activar
+                      Inactivo
                     </button>
                   </div>
                   <div class="form-row">
@@ -1347,10 +1316,12 @@
                     <input name="rules_enabled" type="hidden" value="false" />
                     <button
                       type="button"
-                      class="automation-toggle-btn secondary"
+                      class="status-switch automation-toggle-btn"
                       data-automation-toggle="rules"
+                      role="switch"
+                      aria-checked="false"
                     >
-                      Activar
+                      Inactivo
                     </button>
                   </div>
                   <div class="form-row">

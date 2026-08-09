@@ -60,7 +60,7 @@ function createModule() {
     </div>
     <fieldset class="lab-group-selector" aria-describedby="lab-group-help">
       <legend>Grupos para las pruebas</legend>
-      <p id="lab-group-help" class="muted">Selecciona uno o más grupos.</p>
+      <p id="lab-group-help" class="muted">Esta selección solo define dónde se ejecuta la prueba. No cambia los grupos persistidos en Automatizaciones.</p>
       <details class="lab-group-menu">
         <summary>
           <span id="lab-group-selection" aria-live="polite">Seleccionar grupos</span>
@@ -126,7 +126,13 @@ function renderGroupSelector() {
     });
     const name = document.createElement('span');
     name.textContent = group.name || 'Grupo sin nombre';
-    option.append(checkbox, name);
+    const identity = document.createElement('small');
+    identity.className = 'group-identity-hint';
+    identity.textContent = `ID ${String(group.key).slice(0, 6).toUpperCase()}`;
+    const copy = document.createElement('span');
+    copy.className = 'group-option-copy';
+    copy.append(name, identity);
+    option.append(checkbox, copy);
     target.append(option);
   });
   updateGroupSelectionSummary();

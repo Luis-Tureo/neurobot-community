@@ -15,7 +15,7 @@ Cada asistente tiene una sesión de WhatsApp, perfil, canales, grupos, conocimie
 
 ## Cómo se contabilizan las consultas
 
-- Una activación válida de Neurobot se controla con un límite antispam independiente: 60 por usuario y hora, tres segundos entre consultas diferentes y 15 segundos para suprimir una consulta idéntica.
+- Cada mensaje distinto recibido por WhatsApp puede generar su propia respuesta; solo se descarta la repetición del mismo ID de mensaje o evento.
 - Solo una llamada real a Groq cuya respuesta termina validada y lista para enviar aumenta los contadores de IA y tokens.
 - Saludos, preguntas frecuentes, respuestas guardadas, conocimiento directo, rechazos de alcance, consultas sin información, duplicados, errores, tiempos de espera y respuestas rechazadas no consumen cuota exitosa de IA.
 - Las reservas temporales evitan exceder el presupuesto durante solicitudes concurrentes. Una falla o respuesta inválida libera la reserva.
@@ -122,7 +122,7 @@ npm run db:init
 - `ANONYMIZATION_SECRET`: secreto HMAC de al menos 32 caracteres.
 - `PANEL_SESSION_SECRET`: secreto independiente para sesiones del panel.
 - `PANEL_INITIAL_PASSWORD`: opcional. Si está vacío en la primera ejecución se genera una contraseña temporal y se muestra una sola vez.
-- Límites: `USER_RATE_LIMIT`, `GROUP_RATE_LIMIT`, `RATE_WINDOW_SECONDS`, `USER_COOLDOWN_SECONDS` y `REPEAT_WINDOW_SECONDS`.
+- `MAX_MESSAGE_LENGTH`: tamaño máximo aceptado para un mensaje entrante.
 - `CHROME_EXECUTABLE_PATH`: opcional; normalmente debe quedar vacío para usar el navegador administrado por Puppeteer.
 - `AI_PROVIDER`, `GROQ_API_KEY` y `GROQ_MODEL`: proveedor, clave global opcional y modelo.
 - `APP_ENCRYPTION_KEY`: secreto obligatorio para cifrar claves configuradas por asistente.

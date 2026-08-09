@@ -14,17 +14,13 @@ describe('configuración de entorno', () => {
     expect(environment.developmentMode).toBe(false);
   });
 
-  it('convierte y valida límites configurables', () => {
+  it('convierte y valida opciones de ejecución', () => {
     const environment = loadEnvironment({
       ...valid,
       PANEL_PORT: '4100',
-      USER_RATE_LIMIT: '7',
-      RATE_WINDOW_SECONDS: '30',
       DEVELOPMENT_MODE: 'true',
     });
     expect(environment.panelPort).toBe(4100);
-    expect(environment.userRateLimit).toBe(7);
-    expect(environment.rateWindowMs).toBe(30_000);
     expect(environment.developmentMode).toBe(true);
   });
 

@@ -1,4 +1,5 @@
 import { confirmAction, showToast } from './ui-feedback.js';
+import { setStatusSwitchState } from './status-switch.js';
 
 const state = {
   csrfToken: null,
@@ -652,11 +653,6 @@ async function loadSettings() {
   form.elements.fallback_response.value = settings.fallback_response || '';
   form.elements.professional_warning.value = settings.professional_warning || '';
   form.elements.log_level.value = settings.log_level || 'info';
-  form.elements.user_rate_limit.value = settings.user_rate_limit ?? 3;
-  form.elements.group_rate_limit.value = settings.group_rate_limit ?? 10;
-  form.elements.rate_window_seconds.value = settings.rate_window_seconds ?? 60;
-  form.elements.user_cooldown_seconds.value = settings.user_cooldown_seconds ?? 5;
-  form.elements.repeat_window_seconds.value = settings.repeat_window_seconds ?? 120;
   form.elements.require_authorized_admin_in_group.checked =
     settings.require_authorized_admin_in_group !== false;
   form.elements.group_archive_after_hours.value = settings.group_archive_after_hours ?? 24;
@@ -673,11 +669,6 @@ document.querySelector('#settings-form').addEventListener('submit', async (event
     fallback_response: form.elements.fallback_response.value,
     professional_warning: form.elements.professional_warning.value,
     log_level: form.elements.log_level.value,
-    user_rate_limit: Number(form.elements.user_rate_limit.value),
-    group_rate_limit: Number(form.elements.group_rate_limit.value),
-    rate_window_seconds: Number(form.elements.rate_window_seconds.value),
-    user_cooldown_seconds: Number(form.elements.user_cooldown_seconds.value),
-    repeat_window_seconds: Number(form.elements.repeat_window_seconds.value),
     require_authorized_admin_in_group: form.elements.require_authorized_admin_in_group.checked,
     group_archive_after_hours: Number(form.elements.group_archive_after_hours.value),
     group_delete_after_days: Number(form.elements.group_delete_after_days.value),
@@ -809,17 +800,33 @@ function isAutomationEnabled(name) {
 function updateAutomationToggleButton(key, enabled) {
   const button = document.querySelector(`[data-automation-toggle="${key}"]`);
   if (!button) return;
-  button.textContent = enabled ? 'Desactivar' : 'Activar';
-  button.classList.toggle('danger', enabled);
-  button.classList.toggle('secondary', !enabled);
-  button.setAttribute('aria-pressed', String(enabled));
+  setStatusSwitchState(button, {
+    checked: enabled,
+    ariaLabel: automationToggleLabel(key),
+  });
+}
+
+function automationToggleLabel(key) {
+  return (
+    {
+      welcome: 'Bienvenida',
+      greeting: 'Buenos días',
+      rules: 'Reglas diarias',
+      digest_daily: 'Resumen diario',
+      digest_weekly: 'Resumen semanal',
+      digest_monthly: 'Resumen mensual',
+    }[key] || 'automatización'
+  );
 }
 
 async function toggleAutomation(key, button) {
   const currentEnabled = isAutomationEnabled(`${key}_enabled`);
   const targetEnabled = !currentEnabled;
-  button.disabled = true;
-  button.textContent = targetEnabled ? 'Activando...' : 'Desactivando...';
+  setStatusSwitchState(button, {
+    checked: currentEnabled,
+    loading: true,
+    ariaLabel: automationToggleLabel(key),
+  });
 
   try {
     if (key === 'welcome' || key === 'greeting' || key === 'rules') {
@@ -910,7 +917,10 @@ async function toggleAutomation(key, button) {
       true,
     );
   } finally {
-    button.disabled = false;
+    setStatusSwitchState(button, {
+      checked: isAutomationEnabled(`${key}_enabled`),
+      ariaLabel: automationToggleLabel(key),
+    });
   }
 }
 
@@ -959,7 +969,13 @@ function renderAutomationGroupSelector() {
       });
       const name = document.createElement('span');
       name.textContent = group.name || 'Grupo sin nombre';
-      option.append(checkbox, name);
+      const identity = document.createElement('small');
+      identity.className = 'group-identity-hint';
+      identity.textContent = `ID ${String(group.key).slice(0, 6).toUpperCase()}`;
+      const copy = document.createElement('span');
+      copy.className = 'group-option-copy';
+      copy.append(name, identity);
+      option.append(checkbox, copy);
       options.append(option);
     });
     const selectedGroups = state.automationGroups.filter((group) =>

@@ -320,7 +320,7 @@ describe('persistencia SQLite', () => {
     }
   });
 
-  it('persiste bienvenida pública por asistente y configuración anonimizada por grupo', () => {
+  it('persiste la configuración pública de bienvenida por asistente', () => {
     const database = new AppDatabase(':memory:');
     database.migrate();
     try {
@@ -335,25 +335,8 @@ describe('persistencia SQLite', () => {
       });
       configuration.welcome.template = 'Hola {name} en {groupName}';
       database.saveAutomaticMessageConfiguration(configuration, 'neurobot');
-      database.saveWelcomeGroupSetting(
-        'grupo-anonimo',
-        {
-          enabled: true,
-          customTemplate: 'Bienvenida {mention}',
-          inheritAssistantTemplate: false,
-        },
-        'neurobot',
-      );
       expect(database.getAutomaticMessageConfiguration('neurobot').welcome.template).toBe(
         'Hola {name} en {groupName}',
-      );
-      expect(database.getWelcomeGroupSetting('grupo-anonimo', 'neurobot')).toEqual({
-        enabled: true,
-        customTemplate: 'Bienvenida {mention}',
-        inheritAssistantTemplate: false,
-      });
-      expect(JSON.stringify(database.listWelcomeGroupSettings('neurobot'))).not.toMatch(
-        /@(?:c\.us|lid)/u,
       );
     } finally {
       database.close();

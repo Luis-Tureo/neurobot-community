@@ -389,10 +389,6 @@ export type AISettings = {
   temperature: number;
   userHourlyLimit: number;
   userDailyLimit: number;
-  userCooldownSeconds: number;
-  interactionHourlyLimit: number;
-  interactionCooldownSeconds: number;
-  duplicateQueryWindowSeconds: number;
   groupHourlyLimit: number;
   groupDailyLimit: number;
   globalDailyLimit: number;
@@ -437,9 +433,6 @@ export type AIQueueSettings = {
   initialRetryDelaySeconds: number;
   maximumRetryDelaySeconds: number;
   waitNoticeSeconds: number;
-  userCooldownSeconds: number;
-  duplicateWindowSeconds: number;
-  singleFlightWindowSeconds: number;
   outboundMessageIntervalMs: number;
   suggestedRetrySeconds: number;
 };
@@ -563,7 +556,6 @@ export type AIReservation = {
 export type AILimitCode =
   | 'AI_LIMIT_USER_HOURLY_REACHED'
   | 'AI_LIMIT_USER_DAILY_REACHED'
-  | 'AI_LIMIT_USER_COOLDOWN'
   | 'AI_LIMIT_GROUP_HOURLY_REACHED'
   | 'AI_LIMIT_GROUP_DAILY_REACHED'
   | 'AI_LIMIT_DAILY_REACHED'

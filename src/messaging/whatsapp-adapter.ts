@@ -280,7 +280,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
           continue;
         }
         const rawName = Reflect.get(chat, 'name');
-        const name =
+        let name =
           typeof rawName === 'string' && rawName.trim() !== ''
             ? rawName.trim().slice(0, 200)
             : 'Grupo sin nombre';
@@ -288,21 +288,26 @@ export class WhatsAppWebAdapter implements MessagingClient {
         let rawAdministratorIds = readGroupAdministratorIds(chat);
         if (
           source === 'MINIMAL_CHAT_SNAPSHOT' &&
-          (rawParticipantIds === null || rawAdministratorIds === null)
+          (name === 'Grupo sin nombre' ||
+            rawParticipantIds === null ||
+            rawAdministratorIds === null)
         ) {
           try {
             const detailedChat = await client.getChatById(id);
+            const detailedName = readChatDisplayName(detailedChat);
+            if (detailedName !== null) name = detailedName;
             rawParticipantIds = readGroupParticipantIds(detailedChat);
             rawAdministratorIds = readGroupAdministratorIds(detailedChat);
           } catch (error) {
             this.logger.warn(
               {
-                ...serializeError(error, 'GROUP_PARTICIPANTS_FETCH_FAILED', false),
-                operation: 'getGroupParticipants',
+                ...serializeError(error, 'GROUP_DETAILS_FETCH_FAILED', false),
+                module: 'WhatsApp',
+                operation: 'getGroupDetails',
                 groupHash: this.hash(id),
                 source,
               },
-              'No fue posible completar los participantes de un grupo',
+              'No fue posible completar los detalles de un grupo',
             );
           }
         }
@@ -405,13 +410,25 @@ export class WhatsAppWebAdapter implements MessagingClient {
     try {
       return { chats: (await client.getChats()) as unknown[], source: 'GET_CHATS' };
     } catch (error) {
+      const compactError = serializeError(error, 'GROUP_LIST_FETCH_FAILED', false);
       this.logger.warn(
         {
+          errorCode: compactError.errorCode,
+          module: 'WhatsApp',
+          operation: 'getChats',
+          fallback: 'minimalChatSnapshot',
+          recovery: 'Se utilizará una lectura mínima compatible',
+        },
+        'No se pudo obtener la lista completa de chats',
+      );
+      this.logger.debug(
+        {
           ...serializeError(error, 'GROUP_LIST_FETCH_FAILED', true),
+          module: 'WhatsApp',
           operation: 'getChats',
           fallback: 'minimalChatSnapshot',
         },
-        'getChats falló; se intentará una lectura mínima compatible',
+        'Detalle técnico del fallo recuperable de getChats',
       );
       const page = client.pupPage;
       if (page === undefined) throw error;
@@ -482,7 +499,21 @@ export class WhatsAppWebAdapter implements MessagingClient {
                     (participantId): participantId is string => typeof participantId === 'string',
                   )
               : null;
-            const rawName = Reflect.get(chat, 'formattedTitle') ?? Reflect.get(chat, 'name');
+            const rawContact = Reflect.get(chat, 'contact');
+            const rawContactName =
+              typeof rawContact === 'object' && rawContact !== null
+                ? Reflect.get(rawContact, 'name') ?? Reflect.get(rawContact, 'pushname')
+                : null;
+            const rawGroupName =
+              typeof groupMetadata === 'object' && groupMetadata !== null
+                ? Reflect.get(groupMetadata, 'subject') ?? Reflect.get(groupMetadata, 'name')
+                : null;
+            const rawName =
+              Reflect.get(chat, 'formattedTitle') ??
+              Reflect.get(chat, 'name') ??
+              Reflect.get(chat, 'subject') ??
+              rawGroupName ??
+              rawContactName;
             return {
               id: serializedId,
               name: typeof rawName === 'string' ? rawName : null,
@@ -1665,6 +1696,32 @@ function normalizeMenuSelection(value: string): string {
 
 function normalizeParticipantId(value: string): string {
   return getSerializedId(value) ?? value.trim().toLowerCase();
+}
+
+function readChatDisplayName(chat: unknown): string | null {
+  if (typeof chat !== 'object' || chat === null) return null;
+  try {
+    const metadata = Reflect.get(chat, 'groupMetadata');
+    const contact = Reflect.get(chat, 'contact');
+    const candidates = [
+      Reflect.get(chat, 'formattedTitle'),
+      Reflect.get(chat, 'name'),
+      Reflect.get(chat, 'subject'),
+      typeof metadata === 'object' && metadata !== null
+        ? Reflect.get(metadata, 'subject') ?? Reflect.get(metadata, 'name')
+        : null,
+      typeof contact === 'object' && contact !== null
+        ? Reflect.get(contact, 'name') ?? Reflect.get(contact, 'pushname')
+        : null,
+    ];
+    const name = candidates.find(
+      (candidate): candidate is string =>
+        typeof candidate === 'string' && candidate.trim().length > 0,
+    );
+    return name === undefined ? null : name.trim().slice(0, 200);
+  } catch {
+    return null;
+  }
 }
 
 function normalizeGroupJoinSubtype(

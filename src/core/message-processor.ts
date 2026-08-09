@@ -1,7 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import type { Logger } from 'pino';
 import type { AssistantQueryResult, AssistantQueryService } from '../ai/assistant-query-service.js';
-import { hashNormalizedQuestion, normalizeQuestionForCache } from '../ai/answer-cache-service.js';
 import type { ConnectionSnapshot, IncomingMessage } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
@@ -20,7 +19,6 @@ import type { ModerationService } from '../moderation/moderation-service.js';
 
 export type MessageProcessorOptions = {
   maxMessageLength: number;
-  repeatWindowMs: number;
   developmentMode?: boolean;
 };
 
@@ -31,7 +29,6 @@ export type ProcessResult =
   | 'bot_disabled'
   | 'silenced'
   | 'rate_limited'
-  | 'repeated_response'
   | 'responded'
   | 'send_failed';
 
@@ -161,7 +158,6 @@ export class MessageProcessor {
       return 'silenced';
     }
 
-    const profile = this.database.getBotProfile(this.botId);
     const reportedIdentifiers = this.client.getOwnIdentifiers?.() ?? [];
     const fallbackIdentifier = this.client.getOwnIdentifier?.() ?? null;
     const botIdentifiers =
@@ -250,33 +246,6 @@ export class MessageProcessor {
     });
 
     if (bot.capabilities.communitySingleTurnMode) {
-      const interactionNow = new Date();
-      const interactionPeriod = localInteractionPeriod(interactionNow, profile.timezone);
-      const interaction = this.database.registerCommunityInteraction({
-        botId: this.botId,
-        profileId: profile.id,
-        userHash,
-        queryHash: hashNormalizedQuestion(normalizeQuestionForCache(invocation.cleanedText)),
-        localDate: interactionPeriod.date,
-        hourBucket: interactionPeriod.hour,
-        now: interactionNow,
-      });
-      if (!interaction.allowed) {
-        const duplicate = interaction.reason === 'DUPLICATE_QUERY';
-        const operation = duplicate ? 'DUPLICATE_QUERY_SUPPRESSED' : 'INTERACTION_RATE_LIMITED';
-        this.database.recordTechnicalEvent({
-          eventType: operation,
-          botId: this.botId,
-          groupHash,
-          userHash,
-          result: interaction.reason,
-        });
-        this.logger.info(
-          { operation, botId: this.botId, reason: interaction.reason, ...context },
-          'La interacción fue suprimida de forma segura',
-        );
-        return duplicate ? 'duplicate' : 'rate_limited';
-      }
       const answer = await this.queryService.answerQuestion(
         invocation.cleanedText,
         groupHash,
@@ -294,13 +263,12 @@ export class MessageProcessor {
       this.recordSelectedRoute(answer.code, invocation.method, context);
       if (answer.coalesced) {
         this.database.recordTechnicalEvent({
-          eventType: 'GROUP_DUPLICATE_RESPONSE_COALESCED',
+          eventType: 'AI_REQUEST_SHARED_IN_FLIGHT',
           botId: this.botId,
           groupHash,
           userHash,
           result: 'coalesced',
         });
-        return 'responded';
       }
       const sent = await this.safeSend(message.chatId, answer.text, context);
       if (sent) this.recordResponseSent(answer.code, invocation.method, context);
@@ -391,13 +359,12 @@ export class MessageProcessor {
     this.recordSelectedRoute(answer.code, invocation.method, context);
     if (answer.coalesced) {
       this.database.recordTechnicalEvent({
-        eventType: 'GROUP_DUPLICATE_RESPONSE_COALESCED',
+        eventType: 'AI_REQUEST_SHARED_IN_FLIGHT',
         botId: this.botId,
         groupHash,
         userHash,
         result: 'coalesced',
       });
-      return 'responded';
     }
     const sent = await this.safeSend(message.chatId, answer.text, context);
     if (sent) {
@@ -541,19 +508,4 @@ function invocationEventType(method: BotInvocationMethod): string {
     case 'phone_number':
       return 'PHONE_NUMBER_RECEIVED';
   }
-}
-
-function localInteractionPeriod(now: Date, timezone: string): { date: string; hour: string } {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(now);
-  const value = (type: Intl.DateTimeFormatPartTypes): string =>
-    parts.find((part) => part.type === type)?.value ?? '00';
-  const date = `${value('year')}-${value('month')}-${value('day')}`;
-  return { date, hour: `${date}T${value('hour')}` };
 }

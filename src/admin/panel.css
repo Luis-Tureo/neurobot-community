@@ -333,7 +333,7 @@
     grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
   }
 
-  [data-digest-frequency].is-disabled > :not(legend, .toggle) {
+  [data-digest-frequency].is-disabled > :not(legend, .status-switch) {
     opacity: 0.58;
   }
 
@@ -1709,20 +1709,6 @@ legend {
   min-height: 2.75rem;
 }
 
-button.ai-enable-action {
-  color: #ffffff;
-  background: #059669;
-  border-color: #059669;
-  box-shadow: 0 0.2rem 0.55rem rgba(5, 150, 105, 0.22);
-}
-
-button.ai-enable-action:not(:disabled):hover {
-  color: #ffffff;
-  background: #047857;
-  border-color: #047857;
-  box-shadow: 0 0.35rem 0.8rem rgba(4, 120, 87, 0.28);
-}
-
 .ai-provider-form h3,
 .ai-provider-history-card h3,
 .ai-provider-history-card .list {
@@ -2453,4 +2439,211 @@ body.login-mode {
   opacity: 0.4;
   pointer-events: none;
   transition: opacity 0.15s ease-in-out;
+}
+
+/* Control de estado compartido para automatizaciones, asistentes, IA y moderación. */
+button.status-switch {
+  position: relative;
+  display: grid;
+  width: 7.25rem;
+  min-width: 7.25rem;
+  min-height: 2.75rem;
+  place-items: center;
+  overflow: hidden;
+  padding: 0 0.35rem;
+  border: 1px solid #fda4af;
+  border-radius: 999px;
+  color: #881337;
+  background: #ffe4e6;
+  box-shadow: 0 0.2rem 0.55rem rgba(190, 18, 60, 0.12);
+  font-size: 0.75rem;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  isolation: isolate;
+  transition:
+    color 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+button.status-switch[data-status='active'] {
+  color: #064e3b;
+  background: #d1fae5;
+  border-color: #6ee7b7;
+  box-shadow: 0 0.2rem 0.55rem rgba(5, 150, 105, 0.14);
+}
+
+button.status-switch:not(:disabled):hover {
+  color: #881337;
+  background: #fecdd3;
+  border-color: #fb7185;
+  box-shadow: 0 0.35rem 0.75rem rgba(190, 18, 60, 0.18);
+}
+
+button.status-switch[data-status='active']:not(:disabled):hover {
+  color: #064e3b;
+  background: #a7f3d0;
+  border-color: #34d399;
+  box-shadow: 0 0.35rem 0.75rem rgba(5, 150, 105, 0.2);
+}
+
+.status-switch__knob {
+  position: absolute;
+  z-index: 2;
+  left: 0.35rem;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0.15rem 0.35rem rgba(15, 23, 42, 0.22);
+  transform: translateX(0);
+  transition: transform 190ms ease;
+}
+
+button.status-switch[data-status='active'] .status-switch__knob {
+  transform: translateX(4.8rem);
+}
+
+.status-switch__icon {
+  position: absolute;
+  z-index: 1;
+  right: 0.7rem;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+button.status-switch[data-status='active'] .status-switch__icon {
+  right: auto;
+  left: 0.75rem;
+}
+
+.status-switch__text {
+  z-index: 1;
+  padding-left: 1.4rem;
+  white-space: nowrap;
+}
+
+button.status-switch[data-status='active'] .status-switch__text {
+  padding-right: 1.4rem;
+  padding-left: 0;
+}
+
+button.status-switch:disabled {
+  opacity: 0.78;
+  cursor: not-allowed;
+}
+
+button.status-switch.is-loading {
+  cursor: progress;
+}
+
+button.status-switch.is-loading .status-switch__icon {
+  opacity: 0;
+}
+
+button.status-switch.is-loading .status-switch__knob {
+  border-color: rgba(255, 255, 255, 0.55);
+  border-top-color: currentColor;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: none;
+  animation: status-switch-spin 700ms linear infinite;
+}
+
+@keyframes status-switch-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+
+.section-heading > :first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.section-heading-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.section-heading-actions .collapse-button {
+  min-height: 2.75rem;
+}
+
+.digest-frequency-list fieldset {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.digest-frequency-list fieldset > legend {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.digest-frequency-list fieldset > .status-switch {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.digest-frequency-list fieldset > .digest-frequency-fields,
+.digest-frequency-list fieldset > p {
+  grid-column: 1 / -1;
+}
+
+.group-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.1rem;
+}
+
+.group-identity-hint {
+  color: #64748b;
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+}
+
+@media (max-width: 900px) {
+  .automatic-card > .section-heading {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .section-heading-actions {
+    width: auto;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+
+  .digest-frequency-list fieldset {
+    grid-template-columns: 1fr;
+  }
+
+  .digest-frequency-list fieldset > legend,
+  .digest-frequency-list fieldset > .status-switch,
+  .digest-frequency-list fieldset > .digest-frequency-fields,
+  .digest-frequency-list fieldset > p {
+    grid-column: 1;
+  }
+
+  .digest-frequency-list fieldset > .status-switch {
+    grid-row: auto;
+    justify-self: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button.status-switch,
+  .status-switch__knob {
+    animation: none !important;
+    transition: none !important;
+  }
 }
