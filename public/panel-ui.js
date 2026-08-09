@@ -209,40 +209,35 @@ function installDigestDesktopLayoutAdjustment() {
   style.textContent = `
     @media (min-width: 821px) {
       .status-action-row {
+        position: relative;
         display: flex;
         align-items: center;
         gap: 0.75rem;
         width: 100%;
+        padding-right: 8.25rem;
         overflow-x: visible;
       }
 
       .status-action-row > #restart-connection,
-      .status-action-row > #change-bot-number {
-        flex: 0 1 13.5rem;
-        width: 13.5rem;
-        min-width: 11rem;
-      }
-
-      #status-quick-actions.status-action-dynamic {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        flex: 1 1 auto;
-        min-width: 0;
-      }
-
+      .status-action-row > #change-bot-number,
       #status-quick-actions > button.danger {
         flex: 0 1 13.5rem;
         width: 13.5rem;
         min-width: 11rem;
       }
 
+      #status-quick-actions.status-action-dynamic {
+        display: contents;
+      }
+
       #status-quick-actions > button.status-switch {
-        order: 1;
-        flex: 0 0 7.25rem;
+        position: absolute;
+        right: 0;
+        top: 50%;
         width: 7.25rem;
         min-width: 7.25rem;
-        margin-left: auto;
+        margin: 0;
+        transform: translateY(-50%);
       }
     }
 
