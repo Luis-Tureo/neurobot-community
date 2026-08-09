@@ -19,6 +19,13 @@ $tsx = Join-Path $repositoryRoot 'node_modules\.bin\tsx.cmd'
 if (-not (Test-Path -LiteralPath $tsx)) {
     throw 'No se encontró tsx. Ejecuta npm install antes de iniciar el proyecto.'
 }
+
+Write-Host 'Compilando estilos Tailwind del panel...'
+& npm.cmd run styles:build
+if ($LASTEXITCODE -ne 0) {
+    throw 'No fue posible compilar los estilos Tailwind del panel.'
+}
+
 if ($Watch) {
     & $tsx watch src/index.ts
 } else {
