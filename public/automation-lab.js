@@ -3,6 +3,8 @@ let csrfToken = null;
 let polls = [];
 let authorizedGroups = [];
 let selectedGroupKeys = new Set();
+let botValidation = null;
+let botValidationSignature = '';
 
 const query = (selector, root = document) => root.querySelector(selector);
 const queryAll = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -33,6 +35,7 @@ async function api(path, options = {}) {
   if (!response.ok) {
     const error = new Error(payload.error || 'La prueba no pudo completarse.');
     error.code = payload.code;
+    error.validation = payload.validation;
     throw error;
   }
   return payload;
@@ -42,6 +45,7 @@ function createModule() {
   const existing = query('#section-automation-lab');
   if (existing) {
     query('#lab-refresh', existing)?.remove();
+    installSimulatorStyles();
     return;
   }
   const reference = query('#section-automatic-messages');
@@ -69,10 +73,221 @@ function createModule() {
         <div id="lab-group-options" class="lab-group-options"></div>
       </details>
     </fieldset>
+    <article class="card inset lab-bot-validation-card">
+      <div class="section-heading">
+        <div>
+          <h3>Validación del funcionamiento del bot</h3>
+          <p class="muted">Comprueba que el asistente, WhatsApp, la IA y los grupos estén disponibles antes de probar conversaciones.</p>
+        </div>
+        <button id="lab-validate-bot" class="secondary" type="button">Validar bot</button>
+      </div>
+      <p id="lab-validation-summary" class="lab-validation-summary" data-state="idle">Sin validar</p>
+      <ul id="lab-validation-checks" class="lab-validation-checks"></ul>
+    </article>
+    <article class="card inset lab-ai-simulator-card">
+      <div class="section-heading">
+        <div>
+          <h3>Simulador conversacional con IA</h3>
+          <p class="muted">Escribe como un integrante y revisa la respuesta que produciría el pipeline real del asistente.</p>
+        </div>
+        <button id="lab-clear-chat" class="secondary" type="button">Limpiar conversación</button>
+      </div>
+      <div id="lab-chat" class="lab-chat" aria-live="polite">
+        <p class="lab-chat-empty">Selecciona uno o más grupos, valida el bot y escribe una pregunta.</p>
+      </div>
+      <form id="lab-chat-form" class="lab-chat-form">
+        <label for="lab-chat-question">Pregunta de prueba</label>
+        <textarea id="lab-chat-question" rows="3" maxlength="3000" placeholder="Ejemplo: ¿De qué se trata este grupo?" required></textarea>
+        <div class="lab-chat-actions">
+          <p class="muted">No se envía a WhatsApp. Si el pipeline necesita consultar la IA real, el consumo de tokens sí se registra.</p>
+          <button id="lab-chat-send" type="submit">Enviar al bot</button>
+        </div>
+      </form>
+    </article>
     <ol id="lab-list" class="automation-test-list"></ol>`;
   reference.insertAdjacentElement('afterend', section);
+  installSimulatorStyles();
   bindModule();
+  bindSimulator();
   renderTests();
+}
+
+function installSimulatorStyles() {
+  if (query('#automation-lab-simulator-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'automation-lab-simulator-styles';
+  style.textContent = `
+    .lab-bot-validation-card,
+    .lab-ai-simulator-card {
+      display: grid;
+      gap: 1rem;
+      margin: 0 0 1rem;
+    }
+    .lab-validation-summary {
+      margin: 0;
+      border: 1px solid #cbd5e1;
+      border-radius: .75rem;
+      background: #f8fafc;
+      padding: .75rem .9rem;
+      color: #475569;
+      font-size: .88rem;
+      font-weight: 750;
+    }
+    .lab-validation-summary[data-state='healthy'] {
+      border-color: #6ee7b7;
+      background: #ecfdf5;
+      color: #065f46;
+    }
+    .lab-validation-summary[data-state='failed'] {
+      border-color: #fca5a5;
+      background: #fef2f2;
+      color: #991b1b;
+    }
+    .lab-validation-summary[data-state='pending'] {
+      border-color: #a5b4fc;
+      background: #eef2ff;
+      color: #3730a3;
+    }
+    .lab-validation-checks {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: .65rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .lab-validation-check {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: .65rem;
+      align-items: start;
+      border: 1px solid #e2e8f0;
+      border-radius: .75rem;
+      background: #fff;
+      padding: .75rem;
+    }
+    .lab-validation-check[data-ok='true'] {
+      border-color: #a7f3d0;
+    }
+    .lab-validation-check[data-ok='false'] {
+      border-color: #fecaca;
+    }
+    .lab-validation-icon {
+      display: grid;
+      place-items: center;
+      width: 1.65rem;
+      height: 1.65rem;
+      border-radius: 999px;
+      background: #fee2e2;
+      color: #991b1b;
+      font-weight: 900;
+    }
+    .lab-validation-check[data-ok='true'] .lab-validation-icon {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    .lab-validation-copy {
+      display: grid;
+      gap: .2rem;
+      min-width: 0;
+    }
+    .lab-validation-copy strong {
+      color: #0f172a;
+      font-size: .86rem;
+    }
+    .lab-validation-copy span {
+      color: #64748b;
+      font-size: .78rem;
+      line-height: 1.4;
+    }
+    .lab-chat {
+      display: grid;
+      gap: .75rem;
+      min-height: 12rem;
+      max-height: 30rem;
+      overflow-y: auto;
+      border: 1px solid #dbe4ee;
+      border-radius: .9rem;
+      background: #f8fafc;
+      padding: 1rem;
+    }
+    .lab-chat-empty {
+      align-self: center;
+      margin: 0;
+      color: #64748b;
+      text-align: center;
+      font-size: .88rem;
+    }
+    .lab-chat-message {
+      display: grid;
+      gap: .3rem;
+      max-width: min(78%, 46rem);
+      border-radius: .9rem;
+      padding: .8rem .9rem;
+      box-shadow: 0 .1rem .35rem rgba(15, 23, 42, .08);
+    }
+    .lab-chat-message[data-role='user'] {
+      justify-self: end;
+      background: #4f46e5;
+      color: #fff;
+    }
+    .lab-chat-message[data-role='assistant'] {
+      justify-self: start;
+      border: 1px solid #e2e8f0;
+      background: #fff;
+      color: #0f172a;
+    }
+    .lab-chat-message[data-role='error'] {
+      justify-self: start;
+      border: 1px solid #fecaca;
+      background: #fef2f2;
+      color: #991b1b;
+    }
+    .lab-chat-message p {
+      margin: 0;
+      white-space: pre-wrap;
+      line-height: 1.5;
+    }
+    .lab-chat-meta {
+      opacity: .8;
+      font-size: .72rem;
+      font-weight: 700;
+    }
+    .lab-chat-form {
+      gap: .75rem;
+    }
+    .lab-chat-form textarea {
+      min-height: 6rem;
+      resize: vertical;
+    }
+    .lab-chat-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .lab-chat-actions p {
+      margin: 0;
+      max-width: 52rem;
+      font-size: .78rem;
+    }
+    @media (max-width: 760px) {
+      .lab-validation-checks {
+        grid-template-columns: 1fr;
+      }
+      .lab-chat-message {
+        max-width: 92%;
+      }
+      .lab-chat-actions {
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .lab-chat-actions button {
+        width: 100%;
+      }
+    }
+  `;
+  document.head.append(style);
 }
 
 function activateModule() {
@@ -97,6 +312,21 @@ function selectedGroups() {
   return groupKeys;
 }
 
+function selectionSignature(groupKeys = [...selectedGroupKeys]) {
+  return `${botId || ''}:${[...groupKeys].sort().join(',')}`;
+}
+
+function invalidateBotValidation() {
+  botValidation = null;
+  botValidationSignature = '';
+  const summary = query('#lab-validation-summary');
+  if (summary) {
+    summary.dataset.state = 'idle';
+    summary.textContent = 'Pendiente de validar para la selección actual.';
+  }
+  query('#lab-validation-checks')?.replaceChildren();
+}
+
 function renderGroupSelector() {
   const target = query('#lab-group-options');
   const summary = query('#lab-group-selection');
@@ -110,6 +340,7 @@ function renderGroupSelector() {
     message.textContent = 'No hay grupos autorizados disponibles.';
     target.append(message);
     summary.textContent = 'Sin grupos disponibles';
+    invalidateBotValidation();
     return;
   }
   authorizedGroups.forEach((group) => {
@@ -123,6 +354,7 @@ function renderGroupSelector() {
       if (checkbox.checked) selectedGroupKeys.add(group.key);
       else selectedGroupKeys.delete(group.key);
       updateGroupSelectionSummary();
+      invalidateBotValidation();
     });
     const name = document.createElement('span');
     name.textContent = group.name || 'Grupo sin nombre';
@@ -299,6 +531,156 @@ async function sendDigestTest(period, groupKey) {
   return result;
 }
 
+function renderBotValidation(validation) {
+  const summary = query('#lab-validation-summary');
+  const list = query('#lab-validation-checks');
+  if (!summary || !list) return;
+  summary.dataset.state = validation.healthy ? 'healthy' : 'failed';
+  summary.textContent = validation.healthy
+    ? 'Bot operativo: todas las validaciones requeridas fueron superadas.'
+    : 'El bot necesita atención antes de usar el simulador. Revisa los puntos marcados abajo.';
+  list.replaceChildren();
+  (validation.checks || []).forEach((check) => {
+    const item = document.createElement('li');
+    item.className = 'lab-validation-check';
+    item.dataset.ok = String(check.ok);
+    const icon = document.createElement('span');
+    icon.className = 'lab-validation-icon';
+    icon.textContent = check.ok ? '✓' : '×';
+    const copy = document.createElement('span');
+    copy.className = 'lab-validation-copy';
+    const label = document.createElement('strong');
+    label.textContent = check.label;
+    const message = document.createElement('span');
+    message.textContent = check.message;
+    copy.append(label, message);
+    item.append(icon, copy);
+    list.append(item);
+  });
+}
+
+async function validateSelectedBot(testProvider = true) {
+  if (!botId) throw new Error('No hay un asistente seleccionado.');
+  const groupKeys = selectedGroups();
+  const summary = query('#lab-validation-summary');
+  const button = query('#lab-validate-bot');
+  if (summary) {
+    summary.dataset.state = 'pending';
+    summary.textContent = testProvider
+      ? 'Validando asistente, WhatsApp, grupos y conexión con IA…'
+      : 'Verificando estado del bot antes de responder…';
+  }
+  if (button) button.disabled = true;
+  try {
+    const validation = await api('/api/automation-lab/validate', {
+      method: 'POST',
+      body: JSON.stringify({ botId, groupKeys, testProvider }),
+    });
+    botValidation = validation;
+    botValidationSignature = selectionSignature(groupKeys);
+    renderBotValidation(validation);
+    return validation;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function ensureConversationValidation(groupKeys) {
+  const signature = selectionSignature(groupKeys);
+  if (botValidation?.healthy && botValidationSignature === signature) return botValidation;
+  const validation = await validateSelectedBot(true);
+  if (!validation.healthy) {
+    throw new Error('El bot no está completamente operativo. Corrige el diagnóstico antes de probar la conversación.');
+  }
+  return validation;
+}
+
+function appendChatMessage(role, text, meta = '') {
+  const chat = query('#lab-chat');
+  if (!chat) return;
+  query('.lab-chat-empty', chat)?.remove();
+  const message = document.createElement('article');
+  message.className = 'lab-chat-message';
+  message.dataset.role = role;
+  if (meta) {
+    const metadata = document.createElement('span');
+    metadata.className = 'lab-chat-meta';
+    metadata.textContent = meta;
+    message.append(metadata);
+  }
+  const body = document.createElement('p');
+  body.textContent = text;
+  message.append(body);
+  chat.append(message);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function clearSimulatorConversation() {
+  const chat = query('#lab-chat');
+  if (!chat) return;
+  chat.replaceChildren();
+  const empty = document.createElement('p');
+  empty.className = 'lab-chat-empty';
+  empty.textContent = 'Conversación limpiada. Puedes realizar una nueva prueba.';
+  chat.append(empty);
+}
+
+async function sendSimulatorQuestion(event) {
+  event.preventDefault();
+  const input = query('#lab-chat-question');
+  const button = query('#lab-chat-send');
+  if (!input || !button || !botId) return;
+  const question = input.value.trim();
+  if (!question) return;
+
+  try {
+    const groupKeys = selectedGroups();
+    button.disabled = true;
+    await ensureConversationValidation(groupKeys);
+    appendChatMessage('user', question, 'Pregunta de prueba');
+    input.value = '';
+    const result = await api('/api/automation-lab/ai-simulator', {
+      method: 'POST',
+      body: JSON.stringify({
+        botId,
+        groupKeys,
+        question,
+        confirmed: true,
+      }),
+    });
+    (result.responses || []).forEach((response) => {
+      const metadata = `${response.groupName} · ${response.code} · ${response.durationMs} ms`;
+      appendChatMessage('assistant', response.text, metadata);
+    });
+    if ((result.responses || []).length === 0) {
+      appendChatMessage('error', 'El simulador no devolvió ninguna respuesta.', 'Simulador');
+    }
+  } catch (error) {
+    if (error.validation) {
+      botValidation = error.validation;
+      botValidationSignature = selectionSignature();
+      renderBotValidation(error.validation);
+    }
+    appendChatMessage('error', error.message || 'La prueba conversacional no pudo completarse.', 'Error de prueba');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function bindSimulator() {
+  query('#lab-validate-bot')?.addEventListener('click', () => {
+    void validateSelectedBot(true).catch((error) => showNotice(error.message, true));
+  });
+  query('#lab-clear-chat')?.addEventListener('click', clearSimulatorConversation);
+  query('#lab-chat-form')?.addEventListener('submit', (event) => void sendSimulatorQuestion(event));
+  query('#lab-chat-question')?.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      query('#lab-chat-form')?.requestSubmit();
+    }
+  });
+}
+
 async function loadModule() {
   if (!botId) return;
   try {
@@ -313,6 +695,7 @@ async function loadModule() {
     polls = (pollData.templates || []).filter((item) => item.enabled);
     renderGroupSelector();
     renderTests();
+    invalidateBotValidation();
   } catch (error) {
     showNotice(error.message, true);
   }
@@ -333,7 +716,10 @@ function bindModule() {
 
 window.addEventListener('bot-services-load', (event) => {
   botId = event.detail.botId;
+  botValidation = null;
+  botValidationSignature = '';
   createModule();
+  bindSimulator();
   const visible = new Set(event.detail.visibleModules || []).has('automatic-messages');
   queryAll('[data-section="automation-lab"], option[value="automation-lab"]').forEach((item) => {
     item.hidden = !visible;
@@ -344,3 +730,4 @@ window.addEventListener('bot-services-load', (event) => {
 });
 
 createModule();
+bindSimulator();
