@@ -36,11 +36,24 @@ function simplifyAIUsageHeader() {
   dashboard.querySelectorAll(':scope > p').forEach((item) => item.remove());
 }
 
+function hideTokensTodayStatusCard() {
+  document.querySelectorAll('#status-cards > .status-card').forEach((card) => {
+    const label = card.querySelector(':scope > span')?.textContent?.trim();
+    if (label !== 'Tokens hoy') return;
+    card.classList.add('hidden');
+    card.setAttribute('aria-hidden', 'true');
+  });
+}
+
 function initializeStateMetricsUI() {
   removeLegacyAIStatistics();
   simplifyAIUsageHeader();
+  hideTokensTodayStatusCard();
 
-  const observer = new window.MutationObserver(() => simplifyAIUsageHeader());
+  const observer = new window.MutationObserver(() => {
+    simplifyAIUsageHeader();
+    hideTokensTodayStatusCard();
+  });
   observer.observe(document.body, { childList: true, subtree: true });
 }
 

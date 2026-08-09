@@ -16,9 +16,17 @@ describe('estado y estadísticas', () => {
   it('deja únicamente el nombre del modelo encima de las métricas nuevas', () => {
     expect(metricsUi).toContain('function simplifyAIUsageHeader()');
     expect(metricsUi).toContain("rawHeading.split('·').at(-1)");
-    expect(metricsUi).toContain("providerSummary.replaceChildren(model)");
+    expect(metricsUi).toContain('providerSummary.replaceChildren(model)');
     expect(metricsUi).toContain("dashboard.querySelectorAll(':scope > p').forEach((item) => item.remove())");
     expect(metricsUi).toContain('descriptiveHeader?.remove()');
     expect(metricsUi).toContain('new window.MutationObserver');
+  });
+
+  it('oculta la tarjeta duplicada Tokens hoy del estado general', () => {
+    expect(metricsUi).toContain('function hideTokensTodayStatusCard()');
+    expect(metricsUi).toContain("document.querySelectorAll('#status-cards > .status-card')");
+    expect(metricsUi).toContain("label !== 'Tokens hoy'");
+    expect(metricsUi).toContain("card.classList.add('hidden')");
+    expect(metricsUi).toContain("card.setAttribute('aria-hidden', 'true')");
   });
 });
