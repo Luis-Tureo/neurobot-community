@@ -6,11 +6,20 @@ const optionalTrimmedString = z.preprocess(
   z.string().trim().optional(),
 );
 
+const optionalPort = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.coerce.number().int().min(1).max(65_535).optional(),
+);
+
 const environmentSchema = z.object({
-  PANEL_HOST: z.string().trim().default('127.0.0.1'),
-  PANEL_PORT: z.coerce.number().int().min(1024).max(65_535).default(3000),
-  DATABASE_PATH: z.string().trim().default('./data/asistente.db'),
-  WHATSAPP_SESSION_PATH: z.string().trim().default('./data/whatsapp-session'),
+  PANEL_HOST: optionalTrimmedString,
+  PANEL_PORT: optionalPort,
+  PORT: optionalPort,
+  DATA_ROOT: optionalTrimmedString,
+  WEBSITE_SITE_NAME: optionalTrimmedString,
+  HOME: optionalTrimmedString,
+  DATABASE_PATH: optionalTrimmedString,
+  WHATSAPP_SESSION_PATH: optionalTrimmedString,
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   ANONYMIZATION_SECRET: z.string().min(32),
   PANEL_SESSION_SECRET: z.string().min(32),
@@ -35,6 +44,7 @@ const environmentSchema = z.object({
 export type Environment = {
   panelHost: string;
   panelPort: number;
+  dataRoot: string;
   databasePath: string;
   sessionPath: string;
   logLevel: string;
@@ -65,11 +75,26 @@ export function loadEnvironment(
   }
 
   const value = parsed.data;
+  const isAzureAppService = value.WEBSITE_SITE_NAME !== undefined;
+  const dataRoot =
+    value.DATA_ROOT === undefined
+      ? isAzureAppService
+        ? resolve(value.HOME ?? '/home', 'neurobot')
+        : resolve(baseDirectory)
+      : resolve(baseDirectory, value.DATA_ROOT);
+
   return {
-    panelHost: value.PANEL_HOST,
-    panelPort: value.PANEL_PORT,
-    databasePath: resolve(baseDirectory, value.DATABASE_PATH),
-    sessionPath: resolve(baseDirectory, value.WHATSAPP_SESSION_PATH),
+    panelHost: value.PANEL_HOST ?? (isAzureAppService ? '0.0.0.0' : '127.0.0.1'),
+    panelPort: value.PORT ?? value.PANEL_PORT ?? 3000,
+    dataRoot,
+    databasePath:
+      value.DATABASE_PATH === undefined
+        ? resolve(dataRoot, 'data', 'asistente.db')
+        : resolve(baseDirectory, value.DATABASE_PATH),
+    sessionPath:
+      value.WHATSAPP_SESSION_PATH === undefined
+        ? resolve(dataRoot, 'data', 'whatsapp-session')
+        : resolve(baseDirectory, value.WHATSAPP_SESSION_PATH),
     logLevel: value.LOG_LEVEL,
     anonymizationSecret: value.ANONYMIZATION_SECRET,
     panelSessionSecret: value.PANEL_SESSION_SECRET,
