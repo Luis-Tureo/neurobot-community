@@ -1,0 +1,66 @@
+name: Deploy Neurobot to Azure
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AZURE_CLIENT_ID: 08de1185-b271-4533-9583-b43599f9d283
+  AZURE_TENANT_ID: 3bb118c0-bb1e-4418-87e5-d176550897cb
+  AZURE_SUBSCRIPTION_ID: c8f1120a-a5f2-4c59-be76-e3118c5f03ce
+  AZURE_WEBAPP_NAME: neurobot-community
+  NODE_VERSION: 24.x
+  PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.cache/puppeteer
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+      - name: Remove development dependencies
+        run: npm prune --omit=dev
+
+      - name: Prepare deployment package
+        shell: bash
+        run: |
+          rm -rf deploy
+          mkdir -p deploy
+          cp -R dist public node_modules package.json package-lock.json deploy/
+          if [ -d .cache ]; then
+            cp -R .cache deploy/.cache
+          fi
+
+      - name: Login to Azure with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          slot-name: Production
+          package: ./deploy
