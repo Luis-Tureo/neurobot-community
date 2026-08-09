@@ -134,7 +134,7 @@ function installPollConfigurationEnabledGuard() {
       /\/api\/polls\/configuration(?:\?|$)/u.test(rawUrl) &&
       typeof init.body === 'string'
     ) {
-      const url = new URL(rawUrl, window.location.origin);
+      const url = new window.URL(rawUrl, window.location.origin);
       const botId = url.searchParams.get('botId') || selectedBotIdFromHash();
       if (botId && weeklyPollEnabledByBot.has(botId)) {
         try {
@@ -454,7 +454,7 @@ function configureAssistantQuickActionOrder() {
     container.append(deleteButton, statusSwitch);
   };
 
-  const observer = new MutationObserver(applyOrder);
+  const observer = new window.MutationObserver(applyOrder);
   observer.observe(container, { childList: true });
   container.dataset.actionOrderReady = 'true';
   applyOrder();
