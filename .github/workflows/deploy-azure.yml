@@ -12,7 +12,7 @@ on:
         default: false
         type: boolean
 
-# Evita que varios pushes consecutivos publiquen la etiqueta latest fuera de orden.
+# Evita que varios pushes consecutivos publiquen o desplieguen fuera de orden.
 concurrency:
   group: neurobot-container-main
   cancel-in-progress: true
@@ -76,7 +76,7 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Login to Azure with OIDC
-        if: github.event_name == 'workflow_dispatch' && inputs.deploy_container
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_container)
         uses: azure/login@v2
         with:
           client-id: ${{ env.AZURE_CLIENT_ID }}
@@ -84,10 +84,16 @@ jobs:
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: Configure persistent Azure container runtime
-        if: github.event_name == 'workflow_dispatch' && inputs.deploy_container
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_container)
         shell: bash
         run: |
           set -euo pipefail
+
+          az webapp update \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            --https-only true \
+            >/dev/null
 
           az webapp config appsettings set \
             --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -123,7 +129,7 @@ jobs:
             --name "$AZURE_WEBAPP_NAME"
 
       - name: Verify Azure health endpoint
-        if: github.event_name == 'workflow_dispatch' && inputs.deploy_container
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_container)
         shell: bash
         run: |
           set -euo pipefail
@@ -148,5 +154,5 @@ jobs:
           exit 1
 
       - name: Show deployed image
-        if: github.event_name == 'workflow_dispatch' && inputs.deploy_container
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_container)
         run: echo "Azure configurado con ${IMAGE_NAME}:${GITHUB_SHA}"
