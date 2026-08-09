@@ -15,7 +15,7 @@ env:
   AZURE_TENANT_ID: 3bb118c0-bb1e-4418-87e5-d176550897cb
   AZURE_SUBSCRIPTION_ID: c8f1120a-a5f2-4c59-be76-e3118c5f03ce
   AZURE_WEBAPP_NAME: neurobot-community
-  NODE_VERSION: 24.x
+  NODE_VERSION: 24.19.0
   PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.cache/puppeteer
 
 jobs:
@@ -31,6 +31,12 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+
+      - name: Verify runtime
+        run: |
+          node --version
+          npm --version
+          npm run runtime:check
 
       - name: Install dependencies
         run: npm ci
