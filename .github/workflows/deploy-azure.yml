@@ -96,6 +96,46 @@ jobs:
         run: |
           set -euo pipefail
 
+          # LocalAuth guarda el perfil Chromium en /home. Un restart directo puede
+          # solapar por unos segundos el contenedor anterior y el nuevo usando el
+          # mismo perfil. Detener primero garantiza un único propietario del perfil.
+          APP_STOPPED=false
+          restore_app_on_failure() {
+            if [ "$APP_STOPPED" = "true" ]; then
+              echo "El despliegue falló con la Web App detenida; intentando volver a iniciarla."
+              az webapp start \
+                --resource-group "$AZURE_RESOURCE_GROUP" \
+                --name "$AZURE_WEBAPP_NAME" \
+                >/dev/null || true
+            fi
+          }
+          trap restore_app_on_failure EXIT
+
+          echo "Deteniendo Azure App Service antes de reemplazar la imagen..."
+          az webapp stop \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            >/dev/null
+          APP_STOPPED=true
+
+          for attempt in $(seq 1 18); do
+            STATE=$(az webapp show \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$AZURE_WEBAPP_NAME" \
+              --query state \
+              --output tsv)
+            if [ "$STATE" = "Stopped" ]; then
+              echo "Azure App Service detenido correctamente."
+              break
+            fi
+            if [ "$attempt" -eq 18 ]; then
+              echo "ERROR: Azure no confirmó el estado Stopped dentro del tiempo esperado." >&2
+              exit 1
+            fi
+            echo "Esperando detención completa (${attempt}/18)..."
+            sleep 5
+          done
+
           az webapp update \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_WEBAPP_NAME" \
@@ -133,9 +173,13 @@ jobs:
             --always-on true \
             >/dev/null
 
-          az webapp restart \
+          echo "Iniciando Azure App Service con la nueva imagen..."
+          az webapp start \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$AZURE_WEBAPP_NAME"
+            --name "$AZURE_WEBAPP_NAME" \
+            >/dev/null
+          APP_STOPPED=false
+          trap - EXIT
 
       - name: Verify Azure health endpoint
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_container)
