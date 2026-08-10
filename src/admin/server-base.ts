@@ -3674,6 +3674,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           enableRealMention: true,
           multipleJoinMode: 'GROUPED' as const,
           sendDelaySeconds: WELCOME_BATCH_WINDOW_SECONDS,
+          scheduleTimes: DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.welcome.scheduleTimes,
           template: assertPlainText(configurationInput.welcome.template),
         },
         dailyGreeting: {
