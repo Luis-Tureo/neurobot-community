@@ -146,16 +146,24 @@ describe('bienvenida agrupada por horarios', () => {
 
   it('mientras está desactivado no acumula miembros y una activación posterior parte desde ese momento', async () => {
     let current = new Date('2026-01-05T15:00:00Z');
-    const { database, client, service, enhancer } = createSubject(() => current);
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    const disabled = database.getAutomaticMessageConfiguration();
+    disabled.welcome.enabled = false;
+    database.saveAutomaticMessageConfiguration(disabled);
+    const client = new SimulatedMessagingClient();
+    client.groups = [
+      {
+        id: GROUP_ID,
+        name: 'NEURODIVERGENTES ⚡🌎',
+        botIsMember: true,
+        participantIds: ['56911111111@c.us'],
+      },
+    ];
+    const { service, enhancer } = createSubject(() => current, database, client);
     try {
-      client.groups = [
-        {
-          id: GROUP_ID,
-          name: 'NEURODIVERGENTES ⚡🌎',
-          botIsMember: true,
-          participantIds: ['56911111111@c.us'],
-        },
-      ];
+      expect(database.getAutomaticMessageConfiguration().welcome.enabled).toBe(false);
+      expect(enhancer.status().activation).toBe('inactive');
       await service.handleGroupJoin({
         groupId: GROUP_ID,
         participantIds: ['56911111111@c.us'],
@@ -171,24 +179,16 @@ describe('bienvenida agrupada por horarios', () => {
         activation: 'active',
         activeSince: current.toISOString(),
       });
-      if (client.sentMessages.length !== 0) {
-        throw new Error(
-          JSON.stringify(
-            {
-              messages: client.sentMessages,
-              events: database.getTechnicalEvents().map((event) => ({
-                type: event.event_type,
-                result: event.result,
-                source: event.source,
-                count: event.item_count,
-                error: event.error_code,
-              })),
-            },
-            null,
-            2,
-          ),
-        );
-      }
+      expect(client.sentMessages).toHaveLength(0);
+
+      await service.handleGroupJoin({
+        groupId: GROUP_ID,
+        participantIds: ['56911111111@c.us'],
+        eventId: 'legacy-reconciliation-after-enable',
+        source: 'reconciliation',
+      });
+      await service.runDueTasks(current);
+      expect(client.sentMessages).toHaveLength(0);
 
       await service.handleGroupJoin({
         groupId: GROUP_ID,

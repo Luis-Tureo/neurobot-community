@@ -126,8 +126,9 @@ export class ScheduledWelcomeEnhancer {
   private handleConfigurationTransition(): void {
     const enabled = this.configuration().welcome.enabled;
     if (enabled && !this.lastWelcomeEnabled) {
-      if (this.store.activationStatus() === 'inactive') this.beginActivation();
-      else void this.ensureActivation();
+      // Una activación explícita siempre comienza una época nueva: limpia cualquier
+      // cola/estado anterior y fija activeSince exactamente en el momento del toggle.
+      this.beginActivation(true);
     } else if (!enabled && this.lastWelcomeEnabled) {
       this.store.deactivate();
       this.record('WELCOME_SCHEDULE_DEACTIVATED', 'deactivated');
@@ -137,8 +138,8 @@ export class ScheduledWelcomeEnhancer {
     this.lastWelcomeEnabled = enabled;
   }
 
-  private beginActivation(): void {
-    if (this.store.activationStatus() === 'initializing') {
+  private beginActivation(forceReset = false): void {
+    if (!forceReset && this.store.activationStatus() === 'initializing') {
       void this.ensureActivation();
       return;
     }
@@ -228,7 +229,12 @@ export class ScheduledWelcomeEnhancer {
 
   private async handleGroupJoin(event: GroupJoinEvent): Promise<void> {
     const configuration = this.configuration();
-    if (!configuration.welcome.enabled) return;
+    if (!configuration.welcome.enabled) {
+      // Mientras la función esté desactivada no se conserva ningún ingreso ni
+      // línea base de bienvenida. La próxima activación partirá desde cero.
+      if (this.store.activationStatus() !== 'inactive') this.store.deactivate();
+      return;
+    }
     const groupId = normalizeWhatsAppGroupId(event.groupId);
     if (groupId === null || !this.selectedGroupIds().includes(groupId)) return;
     if (!this.options.database.canBotSendToGroup(this.options.botId, groupId)) return;
