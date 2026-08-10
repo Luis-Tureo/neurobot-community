@@ -79,8 +79,10 @@ export class ScheduledWelcomeEnhancer {
       await this.runScheduledWelcome(now ?? this.now());
     };
     service.reconfigure = () => {
-      originalReconfigure();
+      // La transición de bienvenida debe fijar activeSince y abrir su línea base
+      // antes de que el servicio legado reinicie su reconciliación.
       this.handleConfigurationTransition();
+      originalReconfigure();
     };
 
     if (!this.lastWelcomeEnabled) {
@@ -124,7 +126,8 @@ export class ScheduledWelcomeEnhancer {
   private handleConfigurationTransition(): void {
     const enabled = this.configuration().welcome.enabled;
     if (enabled && !this.lastWelcomeEnabled) {
-      this.beginActivation();
+      if (this.store.activationStatus() === 'inactive') this.beginActivation();
+      else void this.ensureActivation();
     } else if (!enabled && this.lastWelcomeEnabled) {
       this.store.deactivate();
       this.record('WELCOME_SCHEDULE_DEACTIVATED', 'deactivated');
@@ -135,6 +138,10 @@ export class ScheduledWelcomeEnhancer {
   }
 
   private beginActivation(): void {
+    if (this.store.activationStatus() === 'initializing') {
+      void this.ensureActivation();
+      return;
+    }
     const activeSince = this.now();
     this.store.beginActivation(activeSince);
     this.record('WELCOME_SCHEDULE_ACTIVATION_STARTED', 'initializing');
@@ -144,6 +151,10 @@ export class ScheduledWelcomeEnhancer {
   private async ensureActivation(): Promise<void> {
     if (!this.configuration().welcome.enabled) return;
     if (this.store.activationStatus() === 'active') return;
+    if (this.store.activationStatus() === 'inactive') {
+      this.store.beginActivation(this.now());
+      this.record('WELCOME_SCHEDULE_ACTIVATION_STARTED', 'initializing');
+    }
     if (this.activationPromise !== null) return this.activationPromise;
     if (!this.options.client.isReady()) return;
 
