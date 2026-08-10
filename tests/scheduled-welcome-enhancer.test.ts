@@ -171,7 +171,24 @@ describe('bienvenida agrupada por horarios', () => {
         activation: 'active',
         activeSince: current.toISOString(),
       });
-      expect(client.sentMessages).toHaveLength(0);
+      if (client.sentMessages.length !== 0) {
+        throw new Error(
+          JSON.stringify(
+            {
+              messages: client.sentMessages,
+              events: database.getTechnicalEvents().map((event) => ({
+                type: event.event_type,
+                result: event.result,
+                source: event.source,
+                count: event.item_count,
+                error: event.error_code,
+              })),
+            },
+            null,
+            2,
+          ),
+        );
+      }
 
       await service.handleGroupJoin({
         groupId: GROUP_ID,
