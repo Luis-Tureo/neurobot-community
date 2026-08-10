@@ -193,6 +193,13 @@ export class ScheduledWelcomeEnhancer {
       this.store.completeActivation(snapshots);
       const activeSince = this.store.activeSince();
       for (const groupId of selectedGroupIds) {
+        // Cualquier pendiente cuya identidad forme parte de la foto tomada al activar
+        // pertenece a integrantes que ya estaban presentes y jamás debe saludarse.
+        const baselinePending = this.store
+          .pending(groupId)
+          .filter((entry) => this.store.hasAnyMember(groupId, entry.identityKeys))
+          .map((entry) => entry.participantHash);
+        this.store.removePending(groupId, baselinePending);
         for (const entry of this.store.early(groupId)) {
           const joinedAt = new Date(entry.joinedAt);
           if (activeSince !== null && joinedAt.getTime() < activeSince.getTime()) continue;
