@@ -20,15 +20,33 @@ jobs:
           fetch-depth: 0
 
       - name: Apply implementation
+        id: apply
+        shell: bash
         run: |
-          python3 scripts/apply-welcome-scheduled-groups.py
-          rm -f docs/.implementation-*
+          set +e
+          python3 scripts/apply-welcome-scheduled-groups.py > /tmp/welcome-apply.log 2>&1
+          STATUS=$?
+          cat /tmp/welcome-apply.log
+          if [ "$STATUS" -ne 0 ]; then
+            mkdir -p docs
+            cp /tmp/welcome-apply.log docs/implementation-error.log
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          else
+            rm -f docs/.implementation-* docs/implementation-error.log
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
 
       - name: Commit generated implementation
+        shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Implementar bienvenidas agrupadas por horario"
+          if [ "${{ steps.apply.outputs.failed }}" = "true" ]; then
+            git commit -m "Implementar bienvenidas agrupadas por horario - error del generador"
+          else
+            git commit -m "Implementar bienvenidas agrupadas por horario"
+          fi
           git push origin HEAD:main
