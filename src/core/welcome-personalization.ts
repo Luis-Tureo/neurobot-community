@@ -26,6 +26,9 @@ type ContactLike = {
   id?: { _serialized?: unknown } | string | null;
   number?: unknown;
   pushname?: unknown;
+  verifiedName?: unknown;
+  name?: unknown;
+  shortName?: unknown;
   isMe?: unknown;
 };
 
@@ -76,7 +79,11 @@ export function sanitizeWhatsAppGroupName(value: unknown): string | null {
 }
 
 export function resolveWelcomeDisplayName(contact: ContactLike): string | null {
-  return sanitizeWhatsAppDisplayName(contact.pushname);
+  for (const candidate of [contact.pushname, contact.verifiedName, contact.name, contact.shortName]) {
+    const displayName = sanitizeWhatsAppDisplayName(candidate);
+    if (displayName !== null) return displayName;
+  }
+  return null;
 }
 
 export function resolvePublicWhatsAppName(contact: ContactLike): WelcomeParticipant | null {
@@ -116,6 +123,9 @@ export function renderWelcomeTemplate(
   const allowed = new Set<string>(WELCOME_TEMPLATE_VARIABLES);
   const rendered = template.normalize('NFKC').replace(/\{([^{}]+)\}/gu, (match, key: string) => {
     if (!allowed.has(key)) return match;
+    if ((key === 'usuario' || key === 'usuarios') && hasVisibleWelcomeMention(values.mention)) {
+      return values.mention ?? '';
+    }
     return values[key as keyof typeof values] ?? '';
   });
   const recipientLabel = values.usuarios ?? values.usuario ?? values.name;
@@ -141,6 +151,11 @@ function joinSpanishList(names: string[]): string {
 
 function isUnknownWelcomeName(value: string): boolean {
   return UNKNOWN_WELCOME_NAME_PATTERN.test(value.replace(/^@/u, '').normalize('NFKC').trim());
+}
+
+function hasVisibleWelcomeMention(value: string | undefined): boolean {
+  if (value === undefined || value.trim() === '' || isUnknownWelcomeName(value)) return false;
+  return /(?:^|[\s,])@(?=[\p{L}\p{N}])/u.test(value);
 }
 
 function representsMultipleWelcomeRecipients(value: string | undefined): boolean {
