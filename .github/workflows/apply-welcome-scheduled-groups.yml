@@ -20,7 +20,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply implementation
-        run: python3 scripts/apply-welcome-scheduled-groups.py
+        run: |
+          python3 scripts/apply-welcome-scheduled-groups.py
+          rm -f docs/.implementation-trigger
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
