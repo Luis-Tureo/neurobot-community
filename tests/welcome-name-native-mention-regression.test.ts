@@ -46,13 +46,13 @@ describe('bienvenida con nombre y mención visible', () => {
     ).toBe('¡Bienvenido/a nuevo/a integrante!');
   });
 
-  it('pluraliza y muestra menciones visibles cuando ingresan varias personas', () => {
+  it('mantiene la lista agrupada y pluraliza cuando ingresan varias personas', () => {
     expect(
       renderWelcomeTemplate('¡Bienvenido/a {usuarios}!', {
         usuario: 'Alejandra y Pedro',
         usuarios: 'Alejandra y Pedro',
         mention: '@Alejandra y @Pedro',
       }),
-    ).toBe('¡Bienvenidos @Alejandra y @Pedro!');
+    ).toBe('¡Bienvenidos Alejandra y Pedro!');
   });
 });
