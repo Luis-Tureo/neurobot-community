@@ -202,8 +202,12 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     expect((await service.answerQuestion(question, 'group-b', 'user-b')).code).toBe('ANSWER_CACHE');
     expect(provider.calls).toBe(1);
     expect(database.listCachedAnswers('neurobot')).toHaveLength(1);
-    const now = new Date();
-    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const date = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Santiago',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
     expect(database.getAIUsageSummary(profileId, date, date.slice(0, 7)).requests).toBe(1);
     database.close();
   });
