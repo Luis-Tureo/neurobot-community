@@ -233,23 +233,29 @@ export class ScheduledWelcomeEnhancer {
     if (groupId === null || !this.selectedGroupIds().includes(groupId)) return;
     if (!this.options.database.canBotSendToGroup(this.options.botId, groupId)) return;
 
+    // La reconciliación heredada puede volver a informar miembros antiguos justo al activar.
+    // Para la cola programada solo los eventos directos de ingreso pueden crear una bienvenida;
+    // esto prioriza evitar falsos saludos y spam a integrantes que ya estaban en el grupo.
+    if (event.source === 'reconciliation') {
+      if (this.store.activationStatus() !== 'active') void this.ensureActivation();
+      return;
+    }
+
     const joinedAt = eventDate(event, this.now());
     const activeSince = this.store.activeSince();
     if (activeSince !== null && joinedAt.getTime() < activeSince.getTime()) return;
 
     if (this.store.activationStatus() !== 'active') {
-      if (event.source !== 'reconciliation') {
-        for (const resolved of await this.resolveParticipants(event)) {
-          if (resolved.identities.some((identity) => this.options.client.isOwnIdentifier(identity))) {
-            continue;
-          }
-          this.store.enqueueEarly(
-            groupId,
-            resolved.participant,
-            resolved.identities,
-            joinedAt,
-          );
+      for (const resolved of await this.resolveParticipants(event)) {
+        if (resolved.identities.some((identity) => this.options.client.isOwnIdentifier(identity))) {
+          continue;
         }
+        this.store.enqueueEarly(
+          groupId,
+          resolved.participant,
+          resolved.identities,
+          joinedAt,
+        );
       }
       void this.ensureActivation();
       return;
