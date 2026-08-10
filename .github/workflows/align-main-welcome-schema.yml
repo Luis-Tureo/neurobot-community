@@ -1,0 +1,29 @@
+name: Align welcome schema with main
+
+on:
+  push:
+    branches:
+      - feat/scheduled-welcome-runtime-v2
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v6
+        with:
+          ref: feat/scheduled-welcome-runtime-v2
+          fetch-depth: 0
+      - name: Apply alignment
+        run: python3 scripts/align-main-welcome-schema.py
+      - name: Commit alignment
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Alinear esquema de bienvenida con main"
+          git push origin HEAD:feat/scheduled-welcome-runtime-v2
