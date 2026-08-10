@@ -31,6 +31,7 @@ env:
   NODE_VERSION: 24.19.0
   REGISTRY: ghcr.io
   IMAGE_NAME: ghcr.io/luis-tureo/neurobot-community
+  TZ: America/Santiago
 
 jobs:
   build-publish-and-deploy:
@@ -39,6 +40,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Show checked out revision
+        run: |
+          echo "Workflow ref: ${GITHUB_REF}"
+          echo "Workflow SHA: ${GITHUB_SHA}"
+          echo "Checked out SHA: $(git rev-parse HEAD)"
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
