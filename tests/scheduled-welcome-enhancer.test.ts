@@ -171,6 +171,7 @@ describe('bienvenida agrupada por horarios', () => {
         activation: 'active',
         activeSince: current.toISOString(),
       });
+      expect(client.sentMessages).toHaveLength(0);
 
       await service.handleGroupJoin({
         groupId: GROUP_ID,
