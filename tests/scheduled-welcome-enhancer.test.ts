@@ -167,6 +167,10 @@ describe('bienvenida agrupada por horarios', () => {
       enhancer.saveScheduleTimes([toLocalDateTime(current, 'America/Santiago').time]);
       service.reconfigure();
       await service.runDueTasks(current);
+      expect(enhancer.status()).toMatchObject({
+        activation: 'active',
+        activeSince: current.toISOString(),
+      });
 
       await service.handleGroupJoin({
         groupId: GROUP_ID,
