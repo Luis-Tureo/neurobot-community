@@ -273,9 +273,13 @@ export class ScheduledWelcomeStore {
     return [
       ...new Set(
         identities
-          .map((identity) => normalizeWhatsAppIdentity(identity) ?? identity.trim().toLowerCase())
+          .map((identity) => identity.trim().toLowerCase())
           .filter(Boolean)
-          .map((identity) => this.participantHash(identity)),
+          .map((identity) =>
+            /^[0-9a-f]{64}$/u.test(identity)
+              ? identity
+              : this.participantHash(normalizeWhatsAppIdentity(identity) ?? identity),
+          ),
       ),
     ];
   }
