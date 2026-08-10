@@ -120,16 +120,21 @@ export function renderWelcomeTemplate(
   values: Partial<Record<(typeof WELCOME_TEMPLATE_VARIABLES)[number], string>>,
 ): string {
   if (template.length === 0) return '';
+  const recipientLabel = values.usuarios ?? values.usuario ?? values.name;
+  const multipleRecipients = representsMultipleWelcomeRecipients(recipientLabel);
   const allowed = new Set<string>(WELCOME_TEMPLATE_VARIABLES);
   const rendered = template.normalize('NFKC').replace(/\{([^{}]+)\}/gu, (match, key: string) => {
     if (!allowed.has(key)) return match;
-    if ((key === 'usuario' || key === 'usuarios') && hasVisibleWelcomeMention(values.mention)) {
+    if (
+      key === 'usuarios' &&
+      !multipleRecipients &&
+      hasVisibleWelcomeMention(values.mention)
+    ) {
       return values.mention ?? '';
     }
     return values[key as keyof typeof values] ?? '';
   });
-  const recipientLabel = values.usuarios ?? values.usuario ?? values.name;
-  if (!representsMultipleWelcomeRecipients(recipientLabel)) return rendered;
+  if (!multipleRecipients) return rendered;
   return rendered.replace(/\bbienvenido\/a\b/giu, pluralizeWelcomeGreeting);
 }
 
