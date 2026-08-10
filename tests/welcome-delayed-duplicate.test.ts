@@ -42,7 +42,7 @@ describe('deduplicación de participantes en bienvenidas', () => {
       await vi.advanceTimersByTimeAsync(10_000);
 
       expect(client.sentMessages).toHaveLength(1);
-      expect(client.sentMessages[0]?.text).toContain('Bienvenidos nuevos integrantes');
+      expect(client.sentMessages[0]?.text).toContain('Damos la bienvenida a nuestros nuevos integrantes');
       expect(client.sentMessages[0]?.mentionIds).toEqual(['persona-a@lid', 'persona-b@lid']);
 
       await service.handleGroupJoin({

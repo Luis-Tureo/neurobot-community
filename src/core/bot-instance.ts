@@ -10,6 +10,7 @@ import {
   unregisterCommunityDigestService,
 } from './community-digest-registry.js';
 import { BotInstance as BaseBotInstance, type BotInstanceOptions } from './bot-instance-base.js';
+import { installScheduledWelcomeEnhancer } from './scheduled-welcome-enhancer.js';
 
 export type { BotInstanceOptions } from './bot-instance-base.js';
 
@@ -26,6 +27,17 @@ export class BotInstance extends BaseBotInstance {
     options: BotInstanceOptions,
   ) {
     super(bot, client, database, provider, anonymizer, logger, options);
+    const automaticMessages = this.automaticMessageService();
+    if (automaticMessages !== null) {
+      installScheduledWelcomeEnhancer({
+        botId: bot.id,
+        service: automaticMessages,
+        database,
+        client,
+        anonymizer,
+        logger,
+      });
+    }
     this.communityDigest = bot.groupChannelEnabled
       ? new CommunityDigestService(database, client, provider, logger, anonymizer, {
           botId: bot.id,
