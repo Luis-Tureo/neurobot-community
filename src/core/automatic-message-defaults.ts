@@ -3,6 +3,7 @@ import type { AutomaticMessageConfiguration } from '../domain/types.js';
 export const AUTOMATIC_MESSAGE_TIMEZONE = 'America/Santiago' as const;
 export const WELCOME_BATCH_WINDOW_SECONDS = 10 as const;
 export const WELCOME_BATCH_WINDOW_MS = WELCOME_BATCH_WINDOW_SECONDS * 1000;
+export const WELCOME_SCHEDULE_TIMES = ['12:00', '20:00'] as const;
 
 export const LEGACY_AUTOMATIC_TEMPLATES = {
   WELCOME:
@@ -26,11 +27,12 @@ export const DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION: AutomaticMessageConfigurat
     batchWindowSeconds: WELCOME_BATCH_WINDOW_SECONDS,
     groupSimultaneous: true,
     reconciliationIntervalSeconds: 120,
+    scheduleTimes: [...WELCOME_SCHEDULE_TIMES],
     template:
-      '¡Bienvenido/a {usuarios} a {grupo}! 👋\n\nEste es un espacio de respeto, apoyo e inclusión para personas neurodivergentes y quienes deseen aprender y compartir experiencias.\n\nPuedes participar cuando te sientas cómodo/a.',
+      '👋 ¡Damos la bienvenida a nuestros nuevos integrantes!\n{usuarios}\nEste es un espacio de respeto y apoyo. Participen cuando se sientan cómodos/as. 💙',
     includePublicName: true,
     enableRealMention: true,
-    unknownNameFallback: 'nuevo/a integrante',
+    unknownNameFallback: 'Nuevo integrante',
     multipleJoinMode: 'GROUPED',
     maximumGroupedNames: 5,
     sendDelaySeconds: WELCOME_BATCH_WINDOW_SECONDS,

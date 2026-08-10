@@ -90,6 +90,7 @@ export type AutomaticMessageConfiguration = {
     batchWindowSeconds: number;
     groupSimultaneous: boolean;
     reconciliationIntervalSeconds: number;
+    scheduleTimes: string[];
     template: string;
     includePublicName: boolean;
     enableRealMention: boolean;

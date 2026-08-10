@@ -29,6 +29,7 @@ type ContactLike = {
   verifiedName?: unknown;
   name?: unknown;
   shortName?: unknown;
+  _data?: unknown;
   isMe?: unknown;
 };
 
@@ -79,7 +80,20 @@ export function sanitizeWhatsAppGroupName(value: unknown): string | null {
 }
 
 export function resolveWelcomeDisplayName(contact: ContactLike): string | null {
-  for (const candidate of [contact.pushname, contact.verifiedName, contact.name, contact.shortName]) {
+  const rawData = typeof contact._data === 'object' && contact._data !== null ? contact._data : null;
+  const candidates = [
+    contact.pushname,
+    contact.verifiedName,
+    contact.name,
+    contact.shortName,
+    rawData === null ? null : Reflect.get(rawData, 'pushname'),
+    rawData === null ? null : Reflect.get(rawData, 'notifyName'),
+    rawData === null ? null : Reflect.get(rawData, 'formattedName'),
+    rawData === null ? null : Reflect.get(rawData, 'verifiedName'),
+    rawData === null ? null : Reflect.get(rawData, 'name'),
+    rawData === null ? null : Reflect.get(rawData, 'shortName'),
+  ];
+  for (const candidate of candidates) {
     const displayName = sanitizeWhatsAppDisplayName(candidate);
     if (displayName !== null) return displayName;
   }
@@ -89,7 +103,9 @@ export function resolveWelcomeDisplayName(contact: ContactLike): string | null {
 export function resolvePublicWhatsAppName(contact: ContactLike): WelcomeParticipant | null {
   if (contact.isMe === true) return null;
 
-  const mentionId = serializedContactId(contact.id);
+  const mentionId =
+    serializedContactId(contact.id) ??
+    (typeof contact.number === 'string' ? canonicalPhoneIdentity(contact.number) : null);
   if (mentionId === null || !isParticipantId(mentionId)) return null;
 
   const displayName = resolveWelcomeDisplayName(contact);
