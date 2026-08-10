@@ -454,7 +454,7 @@ const automaticMessagesSchema = z
         scheduleTimes: z
           .array(z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u))
           .min(1, 'Agrega al menos un horario de bienvenida.')
-          .max(8, 'Puedes configurar hasta 8 horarios.')
+          .max(8)
           .refine((times) => new Set(times).size === times.length, 'Los horarios no pueden repetirse.')
           .default([...DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.welcome.scheduleTimes]),
         template: welcomeTemplateSchema,
@@ -3680,7 +3680,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           enableRealMention: true,
           multipleJoinMode: 'GROUPED' as const,
           sendDelaySeconds: WELCOME_BATCH_WINDOW_SECONDS,
-          scheduleTimes: [...configurationInput.welcome.scheduleTimes],
+          scheduleTimes: [...configurationInput.welcome.scheduleTimes].sort(),
           template: assertPlainText(configurationInput.welcome.template),
         },
         dailyGreeting: {
