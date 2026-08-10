@@ -185,6 +185,9 @@ export class ScheduledWelcomeEnhancer {
         for (const entry of this.store.early(groupId)) {
           const joinedAt = new Date(entry.joinedAt);
           if (activeSince !== null && joinedAt.getTime() < activeSince.getTime()) continue;
+          // La prioridad de activación es no saludar a nadie que ya estuviera presente.
+          // Si la identidad aparece en la foto de línea base, descartamos el evento temprano.
+          if (this.store.hasAnyMember(groupId, entry.identityKeys)) continue;
           this.store.addMember(groupId, entry.identityKeys);
           this.store.enqueuePending(
             groupId,
