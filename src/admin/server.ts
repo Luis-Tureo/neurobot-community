@@ -7,6 +7,7 @@ import { registerAutomationLabContextRoute } from './automation-lab-context-rout
 import { installAzureForwardedHttps } from './azure-forwarded-https.js';
 import { registerCommunityDigestRoutes } from './community-digest-routes.js';
 import { SessionStore } from './session-store.js';
+import { registerWelcomeScheduleRoutes } from './welcome-schedule-routes.js';
 
 export type { AdminServerContext } from './server-base.js';
 
@@ -18,6 +19,7 @@ export async function buildAdminServer(context: AdminServerContext) {
     registerAutomationLabContextRoute(app, context.sessionSecret);
     registerAutomationLabAIRoutes(app, context);
     registerCommunityDigestRoutes(app, context);
+    registerWelcomeScheduleRoutes(app, context);
     return app;
   } finally {
     SessionStore.disableSharedSecret(context.sessionSecret);
