@@ -29,4 +29,10 @@ describe('interfaz de horarios de bienvenida', () => {
     expect(schedule).toContain('no se envía ningún mensaje');
     expect(schedule).toContain('integrante(s) pendiente(s) para el próximo saludo');
   });
+
+  it('informa cuando la activación está tomando una línea base fresca', () => {
+    expect(schedule).toContain("scheduleState?.activationStatus === 'initializing'");
+    expect(schedule).toContain('La activación está tomando una línea base de los integrantes actuales.');
+    expect(routes).toContain('activeSince');
+  });
 });
