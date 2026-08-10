@@ -451,6 +451,12 @@ const automaticMessagesSchema = z
         batchWindowSeconds: z.number().int().min(5).max(300),
         groupSimultaneous: z.boolean().default(true),
         reconciliationIntervalSeconds: z.number().int().min(60).max(3600).default(120),
+        scheduleTimes: z
+          .array(z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u))
+          .min(1, 'Agrega al menos un horario de bienvenida.')
+          .max(8)
+          .refine((times) => new Set(times).size === times.length, 'Los horarios no pueden repetirse.')
+          .default([...DEFAULT_AUTOMATIC_MESSAGE_CONFIGURATION.welcome.scheduleTimes]),
         template: welcomeTemplateSchema,
         includePublicName: z.boolean().default(true),
         enableRealMention: z.boolean().default(true),
@@ -3674,6 +3680,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           enableRealMention: true,
           multipleJoinMode: 'GROUPED' as const,
           sendDelaySeconds: WELCOME_BATCH_WINDOW_SECONDS,
+          scheduleTimes: [...configurationInput.welcome.scheduleTimes].sort(),
           template: assertPlainText(configurationInput.welcome.template),
         },
         dailyGreeting: {
