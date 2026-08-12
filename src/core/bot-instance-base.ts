@@ -10,7 +10,7 @@ import type { Anonymizer } from '../security/anonymizer.js';
 import type { SecretVault } from '../security/secret-vault.js';
 import { ModerationService } from '../moderation/moderation-service.js';
 import { AutomaticMessageService } from './automatic-message-service.js';
-import { ConnectionManager } from './connection-manager.js';
+import { ConnectionManager, normalizeWhatsAppErrorCode } from './connection-manager.js';
 import { ConversationFlowService } from './conversation-flow-service.js';
 import { GroupDiscoveryService } from './group-discovery-service.js';
 import { MessageProcessor } from './message-processor.js';
@@ -31,7 +31,17 @@ export type BotInstanceOptions = {
   onDuplicateIdentity?: (botId: string) => Promise<void>;
   onGroupJoin?: (botId: string, event: GroupJoinEvent) => Promise<void>;
   secretVault?: SecretVault;
+  qrMaxAgeMs?: number;
 };
+
+export type ActiveQr = {
+  value: string;
+  generatedAt: number;
+  qrGeneration: number;
+  clientGeneration: number;
+};
+
+const DEFAULT_QR_MAX_AGE_MS = 45_000;
 
 export class BotInstance {
   private readonly connection: ConnectionManager;
@@ -44,20 +54,26 @@ export class BotInstance {
   private readonly aiQueue: AIRequestQueueService;
   private readonly outboundQueue: OutboundMessageQueueService;
   private readonly moderation: ModerationService | null;
-  private latestQr: string | null = null;
+  private activeQr: ActiveQr | null = null;
+  private qrGeneration = 0;
+  private latestQrClientGeneration = 0;
+  private lastQrFingerprint: string | null = null;
+  private qrRefreshOperation: Promise<number> | null = null;
   private adminPhone: string | null = null;
   private readonly communityServicesEnabled: boolean;
+  private readonly qrMaxAgeMs: number;
 
   public constructor(
     public readonly bot: BotRecord,
     private readonly client: MessagingClient,
-    database: AppDatabase,
+    private readonly database: AppDatabase,
     provider: AIProvider,
     anonymizer: Anonymizer,
     private readonly logger: Logger,
     options: BotInstanceOptions,
   ) {
     this.communityServicesEnabled = bot.groupChannelEnabled;
+    this.qrMaxAgeMs = options.qrMaxAgeMs ?? DEFAULT_QR_MAX_AGE_MS;
     this.connection = new ConnectionManager(client, logger, {
       maxAttempts: options.maxReconnectAttempts,
       maxDelayMs: options.maxReconnectDelayMs,
@@ -135,6 +151,11 @@ export class BotInstance {
       },
       onStateChange: (state, reason) => {
         this.connection.updateState(state, reason);
+        if (
+          ['authenticated', 'connected', 'auth_failure', 'disconnected', 'resetting'].includes(state)
+        ) {
+          this.activeQr = null;
+        }
         database.updateBotWhatsAppStatus(
           bot.id,
           state,
@@ -150,12 +171,30 @@ export class BotInstance {
                 ? 'BOT_DISCONNECTED'
                 : 'BOT_STATE_CHANGED',
           result: state,
-          ...(reason === undefined ? {} : { errorCode: reason }),
+          ...(reason === undefined
+            ? {}
+            : { errorCode: normalizeWhatsAppErrorCode(reason) }),
         });
+        if (state === 'authenticated' || state === 'auth_failure') {
+          database.recordTechnicalEvent({
+            botId: bot.id,
+            eventType:
+              state === 'authenticated' ? 'WHATSAPP_AUTHENTICATED' : 'WHATSAPP_LINK_FAILED',
+            result: state,
+            ...(reason === undefined
+              ? {}
+              : { errorCode: normalizeWhatsAppErrorCode(reason) }),
+          });
+        }
         if (state === 'disconnected' || state === 'auth_failure') this.discovery.cancel();
       },
       onReady: async () => {
-        this.latestQr = null;
+        this.activeQr = null;
+        database.recordTechnicalEvent({
+          botId: bot.id,
+          eventType: 'WHATSAPP_LINK_READY',
+          result: 'ready',
+        });
         const ownIdentifier = client.getOwnIdentifier?.() ?? null;
         this.adminPhone = formatAdminPhoneNumber(ownIdentifier);
         if (ownIdentifier !== null) {
@@ -208,13 +247,58 @@ export class BotInstance {
         }
         options.onReady?.(bot.id);
       },
-      onQr: (qr) => {
-        this.latestQr = qr;
+      onQr: (qr, metadata) => {
+        const clientGeneration = metadata?.clientGeneration ?? 0;
+        if (clientGeneration < this.latestQrClientGeneration) return;
+        if (clientGeneration > this.latestQrClientGeneration) {
+          this.latestQrClientGeneration = clientGeneration;
+          this.lastQrFingerprint = null;
+        }
+        const fingerprint = anonymizer.fingerprint(['whatsapp-qr', qr]);
+        if (fingerprint === this.lastQrFingerprint) return;
+        this.lastQrFingerprint = fingerprint;
+        this.qrGeneration += 1;
+        this.activeQr = {
+          value: qr,
+          generatedAt: Date.now(),
+          qrGeneration: this.qrGeneration,
+          clientGeneration,
+        };
         database.recordTechnicalEvent({
           botId: bot.id,
-          eventType: 'BOT_QR_GENERATED',
+          eventType: 'WHATSAPP_QR_GENERATED',
           result: 'available',
         });
+        logger.info(
+          {
+            operation: 'WHATSAPP_QR_GENERATED',
+            botId: bot.id,
+            clientGeneration: this.activeQr.clientGeneration,
+            qrGeneration: this.activeQr.qrGeneration,
+            qrAgeMs: 0,
+            generatedAt: new Date(this.activeQr.generatedAt).toISOString(),
+            qrFingerprint: fingerprint,
+          },
+          'Se registró la generación activa del QR sin almacenar su contenido',
+        );
+      },
+      onWhatsAppStateChange: (state, clientGeneration) => {
+        database.recordTechnicalEvent({
+          botId: bot.id,
+          eventType:
+            state === 'PAIRING' ? 'WHATSAPP_PAIRING_STARTED' : 'WHATSAPP_STATE_CHANGED',
+          result: state,
+        });
+        logger.info(
+          {
+            operation:
+              state === 'PAIRING' ? 'WHATSAPP_PAIRING_STARTED' : 'WHATSAPP_STATE_CHANGED',
+            botId: bot.id,
+            clientGeneration,
+            whatsappState: state,
+          },
+          'Se registró una transición segura de WhatsApp Web',
+        );
       },
       onGroupJoin: async (event) => {
         if (this.communityServicesEnabled) await this.automaticMessages.handleGroupJoin(event);
@@ -261,12 +345,7 @@ export class BotInstance {
   }
 
   public async stop(): Promise<void> {
-    this.aiQueue.shutdown();
-    if (this.communityServicesEnabled) this.discovery.stop();
-    if (this.communityServicesEnabled) {
-      this.automaticMessages.stop();
-      this.pollScheduler.stop();
-    }
+    this.stopRuntimeServices();
     await this.connection.stop();
     this.logger.info(
       { operation: 'BOT_STOPPED', botId: this.bot.id },
@@ -274,8 +353,28 @@ export class BotInstance {
     );
   }
 
+  public async stopForNewLink(): Promise<void> {
+    this.stopRuntimeServices();
+    this.activeQr = null;
+    await this.connection.resetForNewLink();
+    this.logger.info(
+      { operation: 'WHATSAPP_LINK_SESSION_RESET_STARTED', botId: this.bot.id },
+      'La instancia anterior quedó detenida para iniciar una vinculación limpia',
+    );
+  }
+
   public async restart(): Promise<void> {
     await this.connection.restart();
+  }
+
+  public requestQrRefresh(): Promise<number> {
+    if (this.qrRefreshOperation !== null) return this.qrRefreshOperation;
+    const operation = this.requestQrRefreshOnce();
+    const tracked = operation.finally(() => {
+      if (this.qrRefreshOperation === tracked) this.qrRefreshOperation = null;
+    });
+    this.qrRefreshOperation = tracked;
+    return tracked;
   }
 
   public resetTransientState(): void {
@@ -318,20 +417,76 @@ export class BotInstance {
     connection: ConnectionSnapshot;
     discovery: ReturnType<GroupDiscoveryService['snapshot']>;
     qrAvailable: boolean;
+    qrGeneration: number;
+    qrGeneratedAt: string | null;
+    qrClientGeneration: number | null;
   } {
+    const qr = this.currentQr();
     return {
       connection: this.connection.snapshot(),
       discovery: this.discovery.snapshot(),
-      qrAvailable: this.latestQr !== null,
+      qrAvailable: qr !== null,
+      qrGeneration: qr?.qrGeneration ?? this.qrGeneration,
+      qrGeneratedAt: qr === null ? null : new Date(qr.generatedAt).toISOString(),
+      qrClientGeneration: qr?.clientGeneration ?? null,
     };
   }
 
-  public qr(): string | null {
-    return this.latestQr;
+  public qr(): ActiveQr | null {
+    const qr = this.currentQr();
+    return qr === null ? null : { ...qr };
   }
 
   public adminPhoneNumber(): string | null {
     return this.adminPhone;
+  }
+
+  private async requestQrRefreshOnce(): Promise<number> {
+    const afterGeneration = this.qrGeneration;
+    this.activeQr = null;
+    if (this.client.requestQrRefresh === undefined) {
+      throw new Error('El cliente activo no permite renovar el QR.');
+    }
+    await this.client.requestQrRefresh();
+    this.database.recordTechnicalEvent({
+      botId: this.bot.id,
+      eventType: 'WHATSAPP_QR_REFRESHED',
+      result: 'requested',
+    });
+    return afterGeneration;
+  }
+
+  private currentQr(): ActiveQr | null {
+    if (this.activeQr === null) return null;
+    const qrAgeMs = Math.max(0, Date.now() - this.activeQr.generatedAt);
+    if (qrAgeMs <= this.qrMaxAgeMs) return this.activeQr;
+    const expired = this.activeQr;
+    this.activeQr = null;
+    this.database.recordTechnicalEvent({
+      botId: this.bot.id,
+      eventType: 'WHATSAPP_QR_EXPIRED',
+      result: 'expired',
+    });
+    this.logger.info(
+      {
+        operation: 'WHATSAPP_QR_EXPIRED',
+        botId: this.bot.id,
+        clientGeneration: expired.clientGeneration,
+        qrGeneration: expired.qrGeneration,
+        qrAgeMs,
+        generatedAt: new Date(expired.generatedAt).toISOString(),
+      },
+      'El QR dejó de publicarse por superar su edad máxima',
+    );
+    return null;
+  }
+
+  private stopRuntimeServices(): void {
+    this.aiQueue.shutdown();
+    if (!this.communityServicesEnabled) return;
+    this.discovery.stop();
+    this.automaticMessages.stop();
+    this.pollScheduler.stop();
   }
 }
 

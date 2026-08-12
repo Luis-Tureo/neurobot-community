@@ -15,12 +15,22 @@ import type { PollService } from './poll-service.js';
 import type { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
 import type { ModerationService } from '../moderation/moderation-service.js';
 
-type ClientFactory = (bot: BotRecord) => MessagingClient;
+type ClientFactory = (
+  bot: BotRecord,
+  context: { freshLinkingSession: boolean },
+) => MessagingClient;
+
+export type LinkNewNumberResult = {
+  backupPath: string | null;
+};
 
 export class MultiBotManager {
   private readonly instances = new Map<string, BotInstance>();
   private readonly started = new Set<string>();
   private readonly adminPhoneNumbers = new Map<string, string>();
+  private readonly lifecycleOperations = new Map<string, Promise<void>>();
+  private readonly linkOperations = new Map<string, Promise<LinkNewNumberResult>>();
+  private readonly resettingBots = new Set<string>();
 
   public constructor(
     private readonly database: AppDatabase,
@@ -29,7 +39,7 @@ export class MultiBotManager {
     private readonly anonymizer: Anonymizer,
     private readonly logger: Logger,
     private readonly options: BotInstanceOptions & { chromeExecutablePath?: string },
-    private readonly clientFactory: ClientFactory = (bot) => {
+    private readonly clientFactory: ClientFactory = (bot, context) => {
       if (bot.connectorType !== 'WHATSAPP_WEB') {
         throw new Error('El conector WHATSAPP_CLOUD_API requiere credenciales y webhooks oficiales antes de iniciar.');
       }
@@ -41,6 +51,7 @@ export class MultiBotManager {
           maxMessageLength: options.maxMessageLength,
           developmentMode: options.developmentMode,
           communityPollVotesNoAction: bot.capabilities.communitySingleTurnMode,
+          freshLinkingSession: context.freshLinkingSession,
           ...(options.chromeExecutablePath === undefined ? {} : { chromeExecutablePath: options.chromeExecutablePath }),
         },
         logger,
@@ -60,7 +71,11 @@ export class MultiBotManager {
   }
 
   public async start(botId: string): Promise<void> {
-    const instance = await this.prepare(botId);
+    await this.runExclusive(botId, async () => this.startUnlocked(botId, false));
+  }
+
+  private async startUnlocked(botId: string, freshLinkingSession: boolean): Promise<void> {
+    const instance = await this.prepareUnlocked(botId, freshLinkingSession);
     if (this.started.has(botId)) return;
     this.started.add(botId);
     try {
@@ -82,6 +97,13 @@ export class MultiBotManager {
   }
 
   public async prepare(botId: string): Promise<BotInstance> {
+    return this.runExclusive(botId, async () => this.prepareUnlocked(botId, false));
+  }
+
+  private async prepareUnlocked(
+    botId: string,
+    freshLinkingSession: boolean,
+  ): Promise<BotInstance> {
     const existing = this.instances.get(botId);
     if (existing !== undefined) return existing;
     let bot = this.database.getBot(botId);
@@ -97,7 +119,7 @@ export class MultiBotManager {
     bot = this.database.getBot(botId) as BotRecord;
     const instance = new BotInstance(
       bot,
-      this.clientFactory(bot),
+      this.clientFactory(bot, { freshLinkingSession }),
       this.database,
       this.providers.forBot(bot.id),
       this.anonymizer,
@@ -149,7 +171,7 @@ export class MultiBotManager {
         result: 'started',
       });
       try {
-        await this.start(bot.id);
+        await this.runExclusive(bot.id, async () => this.startUnlocked(bot.id, true));
       } catch (error) {
         this.recordInstanceFailure('BOT_START_FAILED', bot.id, error);
       }
@@ -168,25 +190,110 @@ export class MultiBotManager {
   }
 
   public async restart(botId: string): Promise<void> {
-    const instance = this.instances.get(botId);
-    if (instance === undefined) return this.start(botId);
-    await instance.restart();
+    const reset = this.linkOperations.get(botId);
+    if (reset !== undefined) {
+      await reset;
+      return;
+    }
+    await this.runExclusive(botId, async () => {
+      const instance = this.instances.get(botId);
+      if (instance === undefined) return this.startUnlocked(botId, false);
+      await instance.restart();
+    });
   }
 
   public async stop(botId: string): Promise<void> {
+    await this.runExclusive(botId, async () => this.stopUnlocked(botId, false));
+  }
+
+  private async stopUnlocked(botId: string, forNewLink: boolean): Promise<void> {
     const instance = this.instances.get(botId);
     if (instance === undefined) return;
     const phoneNumber = instance.adminPhoneNumber();
     if (phoneNumber !== null) this.adminPhoneNumbers.set(botId, phoneNumber);
-    await instance.stop();
+    if (forNewLink) await instance.stopForNewLink();
+    else await instance.stop();
     this.instances.delete(botId);
     this.started.delete(botId);
   }
 
   public async stopAll(): Promise<void> {
-    await Promise.all([...this.instances.values()].map((instance) => instance.stop()));
-    this.instances.clear();
-    this.started.clear();
+    await Promise.all([...this.instances.keys()].map(async (botId) => this.stop(botId)));
+  }
+
+  public linkNewNumber(botId: string): Promise<LinkNewNumberResult> {
+    const existing = this.linkOperations.get(botId);
+    if (existing !== undefined) return existing;
+    const operation = this.runExclusive(botId, async () => this.linkNewNumberOnce(botId));
+    const tracked = operation.finally(() => {
+      if (this.linkOperations.get(botId) === tracked) this.linkOperations.delete(botId);
+    });
+    this.linkOperations.set(botId, tracked);
+    return tracked;
+  }
+
+  private async linkNewNumberOnce(botId: string): Promise<LinkNewNumberResult> {
+    const bot = this.database.getBot(botId);
+    if (bot === null) throw new Error('El asistente no existe.');
+    if (bot.connectorType !== 'WHATSAPP_WEB') {
+      throw new Error('El asistente no utiliza una sesión LocalAuth de WhatsApp Web.');
+    }
+    this.resettingBots.add(botId);
+    this.database.updateBotWhatsAppStatus(botId, 'resetting');
+    this.database.recordTechnicalEvent({
+      botId,
+      eventType: 'WHATSAPP_LINK_SESSION_RESET_STARTED',
+      result: 'resetting',
+    });
+    this.logger.info(
+      { operation: 'WHATSAPP_LINK_SESSION_RESET_STARTED', botId },
+      'Comenzó el restablecimiento explícito de la sesión de vinculación',
+    );
+    try {
+      await this.stopUnlocked(botId, true);
+      const { backupPath } = await this.sessions.archiveForNewLink(bot);
+      this.database.recordTechnicalEvent({
+        botId,
+        eventType: 'WHATSAPP_LINK_SESSION_BACKED_UP',
+        result: backupPath === null ? 'not_present' : 'archived',
+      });
+      this.logger.info(
+        {
+          operation: 'WHATSAPP_LINK_SESSION_BACKED_UP',
+          botId,
+          backupCreated: backupPath !== null,
+        },
+        'La sesión LocalAuth anterior quedó fuera de la carpeta activa',
+      );
+      this.database.releaseBotWhatsAppIdentity(botId);
+      this.adminPhoneNumbers.delete(botId);
+      this.database.recordTechnicalEvent({
+        botId,
+        eventType: 'WHATSAPP_LINK_SESSION_CREATED',
+        result: 'clean',
+      });
+      this.logger.info(
+        { operation: 'WHATSAPP_LINK_SESSION_CREATED', botId },
+        'Se creó una carpeta LocalAuth completamente limpia',
+      );
+      await this.startUnlocked(botId, true);
+      return { backupPath };
+    } catch (error) {
+      const details = serializeError(error, 'WHATSAPP_LINK_FAILED', false);
+      this.database.recordTechnicalEvent({
+        botId,
+        eventType: 'WHATSAPP_LINK_FAILED',
+        result: 'failed',
+        errorCode: details.errorCode,
+      });
+      this.logger.error(
+        { operation: 'WHATSAPP_LINK_FAILED', botId, ...details },
+        'Falló el restablecimiento seguro de la vinculación',
+      );
+      throw error;
+    } finally {
+      this.resettingBots.delete(botId);
+    }
   }
 
   public snapshots(): Array<{ bot: BotRecord; runtime: ReturnType<BotInstance['snapshot']> | null }> {
@@ -207,8 +314,19 @@ export class MultiBotManager {
     this.adminPhoneNumbers.delete(botId);
   }
 
-  public qr(botId: string): string | null {
+  public qr(botId: string): ReturnType<BotInstance['qr']> {
     return this.instances.get(botId)?.qr() ?? null;
+  }
+
+  public async requestQrRefresh(botId: string): Promise<number> {
+    if (this.resettingBots.has(botId)) {
+      throw new Error('La sesión se está restableciendo; espera al nuevo cliente.');
+    }
+    return this.runExclusive(botId, async () => {
+      const instance = this.instances.get(botId);
+      if (instance === undefined) throw new Error('El asistente no está iniciado.');
+      return instance.requestQrRefresh();
+    });
   }
 
   public client(botId: string): MessagingClient | null {
@@ -256,6 +374,22 @@ export class MultiBotManager {
       result: 'failed',
       errorCode: details.errorCode,
     });
+  }
+
+  private runExclusive<T>(botId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.lifecycleOperations.get(botId) ?? Promise.resolve();
+    const result = previous.catch(() => undefined).then(operation);
+    const tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.lifecycleOperations.set(botId, tail);
+    void tail.then(() => {
+      if (this.lifecycleOperations.get(botId) === tail) {
+        this.lifecycleOperations.delete(botId);
+      }
+    });
+    return result;
   }
 
   private canStart(bot: BotRecord): boolean {

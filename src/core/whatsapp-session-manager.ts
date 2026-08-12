@@ -1,6 +1,6 @@
-import { lstat, mkdir, readlink, rename, rm } from 'node:fs/promises';
+import { lstat, mkdir, readlink, readdir, rename, rm } from 'node:fs/promises';
 import { hostname } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { BotRecord } from '../domain/types.js';
 
@@ -44,6 +44,9 @@ export class WhatsAppSessionManager {
       this.backupsRoot,
       `whatsapp-${bot.id}-${new Date().toISOString().replace(/[:.]/gu, '-')}`,
     );
+    if (isPathInside(source, destination)) {
+      throw new Error('La copia de seguridad debe quedar fuera de la sesión activa.');
+    }
     await mkdir(dirname(destination), { recursive: true });
     await rename(source, destination);
     await mkdir(source, { recursive: true });
@@ -62,6 +65,31 @@ export class WhatsAppSessionManager {
         return null;
       }
       throw error;
+    }
+  }
+
+  public async archiveForNewLink(
+    bot: BotRecord,
+  ): Promise<{ backupPath: string | null; sessionPath: string }> {
+    await this.assertNoLiveChromiumProfile(bot);
+    const backupPath = await this.archiveIfPresent(bot);
+    const sessionPath = resolve(bot.sessionPath);
+    await mkdir(sessionPath, { recursive: true });
+    const entries = await readdir(sessionPath);
+    if (entries.length > 0) {
+      throw new Error('La carpeta activa de vinculación no quedó limpia.');
+    }
+    return { backupPath, sessionPath };
+  }
+
+  private async assertNoLiveChromiumProfile(bot: BotRecord): Promise<void> {
+    const profilePath = resolve(bot.sessionPath, `session-${bot.clientId || 'comunidad'}`);
+    const lock = await readChromiumLock(resolve(profilePath, 'SingletonLock'));
+    if (lock === null) return;
+    const currentHostname = this.options.currentHostname ?? hostname();
+    const isProcessAlive = this.options.isProcessAlive ?? processIsAlive;
+    if (belongsToLiveLocalProcess(lock, currentHostname, isProcessAlive)) {
+      throw new Error('Chromium continúa activo; la sesión no puede archivarse todavía.');
     }
   }
 
@@ -90,6 +118,11 @@ export class WhatsAppSessionManager {
       CHROMIUM_SINGLETON_FILES.map((filename) => rm(resolve(profilePath, filename), { force: true })),
     );
   }
+}
+
+function isPathInside(parent: string, candidate: string): boolean {
+  const pathFromParent = relative(parent, candidate);
+  return pathFromParent !== '' && !pathFromParent.startsWith('..') && !isAbsolute(pathFromParent);
 }
 
 async function readChromiumLock(lockPath: string): Promise<ChromiumLockSnapshot | null> {

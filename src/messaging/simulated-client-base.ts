@@ -31,6 +31,7 @@ export class SimulatedMessagingClient implements MessagingClient {
   public selectableMenusSupported = true;
   public initializeCalls = 0;
   public destroyCalls = 0;
+  public qrRefreshCalls = 0;
   public groups: DetectedGroup[] = [];
   public failSending = false;
   public ready = true;
@@ -55,6 +56,10 @@ export class SimulatedMessagingClient implements MessagingClient {
     this.destroyCalls += 1;
     this.ready = false;
     this.connectionState = null;
+  }
+
+  public async requestQrRefresh(): Promise<void> {
+    this.qrRefreshCalls += 1;
   }
 
   public async sendMessage(chatId: string, text: string, replyToMessageId?: string): Promise<void> {
@@ -158,6 +163,10 @@ export class SimulatedMessagingClient implements MessagingClient {
     this.ready = true;
     this.connectionState = 'CONNECTED';
     this.events?.onReady();
+  }
+
+  public emitQr(qr: string, clientGeneration = 1): void {
+    this.events?.onQr(qr, { clientGeneration });
   }
 
   public async emitGroupJoin(event: GroupJoinEvent): Promise<void> {

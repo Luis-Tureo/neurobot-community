@@ -13,7 +13,8 @@ export type MessagingClientEvents = {
   onMessage: (message: IncomingMessage) => Promise<void>;
   onStateChange: (state: ConnectionState, reason?: string) => void;
   onReady: () => void | Promise<void>;
-  onQr: (qr: string) => void;
+  onQr: (qr: string, metadata?: { clientGeneration: number }) => void;
+  onWhatsAppStateChange?: (state: string, clientGeneration: number) => void;
   onGroupJoin?: (event: GroupJoinEvent) => Promise<void>;
   onGroupChanged?: (event: GroupChangeEvent) => Promise<void>;
 };
@@ -78,6 +79,7 @@ export interface MessagingClient {
   setEvents(events: MessagingClientEvents): void;
   initialize(): Promise<void>;
   destroy(): Promise<void>;
+  requestQrRefresh?(): Promise<void>;
   sendMessage(chatId: string, text: string, replyToMessageId?: string): Promise<void>;
   sendMessageWithMentions?(chatId: string, text: string, mentionIds: string[]): Promise<void>;
   resolveWelcomeParticipants?(participantIds: string[]): Promise<WelcomeParticipant[]>;

@@ -17,8 +17,11 @@ export class ConnectionManager {
   private reconnectAttempt = 0;
   private initialization: Promise<void> | null = null;
   private restartOperation: Promise<void> | null = null;
+  private resetOperation: Promise<void> | null = null;
+  private lifecycleTail: Promise<void> = Promise.resolve();
   private reconnectTimer: NodeJS.Timeout | null = null;
   private stopping = false;
+  private resetting = false;
 
   public constructor(
     private readonly client: MessagingClient,
@@ -27,6 +30,7 @@ export class ConnectionManager {
   ) {}
 
   public updateState(state: ConnectionState, reason?: string): void {
+    if (this.resetting && state !== 'resetting') return;
     this.state = state;
     if (state === 'connected') {
       this.lastConnectedAt = new Date().toISOString();
@@ -37,9 +41,9 @@ export class ConnectionManager {
       this.lastErrorCode = 'AUTH_FAILURE';
       this.clearReconnectTimer();
     } else if (state === 'loading_chats' && reason !== undefined) {
-      this.lastErrorCode = normalizeErrorCode(reason);
+      this.lastErrorCode = normalizeWhatsAppErrorCode(reason);
     } else if (state === 'disconnected' && !this.stopping) {
-      this.lastErrorCode = normalizeErrorCode(reason);
+      this.lastErrorCode = normalizeWhatsAppErrorCode(reason);
       this.scheduleReconnect();
     }
   }
@@ -47,26 +51,15 @@ export class ConnectionManager {
   public start(): Promise<void> {
     if (this.initialization !== null) return this.initialization;
     this.stopping = false;
-    this.state = 'initializing';
-    this.initialization = this.client
-      .initialize()
-      .catch((error: unknown) => {
-        const details = serializeError(
-          error,
-          'WHATSAPP_INITIALIZATION_FAILED',
-          this.options.developmentMode ?? false,
-        );
-        this.lastErrorCode = details.errorCode;
-        this.state = 'disconnected';
-        this.logger.error(
-          { ...details, operation: 'initializeClient' },
-          'No fue posible inicializar el cliente de WhatsApp',
-        );
-        this.scheduleReconnect();
-      })
-      .finally(() => {
-        this.initialization = null;
-      });
+    this.resetting = false;
+    const operation = this.serialize(async () => {
+      if (this.stopping || this.resetting) return;
+      await this.initializeOnce();
+    });
+    const tracked = operation.finally(() => {
+      if (this.initialization === tracked) this.initialization = null;
+    });
+    this.initialization = tracked;
     return this.initialization;
   }
 
@@ -82,9 +75,28 @@ export class ConnectionManager {
 
   public async stop(): Promise<void> {
     this.stopping = true;
+    this.resetting = false;
     this.clearReconnectTimer();
-    await this.client.destroy();
+    await this.serialize(async () => this.client.destroy());
     this.state = 'disconnected';
+  }
+
+  public resetForNewLink(): Promise<void> {
+    if (this.resetOperation !== null) return this.resetOperation;
+    const operation = this.resetForNewLinkOnce();
+    const tracked = operation.finally(() => {
+      if (this.resetOperation === tracked) this.resetOperation = null;
+    });
+    this.resetOperation = tracked;
+    return tracked;
+  }
+
+  private async resetForNewLinkOnce(): Promise<void> {
+    this.stopping = true;
+    this.resetting = true;
+    this.state = 'resetting';
+    this.clearReconnectTimer();
+    await this.serialize(async () => this.client.destroy());
   }
 
   public snapshot(): ConnectionSnapshot {
@@ -99,6 +111,7 @@ export class ConnectionManager {
   private scheduleReconnect(): void {
     if (
       this.stopping ||
+      this.resetting ||
       this.reconnectTimer !== null ||
       this.reconnectAttempt >= this.options.maxAttempts ||
       this.state === 'auth_failure'
@@ -124,22 +137,54 @@ export class ConnectionManager {
   }
 
   private async reconnectOnce(): Promise<void> {
-    this.state = 'reconnecting';
-    await this.client.destroy();
-    await this.start();
+    if (this.stopping || this.resetting) return;
+    await this.serialize(async () => {
+      if (this.stopping || this.resetting) return;
+      this.state = 'reconnecting';
+      await this.client.destroy();
+      if (this.stopping || this.resetting) return;
+      await this.initializeOnce();
+    });
   }
 
   private clearReconnectTimer(): void {
     if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
   }
+
+  private async initializeOnce(): Promise<void> {
+    this.state = 'initializing';
+    try {
+      await this.client.initialize();
+    } catch (error) {
+      const details = serializeError(
+        error,
+        'WHATSAPP_INITIALIZATION_FAILED',
+        this.options.developmentMode ?? false,
+      );
+      this.lastErrorCode = details.errorCode;
+      this.state = 'disconnected';
+      this.logger.error(
+        { ...details, operation: 'initializeClient' },
+        'No fue posible inicializar el cliente de WhatsApp',
+      );
+      this.scheduleReconnect();
+    }
+  }
+
+  private serialize(operation: () => Promise<void>): Promise<void> {
+    const result = this.lifecycleTail.catch(() => undefined).then(operation);
+    this.lifecycleTail = result.catch(() => undefined);
+    return result;
+  }
 }
 
-function normalizeErrorCode(reason: string | undefined): string {
+export function normalizeWhatsAppErrorCode(reason: string | undefined): string {
   if (reason === undefined || reason.trim() === '') return 'DISCONNECTED';
-  const normalized = reason
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, '_')
-    .slice(0, 50);
-  return normalized.length >= 3 ? normalized : 'DISCONNECTED';
+  const trimmed = reason.trim();
+  if (/^[A-Z][A-Z0-9_-]{2,49}$/u.test(trimmed)) return trimmed;
+  const normalized = trimmed.toUpperCase().replace(/[^A-Z0-9]+/gu, '_');
+  return new Set(['LOGOUT', 'NETWORK', 'TIMEOUT', 'CONFLICT']).has(normalized)
+    ? normalized
+    : 'DISCONNECTED';
 }

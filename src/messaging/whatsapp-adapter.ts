@@ -1,11 +1,12 @@
-import qrcode from 'qrcode-terminal';
 import type { Logger } from 'pino';
 import WhatsApp from 'whatsapp-web.js';
 import type {
   Client as WhatsAppClient,
+  ClientOptions as WhatsAppClientOptions,
   GroupNotification,
   MessageSendOptions,
 } from 'whatsapp-web.js';
+import { normalizeWhatsAppErrorCode } from '../core/connection-manager.js';
 import { ExpiringSet } from '../core/expiring-cache.js';
 import { resolvePublicWhatsAppName } from '../core/welcome-personalization.js';
 import type {
@@ -39,6 +40,7 @@ import {
 
 const { Client, LocalAuth, MessageMedia, Poll } = WhatsApp;
 const supportedMessageTypes = new Set(['chat']);
+let nextClientGeneration = 0;
 
 type BrowserChatSnapshot = {
   id: string | null;
@@ -367,9 +369,30 @@ export type WhatsAppAdapterOptions = {
   messageDeduplicationTtlMs?: number;
   chromeExecutablePath?: string;
   communityPollVotesNoAction?: boolean;
+  freshLinkingSession?: boolean;
 };
 
 type ClientFactory = () => WhatsAppClient;
+
+export function buildWhatsAppClientOptions(
+  options: WhatsAppAdapterOptions,
+): WhatsAppClientOptions {
+  return {
+    authStrategy: new LocalAuth({
+      dataPath: options.sessionPath,
+      clientId: options.clientId ?? 'comunidad',
+    }),
+    ...(options.freshLinkingSession === true
+      ? { webVersionCache: { type: 'none' as const } }
+      : {}),
+    puppeteer: {
+      headless: true,
+      ...(options.chromeExecutablePath === undefined
+        ? {}
+        : { executablePath: options.chromeExecutablePath }),
+    },
+  };
+}
 
 export class WhatsAppWebAdapter implements MessagingClient {
   private client: WhatsAppClient | null = null;
@@ -432,6 +455,17 @@ export class WhatsAppWebAdapter implements MessagingClient {
     });
     this.destruction = tracked;
     return tracked;
+  }
+
+  public async requestQrRefresh(): Promise<void> {
+    const client = this.requireClient();
+    if (this.ready) throw new Error('La sesión ya está vinculada.');
+    if (client.pupPage === undefined) throw new Error('WhatsApp Web todavía no está listo.');
+    await client.pupPage.evaluate("window.require('WAWebCmd').Cmd.refreshQR()");
+    this.logger.info(
+      { operation: 'WHATSAPP_QR_REFRESHED', clientGeneration: this.generation },
+      'Se solicitó a WhatsApp Web la siguiente generación de QR',
+    );
   }
 
   public async sendMessage(chatId: string, text: string, replyToMessageId?: string): Promise<void> {
@@ -978,7 +1012,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
     const client = this.client ?? this.createClient();
     if (this.client === null) {
       this.client = client;
-      this.generation += 1;
+      this.generation = allocateClientGeneration();
       this.authenticatedHandled = false;
       this.readyHandled = false;
       this.ready = false;
@@ -989,6 +1023,9 @@ export class WhatsAppWebAdapter implements MessagingClient {
     this.registerHandlers(client, operationGeneration);
     try {
       await client.initialize();
+      if (this.isCurrent(client, operationGeneration)) {
+        await this.detectRuntimeVersions(client, operationGeneration);
+      }
     } catch (error) {
       if (this.client !== client || this.generation !== operationGeneration) return;
       throw error;
@@ -996,8 +1033,10 @@ export class WhatsAppWebAdapter implements MessagingClient {
   }
 
   private async destroyOnce(): Promise<void> {
+    const initialization = this.initialization;
+    if (initialization !== null) await initialization.catch(() => undefined);
     const client = this.client;
-    this.generation += 1;
+    this.generation = allocateClientGeneration();
     this.client = null;
     this.initialization = null;
     this.initializationRequested = false;
@@ -1012,6 +1051,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
     try {
       await client.destroy();
     } catch (error) {
+      const browserStillConnected = client.pupBrowser?.isConnected?.() === true;
       this.logger.warn(
         {
           ...serializeError(error, 'WHATSAPP_CLIENT_DESTROY_FAILED', this.options.developmentMode),
@@ -1019,24 +1059,59 @@ export class WhatsAppWebAdapter implements MessagingClient {
         },
         'El cliente ya estaba cerrado o no pudo cerrarse completamente',
       );
+      if (browserStillConnected) {
+        throw new Error('Chromium continúa activo después de destroy().', { cause: error });
+      }
+    }
+    if (client.pupBrowser?.isConnected?.() === true) {
+      throw new Error('Chromium continúa activo después de destroy().');
+    }
+  }
+
+  private async detectRuntimeVersions(
+    client: WhatsAppClient,
+    clientGeneration: number,
+  ): Promise<void> {
+    try {
+      const webVersion = await client.getWWebVersion();
+      if (!this.isCurrent(client, clientGeneration)) return;
+      this.logger.info(
+        { operation: 'WHATSAPP_WEB_VERSION_DETECTED', clientGeneration, webVersion },
+        'Se detectó la versión real de WhatsApp Web',
+      );
+    } catch (error) {
+      this.logger.debug(
+        {
+          operation: 'WHATSAPP_WEB_VERSION_DETECTION_FAILED',
+          clientGeneration,
+          errorCode: serializeError(error, 'WEB_VERSION_UNAVAILABLE', false).errorCode,
+        },
+        'No fue posible detectar la versión de WhatsApp Web',
+      );
+    }
+    try {
+      const browserVersion = await client.pupBrowser?.version();
+      if (browserVersion === undefined || !this.isCurrent(client, clientGeneration)) return;
+      this.logger.info(
+        { operation: 'WHATSAPP_BROWSER_VERSION_DETECTED', clientGeneration, browserVersion },
+        'Se detectó la versión real de Chromium',
+      );
+    } catch (error) {
+      this.logger.debug(
+        {
+          operation: 'WHATSAPP_BROWSER_VERSION_DETECTION_FAILED',
+          clientGeneration,
+          errorCode: serializeError(error, 'BROWSER_VERSION_UNAVAILABLE', false).errorCode,
+        },
+        'No fue posible detectar la versión de Chromium',
+      );
     }
   }
 
   private createClient(): WhatsAppClient {
     return (
       this.clientFactory?.() ??
-      new Client({
-        authStrategy: new LocalAuth({
-          dataPath: this.options.sessionPath,
-          clientId: this.options.clientId ?? 'comunidad',
-        }),
-        puppeteer: {
-          headless: true,
-          ...(this.options.chromeExecutablePath === undefined
-            ? {}
-            : { executablePath: this.options.chromeExecutablePath }),
-        },
-      })
+      new Client(buildWhatsAppClientOptions(this.options))
     );
   }
 
@@ -1054,9 +1129,15 @@ export class WhatsAppWebAdapter implements MessagingClient {
     client.on('qr', (qr: string) => {
       if (!this.isCurrent(client, generation)) return;
       this.events?.onStateChange('waiting_qr');
-      this.events?.onQr(qr);
-      this.logger.info('Se generó un QR; escanéalo desde WhatsApp. El contenido no se registrará.');
-      qrcode.generate(qr, { small: true });
+      this.events?.onQr(qr, { clientGeneration: generation });
+      this.logger.info(
+        {
+          operation: 'WHATSAPP_QR_GENERATED',
+          clientGeneration: generation,
+          qrFingerprint: this.anonymizer.fingerprint(['whatsapp-qr', qr]),
+        },
+        'WhatsApp Web emitió una nueva generación de QR',
+      );
     });
     client.on('authenticated', () => {
       if (!this.isCurrent(client, generation)) return;
@@ -1069,7 +1150,10 @@ export class WhatsAppWebAdapter implements MessagingClient {
       }
       this.authenticatedHandled = true;
       this.events?.onStateChange('authenticated');
-      this.logger.info({ clientGeneration: generation }, 'La sesión de WhatsApp fue autenticada.');
+      this.logger.info(
+        { operation: 'WHATSAPP_AUTHENTICATED', clientGeneration: generation },
+        'La sesión de WhatsApp fue autenticada.',
+      );
     });
     client.on('ready', () => {
       if (!this.isCurrent(client, generation) || this.readyHandled) return;
@@ -1079,7 +1163,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
       this.botIdentityResolution = this.resolveBotIdentifierAliases(client, generation);
       this.logger.info(
         {
-          operation: 'clientReady',
+          operation: 'WHATSAPP_LINK_READY',
           clientGeneration: generation,
           activeClient: this.isCurrent(client, generation),
           messageListeners: client.listenerCount('message'),
@@ -1107,8 +1191,9 @@ export class WhatsAppWebAdapter implements MessagingClient {
       this.events?.onStateChange('auth_failure', message);
       this.logger.error(
         {
-          ...serializeError(message, 'AUTH_FAILURE', this.options.developmentMode),
-          operation: 'authenticateClient',
+          errorCode: normalizeWhatsAppErrorCode(message),
+          operation: 'WHATSAPP_LINK_FAILED',
+          clientGeneration: generation,
         },
         'Falló la autenticación de WhatsApp.',
       );
@@ -1119,10 +1204,27 @@ export class WhatsAppWebAdapter implements MessagingClient {
       this.events?.onStateChange('disconnected', reason);
       this.logger.warn(
         {
-          ...serializeError(reason, 'WHATSAPP_DISCONNECTED', this.options.developmentMode),
-          operation: 'disconnectClient',
+          errorCode: normalizeWhatsAppErrorCode(reason),
+          operation: 'WHATSAPP_DISCONNECTED',
+          clientGeneration: generation,
         },
         'Se perdió la conexión con WhatsApp.',
+      );
+    });
+    client.on('change_state', (state: string) => {
+      if (!this.isCurrent(client, generation)) return;
+      const normalizedState = normalizeWhatsAppState(state);
+      this.events?.onWhatsAppStateChange?.(normalizedState, generation);
+      this.logger.info(
+        {
+          operation:
+            normalizedState === 'PAIRING'
+              ? 'WHATSAPP_PAIRING_STARTED'
+              : 'WHATSAPP_STATE_CHANGED',
+          clientGeneration: generation,
+          whatsappState: normalizedState,
+        },
+        'WhatsApp Web cambió de estado',
       );
     });
     client.on('message', async (message: unknown) => {
@@ -2225,4 +2327,28 @@ function safeConstructorName(value: unknown): string {
   } catch {
     return 'UnknownChat';
   }
+}
+
+function allocateClientGeneration(): number {
+  nextClientGeneration += 1;
+  return nextClientGeneration;
+}
+
+function normalizeWhatsAppState(state: string): string {
+  const normalized = state.trim().toUpperCase();
+  const knownStates = new Set([
+    'CONFLICT',
+    'CONNECTED',
+    'DEPRECATED_VERSION',
+    'OPENING',
+    'PAIRING',
+    'PROXYBLOCK',
+    'SMB_TOS_BLOCK',
+    'TIMEOUT',
+    'TOS_BLOCK',
+    'UNLAUNCHED',
+    'UNPAIRED',
+    'UNPAIRED_IDLE',
+  ]);
+  return knownStates.has(normalized) ? normalized : 'UNKNOWN';
 }

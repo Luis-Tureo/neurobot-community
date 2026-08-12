@@ -70,4 +70,46 @@ describe('máquina de conexión y reconexión', () => {
     expect(client.destroyCalls).toBe(1);
     vi.useRealTimers();
   });
+
+  it('no inicializa otro cliente mientras destroy sigue pendiente', async () => {
+    let finishDestroy: (() => void) | undefined;
+    const client = new SimulatedMessagingClient();
+    client.destroy = vi.fn(
+      async () =>
+        new Promise<void>((resolve) => {
+          finishDestroy = resolve;
+        }),
+    );
+    const manager = new ConnectionManager(client, createLogger('silent'), {
+      maxAttempts: 3,
+      maxDelayMs: 100,
+    });
+
+    const restart = manager.restart();
+    await vi.waitFor(() => expect(client.destroy).toHaveBeenCalledOnce());
+    expect(client.initializeCalls).toBe(0);
+    finishDestroy?.();
+    await restart;
+    expect(client.initializeCalls).toBe(1);
+  });
+
+  it('cancela un reconnect pendiente durante resetting', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new SimulatedMessagingClient();
+      const manager = new ConnectionManager(client, createLogger('silent'), {
+        maxAttempts: 3,
+        maxDelayMs: 100,
+        baseDelayMs: 10,
+      });
+      manager.updateState('disconnected', 'network');
+      await manager.resetForNewLink();
+      expect(manager.snapshot().state).toBe('resetting');
+      await vi.advanceTimersByTimeAsync(20);
+      expect(client.destroyCalls).toBe(1);
+      expect(client.initializeCalls).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

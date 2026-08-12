@@ -1,4 +1,13 @@
-import { lstat, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -24,6 +33,29 @@ describe('WhatsAppSessionManager', () => {
     } as BotRecord;
 
     await expect(manager.archiveIfPresent(bot)).resolves.toBeNull();
+  });
+
+  it('archiva la sesión anterior fuera de la carpeta activa y crea una carpeta limpia', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'neurobot-session-'));
+    temporaryDirectories.push(root);
+    const sessionPath = join(root, 'sessions', 'neurobot');
+    const profilePath = join(sessionPath, 'session-comunidad');
+    await mkdir(profilePath, { recursive: true });
+    await writeFile(join(profilePath, 'estado-criptografico'), 'estado-anterior', 'utf8');
+    const manager = new WhatsAppSessionManager(
+      join(root, 'sessions'),
+      join(root, 'backups', 'sessions'),
+    );
+    const bot = { id: 'neurobot', clientId: 'comunidad', sessionPath } as BotRecord;
+
+    const result = await manager.archiveForNewLink(bot);
+
+    expect(result.backupPath).not.toBeNull();
+    expect(result.backupPath?.startsWith(sessionPath)).toBe(false);
+    await expect(readdir(sessionPath)).resolves.toEqual([]);
+    await expect(
+      readFile(join(result.backupPath as string, 'session-comunidad', 'estado-criptografico'), 'utf8'),
+    ).resolves.toBe('estado-anterior');
   });
 
   it('elimina artefactos Singleton huérfanos antes de abrir el perfil persistente', async () => {
@@ -75,6 +107,8 @@ describe('WhatsAppSessionManager', () => {
       } as BotRecord;
 
       await manager.pathFor(bot);
+      await expect(lstat(lockPath)).resolves.toMatchObject({ isSymbolicLink: expect.any(Function) });
+      await expect(manager.archiveForNewLink(bot)).rejects.toThrow('Chromium continúa activo');
       await expect(lstat(lockPath)).resolves.toMatchObject({ isSymbolicLink: expect.any(Function) });
     });
   }
