@@ -277,10 +277,45 @@ describe('resúmenes comunitarios', () => {
         'No incluyas fechas, días, horas, horarios ni marcas de tiempo',
       );
       expect(request?.systemInstruction).toContain('Sintetiza por temas');
-      expect(request?.question).toContain('máximo de cuatro viñetas');
+      expect(request?.systemInstruction).toContain('exactamente un solo párrafo continuo');
+      expect(request?.systemInstruction).toContain('entre tres y cinco emojis relevantes');
+      expect(request?.systemInstruction).toContain('No uses asteriscos');
+      expect(request?.question).toContain('un único párrafo temático');
       expect(request?.context).toBe('- Se conversó sobre mejorar las reglas del grupo.');
       expect(request?.context).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
       expect(request?.maximumOutputTokens).toBe(400);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('elimina asteriscos y agrega emojis antes de enviar el resumen', async () => {
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async () => ({
+        text: [
+          '· *Bienvenida y preguntas*: Se conversó sobre el propósito del grupo.',
+          '- *Acuerdos*: Se propuso aclarar las reglas.',
+          '*Convivencia*: No se observaron alertas generales.',
+        ].join('\n'),
+        usage: { inputTokens: 20, outputTokens: 15, totalTokens: 35 },
+      }),
+    };
+    const { database, client, service } = createSubject(NOW, provider);
+    try {
+      const result = await service.sendManual('weekly', GROUP_ID, NOW);
+      const sentText = client.sentMessages[0]?.text ?? '';
+
+      expect(result.status).toBe('SENT');
+      expect(result.summary).not.toContain('*');
+      expect(result.summary).not.toContain('\n');
+      expect(sentText).not.toContain('*');
+      expect(sentText).toContain('💬 Bienvenida y preguntas:');
+      expect(sentText).toContain('🧩 Acuerdos:');
+      expect(sentText).toContain('🤝 Convivencia:');
+      expect(sentText).toContain(
+        '💬 Bienvenida y preguntas: Se conversó sobre el propósito del grupo. 🧩 Acuerdos:',
+      );
     } finally {
       database.close();
     }

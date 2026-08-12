@@ -742,19 +742,19 @@ export class CommunityDigestService {
     }
     const response = await this.provider.generateGroundedResponse({
       systemInstruction:
-        'Resume conversaciones comunitarias de forma breve, amistosa y fiel. Sintetiza por temas: explica de qué se conversó, qué acuerdos o conclusiones surgieron y qué asuntos relevantes quedaron pendientes. Agrupa mensajes repetidos y omite saludos, respuestas breves al bot y detalles operativos que no aporten al tema. No redactes una cronología ni describas cada mensaje por separado. No incluyas fechas, días, horas, horarios ni marcas de tiempo, aunque aparezcan en el contexto; si se coordinó una actividad, menciona solo que se coordinó. No inventes datos. No incluyas nombres, teléfonos, correos, identificadores ni citas textuales extensas. Empieza directamente con el contenido, sin frases introductorias. Agrega al final una línea breve llamada “Convivencia” indicando si hubo posibles incumplimientos generales que deban revisar los administradores, sin acusar ni sancionar a nadie.',
+        'Resume conversaciones comunitarias de forma breve, cálida, respetuosa y fiel para una comunidad neurodivergente. Usa lenguaje claro, directo, inclusivo y no infantilizante. Sintetiza por temas: explica de qué se conversó, qué acuerdos o conclusiones surgieron y qué asuntos relevantes quedaron pendientes. Agrupa mensajes repetidos y omite saludos, respuestas breves al bot y detalles operativos que no aporten al tema. No redactes una cronología ni describas cada mensaje por separado. No incluyas fechas, días, horas, horarios ni marcas de tiempo, aunque aparezcan en el contexto; si se coordinó una actividad, menciona solo que se coordinó. No inventes datos. No incluyas nombres, teléfonos, correos, identificadores ni citas textuales extensas. Devuelve exactamente un solo párrafo continuo, sin listas, viñetas, títulos ni saltos de línea. Empieza directamente con el contenido, sin frases introductorias. Integra entre tres y cinco emojis relevantes y variados de forma natural, por ejemplo 💬, 🧩, 💡, 🌱 o 📌. No uses asteriscos, negritas ni ningún formato Markdown. Finaliza el mismo párrafo con una frase breve iniciada con “🤝 Convivencia:” indicando si hubo posibles incumplimientos generales que deban revisar los administradores, sin acusar ni sancionar a nadie.',
       question:
         period === 'daily'
-          ? 'Genera un resumen temático muy breve de la conversación en un máximo de tres viñetas, más la línea de Convivencia.'
+          ? 'Genera un único párrafo temático muy breve de hasta cuatro oraciones, incluida la frase de Convivencia.'
           : period === 'weekly'
-            ? 'Genera un resumen temático muy breve de la conversación en un máximo de cuatro viñetas, más la línea de Convivencia.'
-            : 'Genera un resumen temático muy breve de la conversación en un máximo de cinco viñetas, más la línea de Convivencia.',
+            ? 'Genera un único párrafo temático muy breve de hasta cinco oraciones, incluida la frase de Convivencia.'
+            : 'Genera un único párrafo temático muy breve de hasta seis oraciones, incluida la frase de Convivencia.',
       context: contextLines.join('\n'),
       maximumOutputTokens: 400,
       temperature: 0.1,
       timeoutMs: 45_000,
     });
-    const summary = response.text.trim().slice(0, 2000);
+    const summary = formatDigestSummary(response.text).slice(0, 2000);
     if (summary === '') {
       const error = new Error('AI_EMPTY_RESPONSE');
       (error as Error & { code: string }).code = 'AI_EMPTY_RESPONSE';
@@ -1363,6 +1363,30 @@ function digestHeading(period: CommunityDigestPeriod): string {
   if (period === 'daily') return '📝 Resumen del día';
   if (period === 'weekly') return '🗓️ Resumen semanal';
   return '📅 Resumen mensual';
+}
+
+const DIGEST_TOPIC_EMOJIS = ['💬', '🧩', '💡', '🌱', '📌'] as const;
+
+function formatDigestSummary(value: string): string {
+  let topicIndex = 0;
+  return value
+    .replace(/\*/gu, '')
+    .split(/\r?\n/gu)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const content = line.replace(/^(?:[-•·]|\d+[.)])\s*/u, '').trim();
+      if (/^(?:🤝\s*)?Convivencia\s*:/iu.test(content)) {
+        return `🤝 ${content.replace(/^🤝\s*/u, '')}`;
+      }
+      if (/^[\p{Extended_Pictographic}\p{Emoji_Presentation}]/u.test(content)) return content;
+      const emoji = DIGEST_TOPIC_EMOJIS[topicIndex % DIGEST_TOPIC_EMOJIS.length];
+      topicIndex += 1;
+      return `${emoji} ${content}`;
+    })
+    .join(' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
 }
 
 function sanitizeBody(value: string): string {
