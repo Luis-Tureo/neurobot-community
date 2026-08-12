@@ -33,24 +33,22 @@ function ensureWelcomeScheduleUI() {
 
   const section = document.createElement('div');
   section.id = 'welcome-schedule-settings';
-  section.className = 'card inset';
+  section.className = 'welcome-schedule-card';
   section.innerHTML = `
-    <div class="section-heading">
+    <div class="welcome-schedule-heading">
       <div>
         <h4>Horarios de bienvenida</h4>
-        <p class="muted">
-          Los nuevos integrantes quedan pendientes hasta el próximo horario. Si no hay ingresos
-          nuevos, no se envía ningún mensaje.
+        <p>
+          Envía un único saludo en cada horario. Si no hay ingresos nuevos, no se envía ningún mensaje.
         </p>
       </div>
+      <span class="welcome-schedule-timezone-label" title="Se ajusta automáticamente al horario de verano e invierno de Chile">
+        <span aria-hidden="true">◷</span>
+        <span id="welcome-schedule-timezone">${escapeHtml(WELCOME_TIMEZONE_LABEL)}</span>
+      </span>
     </div>
-    <p class="muted">
-      <strong>Zona horaria:</strong>
-      <span id="welcome-schedule-timezone">${escapeHtml(WELCOME_TIMEZONE_LABEL)}</span>
-    </p>
-    <p class="muted">Se ajusta automáticamente al horario de verano/invierno de Chile.</p>
-    <div id="welcome-schedule-times"></div>
-    <div class="actions">
+    <div id="welcome-schedule-times" class="welcome-schedule-times" aria-label="Horarios configurados"></div>
+    <div class="welcome-schedule-actions">
       <button id="welcome-schedule-add" class="secondary" type="button">+ Agregar horario</button>
       <button id="welcome-schedule-save" type="button">Guardar horarios</button>
     </div>
@@ -163,20 +161,22 @@ function renderTimes(times) {
 
 function createTimeRow(time) {
   const row = document.createElement('div');
-  row.className = 'form-row welcome-schedule-row';
+  row.className = 'welcome-schedule-row';
   const label = document.createElement('label');
-  label.textContent = 'Hora';
+  const labelText = document.createElement('span');
+  labelText.className = 'welcome-schedule-row-label';
+  labelText.textContent = 'Horario';
   const input = document.createElement('input');
   input.type = 'time';
   input.step = '60';
   input.value = time;
   input.dataset.welcomeTime = '';
-  input.addEventListener('change', updateSummary);
-  label.append(input);
+  input.addEventListener('change', () => updateSummary());
+  label.append(labelText, input);
 
   const remove = document.createElement('button');
   remove.type = 'button';
-  remove.className = 'secondary';
+  remove.className = 'secondary welcome-schedule-remove';
   remove.textContent = 'Quitar';
   remove.addEventListener('click', () => {
     const allRows = document.querySelectorAll('[data-welcome-time]');
@@ -191,6 +191,19 @@ function createTimeRow(time) {
   return row;
 }
 
+function updateTimeRowLabels() {
+  const rows = [...document.querySelectorAll('.welcome-schedule-row')];
+  rows.forEach((row, index) => {
+    const position = index + 1;
+    const label = row.querySelector('.welcome-schedule-row-label');
+    const input = row.querySelector('[data-welcome-time]');
+    const remove = row.querySelector('.welcome-schedule-remove');
+    if (label) label.textContent = `Horario ${position}`;
+    if (input) input.setAttribute('aria-label', `Horario de bienvenida ${position}`);
+    if (remove) remove.setAttribute('aria-label', `Quitar horario ${position}`);
+  });
+}
+
 function collectTimes() {
   return [...document.querySelectorAll('[data-welcome-time]')]
     .map((input) => input.value)
@@ -199,6 +212,7 @@ function collectTimes() {
 }
 
 function updateSummary(prefix = '') {
+  updateTimeRowLabels();
   const summary = document.querySelector('#welcome-schedule-summary');
   if (!summary) return;
   const times = collectTimes();

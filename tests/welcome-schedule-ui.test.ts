@@ -14,6 +14,8 @@ describe('interfaz de horarios de bienvenida', () => {
     expect(schedule).toContain('Guardar horarios');
     expect(schedule).toContain('Próximo saludo:');
     expect(schedule).toContain('Lista ordenada de nuevos integrantes');
+    expect(schedule).toContain('welcome-schedule-actions');
+    expect(schedule).toContain('Quitar horario ${position}');
   });
 
   it('guarda de uno a ocho horarios con sesión y CSRF', () => {
