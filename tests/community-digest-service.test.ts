@@ -247,6 +247,45 @@ describe('resúmenes comunitarios', () => {
     }
   });
 
+  it('pide a la IA un resumen temático breve sin fechas ni horarios', async () => {
+    let request:
+      | Parameters<AIProvider['generateGroundedResponse']>[0]
+      | undefined;
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async (receivedRequest) => {
+        request = receivedRequest;
+        return createProvider().generateGroundedResponse(receivedRequest);
+      },
+    };
+    const { database, client, service } = createSubject(NOW, provider);
+    try {
+      client.recentGroupMessages.set(GROUP_ID, [
+        {
+          id: 'tema-1',
+          body: 'Se conversó sobre mejorar las reglas del grupo.',
+          timestampMs: NOW.getTime() - 60_000,
+          fromMe: false,
+          participantId: null,
+        },
+      ]);
+
+      await service.sendManual('weekly', GROUP_ID, NOW);
+
+      expect(request).toBeDefined();
+      expect(request?.systemInstruction).toContain(
+        'No incluyas fechas, días, horas, horarios ni marcas de tiempo',
+      );
+      expect(request?.systemInstruction).toContain('Sintetiza por temas');
+      expect(request?.question).toContain('máximo de cuatro viñetas');
+      expect(request?.context).toBe('- Se conversó sobre mejorar las reglas del grupo.');
+      expect(request?.context).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
+      expect(request?.maximumOutputTokens).toBe(400);
+    } finally {
+      database.close();
+    }
+  });
+
   it('no envía un resumen antes de la hora configurada', async () => {
     const scheduled = new Date('2026-08-06T19:00:00.000Z');
     const { database, client, service } = createSubject(scheduled);

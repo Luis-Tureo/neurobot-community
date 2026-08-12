@@ -733,26 +733,28 @@ export class CommunityDigestService {
     for (const message of messages) {
       const text = sanitizeBody(message.body);
       if (text === '') continue;
-      const line = `[${new Date(message.timestampMs).toISOString()}] ${text}`;
+      // La ventana temporal ya fue aplicada al recuperar el historial. No exponemos
+      // marcas de tiempo a la IA para evitar que convierta el resumen en una cronología.
+      const line = `- ${text}`;
       if (characterCount + line.length > configuration.maxCharacters) break;
       contextLines.push(line);
       characterCount += line.length;
     }
     const response = await this.provider.generateGroundedResponse({
       systemInstruction:
-        'Resume conversaciones comunitarias de forma breve, amistosa y fiel. No inventes datos. No incluyas nombres, teléfonos, correos, identificadores ni citas textuales extensas. Agrega al final una línea breve llamada “Convivencia” indicando si hubo posibles incumplimientos generales que deban revisar los administradores, sin acusar ni sancionar a nadie.',
+        'Resume conversaciones comunitarias de forma breve, amistosa y fiel. Sintetiza por temas: explica de qué se conversó, qué acuerdos o conclusiones surgieron y qué asuntos relevantes quedaron pendientes. Agrupa mensajes repetidos y omite saludos, respuestas breves al bot y detalles operativos que no aporten al tema. No redactes una cronología ni describas cada mensaje por separado. No incluyas fechas, días, horas, horarios ni marcas de tiempo, aunque aparezcan en el contexto; si se coordinó una actividad, menciona solo que se coordinó. No inventes datos. No incluyas nombres, teléfonos, correos, identificadores ni citas textuales extensas. Empieza directamente con el contenido, sin frases introductorias. Agrega al final una línea breve llamada “Convivencia” indicando si hubo posibles incumplimientos generales que deban revisar los administradores, sin acusar ni sancionar a nadie.',
       question:
         period === 'daily'
-          ? 'Genera el resumen comunitario del día en un máximo de seis viñetas.'
+          ? 'Genera un resumen temático muy breve de la conversación en un máximo de tres viñetas, más la línea de Convivencia.'
           : period === 'weekly'
-            ? 'Genera el resumen comunitario de los últimos siete días en un máximo de ocho viñetas.'
-            : 'Genera el resumen comunitario del último mes en un máximo de diez viñetas.',
+            ? 'Genera un resumen temático muy breve de la conversación en un máximo de cuatro viñetas, más la línea de Convivencia.'
+            : 'Genera un resumen temático muy breve de la conversación en un máximo de cinco viñetas, más la línea de Convivencia.',
       context: contextLines.join('\n'),
-      maximumOutputTokens: 700,
+      maximumOutputTokens: 400,
       temperature: 0.1,
       timeoutMs: 45_000,
     });
-    const summary = response.text.trim().slice(0, 3500);
+    const summary = response.text.trim().slice(0, 2000);
     if (summary === '') {
       const error = new Error('AI_EMPTY_RESPONSE');
       (error as Error & { code: string }).code = 'AI_EMPTY_RESPONSE';
