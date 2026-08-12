@@ -2414,13 +2414,45 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       if (context.database.getBot(botId) === null)
         return reply.code(404).send({ error: 'Asistente no encontrado.' });
       const qr = context.multiBotManager?.qr(botId) ?? null;
+      const query = z
+        .object({ afterGeneration: z.coerce.number().int().nonnegative().optional() })
+        .parse(request.query);
+      const isNewEnough =
+        qr !== null &&
+        (query.afterGeneration === undefined || qr.qrGeneration > query.afterGeneration);
+      const ageMs = qr === null ? null : Math.max(0, Date.now() - qr.generatedAt);
       return {
-        available: qr !== null,
+        available: isNewEnough,
         image:
-          qr === null
+          !isNewEnough || qr === null
             ? null
-            : await QRCode.toDataURL(qr, { errorCorrectionLevel: 'M', margin: 2, width: 320 }),
+            : await QRCode.toDataURL(qr.value, {
+                errorCorrectionLevel: 'M',
+                margin: 2,
+                width: 320,
+              }),
+        generatedAt: qr === null ? null : new Date(qr.generatedAt).toISOString(),
+        ageMs,
+        generation: qr?.qrGeneration ?? null,
+        clientGeneration: qr?.clientGeneration ?? null,
       };
+    },
+  );
+
+  app.post(
+    '/api/bots/:botId/qr/refresh',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request, reply) => {
+      if (context.multiBotManager === undefined) {
+        return reply.code(503).send({ error: 'El gestor multibot no está disponible.' });
+      }
+      const botId = parseBotId(request.params);
+      if (context.database.getBot(botId) === null) {
+        return reply.code(404).send({ error: 'Asistente no encontrado.' });
+      }
+      const afterGeneration = await context.multiBotManager.requestQrRefresh(botId);
+      audit(context, 'bot_qr_refresh', botId, 'requested', botId);
+      return { requested: true, afterGeneration };
     },
   );
 
@@ -2428,7 +2460,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     '/api/bots/:botId/unlink',
     { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
     async (request, reply) => {
-      if (context.multiBotManager === undefined || context.sessionManager === undefined) {
+      if (context.multiBotManager === undefined) {
         return reply.code(503).send({ error: 'La administración de sesiones no está disponible.' });
       }
       const botId = parseBotId(request.params);
@@ -2437,12 +2469,13 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         .parse(request.body);
       const bot = context.database.getBot(botId);
       if (bot === null) return reply.code(404).send({ error: 'Asistente no encontrado.' });
-      await context.multiBotManager.stop(botId);
-      const backupPath = await context.sessionManager.archive(bot);
-      context.database.releaseBotWhatsAppIdentity(botId);
-      await context.multiBotManager.start(botId);
+      const { backupPath } = await context.multiBotManager.linkNewNumber(botId);
       audit(context, 'bot_unlink', botId, 'ok', botId);
-      return { unlinked: true, backupCreated: true, backupName: basename(backupPath) };
+      return {
+        unlinked: true,
+        backupCreated: backupPath !== null,
+        backupName: backupPath === null ? null : basename(backupPath),
+      };
     },
   );
 

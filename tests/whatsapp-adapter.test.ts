@@ -4,13 +4,14 @@ import type { Client as WhatsAppClient } from 'whatsapp-web.js';
 import type { GroupChangeEvent, GroupJoinEvent, IncomingMessage } from '../src/domain/types.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import {
+  buildWhatsAppClientOptions,
   readGroupMessageHistoryInBrowser,
   WhatsAppWebAdapter,
 } from '../src/messaging/whatsapp-adapter.js';
 import { Anonymizer } from '../src/security/anonymizer.js';
 
 class FakeWhatsAppClient extends EventEmitter {
-  public readonly initialize = vi.fn(async () => undefined);
+  public readonly initialize = vi.fn(async (): Promise<void> => undefined);
   public readonly destroy = vi.fn(async () => undefined);
   public readonly sendMessage = vi.fn(async (): Promise<unknown> => undefined);
   public readonly getState = vi.fn(async () => 'CONNECTED');
@@ -122,6 +123,18 @@ function rawMessage(overrides: Record<string, unknown> = {}): Record<string, unk
 }
 
 describe('adaptador de WhatsApp', () => {
+  it('configura webVersionCache none solo para una vinculación completamente nueva', () => {
+    const base = {
+      sessionPath: 'sesion-de-prueba',
+      maxMessageLength: 2000,
+      developmentMode: false,
+    };
+    expect(buildWhatsAppClientOptions(base).webVersionCache).toBeUndefined();
+    expect(
+      buildWhatsAppClientOptions({ ...base, freshLinkingSession: true }).webVersionCache,
+    ).toEqual({ type: 'none' });
+  });
+
   it('construye y envía una encuesta nativa con respuesta única o múltiple', async () => {
     const { adapter, fake } = createSubject();
     await adapter.initialize();
@@ -245,6 +258,42 @@ describe('adaptador de WhatsApp', () => {
     expect(fake.listenerCount('group_leave')).toBe(0);
     expect(fake.listenerCount('group_update')).toBe(0);
     expect(fake.destroy).toHaveBeenCalledOnce();
+  });
+
+  it('espera el fin de initialize antes de ejecutar destroy', async () => {
+    let finishInitialization: (() => void) | undefined;
+    const { adapter, fake } = createSubject();
+    fake.initialize.mockImplementationOnce(
+      async () =>
+        new Promise<void>((resolve) => {
+          finishInitialization = resolve;
+        }),
+    );
+
+    const initialization = adapter.initialize();
+    await vi.waitFor(() => expect(fake.initialize).toHaveBeenCalledOnce());
+    const destruction = adapter.destroy();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(fake.destroy).not.toHaveBeenCalled();
+    finishInitialization?.();
+    await Promise.all([initialization, destruction]);
+    expect(fake.destroy).toHaveBeenCalledOnce();
+  });
+
+  it('solicita la siguiente referencia QR sin registrar ni reemitir el contenido anterior', async () => {
+    const captured = createCapturedLogger();
+    const { adapter, fake } = createSubject({ logger: captured.logger });
+    fake.pupPage = { evaluate: vi.fn(async () => undefined) };
+    await adapter.initialize();
+    fake.emit('qr', 'qr-super-secreto-no-registrable');
+
+    await adapter.requestQrRefresh();
+
+    expect(fake.pupPage.evaluate).toHaveBeenCalledWith(
+      "window.require('WAWebCmd').Cmd.refreshQR()",
+    );
+    expect(JSON.stringify(captured.entries)).not.toContain('qr-super-secreto-no-registrable');
+    expect(JSON.stringify(captured.entries)).toContain('WHATSAPP_QR_REFRESHED');
   });
 
   it('un chat incompatible no impide detectar los grupos posteriores', async () => {

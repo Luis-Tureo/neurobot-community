@@ -5,6 +5,8 @@ let qrPollTimer = null;
 let qrPollStartedAt = 0;
 let qrPollBotId = null;
 let qrRequestInFlight = false;
+let qrAfterGeneration = null;
+let lastRenderedGeneration = null;
 
 function selectedBotIdFromHash() {
   const match = window.location.hash.match(/^#assistants\/([^/]+)/u);
@@ -17,6 +19,8 @@ function clearQrPolling() {
   qrPollStartedAt = 0;
   qrPollBotId = null;
   qrRequestInFlight = false;
+  qrAfterGeneration = null;
+  lastRenderedGeneration = null;
 }
 
 function ensureQrLinkingCard() {
@@ -47,9 +51,28 @@ function ensureQrLinkingCard() {
   refreshButton.type = 'button';
   refreshButton.className = 'secondary';
   refreshButton.textContent = 'Actualizar código';
-  refreshButton.addEventListener('click', () => {
+  refreshButton.addEventListener('click', async () => {
     const botId = selectedBotIdFromHash();
-    if (botId) startQrPolling(botId, { restartTimer: false });
+    if (!botId || refreshButton.disabled) return;
+    refreshButton.disabled = true;
+    clearQrImage();
+    showQrCard('Solicitando un código QR nuevo…');
+    try {
+      const session = await fetchJson('/api/auth/session');
+      const result = await fetchJson(
+        `/api/bots/${encodeURIComponent(botId)}/qr/refresh`,
+        {
+          method: 'POST',
+          headers: { 'x-csrf-token': session.csrfToken },
+        },
+      );
+      qrAfterGeneration = result.afterGeneration;
+      startQrPolling(botId);
+    } catch (error) {
+      showQrCard(error instanceof Error ? error.message : 'No fue posible renovar el código QR.');
+    } finally {
+      refreshButton.disabled = false;
+    }
   });
 
   heading.append(headingText, refreshButton);
@@ -86,8 +109,11 @@ function showQrCard(message = 'Preparando código QR…') {
   return card;
 }
 
-function renderQrImage(image) {
-  const card = showQrCard('Código QR listo. Escanéalo desde WhatsApp.');
+function renderQrImage(image, generation, generatedAt) {
+  if (lastRenderedGeneration !== null && generation <= lastRenderedGeneration) return;
+  lastRenderedGeneration = generation;
+  const generatedLabel = generatedAt ? ` Generación ${generation}.` : '';
+  const card = showQrCard(`Código QR nuevo listo.${generatedLabel} Escanéalo desde WhatsApp.`);
   const target = card?.querySelector('#qr-linking-image');
   if (!target) return;
   target.replaceChildren();
@@ -119,8 +145,8 @@ function connectionStateLabel(state) {
   );
 }
 
-async function fetchJson(path) {
-  const response = await fetch(path);
+async function fetchJson(path, options = {}) {
+  const response = await fetch(path, options);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || 'No fue posible consultar el estado de WhatsApp.');
   return payload;
@@ -131,8 +157,12 @@ async function pollQr(botId) {
   qrRequestInFlight = true;
   try {
     const encodedBotId = encodeURIComponent(botId);
+    const qrPath =
+      qrAfterGeneration === null
+        ? `/api/bots/${encodedBotId}/qr`
+        : `/api/bots/${encodedBotId}/qr?afterGeneration=${encodeURIComponent(qrAfterGeneration)}`;
     const [qr, detail] = await Promise.all([
-      fetchJson(`/api/bots/${encodedBotId}/qr`),
+      fetchJson(qrPath),
       fetchJson(`/api/bots/${encodedBotId}`),
     ]);
     if (qrPollBotId !== botId) return;
@@ -141,7 +171,7 @@ async function pollQr(botId) {
     const phoneNumber = detail.bot?.phoneNumber || null;
 
     if (qr.available && qr.image) {
-      renderQrImage(qr.image);
+      renderQrImage(qr.image, qr.generation, qr.generatedAt);
     } else {
       clearQrImage();
       if (['connected', 'loading_chats'].includes(connectionState) || phoneNumber) {
@@ -189,14 +219,13 @@ function startQrPolling(botId, { restartTimer = true } = {}) {
   void pollQr(botId);
 }
 
-function handleLinkingClick(event) {
-  const button = event.target.closest?.('#change-bot-number');
-  if (!button) return;
-  const botId = selectedBotIdFromHash();
+function handleLinkingStarted(event) {
+  const botId = event.detail?.botId;
   if (!botId) return;
-
+  clearQrPolling();
   showQrCard('Preparando código QR…');
-  window.setTimeout(() => startQrPolling(botId), 600);
+  clearQrImage();
+  startQrPolling(botId);
 }
 
 function handleHashChange() {
@@ -207,7 +236,7 @@ function handleHashChange() {
 function installQrLinkingUi() {
   if (window.__neurobotQrLinkingUiInstalled) return;
   window.__neurobotQrLinkingUiInstalled = true;
-  document.addEventListener('click', handleLinkingClick);
+  document.addEventListener('neurobot:linking-started', handleLinkingStarted);
   window.addEventListener('hashchange', handleHashChange);
 }
 

@@ -1675,18 +1675,19 @@ async function changeBotNumber() {
       { title: 'Cambiar número', confirmLabel: 'Cambiar número' },
     );
     if (!confirmed) return;
-    await panelApi(`/api/bots/${encodeURIComponent(bot.id)}/unlink`, {
-      method: 'POST',
-      body: JSON.stringify({ confirmed: true }),
-    });
-    notify('Sesión archivada. Escanea el código para vincular el nuevo número.');
-  } else {
-    await panelApi(`/api/bots/${encodeURIComponent(bot.id)}/restart`, {
-      method: 'POST',
-      body: '{}',
-    });
-    notify('Asistente listo para vincular un número.');
   }
+  await panelApi(`/api/bots/${encodeURIComponent(bot.id)}/unlink`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true }),
+  });
+  notify(
+    bot.phoneNumber
+      ? 'Sesión archivada. Escanea el código para vincular el nuevo número.'
+      : 'Sesión de vinculación renovada. Escanea el código nuevo.',
+  );
+  document.dispatchEvent(
+    new window.CustomEvent('neurobot:linking-started', { detail: { botId: bot.id } }),
+  );
   await Promise.all([loadBots(), loadBotSummary(false), loadWhatsApp()]);
 }
 
