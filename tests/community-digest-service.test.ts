@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
-import type { AIProvider } from '../src/ai/ai-provider.js';
+import { AIProviderError, type AIProvider } from '../src/ai/ai-provider.js';
 import { CommunityDigestService } from '../src/core/community-digest-service.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
@@ -538,6 +538,7 @@ describe('resumen diario — centro de pruebas', () => {
       const result = await service.sendManual('daily', GROUP_ID, NOW);
       expect(result.status).toBe('FAILED');
       expect(result.errorCode).toBe('AI_SUMMARY_FAILED');
+      expect(result.causeCode).toBe('AI_TEMPORARY_ERROR');
       expect(client.sentMessages).toHaveLength(0);
     } finally {
       database.close();
@@ -581,6 +582,7 @@ describe('resumen diario — centro de pruebas', () => {
       const result = await service.sendManual('daily', GROUP_ID, NOW);
       expect(result.status).toBe('FAILED');
       expect(result.errorCode).toBe('AI_SUMMARY_FAILED');
+      expect(result.causeCode).toBe('AI_EMPTY_RESPONSE');
       expect(client.sentMessages).toHaveLength(0);
     } finally {
       database.close();
@@ -839,7 +841,208 @@ describe('resumen diario — centro de pruebas', () => {
       const result = await service.sendManual('daily', GROUP_ID, NOW);
       expect(result.status).toBe('FAILED');
       expect(result.errorCode).toBe('AI_SUMMARY_FAILED');
+      expect(result.causeCode).toBe('AI_NOT_CONFIGURED');
       expect(client.sentMessages).toHaveLength(0);
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe('sanitización y contexto grande de resúmenes', () => {
+  it('elimina URLs largas y compacta enlaces repetidos antes de llamar a la IA', async () => {
+    const contexts: string[] = [];
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async (request) => {
+        contexts.push(request.context);
+        return createProvider().generateGroundedResponse(request);
+      },
+    };
+    const { database, client, service } = createSubject(NOW, provider);
+    try {
+      client.recentGroupMessages.set(
+        GROUP_ID,
+        Array.from({ length: 80 }, (_, index) => ({
+          id: `url-${index}`,
+          body: `https://cdn.example.com/download/${'a'.repeat(500)}?token=secreto-${index}`,
+          timestampMs: NOW.getTime() - index * 1_000,
+          fromMe: false,
+          participantId: null,
+          messageType: 'chat',
+        })),
+      );
+
+      const result = await service.sendManual('daily', GROUP_ID, NOW);
+
+      expect(result.status).toBe('SENT');
+      expect(contexts).toHaveLength(1);
+      expect(contexts[0]).toContain('[enlace omitido] (80 mensajes similares)');
+      expect(contexts[0]).not.toContain('https://');
+      expect(contexts[0]).not.toContain('token=');
+      expect(contexts[0]?.length).toBeLessThan(2_000);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('conserva captions útiles y representa multimedia sin exponer URLs ni metadata', async () => {
+    let context = '';
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async (request) => {
+        context = request.context;
+        return createProvider().generateGroundedResponse(request);
+      },
+    };
+    const { database, client, service } = createSubject(NOW, provider);
+    try {
+      client.recentGroupMessages.set(GROUP_ID, [
+        {
+          id: 'image-caption',
+          body: 'Material para conversar sobre accesibilidad https://cdn.example.com/private/image.jpg',
+          timestampMs: NOW.getTime() - 4_000,
+          fromMe: false,
+          participantId: null,
+          messageType: 'image',
+        },
+        {
+          id: 'image-without-caption',
+          body: 'https://cdn.example.com/private/image-with-token.jpg?token=muy-secreto',
+          timestampMs: NOW.getTime() - 3_000,
+          fromMe: false,
+          participantId: null,
+          messageType: 'image',
+        },
+        {
+          id: 'video-without-caption',
+          body: '',
+          timestampMs: NOW.getTime() - 2_000,
+          fromMe: false,
+          participantId: null,
+          messageType: 'video',
+        },
+        {
+          id: 'document-metadata',
+          body: '{"url":"https://files.example.com/private.pdf","mimetype":"application/pdf","id":"internal-123"}',
+          timestampMs: NOW.getTime() - 1_000,
+          fromMe: false,
+          participantId: null,
+          messageType: 'document',
+        },
+      ]);
+
+      const result = await service.sendManual('monthly', GROUP_ID, NOW);
+
+      expect(result).toMatchObject({ status: 'SENT', messageCount: 4 });
+      expect(context).toContain(
+        '[Imagen compartida] Material para conversar sobre accesibilidad [enlace omitido]',
+      );
+      expect(context).toContain('- [Imagen compartida]');
+      expect(context).toContain('- [Video compartido]');
+      expect(context).toContain('- [Documento compartido]');
+      expect(context).not.toContain('https://');
+      expect(context).not.toContain('mimetype');
+      expect(context).not.toContain('internal-123');
+      expect(context).not.toContain('muy-secreto');
+    } finally {
+      database.close();
+    }
+  });
+
+  it('resume todos los bloques con map-reduce cuando se supera el límite configurado', async () => {
+    const requests: Array<Parameters<AIProvider['generateGroundedResponse']>[0]> = [];
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async (request) => {
+        requests.push(request);
+        return createProvider().generateGroundedResponse(request);
+      },
+    };
+    const { database, client, service } = createSubject(NOW, provider);
+    try {
+      const configuration = service.configuration();
+      configuration.maxCharacters = 2_000;
+      service.saveConfiguration(configuration);
+      client.recentGroupMessages.set(
+        GROUP_ID,
+        Array.from({ length: 12 }, (_, index) => ({
+          id: `large-${index}`,
+          body: `Tema único ${index} ${Array.from({ length: 90 }, (_, word) => `detalle-${index}-${word}`).join(' ')}`,
+          timestampMs: NOW.getTime() - (12 - index) * 1_000,
+          fromMe: false,
+          participantId: null,
+          messageType: 'chat',
+        })),
+      );
+
+      const result = await service.sendManual('weekly', GROUP_ID, NOW);
+
+      expect(result.status).toBe('SENT');
+      expect(requests.length).toBeGreaterThan(2);
+      expect(requests.every((request) => request.context.length <= 2_000)).toBe(true);
+      expect(requests.some((request) => request.context.includes('Tema único 0'))).toBe(true);
+      expect(requests.some((request) => request.context.includes('Tema único 11'))).toBe(true);
+      expect(requests.at(-1)?.question).toContain('cinco oraciones');
+    } finally {
+      database.close();
+    }
+  });
+
+  it.each([
+    ['AI_TIMEOUT', 'AI_TIMEOUT'],
+    ['AI_PROVIDER_RATE_LIMITED', 'AI_PROVIDER_RATE_LIMITED'],
+  ] as const)('conserva la causa segura %s en el resultado manual', async (providerCode, expected) => {
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async () => {
+        throw new AIProviderError(providerCode, 'Detalle interno no apto para el panel.');
+      },
+      classifyProviderError: () => providerCode,
+    };
+    const { database, client, service } = createSubject(NOW, provider);
+    try {
+      const result = await service.sendManual('daily', GROUP_ID, NOW);
+      expect(result).toMatchObject({
+        status: 'FAILED',
+        errorCode: 'AI_SUMMARY_FAILED',
+        causeCode: expected,
+      });
+      expect(JSON.stringify(result)).not.toContain('Detalle interno');
+      expect(client.sentMessages).toHaveLength(0);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('devuelve CONTEXT_TOO_LARGE de forma segura si el número de bloques excede el límite', async () => {
+    const generate = vi.fn(createProvider().generateGroundedResponse);
+    const provider: AIProvider = { ...createProvider(), generateGroundedResponse: generate };
+    const { database, client, service } = createSubject(NOW, provider);
+    try {
+      const configuration = service.configuration();
+      configuration.maxCharacters = 2_000;
+      service.saveConfiguration(configuration);
+      client.recentGroupMessages.set(
+        GROUP_ID,
+        Array.from({ length: 400 }, (_, index) => ({
+          id: `huge-${index}`,
+          body: `Mensaje ${index} ${Array.from({ length: 90 }, (_, word) => `contenido-${index}-${word}`).join(' ')}`,
+          timestampMs: NOW.getTime() - index,
+          fromMe: false,
+          participantId: null,
+          messageType: 'chat',
+        })),
+      );
+
+      const result = await service.sendManual('monthly', GROUP_ID, NOW);
+
+      expect(result).toMatchObject({
+        status: 'FAILED',
+        errorCode: 'AI_SUMMARY_FAILED',
+        causeCode: 'CONTEXT_TOO_LARGE',
+      });
+      expect(generate).not.toHaveBeenCalled();
     } finally {
       database.close();
     }

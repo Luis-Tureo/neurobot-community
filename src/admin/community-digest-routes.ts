@@ -143,7 +143,11 @@ export function registerCommunityDigestRoutes(
       const statusCode = result.status === 'SKIPPED' ? 200 : 502;
       return reply
         .code(statusCode)
-        .send({ ...result, error: digestErrorMessage(result.errorCode) });
+        .send({
+          ...result,
+          code: result.errorCode,
+          error: digestErrorMessage(result.errorCode),
+        });
     },
   );
 
@@ -217,9 +221,11 @@ function digestErrorMessage(errorCode: string | null): string {
     AI_INVALID_KEY: 'Las credenciales del proveedor de IA no son válidas.',
     AI_MODEL_UNAVAILABLE: 'El modelo de IA no está disponible.',
     AI_PROVIDER_RATE_LIMITED: 'Se alcanzó la cuota del proveedor de IA.',
+    AI_EMPTY_RESPONSE: 'El proveedor de IA devolvió una respuesta vacía.',
     AI_INVALID_RESPONSE: 'El proveedor de IA devolvió una respuesta inválida.',
     AI_TEMPORARY_ERROR: 'Error temporal del proveedor de IA.',
     AI_PERMANENT_ERROR: 'Error permanente del proveedor de IA.',
+    CONTEXT_TOO_LARGE: 'La conversación es demasiado extensa para resumirla de forma segura.',
   };
   if (errorCode === null) return 'La prueba no pudo completarse.';
   return messages[errorCode] ?? 'La prueba no pudo completarse.';

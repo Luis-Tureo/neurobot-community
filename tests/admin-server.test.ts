@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Response as InjectResponse } from 'light-my-request';
-import type { AIProvider } from '../src/ai/ai-provider.js';
+import { AIProviderError, type AIProvider } from '../src/ai/ai-provider.js';
 import { AIProviderFactory } from '../src/ai/ai-provider-factory.js';
 import { buildAdminServer } from '../src/admin/server.js';
 import { AutomaticMessageService } from '../src/core/automatic-message-service.js';
@@ -184,6 +184,69 @@ describe('API administrativa', () => {
       });
       expect(invalid.statusCode).toBe(400);
       expect(service.configuration().monthly.dayOfMonth).toBe('last');
+    } finally {
+      unregisterCommunityDigestService('neurobot', service);
+    }
+  });
+
+  it('expone una causa segura cuando falla la IA en la prueba manual de resumen', async () => {
+    const groupId = 'grupo-resumen-error@g.us';
+    const anonymizer = new Anonymizer('x'.repeat(32));
+    database.synchronizeBotGroup('neurobot', {
+      id: groupId,
+      name: 'Grupo de resumen',
+      botIsMember: true,
+    });
+    client.recentGroupMessages.set(groupId, [
+      {
+        id: 'mensaje-error',
+        body: 'Conversación para probar el timeout.',
+        timestampMs: Date.now() - 1_000,
+        fromMe: false,
+        participantId: null,
+        messageType: 'chat',
+      },
+    ]);
+    const provider: AIProvider = {
+      isConfigured: () => true,
+      testConnection: async () => ({ successful: true }),
+      generateGroundedResponse: async () => {
+        throw new AIProviderError('AI_TIMEOUT', 'token=detalle-privado');
+      },
+      getModelInformation: () => ({ provider: 'test', model: 'test' }),
+      normalizeUsage: () => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
+      classifyProviderError: () => 'AI_TIMEOUT',
+    };
+    const service = new CommunityDigestService(
+      database,
+      client,
+      provider,
+      createLogger('silent'),
+      anonymizer,
+      { botId: 'neurobot' },
+    );
+    registerCommunityDigestService('neurobot', service);
+    try {
+      const auth = await login(app);
+      const response = await injectAuthenticated(app, auth, {
+        method: 'POST',
+        url: '/api/automatic-messages/digests/send-test',
+        payload: {
+          groupKey: anonymizer.identifier(groupId),
+          period: 'daily',
+          confirmed: true,
+        },
+      });
+
+      expect(response.statusCode).toBe(502);
+      expect(response.json()).toMatchObject({
+        status: 'FAILED',
+        error: 'La IA no pudo generar el resumen.',
+        code: 'AI_SUMMARY_FAILED',
+        errorCode: 'AI_SUMMARY_FAILED',
+        causeCode: 'AI_TIMEOUT',
+      });
+      expect(response.body).not.toContain('detalle-privado');
     } finally {
       unregisterCommunityDigestService('neurobot', service);
     }
