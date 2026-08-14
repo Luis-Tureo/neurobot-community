@@ -126,6 +126,7 @@ async function api(path, options = {}) {
   if (!response.ok) {
     const error = new Error(payload.error || 'La prueba no pudo completarse.');
     error.code = payload.code;
+    error.causeCode = payload.causeCode;
     error.validation = payload.validation;
     throw error;
   }
@@ -414,7 +415,7 @@ async function execute(test, button) {
         await test.run(groupKey);
         completed += 1;
       } catch (error) {
-        failures.push(error.message);
+        failures.push(formatTestFailure(error));
       }
     }
     if (failures.length > 0) {
@@ -468,9 +469,21 @@ async function sendDigestTest(period, groupKey) {
   if (result.status === 'SKIPPED' || result.status === 'FAILED') {
     const error = new Error(result.error || 'La prueba no pudo completarse.');
     error.code = result.errorCode;
+    error.causeCode = result.causeCode;
     throw error;
   }
   return result;
+}
+
+function formatTestFailure(error) {
+  const message = error instanceof Error ? error.message : 'La prueba no pudo completarse.';
+  const causeCode =
+    typeof error?.causeCode === 'string' && /^[A-Z][A-Z0-9_-]{2,79}$/.test(error.causeCode)
+      ? error.causeCode
+      : null;
+  return causeCode === null || message.endsWith(`· ${causeCode}`)
+    ? message
+    : `${message} · ${causeCode}`;
 }
 
 function renderBotValidation(validation) {

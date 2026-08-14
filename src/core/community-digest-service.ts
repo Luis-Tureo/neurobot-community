@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import type { AIProvider } from '../ai/ai-provider.js';
+import type { AIProvider, AIProviderErrorCode } from '../ai/ai-provider.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import {
   GroupMessageHistoryError,
@@ -38,6 +38,7 @@ export type CommunityDigestResult = {
   messageCount: number;
   summary: string | null;
   errorCode: string | null;
+  causeCode: string | null;
 };
 
 export const DEFAULT_COMMUNITY_DIGEST_CONFIGURATION: CommunityDigestConfiguration = {
@@ -75,6 +76,7 @@ type DigestRunRecord = {
   status: CommunityDigestResult['status'] | 'PENDING';
   messageCount: number;
   errorCode: string | null;
+  causeCode?: string | null;
   updatedAt: string;
 };
 
@@ -109,7 +111,28 @@ type StoredCommunityDigestConfiguration = Partial<CommunityDigestConfiguration> 
   monthly?: Partial<CommunityDigestConfiguration['monthly']> & { toleranceMinutes?: unknown };
 };
 
-const SUMMARIZABLE_MESSAGE_TYPES = new Set(['chat', 'image', 'video', 'document']);
+const DIGEST_CONTEXT_TARGET_CHARACTERS = 18_000;
+const DIGEST_MESSAGE_MAX_CHARACTERS = 600;
+const DIGEST_INTERMEDIATE_MAX_CHARACTERS = 1_200;
+const DIGEST_MAX_AI_CALLS = 96;
+const DIGEST_MAX_REDUCTION_LEVELS = 8;
+const SAFE_AI_CAUSE_CODES = new Set<string>([
+  'AI_NOT_CONFIGURED',
+  'AI_TIMEOUT',
+  'AI_NETWORK_ERROR',
+  'AI_INVALID_KEY',
+  'AI_MODEL_UNAVAILABLE',
+  'AI_PROVIDER_RATE_LIMITED',
+  'AI_EMPTY_RESPONSE',
+  'AI_INVALID_RESPONSE',
+  'AI_TEMPORARY_ERROR',
+  'AI_PERMANENT_ERROR',
+  'CONTEXT_TOO_LARGE',
+]);
+const FINAL_DIGEST_SYSTEM_INSTRUCTION =
+  'Resume conversaciones comunitarias de forma breve, cálida, respetuosa y fiel para una comunidad neurodivergente. Usa lenguaje claro, directo, inclusivo y no infantilizante. Sintetiza por temas: explica de qué se conversó, qué acuerdos o conclusiones surgieron y qué asuntos relevantes quedaron pendientes. Agrupa mensajes repetidos y omite saludos, respuestas breves al bot y detalles operativos que no aporten al tema. No redactes una cronología ni describas cada mensaje por separado. No incluyas fechas, días, horas, horarios ni marcas de tiempo, aunque aparezcan en el contexto; si se coordinó una actividad, menciona solo que se coordinó. No inventes datos. No incluyas nombres, teléfonos, correos, identificadores ni citas textuales extensas. Devuelve exactamente un solo párrafo continuo, sin listas, viñetas, títulos ni saltos de línea. Empieza directamente con el contenido, sin frases introductorias. Integra entre tres y cinco emojis relevantes y variados de forma natural, por ejemplo 💬, 🧩, 💡, 🌱 o 📌. No uses asteriscos, negritas ni ningún formato Markdown. Finaliza el mismo párrafo con una frase breve iniciada con “🤝 Convivencia:” indicando si hubo posibles incumplimientos generales que deban revisar los administradores, sin acusar ni sancionar a nadie.';
+const INTERMEDIATE_DIGEST_SYSTEM_INSTRUCTION =
+  'Resume únicamente el contexto entregado de forma factual y muy compacta. Conserva temas, acuerdos, pendientes y posibles alertas generales de convivencia. Agrupa repeticiones, omite saludos y detalles operativos. No incluyas nombres, teléfonos, correos, identificadores, URLs, fechas, horas ni citas extensas. No inventes datos y no agregues introducciones.';
 
 export class CommunityDigestService {
   private readonly botId: string;
@@ -298,6 +321,7 @@ export class CommunityDigestService {
             status: 'PENDING',
             messageCount: 0,
             errorCode: null,
+            causeCode: null,
             updatedAt: now.toISOString(),
           };
           this.database.setSetting(this.runStateKey(), runState);
@@ -308,6 +332,7 @@ export class CommunityDigestService {
             status: result.status,
             messageCount: result.messageCount,
             errorCode: result.errorCode,
+            causeCode: result.causeCode,
             updatedAt: this.now().toISOString(),
           };
           this.database.setSetting(this.runStateKey(), runState);
@@ -426,7 +451,7 @@ export class CommunityDigestService {
     const title = `Historial ${periodLabel(period)} anonimizado`;
     const lines = messages.map((message) => {
       const timestamp = new Date(message.timestampMs).toISOString();
-      return `[${timestamp}] ${sanitizeBody(message.body)}`;
+      return `[${timestamp}] ${digestMessageText(message)}`;
     });
     return [
       title,
@@ -558,6 +583,7 @@ export class CommunityDigestService {
         messageCount: 0,
         summary: null,
         errorCode: 'NO_MESSAGES_IN_PERIOD',
+        causeCode: null,
       });
     }
 
@@ -580,7 +606,7 @@ export class CommunityDigestService {
         groupHash,
         window,
         now,
-        failed(period, 'AI_SUMMARY_FAILED', messages.length),
+        failed(period, 'AI_SUMMARY_FAILED', messages.length, 'AI_NOT_CONFIGURED'),
       );
     }
 
@@ -609,7 +635,6 @@ export class CommunityDigestService {
       });
     } catch (error) {
       const causeCode = this.aiErrorCode(error);
-      const details = digestErrorDetails(error, groupId);
       this.event('COMMUNITY_DIGEST_AI_FAILED', {
         result: 'failed',
         period,
@@ -619,9 +644,7 @@ export class CommunityDigestService {
         errorCode: 'AI_SUMMARY_FAILED',
         causeCode,
         operation: 'generateCommunityDigest',
-        reason: details.message,
-        errorName: details.name,
-        ...(details.stack === undefined ? {} : { errorStack: details.stack }),
+        reason: `La generación del resumen falló con el código seguro ${causeCode}.`,
         window,
         at: now,
       });
@@ -630,7 +653,7 @@ export class CommunityDigestService {
         groupHash,
         window,
         now,
-        failed(period, 'AI_SUMMARY_FAILED', messages.length),
+        failed(period, 'AI_SUMMARY_FAILED', messages.length, causeCode),
       );
     }
 
@@ -690,6 +713,7 @@ export class CommunityDigestService {
       messageCount: messages.length,
       summary,
       errorCode: null,
+      causeCode: null,
     });
   }
 
@@ -714,10 +738,8 @@ export class CommunityDigestService {
           !message.fromMe &&
           message.timestampMs >= window.startMs &&
           message.timestampMs <= window.endMs &&
-          message.body.trim() !== '' &&
-          (message.messageType === undefined ||
-            message.messageType === null ||
-            SUMMARIZABLE_MESSAGE_TYPES.has(message.messageType)),
+          isTextDigestMessage(message) &&
+          digestMessageText(message) !== '',
       )
       .sort((left, right) => left.timestampMs - right.timestampMs);
     return { messages, history };
@@ -728,33 +750,84 @@ export class CommunityDigestService {
     messages: RecentGroupMessage[],
   ): Promise<string> {
     const configuration = this.configuration();
-    const contextLines: string[] = [];
-    let characterCount = 0;
-    for (const message of messages) {
-      const text = sanitizeBody(message.body);
-      if (text === '') continue;
-      // La ventana temporal ya fue aplicada al recuperar el historial. No exponemos
-      // marcas de tiempo a la IA para evitar que convierta el resumen en una cronología.
-      const line = `- ${text}`;
-      if (characterCount + line.length > configuration.maxCharacters) break;
-      contextLines.push(line);
-      characterCount += line.length;
+    // La ventana temporal ya fue aplicada al recuperar el historial. No exponemos
+    // marcas de tiempo a la IA para evitar que convierta el resumen en una cronología.
+    const contextLines = compactRepeatedContextLines(
+      messages.map(digestMessageText).filter((text) => text !== ''),
+    ).map((text) => `- ${text}`);
+    const contextLimit = Math.min(configuration.maxCharacters, DIGEST_CONTEXT_TARGET_CHARACTERS);
+    const originalChunks = packContextChunks(contextLines, contextLimit);
+    if (originalChunks.length === 0) throw codedError('AI_EMPTY_RESPONSE');
+    if (originalChunks.length >= DIGEST_MAX_AI_CALLS) throw codedError('CONTEXT_TOO_LARGE');
+
+    let aiCalls = 0;
+    const request = async (
+      systemInstruction: string,
+      question: string,
+      context: string,
+      maximumOutputTokens: number,
+    ): Promise<string> => {
+      aiCalls += 1;
+      if (aiCalls > DIGEST_MAX_AI_CALLS) throw codedError('CONTEXT_TOO_LARGE');
+      const response = await this.provider.generateGroundedResponse({
+        systemInstruction,
+        question,
+        context,
+        maximumOutputTokens,
+        temperature: 0.1,
+        timeoutMs: 45_000,
+      });
+      const text = response.text.trim();
+      if (text === '') throw codedError('AI_EMPTY_RESPONSE');
+      return text;
+    };
+
+    let finalContext = originalChunks[0] as string;
+    if (originalChunks.length > 1) {
+      let summaries: string[] = [];
+      for (const chunk of originalChunks) {
+        const mapped = await request(
+          INTERMEDIATE_DIGEST_SYSTEM_INSTRUCTION,
+          'Condensa este bloque por temas, acuerdos, pendientes y posibles alertas generales. Omite saludos y repeticiones. No inventes información.',
+          chunk,
+          300,
+        );
+        summaries.push(limitIntermediateSummary(mapped));
+      }
+
+      for (let level = 0; level < DIGEST_MAX_REDUCTION_LEVELS; level += 1) {
+        const reductionChunks = packContextChunks(
+          summaries.map((summary, index) => `- Bloque ${index + 1}: ${summary}`),
+          contextLimit,
+        );
+        if (reductionChunks.length === 1) {
+          finalContext = reductionChunks[0] as string;
+          break;
+        }
+        if (level + 1 >= DIGEST_MAX_REDUCTION_LEVELS) {
+          throw codedError('CONTEXT_TOO_LARGE');
+        }
+        const reduced: string[] = [];
+        for (const chunk of reductionChunks) {
+          const mapped = await request(
+            INTERMEDIATE_DIGEST_SYSTEM_INSTRUCTION,
+            'Fusiona estos resúmenes parciales sin perder temas, acuerdos, pendientes ni alertas generales. Elimina duplicados y no inventes información.',
+            chunk,
+            300,
+          );
+          reduced.push(limitIntermediateSummary(mapped));
+        }
+        summaries = reduced;
+      }
     }
-    const response = await this.provider.generateGroundedResponse({
-      systemInstruction:
-        'Resume conversaciones comunitarias de forma breve, cálida, respetuosa y fiel para una comunidad neurodivergente. Usa lenguaje claro, directo, inclusivo y no infantilizante. Sintetiza por temas: explica de qué se conversó, qué acuerdos o conclusiones surgieron y qué asuntos relevantes quedaron pendientes. Agrupa mensajes repetidos y omite saludos, respuestas breves al bot y detalles operativos que no aporten al tema. No redactes una cronología ni describas cada mensaje por separado. No incluyas fechas, días, horas, horarios ni marcas de tiempo, aunque aparezcan en el contexto; si se coordinó una actividad, menciona solo que se coordinó. No inventes datos. No incluyas nombres, teléfonos, correos, identificadores ni citas textuales extensas. Devuelve exactamente un solo párrafo continuo, sin listas, viñetas, títulos ni saltos de línea. Empieza directamente con el contenido, sin frases introductorias. Integra entre tres y cinco emojis relevantes y variados de forma natural, por ejemplo 💬, 🧩, 💡, 🌱 o 📌. No uses asteriscos, negritas ni ningún formato Markdown. Finaliza el mismo párrafo con una frase breve iniciada con “🤝 Convivencia:” indicando si hubo posibles incumplimientos generales que deban revisar los administradores, sin acusar ni sancionar a nadie.',
-      question:
-        period === 'daily'
-          ? 'Genera un único párrafo temático muy breve de hasta cuatro oraciones, incluida la frase de Convivencia.'
-          : period === 'weekly'
-            ? 'Genera un único párrafo temático muy breve de hasta cinco oraciones, incluida la frase de Convivencia.'
-            : 'Genera un único párrafo temático muy breve de hasta seis oraciones, incluida la frase de Convivencia.',
-      context: contextLines.join('\n'),
-      maximumOutputTokens: 400,
-      temperature: 0.1,
-      timeoutMs: 45_000,
-    });
-    const summary = formatDigestSummary(response.text).slice(0, 2000);
+
+    const responseText = await request(
+      FINAL_DIGEST_SYSTEM_INSTRUCTION,
+      digestQuestion(period),
+      finalContext,
+      400,
+    );
+    const summary = formatDigestSummary(responseText).slice(0, 2000);
     if (summary === '') {
       const error = new Error('AI_EMPTY_RESPONSE');
       (error as Error & { code: string }).code = 'AI_EMPTY_RESPONSE';
@@ -765,11 +838,12 @@ export class CommunityDigestService {
 
   private aiErrorCode(error: unknown): string {
     const explicitCode = safeErrorCode(error, 'AI_TEMPORARY_ERROR');
-    if (explicitCode !== 'AI_TEMPORARY_ERROR') return explicitCode;
+    if (SAFE_AI_CAUSE_CODES.has(explicitCode)) return explicitCode;
     try {
-      return this.provider.classifyProviderError(error);
+      const classified: AIProviderErrorCode = this.provider.classifyProviderError(error);
+      return SAFE_AI_CAUSE_CODES.has(classified) ? classified : 'AI_TEMPORARY_ERROR';
     } catch {
-      return explicitCode;
+      return 'AI_TEMPORARY_ERROR';
     }
   }
 
@@ -786,6 +860,7 @@ export class CommunityDigestService {
       groupHash,
       itemCount: result.messageCount,
       errorCode: result.errorCode,
+      causeCode: result.causeCode,
       window,
       at,
     });
@@ -1389,15 +1464,87 @@ function formatDigestSummary(value: string): string {
     .trim();
 }
 
-function sanitizeBody(value: string): string {
+function digestMessageText(message: RecentGroupMessage): string {
+  return sanitizeDigestText(message.body);
+}
+
+function isTextDigestMessage(message: RecentGroupMessage): boolean {
+  const messageType = message.messageType?.trim().toLowerCase();
+  return messageType === undefined || messageType === '' || messageType === 'chat';
+}
+
+function sanitizeDigestText(value: string, limit = DIGEST_MESSAGE_MAX_CHARACTERS): string {
   return value
     .normalize('NFKC')
+    .replace(/data:[^\s<>'"]+/giu, '[contenido multimedia omitido]')
+    .replace(/blob:[^\s<>'"]+/giu, '[contenido multimedia omitido]')
+    .replace(/(?:https?|ftp):\/\/[^\s<>'"]+|\bwww\.[^\s<>'"]+/giu, '[enlace omitido]')
+    .replace(/\b[A-Za-z0-9+/=_-]{80,}\b/gu, '[contenido multimedia omitido]')
     .replace(/\b[A-Z0-9._%+-]{2,64}@[A-Z0-9.-]+\.[A-Z]{2,24}\b/giu, '[correo omitido]')
     .replace(/(?:\+?\d[\s().-]*){7,15}/gu, '[número omitido]')
+    .replace(
+      /[\w.-]{2,160}@(g\.us|c\.us|s\.whatsapp\.net|lid|newsletter|broadcast)/giu,
+      '[identificador omitido]',
+    )
+    .replace(
+      /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu,
+      '[identificador omitido]',
+    )
     .replace(/[\p{Cc}\u202a-\u202e\u2066-\u2069]/gu, ' ')
     .replace(/\s+/gu, ' ')
     .trim()
-    .slice(0, 1200);
+    .slice(0, limit);
+}
+
+function compactRepeatedContextLines(values: string[]): string[] {
+  const entries = new Map<string, { text: string; count: number }>();
+  for (const text of values) {
+    const key = text.toLocaleLowerCase('es-CL');
+    const existing = entries.get(key);
+    if (existing === undefined) entries.set(key, { text, count: 1 });
+    else existing.count += 1;
+  }
+  return [...entries.values()].map(({ text, count }) =>
+    count === 1 ? text : `${text} (${count} mensajes similares)`,
+  );
+}
+
+function packContextChunks(lines: string[], characterLimit: number): string[] {
+  const chunks: string[] = [];
+  let current: string[] = [];
+  let characterCount = 0;
+  for (const line of lines) {
+    const additionalCharacters = line.length + (current.length === 0 ? 0 : 1);
+    if (line.length > characterLimit) throw codedError('CONTEXT_TOO_LARGE');
+    if (current.length > 0 && characterCount + additionalCharacters > characterLimit) {
+      chunks.push(current.join('\n'));
+      current = [];
+      characterCount = 0;
+    }
+    current.push(line);
+    characterCount += line.length + (current.length === 1 ? 0 : 1);
+  }
+  if (current.length > 0) chunks.push(current.join('\n'));
+  return chunks;
+}
+
+function limitIntermediateSummary(value: string): string {
+  return value
+    .replace(/(?:https?|ftp):\/\/[^\s<>'"]+|\bwww\.[^\s<>'"]+/giu, '[enlace omitido]')
+    .replace(/[\p{Cc}\u202a-\u202e\u2066-\u2069]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .slice(0, DIGEST_INTERMEDIATE_MAX_CHARACTERS);
+}
+
+function digestQuestion(period: CommunityDigestPeriod): string {
+  if (period === 'daily') {
+    return 'Genera un único párrafo temático muy breve de hasta cuatro oraciones, incluida la frase de Convivencia.';
+  }
+  if (period === 'weekly') {
+    return 'Genera un único párrafo temático muy breve de hasta cinco oraciones, incluida la frase de Convivencia.';
+  }
+  return 'Genera un único párrafo temático muy breve de hasta seis oraciones, incluida la frase de Convivencia.';
 }
 
 function scheduledDateAtMinute(
@@ -1431,6 +1578,7 @@ function failed(
   period: CommunityDigestPeriod,
   errorCode: string,
   messageCount = 0,
+  causeCode: string | null = null,
 ): CommunityDigestResult {
   return {
     period,
@@ -1438,5 +1586,6 @@ function failed(
     messageCount,
     summary: null,
     errorCode,
+    causeCode,
   };
 }

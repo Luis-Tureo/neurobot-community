@@ -65,5 +65,8 @@ describe('centro de pruebas de automatizaciones', () => {
     expect(script).toContain("result.status === 'FAILED'");
     expect(script).toContain('result.error');
     expect(script).toContain('result.errorCode');
+    expect(script).toContain('result.causeCode');
+    expect(script).toContain('formatTestFailure(error)');
+    expect(script).toContain('`${message} · ${causeCode}`');
   });
 });
