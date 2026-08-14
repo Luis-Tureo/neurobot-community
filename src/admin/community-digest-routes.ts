@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { AdminServerContext } from './server-base.js';
 import { SessionStore } from './session-store.js';
 import { getCommunityDigestService } from '../core/community-digest-registry.js';
+import { MAX_GROUP_MESSAGE_HISTORY } from '../messaging/messaging-client.js';
 
 const COOKIE_NAME = 'panel_session';
 
@@ -43,7 +44,7 @@ const configurationSchema = z
         sendTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u),
       })
       .strict(),
-    maxMessages: z.number().int().min(20).max(2000),
+    maxMessages: z.number().int().min(20).max(MAX_GROUP_MESSAGE_HISTORY),
     maxCharacters: z.number().int().min(2000).max(100_000),
   })
   .strict();
@@ -141,13 +142,11 @@ export function registerCommunityDigestRoutes(
       const result = await service.sendManual(input.period, groupId);
       if (result.status === 'SENT') return reply.code(200).send(result);
       const statusCode = result.status === 'SKIPPED' ? 200 : 502;
-      return reply
-        .code(statusCode)
-        .send({
-          ...result,
-          code: result.errorCode,
-          error: digestErrorMessage(result.errorCode),
-        });
+      return reply.code(statusCode).send({
+        ...result,
+        code: result.errorCode,
+        error: digestErrorMessage(result.errorCode),
+      });
     },
   );
 

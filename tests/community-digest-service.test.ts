@@ -848,6 +848,91 @@ describe('resumen diario — centro de pruebas', () => {
 });
 
 describe('sanitización y contexto grande de resúmenes', () => {
+  it('incluye todos los mensajes de texto de las últimas 24 horas aunque superen el límite antiguo', async () => {
+    const requests: Array<Parameters<AIProvider['generateGroundedResponse']>[0]> = [];
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async (request) => {
+        requests.push(request);
+        return createProvider().generateGroundedResponse(request);
+      },
+    };
+    const { database, client, service } = createSubject(NOW, provider);
+    const originalFetch = client.fetchGroupMessageHistory.bind(client);
+    let requestedLimit = 0;
+    client.fetchGroupMessageHistory = async (request) => {
+      requestedLimit = request.maxMessages;
+      return originalFetch(request);
+    };
+    try {
+      client.recentGroupMessages.set(
+        GROUP_ID,
+        Array.from({ length: 2_500 }, (_, index) => ({
+          id: `active-day-${index}`,
+          body: `Mensaje completo del día ${index} sobre el tema comunitario ${index}.`,
+          timestampMs: NOW.getTime() - (2_500 - index) * 1_000,
+          fromMe: false,
+          participantId: null,
+          messageType: 'chat',
+        })),
+      );
+
+      const result = await service.sendManual('daily', GROUP_ID, NOW);
+      const allContexts = requests.map((request) => request.context).join('\n');
+
+      expect(requestedLimit).toBe(10_000);
+      expect(result).toMatchObject({ status: 'SENT', messageCount: 2_500 });
+      expect(requests.length).toBeGreaterThan(2);
+      expect(allContexts).toContain('Mensaje completo del día 0');
+      expect(allContexts).toContain('Mensaje completo del día 1250');
+      expect(allContexts).toContain('Mensaje completo del día 2499');
+      expect(client.sentMessages).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('no genera un resumen parcial si WhatsApp no alcanzó el inicio de las 24 horas', async () => {
+    const generate = vi.fn(createProvider().generateGroundedResponse);
+    const provider: AIProvider = { ...createProvider(), generateGroundedResponse: generate };
+    const { database, client, service } = createSubject(NOW, provider);
+    client.fetchGroupMessageHistory = async (request) => ({
+      messages: [
+        {
+          id: 'partial-message',
+          body: 'Este mensaje aislado no representa todo el día.',
+          timestampMs: NOW.getTime() - 60_000,
+          fromMe: false,
+          participantId: null,
+          messageType: 'chat',
+        },
+      ],
+      canonicalGroupId: request.groupId,
+      resolvedChatId: request.groupId,
+      groupName: 'Grupo parcial',
+      resolvedChatType: 'group',
+      cachedMessageCount: 1,
+      loadedMessageCount: 9_999,
+      pageCount: 500,
+      reachedPeriodStart: false,
+      historyExhausted: false,
+      safetyLimitReached: true,
+    });
+    try {
+      const result = await service.sendManual('daily', GROUP_ID, NOW);
+
+      expect(result).toMatchObject({
+        status: 'FAILED',
+        messageCount: 0,
+        errorCode: 'CHAT_HISTORY_FAILED',
+      });
+      expect(generate).not.toHaveBeenCalled();
+      expect(client.sentMessages).toHaveLength(0);
+    } finally {
+      database.close();
+    }
+  });
+
   it('elimina URLs largas y compacta enlaces repetidos antes de llamar a la IA', async () => {
     const contexts: string[] = [];
     const provider: AIProvider = {
@@ -1096,7 +1181,7 @@ describe('sanitización y contexto grande de resúmenes', () => {
       service.saveConfiguration(configuration);
       client.recentGroupMessages.set(
         GROUP_ID,
-        Array.from({ length: 400 }, (_, index) => ({
+        Array.from({ length: 2_000 }, (_, index) => ({
           id: `huge-${index}`,
           body: `Mensaje ${index} ${Array.from({ length: 90 }, (_, word) => `contenido-${index}-${word}`).join(' ')}`,
           timestampMs: NOW.getTime() - index,
@@ -1724,6 +1809,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
         daily: { enabled: true, sendTime: '21:00' },
         weekly: { enabled: true, weekday: 'Sun', sendTime: '14:00' },
         monthly: { enabled: true, dayOfMonth: 'last', sendTime: '21:00' },
+        maxMessages: 10_000,
       });
       expect(configuration.daily).not.toHaveProperty('toleranceMinutes');
       expect(configuration.weekly).not.toHaveProperty('toleranceMinutes');

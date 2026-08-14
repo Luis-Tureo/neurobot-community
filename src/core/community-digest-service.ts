@@ -3,6 +3,7 @@ import type { AIProvider, AIProviderErrorCode } from '../ai/ai-provider.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import {
   GroupMessageHistoryError,
+  MAX_GROUP_MESSAGE_HISTORY,
   type GroupMessageHistory,
   type MessagingClient,
   type RecentGroupMessage,
@@ -46,7 +47,7 @@ export const DEFAULT_COMMUNITY_DIGEST_CONFIGURATION: CommunityDigestConfiguratio
   daily: { enabled: false, sendTime: '19:00' },
   weekly: { enabled: false, weekday: 'Sun', sendTime: '19:00' },
   monthly: { enabled: false, dayOfMonth: 'last', sendTime: '19:00' },
-  maxMessages: 500,
+  maxMessages: MAX_GROUP_MESSAGE_HISTORY,
   maxCharacters: 24_000,
 };
 
@@ -114,7 +115,7 @@ type StoredCommunityDigestConfiguration = Partial<CommunityDigestConfiguration> 
 const DIGEST_CONTEXT_TARGET_CHARACTERS = 18_000;
 const DIGEST_MESSAGE_MAX_CHARACTERS = 600;
 const DIGEST_INTERMEDIATE_MAX_CHARACTERS = 1_200;
-const DIGEST_MAX_AI_CALLS = 96;
+const DIGEST_MAX_AI_CALLS = 512;
 const DIGEST_MAX_REDUCTION_LEVELS = 8;
 const SAFE_AI_CAUSE_CODES = new Set<string>([
   'AI_NOT_CONFIGURED',
@@ -732,6 +733,13 @@ export class CommunityDigestService {
       periodEndMs: window.endMs,
       maxMessages: configuration.maxMessages,
     });
+    if (history.safetyLimitReached && !history.reachedPeriodStart && !history.historyExhausted) {
+      throw new GroupMessageHistoryError(
+        'CHAT_HISTORY_FAILED',
+        'verifyCompleteHistoryPeriod',
+        new Error('CHAT_HISTORY_INCOMPLETE'),
+      );
+    }
     const messages = history.messages
       .filter(
         (message) =>
@@ -1211,7 +1219,15 @@ function normalizeConfiguration(
           ? configuration.monthly.sendTime
           : fallback.monthly.sendTime,
     },
-    maxMessages: boundedInteger(configuration.maxMessages, 20, 2000, fallback.maxMessages),
+    maxMessages: Math.max(
+      boundedInteger(
+        configuration.maxMessages,
+        20,
+        MAX_GROUP_MESSAGE_HISTORY,
+        fallback.maxMessages,
+      ),
+      fallback.maxMessages,
+    ),
     maxCharacters: boundedInteger(
       configuration.maxCharacters,
       2000,
@@ -1235,7 +1251,7 @@ function assertValidConfiguration(configuration: CommunityDigestConfiguration): 
   if (
     !Number.isInteger(configuration.maxMessages) ||
     configuration.maxMessages < 20 ||
-    configuration.maxMessages > 2000
+    configuration.maxMessages > MAX_GROUP_MESSAGE_HISTORY
   ) {
     throw codedError('INVALID_MAX_MESSAGES');
   }

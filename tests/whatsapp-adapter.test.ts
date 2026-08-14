@@ -401,10 +401,14 @@ describe('adaptador de WhatsApp', () => {
       groupId: 'grupo-normal@g.us',
       periodStartMs: 1_786_000_000_000,
       periodEndMs: 1_786_300_000_000,
-      maxMessages: 500,
+      maxMessages: 10_000,
     });
 
     expect(fake.getChatById).not.toHaveBeenCalled();
+    expect(fake.pupPage.evaluate).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ maxMessages: 10_000 }),
+    );
     expect(result).toMatchObject({
       resolvedChatId: 'grupo-normal@g.us',
       resolvedChatType: 'group',
