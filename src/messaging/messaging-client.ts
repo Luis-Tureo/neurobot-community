@@ -38,6 +38,8 @@ export type RecentGroupMessage = {
   messageType?: string | null;
 };
 
+export const MAX_GROUP_MESSAGE_HISTORY = 10_000;
+
 export type GroupMessageHistoryRequest = {
   groupId: string;
   periodStartMs: number;

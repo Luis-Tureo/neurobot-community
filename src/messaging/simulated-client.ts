@@ -1,7 +1,8 @@
-import type {
-  GroupMessageHistory,
-  GroupMessageHistoryRequest,
-  RecentGroupMessage,
+import {
+  MAX_GROUP_MESSAGE_HISTORY,
+  type GroupMessageHistory,
+  type GroupMessageHistoryRequest,
+  type RecentGroupMessage,
 } from './messaging-client.js';
 import { SimulatedMessagingClient as BaseSimulatedMessagingClient } from './simulated-client-base.js';
 
@@ -13,7 +14,10 @@ export class SimulatedMessagingClient extends BaseSimulatedMessagingClient {
   public async fetchGroupMessageHistory(
     request: GroupMessageHistoryRequest,
   ): Promise<GroupMessageHistory> {
-    const cappedLimit = Math.max(20, Math.min(2000, Math.trunc(request.maxMessages)));
+    const cappedLimit = Math.max(
+      20,
+      Math.min(MAX_GROUP_MESSAGE_HISTORY, Math.trunc(request.maxMessages)),
+    );
     const messages = (this.recentGroupMessages.get(request.groupId) ?? []).slice(-cappedLimit);
     return {
       messages,

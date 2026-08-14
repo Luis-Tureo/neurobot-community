@@ -6,6 +6,7 @@ El módulo **Centro de pruebas > Resúmenes** permite activar un resumen diario,
 
 - Los mensajes se solicitan temporalmente a WhatsApp y no se guardan en SQLite.
 - Solo se procesan mensajes de texto. Imágenes, videos, audios, notas de voz, documentos, stickers y otros adjuntos se excluyen por completo, aunque tengan descripción o transcripción.
+- El historial se pagina hasta alcanzar el inicio exacto del período. La configuración antigua de 500 mensajes se amplía automáticamente para cubrir hasta 10.000 mensajes por grupo y evitar resúmenes parciales en días muy activos.
 - Antes de consultar a la IA se omiten teléfonos, correos, controles invisibles e identificadores.
 - La descarga del historial produce un archivo de texto anonimizado.
 - La IA recibe únicamente el texto necesario y debe devolver un resumen sin nombres ni datos personales.

@@ -31,6 +31,7 @@ import { normalizeMessageTimestamp } from './message-timestamp.js';
 import { describeMessageIdStructure, MessageIdentityResolver } from './message-identity.js';
 import {
   GroupMessageHistoryError,
+  MAX_GROUP_MESSAGE_HISTORY,
   type GroupMessageHistory,
   type GroupMessageHistoryRequest,
   type MessagingClient,
@@ -180,7 +181,7 @@ export async function readGroupMessageHistoryInBrowser(input: {
   let historyExhausted = false;
   let safetyLimitReached = false;
   let historyOperation = 'readCachedGroupMessages';
-  const maximumPages = Math.min(50, Math.max(1, Math.ceil(input.maxMessages / 20)));
+  const maximumPages = Math.min(500, Math.max(1, Math.ceil(input.maxMessages / 20)));
 
   try {
     const messageCollection = Reflect.get(chat, 'msgs');
@@ -374,17 +375,13 @@ export type WhatsAppAdapterOptions = {
 
 type ClientFactory = () => WhatsAppClient;
 
-export function buildWhatsAppClientOptions(
-  options: WhatsAppAdapterOptions,
-): WhatsAppClientOptions {
+export function buildWhatsAppClientOptions(options: WhatsAppAdapterOptions): WhatsAppClientOptions {
   return {
     authStrategy: new LocalAuth({
       dataPath: options.sessionPath,
       clientId: options.clientId ?? 'comunidad',
     }),
-    ...(options.freshLinkingSession === true
-      ? { webVersionCache: { type: 'none' as const } }
-      : {}),
+    ...(options.freshLinkingSession === true ? { webVersionCache: { type: 'none' as const } } : {}),
     puppeteer: {
       headless: true,
       ...(options.chromeExecutablePath === undefined
@@ -508,7 +505,10 @@ export class WhatsAppWebAdapter implements MessagingClient {
         new Error('El período solicitado no es válido.'),
       );
     }
-    const maxMessages = Math.max(20, Math.min(2000, Math.trunc(request.maxMessages)));
+    const maxMessages = Math.max(
+      20,
+      Math.min(MAX_GROUP_MESSAGE_HISTORY, Math.trunc(request.maxMessages)),
+    );
     const page = client.pupPage;
     if (page === undefined) {
       throw new GroupMessageHistoryError(
@@ -1109,10 +1109,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
   }
 
   private createClient(): WhatsAppClient {
-    return (
-      this.clientFactory?.() ??
-      new Client(buildWhatsAppClientOptions(this.options))
-    );
+    return this.clientFactory?.() ?? new Client(buildWhatsAppClientOptions(this.options));
   }
 
   private registerHandlers(client: WhatsAppClient, generation: number): void {
@@ -1218,9 +1215,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
       this.logger.info(
         {
           operation:
-            normalizedState === 'PAIRING'
-              ? 'WHATSAPP_PAIRING_STARTED'
-              : 'WHATSAPP_STATE_CHANGED',
+            normalizedState === 'PAIRING' ? 'WHATSAPP_PAIRING_STARTED' : 'WHATSAPP_STATE_CHANGED',
           clientGeneration: generation,
           whatsappState: normalizedState,
         },
