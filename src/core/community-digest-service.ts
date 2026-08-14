@@ -111,12 +111,6 @@ type StoredCommunityDigestConfiguration = Partial<CommunityDigestConfiguration> 
   monthly?: Partial<CommunityDigestConfiguration['monthly']> & { toleranceMinutes?: unknown };
 };
 
-const SUMMARIZABLE_MESSAGE_TYPES = new Set(['chat', 'image', 'video', 'document']);
-const MEDIA_PLACEHOLDERS = {
-  image: '[Imagen compartida]',
-  video: '[Video compartido]',
-  document: '[Documento compartido]',
-} as const;
 const DIGEST_CONTEXT_TARGET_CHARACTERS = 18_000;
 const DIGEST_MESSAGE_MAX_CHARACTERS = 600;
 const DIGEST_INTERMEDIATE_MAX_CHARACTERS = 1_200;
@@ -744,9 +738,7 @@ export class CommunityDigestService {
           !message.fromMe &&
           message.timestampMs >= window.startMs &&
           message.timestampMs <= window.endMs &&
-          (message.messageType === undefined ||
-            message.messageType === null ||
-            SUMMARIZABLE_MESSAGE_TYPES.has(message.messageType.toLowerCase())) &&
+          isTextDigestMessage(message) &&
           digestMessageText(message) !== '',
       )
       .sort((left, right) => left.timestampMs - right.timestampMs);
@@ -763,10 +755,7 @@ export class CommunityDigestService {
     const contextLines = compactRepeatedContextLines(
       messages.map(digestMessageText).filter((text) => text !== ''),
     ).map((text) => `- ${text}`);
-    const contextLimit = Math.min(
-      configuration.maxCharacters,
-      DIGEST_CONTEXT_TARGET_CHARACTERS,
-    );
+    const contextLimit = Math.min(configuration.maxCharacters, DIGEST_CONTEXT_TARGET_CHARACTERS);
     const originalChunks = packContextChunks(contextLines, contextLimit);
     if (originalChunks.length === 0) throw codedError('AI_EMPTY_RESPONSE');
     if (originalChunks.length >= DIGEST_MAX_AI_CALLS) throw codedError('CONTEXT_TOO_LARGE');
@@ -1476,14 +1465,12 @@ function formatDigestSummary(value: string): string {
 }
 
 function digestMessageText(message: RecentGroupMessage): string {
-  const messageType = message.messageType?.toLowerCase() ?? 'chat';
-  if (messageType in MEDIA_PLACEHOLDERS) {
-    const mediaType = messageType as keyof typeof MEDIA_PLACEHOLDERS;
-    const placeholder = MEDIA_PLACEHOLDERS[mediaType];
-    const caption = sanitizeDigestText(stripMediaTechnicalMetadata(message.body));
-    return isUsefulMediaCaption(caption) ? `${placeholder} ${caption}` : placeholder;
-  }
   return sanitizeDigestText(message.body);
+}
+
+function isTextDigestMessage(message: RecentGroupMessage): boolean {
+  const messageType = message.messageType?.trim().toLowerCase();
+  return messageType === undefined || messageType === '' || messageType === 'chat';
 }
 
 function sanitizeDigestText(value: string, limit = DIGEST_MESSAGE_MAX_CHARACTERS): string {
@@ -1499,45 +1486,14 @@ function sanitizeDigestText(value: string, limit = DIGEST_MESSAGE_MAX_CHARACTERS
       /[\w.-]{2,160}@(g\.us|c\.us|s\.whatsapp\.net|lid|newsletter|broadcast)/giu,
       '[identificador omitido]',
     )
-    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu, '[identificador omitido]')
+    .replace(
+      /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu,
+      '[identificador omitido]',
+    )
     .replace(/[\p{Cc}\u202a-\u202e\u2066-\u2069]/gu, ' ')
     .replace(/\s+/gu, ' ')
     .trim()
     .slice(0, limit);
-}
-
-function stripMediaTechnicalMetadata(value: string): string {
-  const trimmed = value.trim();
-  if (
-    /^[{[]/u.test(trimmed) &&
-    /"?(?:url|downloadUrl|mediaKey|directPath|mimetype|fileSize|filehash|sha256|id)"?\s*:/iu.test(
-      trimmed,
-    )
-  ) {
-    return '';
-  }
-  return value
-    .split(/\r?\n/gu)
-    .filter(
-      (line) =>
-        !/^\s*(?:url|download[_ -]?url|media[_ -]?key|direct[_ -]?path|mime[_ -]?type|file[_ -]?(?:name|size|hash)|sha-?256|id)\s*[:=]/iu.test(
-          line,
-        ),
-    )
-    .join(' ');
-}
-
-function isUsefulMediaCaption(value: string): boolean {
-  const meaningful = value
-    .replace(
-      /\[(?:enlace|contenido multimedia|correo|número|identificador) omitido\]/giu,
-      ' ',
-    )
-    .replace(/\b(?:IMG|VID|DOC|FILE)[-_]?\d{3,}(?:\.[A-Z0-9]{2,8})?\b/giu, ' ')
-    .replace(/\b[^\s]+\.(?:jpe?g|png|gif|webp|mp4|mov|avi|mkv|pdf|docx?|xlsx?|pptx?|zip)\b/giu, ' ')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
-  return meaningful.length >= 3;
 }
 
 function compactRepeatedContextLines(values: string[]): string[] {
