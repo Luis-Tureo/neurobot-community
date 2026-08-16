@@ -17,6 +17,8 @@ export default tseslint.config(
         FormData: 'readonly',
         confirm: 'readonly',
         Event: 'readonly',
+        Node: 'readonly',
+        HTMLFormElement: 'readonly',
         setTimeout: 'readonly',
       },
     },

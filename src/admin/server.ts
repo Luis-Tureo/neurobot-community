@@ -2,6 +2,7 @@ import {
   buildAdminServer as buildBaseAdminServer,
   type AdminServerContext,
 } from './server-base.js';
+import { registerAIModerationPanelRoutes } from './ai-moderation-panel-routes.js';
 import { registerAutomationLabAIRoutes } from './automation-lab-ai-route.js';
 import { registerAutomationLabContextRoute } from './automation-lab-context-route.js';
 import { installAzureForwardedHttps } from './azure-forwarded-https.js';
@@ -16,6 +17,7 @@ export async function buildAdminServer(context: AdminServerContext) {
   try {
     const app = await buildBaseAdminServer(context);
     installAzureForwardedHttps(app);
+    registerAIModerationPanelRoutes(app, context);
     registerAutomationLabContextRoute(app, context.sessionSecret);
     registerAutomationLabAIRoutes(app, context);
     registerCommunityDigestRoutes(app, context);
