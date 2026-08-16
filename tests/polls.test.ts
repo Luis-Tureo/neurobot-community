@@ -444,6 +444,156 @@ describe('servicio y programador de encuestas', () => {
       database.close();
     }
   });
+
+  it('ejecuta múltiples horarios independientes en el mismo día y envía las encuestas correspondientes', async () => {
+    const subject = createSubject(undefined, new Date('2026-01-05T13:00:00Z')); // Lunes 10:00 America/Santiago (UTC-3)
+    const { database, repository, client, service, setNow } = subject;
+    try {
+      const templates = repository.templates().slice(0, 4);
+      expect(templates.length).toBeGreaterThanOrEqual(4);
+      const [t1, t2, t3, t4] = templates as [
+        (typeof templates)[0],
+        (typeof templates)[0],
+        (typeof templates)[0],
+        (typeof templates)[0],
+      ];
+
+      repository.saveConfiguration({
+        enabled: true,
+        sendTime: '13:00',
+        timezone: 'America/Santiago',
+        toleranceMinutes: 15,
+        selectionMode: 'SAME_FOR_ALL',
+        weeklySchedule: [
+          { weekday: 1, sendTime: '10:00', templateIds: [t1.id] },
+          { weekday: 1, sendTime: '14:30', templateIds: [t2.id, t3.id] },
+          { weekday: 1, sendTime: '20:00', templateIds: [t4.id] },
+        ],
+      });
+
+      // 1. Ejecución a las 10:00
+      setNow(new Date('2026-01-05T13:00:00Z')); // 10:00 local
+      const res1 = await service.runDueTasks();
+      expect(res1.sent).toBe(1);
+      expect(client.sentPolls).toHaveLength(1);
+      expect(client.sentPolls[0]?.question).toBe(t1.question);
+
+      // Repetición dentro de tolerancia no duplica
+      const res1Dup = await service.runDueTasks();
+      expect(res1Dup.sent).toBe(0);
+      expect(client.sentPolls).toHaveLength(1);
+
+      // 2. Ejecución a las 14:30 (UTC: 17:30)
+      setNow(new Date('2026-01-05T17:30:00Z')); // 14:30 local
+      const res2 = await service.runDueTasks();
+      expect(res2.sent).toBe(2);
+      expect(client.sentPolls).toHaveLength(3);
+      expect(client.sentPolls[1]?.question).toBe(t2.question);
+      expect(client.sentPolls[2]?.question).toBe(t3.question);
+
+      // Repetición no duplica
+      const res2Dup = await service.runDueTasks();
+      expect(res2Dup.sent).toBe(0);
+      expect(client.sentPolls).toHaveLength(3);
+
+      // 3. Ejecución a las 20:00 (UTC: 23:00)
+      setNow(new Date('2026-01-05T23:00:00Z')); // 20:00 local
+      const res3 = await service.runDueTasks();
+      expect(res3.sent).toBe(1);
+      expect(client.sentPolls).toHaveLength(4);
+      expect(client.sentPolls[3]?.question).toBe(t4.question);
+
+      // Historial completo
+      expect(database.listPollSendHistory()).toHaveLength(4);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('calcula la próxima programación considerando múltiples horarios por día', () => {
+    const { database, repository, service } = createSubject();
+    try {
+      const templates = repository.templates();
+      repository.saveConfiguration({
+        enabled: true,
+        sendTime: '13:00',
+        timezone: 'America/Santiago',
+        toleranceMinutes: 15,
+        selectionMode: 'SAME_FOR_ALL',
+        weeklySchedule: [
+          { weekday: 1, sendTime: '10:00', templateIds: [templates[0]!.id] },
+          { weekday: 1, sendTime: '14:30', templateIds: [templates[1]!.id] },
+          { weekday: 1, sendTime: '20:00', templateIds: [templates[2]!.id] },
+          { weekday: 2, sendTime: '11:00', templateIds: [templates[0]!.id] },
+        ],
+      });
+
+      // Lunes 09:00 -> próxima 10:00 Lunes
+      expect(service.nextScheduledDescription(new Date('2026-01-05T12:00:00Z'))).toBe(
+        '2026-01-05 10:00 America/Santiago',
+      );
+
+      // Lunes 11:00 -> próxima 14:30 Lunes
+      expect(service.nextScheduledDescription(new Date('2026-01-05T14:00:00Z'))).toBe(
+        '2026-01-05 14:30 America/Santiago',
+      );
+
+      // Lunes 16:00 -> próxima 20:00 Lunes
+      expect(service.nextScheduledDescription(new Date('2026-01-05T19:00:00Z'))).toBe(
+        '2026-01-05 20:00 America/Santiago',
+      );
+
+      // Lunes 21:00 -> próxima Martes 11:00
+      expect(service.nextScheduledDescription(new Date('2026-01-06T00:00:00Z'))).toBe(
+        '2026-01-06 11:00 America/Santiago',
+      );
+    } finally {
+      database.close();
+    }
+  });
+
+  it('omite de forma segura una encuesta eliminada o deshabilitada sin romper el scheduler', async () => {
+    const subject = createSubject(undefined, new Date('2026-01-05T13:00:00Z')); // Lunes 10:00 local
+    const { database, repository, client, service } = subject;
+    try {
+      const templates = repository.templates();
+      const t1 = templates[0]!;
+      const t2 = templates[1]!;
+
+      // 1. Guardar con t1 y t2
+      repository.saveConfiguration({
+        enabled: true,
+        sendTime: '13:00',
+        timezone: 'America/Santiago',
+        toleranceMinutes: 30,
+        selectionMode: 'SAME_FOR_ALL',
+        weeklySchedule: [{ weekday: 1, sendTime: '10:00', templateIds: [t1.id, t2.id] }],
+      });
+
+      // 2. Posteriormente deshabilitar t1
+      database.savePollTemplate(
+        {
+          id: t1.id,
+          question: t1.question,
+          category: t1.category,
+          options: [...t1.options],
+          allowMultipleAnswers: t1.allowMultipleAnswers,
+          enabled: false,
+          favorite: t1.favorite,
+          disabledUntil: null,
+        },
+        'neurobot',
+      );
+
+      // 3. Ejecución: omite t1 de forma segura y envía t2
+      const res = await service.runDueTasks();
+      expect(res.sent).toBe(1);
+      expect(client.sentPolls).toHaveLength(1);
+      expect(client.sentPolls[0]?.question).toBe(t2.question);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function markSent(

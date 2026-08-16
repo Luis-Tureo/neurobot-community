@@ -390,4 +390,110 @@ describe('persistencia SQLite', () => {
     ]);
     database.close();
   });
+
+  it('guarda, ordena y recupera múltiples horarios por día para encuestas programadas', () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    const templates = database.listPollTemplates('neurobot');
+    const [t1, t2, t3, t4] = templates as [
+      (typeof templates)[0],
+      (typeof templates)[0],
+      (typeof templates)[0],
+      (typeof templates)[0],
+    ];
+
+    database.savePollConfiguration(
+      {
+        enabled: true,
+        sendTime: '13:00',
+        timezone: 'America/Santiago',
+        toleranceMinutes: 30,
+        selectionMode: 'SAME_FOR_ALL',
+        weeklySchedule: [
+          { weekday: 1, sendTime: '20:00', templateIds: [t4.id] },
+          { weekday: 1, sendTime: '10:00', templateIds: [t1.id] },
+          { weekday: 1, sendTime: '14:30', templateIds: [t2.id, t3.id] },
+          { weekday: 2, sendTime: '11:30', templateIds: [t1.id] },
+        ],
+      },
+      'neurobot',
+    );
+
+    const config = database.getPollConfiguration('neurobot');
+    expect(config.enabled).toBe(true);
+    expect(config.weeklySchedule).toEqual([
+      { weekday: 1, sendTime: '10:00', templateIds: [t1.id] },
+      { weekday: 1, sendTime: '14:30', templateIds: [t2.id, t3.id] },
+      { weekday: 1, sendTime: '20:00', templateIds: [t4.id] },
+      { weekday: 2, sendTime: '11:30', templateIds: [t1.id] },
+    ]);
+
+    // Rechaza horarios duplicados en el mismo día y hora
+    expect(() =>
+      database.savePollConfiguration(
+        {
+          ...config,
+          weeklySchedule: [
+            { weekday: 1, sendTime: '10:00', templateIds: [t1.id] },
+            { weekday: 1, sendTime: '10:00', templateIds: [t2.id] },
+          ],
+        },
+        'neurobot',
+      ),
+    ).toThrow('No se permiten horarios duplicados para el mismo día y hora.');
+
+    // Rechaza horarios sin encuestas
+    expect(() =>
+      database.savePollConfiguration(
+        {
+          ...config,
+          weeklySchedule: [{ weekday: 1, sendTime: '10:00', templateIds: [] }],
+        },
+        'neurobot',
+      ),
+    ).toThrow('Cada programación requiere una hora y al menos una encuesta.');
+
+    database.close();
+  });
+
+  it('desactivar y reactivar la programación semanal conserva todos los múltiples horarios y encuestas', () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    const templates = database.listPollTemplates('neurobot');
+    const schedule = [
+      { weekday: 1, sendTime: '09:00', templateIds: [templates[0]!.id] },
+      { weekday: 1, sendTime: '15:00', templateIds: [templates[1]!.id, templates[2]!.id] },
+      { weekday: 5, sendTime: '18:30', templateIds: [templates[3]!.id] },
+    ];
+
+    // 1. Configurar y activar
+    database.savePollConfiguration(
+      {
+        enabled: true,
+        sendTime: '13:00',
+        timezone: 'America/Santiago',
+        toleranceMinutes: 30,
+        selectionMode: 'SAME_FOR_ALL',
+        weeklySchedule: schedule,
+      },
+      'neurobot',
+    );
+
+    // 2. Desactivar programación semanal
+    const activeConfig = database.getPollConfiguration('neurobot');
+    database.savePollConfiguration({ ...activeConfig, enabled: false }, 'neurobot');
+
+    const disabledConfig = database.getPollConfiguration('neurobot');
+    expect(disabledConfig.enabled).toBe(false);
+    expect(disabledConfig.weeklySchedule).toEqual(schedule);
+
+    // 3. Reactivar programación semanal
+    database.savePollConfiguration({ ...disabledConfig, enabled: true }, 'neurobot');
+
+    const reactivatedConfig = database.getPollConfiguration('neurobot');
+    expect(reactivatedConfig.enabled).toBe(true);
+    expect(reactivatedConfig.weeklySchedule).toEqual(schedule);
+
+    database.close();
+  });
 });

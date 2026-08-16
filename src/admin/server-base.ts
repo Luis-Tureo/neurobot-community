@@ -539,7 +539,27 @@ const pollConfigurationSchema = z
           })
           .strict(),
       )
-      .max(7),
+      .max(70)
+      .refine(
+        (schedules) => {
+          const seen = new Set<string>();
+          const counts = new Map<number, number>();
+          for (const s of schedules) {
+            const key = `${s.weekday}:${s.sendTime}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            const count = (counts.get(s.weekday) ?? 0) + 1;
+            if (count > 10) return false;
+            counts.set(s.weekday, count);
+            if (new Set(s.templateIds).size !== s.templateIds.length) return false;
+          }
+          return true;
+        },
+        {
+          message:
+            'La programación semanal contiene horarios duplicados, inválidos o excede el límite de 10 por día.',
+        },
+      ),
   })
   .strict();
 

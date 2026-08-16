@@ -3322,20 +3322,31 @@ export class AppDatabase {
     ) {
       throw new Error('La tolerancia de la encuesta no es válida.');
     }
-    const weekdays = new Set<number>();
+    if (configuration.weeklySchedule.length > 70) {
+      throw new Error('No se permiten más de 70 horarios semanales en total.');
+    }
+    const schedulesPerWeekday = new Map<number, Set<string>>();
     for (const schedule of configuration.weeklySchedule) {
-      if (weekdays.has(schedule.weekday)) {
-        throw new Error('Cada día puede tener una sola programación de encuestas.');
-      }
-      weekdays.add(schedule.weekday);
       if (!Number.isInteger(schedule.weekday) || schedule.weekday < 0 || schedule.weekday > 6) {
         throw new Error('El día de la programación no es válido.');
+      }
+      let timesForDay = schedulesPerWeekday.get(schedule.weekday);
+      if (timesForDay === undefined) {
+        timesForDay = new Set<string>();
+        schedulesPerWeekday.set(schedule.weekday, timesForDay);
+      }
+      if (timesForDay.size >= 10) {
+        throw new Error('No se permiten más de 10 horarios para el mismo día.');
       }
       if (!isTime(schedule.sendTime) || schedule.templateIds.length === 0) {
         throw new Error('Cada programación requiere una hora y al menos una encuesta.');
       }
+      if (timesForDay.has(schedule.sendTime)) {
+        throw new Error('No se permiten horarios duplicados para el mismo día y hora.');
+      }
+      timesForDay.add(schedule.sendTime);
       if (new Set(schedule.templateIds).size !== schedule.templateIds.length) {
-        throw new Error('Una encuesta no puede repetirse en el mismo día.');
+        throw new Error('Una encuesta no puede repetirse en el mismo horario.');
       }
       for (const templateId of schedule.templateIds) {
         if (this.getPollTemplate(templateId, botId) === null) {
@@ -3343,6 +3354,10 @@ export class AppDatabase {
         }
       }
     }
+    const normalizedSchedule = [...configuration.weeklySchedule].sort((a, b) => {
+      if (a.weekday !== b.weekday) return a.weekday - b.weekday;
+      return a.sendTime.localeCompare(b.sendTime);
+    });
     this.db
       .prepare(
         `
@@ -3357,7 +3372,7 @@ export class AppDatabase {
         configuration.timezone,
         configuration.toleranceMinutes,
         configuration.selectionMode,
-        JSON.stringify(configuration.weeklySchedule),
+        JSON.stringify(normalizedSchedule),
         new Date().toISOString(),
         botId,
       );
@@ -3634,7 +3649,12 @@ export class AppDatabase {
         `UPDATE bot_poll_configurations SET weekly_schedule = ?, enabled = ?, updated_at = ?
          WHERE bot_id = ?`,
       )
-      .run(JSON.stringify(weeklySchedule), weeklySchedule.length > 0 ? 1 : 0, now, botId);
+      .run(
+        JSON.stringify(weeklySchedule),
+        configuration.enabled && weeklySchedule.length > 0 ? 1 : 0,
+        now,
+        botId,
+      );
   }
 
   public restoreDefaultPollTemplates(botId = 'neurobot', safeActorHash = 'system'): number {
@@ -10070,20 +10090,31 @@ function parsePollWeeklySchedule(value: string | undefined): PollConfiguration['
   try {
     const parsed = JSON.parse(value) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (entry): entry is PollConfiguration['weeklySchedule'][number] =>
-        typeof entry === 'object' &&
-        entry !== null &&
-        Number.isInteger((entry as { weekday?: unknown }).weekday) &&
-        Number((entry as { weekday: number }).weekday) >= 0 &&
-        Number((entry as { weekday: number }).weekday) <= 6 &&
-        typeof (entry as { sendTime?: unknown }).sendTime === 'string' &&
-        isTime((entry as { sendTime: string }).sendTime) &&
-        Array.isArray((entry as { templateIds?: unknown }).templateIds) &&
-        (entry as { templateIds: unknown[] }).templateIds.every(
-          (templateId) => Number.isInteger(templateId) && Number(templateId) > 0,
-        ),
-    );
+    return parsed
+      .filter(
+        (entry): entry is PollConfiguration['weeklySchedule'][number] =>
+          typeof entry === 'object' &&
+          entry !== null &&
+          Number.isInteger((entry as { weekday?: unknown }).weekday) &&
+          Number((entry as { weekday: number }).weekday) >= 0 &&
+          Number((entry as { weekday: number }).weekday) <= 6 &&
+          typeof (entry as { sendTime?: unknown }).sendTime === 'string' &&
+          isTime((entry as { sendTime: string }).sendTime) &&
+          Array.isArray((entry as { templateIds?: unknown }).templateIds) &&
+          (entry as { templateIds: unknown[] }).templateIds.every(
+            (templateId) => Number.isInteger(templateId) && Number(templateId) > 0,
+          ) &&
+          (entry as { templateIds: unknown[] }).templateIds.length > 0,
+      )
+      .map((entry) => ({
+        weekday: Number(entry.weekday),
+        sendTime: entry.sendTime,
+        templateIds: [...new Set(entry.templateIds.map(Number))],
+      }))
+      .sort((a, b) => {
+        if (a.weekday !== b.weekday) return a.weekday - b.weekday;
+        return a.sendTime.localeCompare(b.sendTime);
+      });
   } catch {
     return [];
   }

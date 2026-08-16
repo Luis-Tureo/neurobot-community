@@ -109,10 +109,13 @@ export class PollService {
     for (let offset = 0; offset <= 7; offset += 1) {
       const date = addLocalDays(local.date, offset);
       const weekday = weekdayForLocalDate(date);
-      const schedule = configuration.weeklySchedule.find((entry) => entry.weekday === weekday);
-      if (schedule === undefined) continue;
-      if (offset === 0 && local.minuteOfDay >= parseMinute(schedule.sendTime)) continue;
-      return `${date} ${schedule.sendTime} ${configuration.timezone}`;
+      const daySchedules = configuration.weeklySchedule
+        .filter((entry) => entry.weekday === weekday)
+        .sort((a, b) => a.sendTime.localeCompare(b.sendTime));
+      for (const schedule of daySchedules) {
+        if (offset === 0 && local.minuteOfDay >= parseMinute(schedule.sendTime)) continue;
+        return `${date} ${schedule.sendTime} ${configuration.timezone}`;
+      }
     }
     return null;
   }
@@ -121,22 +124,23 @@ export class PollService {
     const result: PollRunResult = { considered: 0, sent: 0, failed: 0, skipped: 0 };
     const now = this.now();
     const configuration = this.repository.configuration();
+    if (!configuration.enabled) return result;
+
     const local = toLocalDateTime(now, configuration.timezone);
     const legacySchedule = configuration.weeklySchedule.length === 0;
-    const dueSchedule = legacySchedule
-      ? {
-          weekday: weekdayForLocalDate(local.date),
-          sendTime: configuration.sendTime,
-          templateIds: [],
-        }
-      : configuration.weeklySchedule.find(
-          (entry) => entry.weekday === weekdayForLocalDate(local.date),
+    const currentWeekday = weekdayForLocalDate(local.date);
+
+    const dueSchedules = legacySchedule
+      ? insideTolerance(local.minuteOfDay, configuration.sendTime, configuration.toleranceMinutes)
+        ? [{ weekday: currentWeekday, sendTime: configuration.sendTime, templateIds: [] as number[] }]
+        : []
+      : configuration.weeklySchedule.filter(
+          (entry) =>
+            entry.weekday === currentWeekday &&
+            insideTolerance(local.minuteOfDay, entry.sendTime, configuration.toleranceMinutes),
         );
-    if (
-      !configuration.enabled ||
-      dueSchedule === undefined ||
-      !insideTolerance(local.minuteOfDay, dueSchedule.sendTime, configuration.toleranceMinutes)
-    ) {
+
+    if (dueSchedules.length === 0) {
       return result;
     }
     if (
@@ -159,84 +163,91 @@ export class PollService {
     }
 
     const groups = this.database.listAutomationGroupIds(this.repository.botId);
-    const scheduledTemplates = dueSchedule.templateIds
-      .map((templateId) => this.repository.template(templateId))
-      .filter(
-        (template): template is PollTemplate => template !== null && isSelectable(template, now),
+
+    for (const dueSchedule of dueSchedules) {
+      const scheduledTemplates = dueSchedule.templateIds
+        .map((templateId) => this.repository.template(templateId))
+        .filter(
+          (template): template is PollTemplate => template !== null && isSelectable(template, now),
+        );
+      const sharedLegacyTemplate =
+        legacySchedule && configuration.selectionMode === 'SAME_FOR_ALL'
+          ? this.selector.select(local.date, null, now)
+          : null;
+
+      this.record(
+        'DAILY_POLL_SCHEDULED',
+        null,
+        scheduledTemplates[0] ?? sharedLegacyTemplate,
+        local,
+        'scheduled',
+        null,
       );
-    const sharedLegacyTemplate =
-      legacySchedule && configuration.selectionMode === 'SAME_FOR_ALL'
-        ? this.selector.select(local.date, null, now)
-        : null;
-    this.record(
-      'DAILY_POLL_SCHEDULED',
-      null,
-      scheduledTemplates[0] ?? sharedLegacyTemplate,
-      local,
-      'scheduled',
-      null,
-    );
-    for (const groupId of groups) {
-      result.considered += 1;
-      const rejection = await this.groupRejection(groupId, now);
-      if (rejection !== null) {
-        result.skipped += 1;
-        this.record('DAILY_POLL_SKIPPED', groupId, null, local, 'skipped', rejection);
-        continue;
-      }
-      const templatesForGroup = legacySchedule
-        ? [sharedLegacyTemplate ?? this.selector.select(local.date, groupId, now)].filter(
-            (template): template is PollTemplate => template !== null,
-          )
-        : scheduledTemplates;
-      if (templatesForGroup.length === 0) {
-        result.skipped += 1;
-        this.record('DAILY_POLL_SKIPPED', groupId, null, local, 'skipped', 'NO_POLL_TEMPLATE');
-        continue;
-      }
-      for (const selected of templatesForGroup) {
-        const deduplicationKey = legacySchedule
-          ? `daily-poll:${groupId}:${local.date}`
-          : `weekly-poll:${groupId}:${local.date}:${dueSchedule.sendTime}:${selected.id}`;
-        const existing = this.repository.delivery(deduplicationKey);
-        if (
-          existing !== null &&
-          (['SENT', 'SENDING', 'SKIPPED'].includes(existing.status) || existing.attempts >= 2)
-        ) {
+
+      for (const groupId of groups) {
+        result.considered += 1;
+        const rejection = await this.groupRejection(groupId, now);
+        if (rejection !== null) {
           result.skipped += 1;
-          this.record(
-            'DAILY_POLL_DUPLICATE_BLOCKED',
+          this.record('DAILY_POLL_SKIPPED', groupId, null, local, 'skipped', rejection);
+          continue;
+        }
+        const templatesForGroup = legacySchedule
+          ? [sharedLegacyTemplate ?? this.selector.select(local.date, groupId, now)].filter(
+              (template): template is PollTemplate => template !== null,
+            )
+          : scheduledTemplates;
+
+        if (templatesForGroup.length === 0) {
+          result.skipped += 1;
+          this.record('DAILY_POLL_SKIPPED', groupId, null, local, 'skipped', 'NO_POLL_TEMPLATE');
+          continue;
+        }
+
+        for (const selected of templatesForGroup) {
+          const deduplicationKey = legacySchedule
+            ? `daily-poll:${groupId}:${local.date}`
+            : `weekly-poll:${groupId}:${local.date}:${dueSchedule.sendTime}:${selected.id}`;
+          const existing = this.repository.delivery(deduplicationKey);
+          if (
+            existing !== null &&
+            (['SENT', 'SENDING', 'SKIPPED'].includes(existing.status) || existing.attempts >= 2)
+          ) {
+            result.skipped += 1;
+            this.record(
+              'DAILY_POLL_DUPLICATE_BLOCKED',
+              groupId,
+              selected,
+              local,
+              'skipped',
+              'DUPLICATE_DAILY_POLL',
+            );
+            continue;
+          }
+          this.record('DAILY_POLL_SELECTED', groupId, selected, local, 'selected', null);
+          const history = this.repository.claim({
+            deduplicationKey,
             groupId,
-            selected,
-            local,
-            'skipped',
-            'DUPLICATE_DAILY_POLL',
-          );
-          continue;
+            localDate: local.date,
+            templateId: selected.id,
+            source: 'scheduled',
+            countsAsDaily: legacySchedule,
+            scheduledAt: now,
+          });
+          if (history === null) {
+            result.skipped += 1;
+            continue;
+          }
+          const persistedTemplate = this.templateForHistory(history, selected);
+          if (persistedTemplate === null) {
+            result.skipped += 1;
+            this.repository.completeAttempt(history.id, 'SKIPPED', now, 'POLL_TEMPLATE_UNAVAILABLE');
+            continue;
+          }
+          const sendResult = await this.sender.send(history, persistedTemplate, local);
+          if (sendResult.status === 'SENT') result.sent += 1;
+          else result.failed += 1;
         }
-        this.record('DAILY_POLL_SELECTED', groupId, selected, local, 'selected', null);
-        const history = this.repository.claim({
-          deduplicationKey,
-          groupId,
-          localDate: local.date,
-          templateId: selected.id,
-          source: 'scheduled',
-          countsAsDaily: legacySchedule,
-          scheduledAt: now,
-        });
-        if (history === null) {
-          result.skipped += 1;
-          continue;
-        }
-        const persistedTemplate = this.templateForHistory(history, selected);
-        if (persistedTemplate === null) {
-          result.skipped += 1;
-          this.repository.completeAttempt(history.id, 'SKIPPED', now, 'POLL_TEMPLATE_UNAVAILABLE');
-          continue;
-        }
-        const sendResult = await this.sender.send(history, persistedTemplate, local);
-        if (sendResult.status === 'SENT') result.sent += 1;
-        else result.failed += 1;
       }
     }
     return result;

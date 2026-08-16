@@ -1065,7 +1065,10 @@ automaticMessagesForm.addEventListener('submit', async (event) => {
       api(botScopedPath('/api/polls/configuration'), {
         method: 'PATCH',
         body: JSON.stringify({
-          enabled: weeklySchedule.length > 0,
+          enabled:
+            pollConfiguration !== undefined
+              ? pollConfiguration.enabled
+              : weeklySchedule.length > 0,
           sendTime: pollConfiguration?.sendTime || '13:00',
           timezone: state.selectedBotTimezone,
           toleranceMinutes: pollConfiguration?.toleranceMinutes ?? 30,
@@ -1299,61 +1302,246 @@ function renderWeeklyPollSchedule(schedule, templates) {
   const target = document.querySelector('#poll-weekly-schedule');
   const enabledTemplates = templates.filter((template) => template.enabled);
   target.replaceChildren();
-  pollWeekdays.forEach(([label, weekday]) => {
-    const configured = schedule.find((entry) => entry.weekday === weekday);
-    const row = document.createElement('article');
-    row.className = 'poll-weekly-row';
-    row.dataset.weekday = String(weekday);
-    const heading = document.createElement('h4');
-    heading.textContent = label;
-    const timeLabel = document.createElement('label');
-    timeLabel.textContent = 'Hora';
-    const time = document.createElement('input');
-    time.type = 'time';
-    time.dataset.weeklyTime = '';
-    time.value = configured?.sendTime || '13:00';
-    timeLabel.append(time);
-    const choices = document.createElement('details');
-    choices.className = 'poll-weekly-choices';
-    const summary = document.createElement('summary');
-    choices.append(summary);
-    const options = document.createElement('div');
-    options.className = 'poll-weekly-options';
-    enabledTemplates.forEach((template) => {
-      const option = document.createElement('label');
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.value = String(template.id);
-      checkbox.dataset.weeklyTemplate = '';
-      checkbox.checked = configured?.templateIds.includes(template.id) ?? false;
-      checkbox.addEventListener('change', () => updateWeeklyPollSummary(row));
-      option.append(checkbox, document.createTextNode(template.question));
-      options.append(option);
+
+  pollWeekdays.forEach(([dayLabel, weekday]) => {
+    const dayCard = document.createElement('article');
+    dayCard.className = 'poll-weekly-day';
+    dayCard.dataset.weekday = String(weekday);
+
+    const header = document.createElement('div');
+    header.className = 'poll-weekly-day-header';
+    const title = document.createElement('h4');
+    title.textContent = dayLabel;
+    header.append(title);
+
+    const list = document.createElement('div');
+    list.className = 'poll-weekly-schedules-list';
+
+    const daySchedules = schedule
+      .filter((entry) => entry.weekday === weekday)
+      .sort((a, b) => a.sendTime.localeCompare(b.sendTime));
+
+    const dayActions = document.createElement('div');
+    dayActions.className = 'poll-weekly-day-actions';
+    const addButton = document.createElement('button');
+    addButton.type = 'button';
+    addButton.className = 'secondary poll-add-schedule-button';
+    addButton.textContent = '+ Agregar horario';
+    addButton.setAttribute('aria-label', `Agregar horario para ${dayLabel}`);
+    addButton.addEventListener('click', () => {
+      const existingTimes = new Set(
+        [...list.querySelectorAll('[data-weekly-time]')].map((input) => input.value),
+      );
+      let defaultTime = '13:00';
+      const fallbackTimes = ['09:00', '13:00', '16:00', '19:00', '21:00', '10:00', '14:00', '18:00'];
+      for (const t of fallbackTimes) {
+        if (!existingTimes.has(t)) {
+          defaultTime = t;
+          break;
+        }
+      }
+      createScheduleRow(dayCard, weekday, dayLabel, defaultTime, [], enabledTemplates);
+      sortDaySchedules(dayCard);
     });
-    if (enabledTemplates.length === 0) options.append(empty('No hay encuestas disponibles.'));
-    choices.append(options);
-    row.append(heading, timeLabel, choices);
-    target.append(row);
-    updateWeeklyPollSummary(row);
+    dayActions.append(addButton);
+
+    dayCard.append(header, list, dayActions);
+    target.append(dayCard);
+
+    if (daySchedules.length === 0) {
+      updateDayEmptyState(dayCard);
+    } else {
+      daySchedules.forEach((entry) => {
+        createScheduleRow(
+          dayCard,
+          weekday,
+          dayLabel,
+          entry.sendTime,
+          entry.templateIds,
+          enabledTemplates,
+        );
+      });
+      sortDaySchedules(dayCard);
+    }
   });
+}
+
+function updateDayEmptyState(dayCard) {
+  const list = dayCard.querySelector('.poll-weekly-schedules-list');
+  const existingRows = list.querySelectorAll('.poll-weekly-row');
+  let emptyNote = list.querySelector('.poll-empty-day-note');
+  if (existingRows.length === 0) {
+    if (!emptyNote) {
+      emptyNote = document.createElement('p');
+      emptyNote.className = 'poll-empty-day-note';
+      emptyNote.textContent = 'Sin horarios programados para este día.';
+      list.append(emptyNote);
+    }
+  } else if (emptyNote) {
+    emptyNote.remove();
+  }
+}
+
+function sortDaySchedules(dayCard) {
+  const list = dayCard.querySelector('.poll-weekly-schedules-list');
+  const rows = [...list.querySelectorAll('.poll-weekly-row')];
+  rows.sort((a, b) => {
+    const timeA = a.querySelector('[data-weekly-time]')?.value || '00:00';
+    const timeB = b.querySelector('[data-weekly-time]')?.value || '00:00';
+    return timeA.localeCompare(timeB);
+  });
+  rows.forEach((row) => list.append(row));
+}
+
+function createScheduleRow(
+  dayCard,
+  weekday,
+  dayLabel,
+  sendTime,
+  selectedTemplateIds,
+  enabledTemplates,
+) {
+  const list = dayCard.querySelector('.poll-weekly-schedules-list');
+  const emptyNote = list.querySelector('.poll-empty-day-note');
+  if (emptyNote) emptyNote.remove();
+
+  const row = document.createElement('article');
+  row.className = 'poll-weekly-row poll-weekly-schedule-row';
+  row.dataset.weekday = String(weekday);
+
+  const timeLabel = document.createElement('label');
+  timeLabel.className = 'poll-time-label';
+  timeLabel.textContent = 'Hora';
+  const time = document.createElement('input');
+  time.type = 'time';
+  time.dataset.weeklyTime = '';
+  time.value = sendTime;
+  time.required = true;
+  time.setAttribute('aria-label', `Hora de envío para ${dayLabel}`);
+  time.addEventListener('change', () => {
+    updateDeleteAriaLabel(row, dayLabel);
+    sortDaySchedules(dayCard);
+  });
+  timeLabel.append(time);
+
+  const choices = document.createElement('details');
+  choices.className = 'poll-weekly-choices';
+  const summary = document.createElement('summary');
+  choices.append(summary);
+
+  const options = document.createElement('div');
+  options.className = 'poll-weekly-options';
+  enabledTemplates.forEach((template) => {
+    const option = document.createElement('label');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = String(template.id);
+    checkbox.dataset.weeklyTemplate = '';
+    checkbox.checked = selectedTemplateIds.includes(template.id);
+    checkbox.addEventListener('change', () => updateWeeklyPollSummary(row));
+    option.append(checkbox, document.createTextNode(template.question));
+    options.append(option);
+  });
+  if (enabledTemplates.length === 0) {
+    options.append(empty('No hay encuestas disponibles.'));
+  }
+  choices.append(options);
+
+  const removeButton = document.createElement('button');
+  removeButton.type = 'button';
+  removeButton.className = 'danger poll-remove-schedule-button';
+  removeButton.textContent = 'Eliminar';
+  removeButton.title = 'Eliminar horario';
+  removeButton.addEventListener('click', () => {
+    row.remove();
+    updateDayEmptyState(dayCard);
+  });
+
+  row.append(timeLabel, choices, removeButton);
+  list.append(row);
+  updateDeleteAriaLabel(row, dayLabel);
+  updateWeeklyPollSummary(row);
+  return row;
+}
+
+function updateDeleteAriaLabel(row, dayLabel) {
+  const timeValue = row.querySelector('[data-weekly-time]')?.value || '';
+  const removeBtn = row.querySelector('.poll-remove-schedule-button');
+  if (removeBtn) {
+    removeBtn.setAttribute(
+      'aria-label',
+      `Eliminar horario ${timeValue ? `${timeValue} ` : ''}de ${dayLabel}`,
+    );
+  }
 }
 
 function updateWeeklyPollSummary(row) {
   const selected = row.querySelectorAll('[data-weekly-template]:checked').length;
-  row.querySelector('summary').textContent =
-    selected === 0 ? 'Seleccionar encuestas' : `${selected} encuesta${selected === 1 ? '' : 's'}`;
+  const summary = row.querySelector('summary');
+  if (summary) {
+    summary.textContent =
+      selected === 0 ? 'Seleccionar encuestas' : `${selected} encuesta${selected === 1 ? '' : 's'}`;
+  }
 }
 
 function collectWeeklyPollSchedule() {
-  return [...document.querySelectorAll('.poll-weekly-row')]
-    .map((row) => ({
-      weekday: Number(row.dataset.weekday),
-      sendTime: row.querySelector('[data-weekly-time]').value,
-      templateIds: [...row.querySelectorAll('[data-weekly-template]:checked')].map((input) =>
-        Number(input.value),
-      ),
-    }))
-    .filter((entry) => entry.templateIds.length > 0);
+  const schedule = [];
+  const days = document.querySelectorAll('.poll-weekly-day');
+
+  if (days.length > 0) {
+    for (const dayCard of days) {
+      const weekday = Number(dayCard.dataset.weekday);
+      const dayLabel = dayCard.querySelector('h4')?.textContent?.trim() || `Día ${weekday}`;
+      const rows = dayCard.querySelectorAll('.poll-weekly-row');
+      const seenTimes = new Set();
+
+      for (const row of rows) {
+        const timeInput = row.querySelector('[data-weekly-time]');
+        const sendTime = timeInput ? timeInput.value : '';
+        if (!sendTime || !/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(sendTime)) {
+          throw new Error(`Debes ingresar una hora válida en el horario de ${dayLabel}.`);
+        }
+        if (seenTimes.has(sendTime)) {
+          throw new Error(
+            `El día ${dayLabel} tiene horarios duplicados a las ${sendTime}. Cada horario debe ser único.`,
+          );
+        }
+        seenTimes.add(sendTime);
+
+        const templateIds = [...row.querySelectorAll('[data-weekly-template]:checked')].map((input) =>
+          Number(input.value),
+        );
+        if (templateIds.length === 0) {
+          throw new Error(
+            `Debes seleccionar al menos una encuesta para el horario ${sendTime} de ${dayLabel}.`,
+          );
+        }
+
+        schedule.push({
+          weekday,
+          sendTime,
+          templateIds,
+        });
+      }
+    }
+    return schedule.sort((a, b) => {
+      if (a.weekday !== b.weekday) return a.weekday - b.weekday;
+      return a.sendTime.localeCompare(b.sendTime);
+    });
+  }
+
+  const rows = document.querySelectorAll('.poll-weekly-row');
+  for (const row of rows) {
+    const weekday = Number(row.dataset.weekday);
+    const sendTime = row.querySelector('[data-weekly-time]')?.value || '';
+    const templateIds = [...row.querySelectorAll('[data-weekly-template]:checked')].map((input) =>
+      Number(input.value),
+    );
+    if (sendTime && templateIds.length > 0) {
+      schedule.push({ weekday, sendTime, templateIds });
+    }
+  }
+  return schedule;
 }
 
 document.addEventListener('click', (event) => {

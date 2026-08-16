@@ -326,6 +326,63 @@ describe('API administrativa de encuestas', () => {
     expect(client.sentPolls).toMatchObject([{ chatId: 'grupo-secreto@g.us' }]);
     expect(sent.body).not.toContain('grupo-secreto@g.us');
   });
+
+  it('guarda múltiples horarios por día mediante la API y valida duplicados y plantillas vacías', async () => {
+    const auth = await login(app);
+    const view = await app.inject({
+      method: 'GET',
+      url: '/api/polls',
+      headers: { cookie: auth.cookie },
+    });
+    const templates = view.json().templates;
+    const [t1, t2, t3] = [Number(templates[0].id), Number(templates[1].id), Number(templates[2].id)];
+
+    const multiScheduleConfig = {
+      enabled: true,
+      sendTime: '13:00',
+      timezone: 'America/Santiago',
+      toleranceMinutes: 30,
+      selectionMode: 'SAME_FOR_ALL',
+      weeklySchedule: [
+        { weekday: 1, sendTime: '10:00', templateIds: [t1] },
+        { weekday: 1, sendTime: '15:30', templateIds: [t2, t3] },
+        { weekday: 2, sendTime: '11:00', templateIds: [t1] },
+      ],
+    };
+
+    const saved = await injectAuthenticated(app, auth, {
+      method: 'PATCH',
+      url: '/api/polls/configuration',
+      payload: multiScheduleConfig,
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(database.getPollConfiguration().weeklySchedule).toHaveLength(3);
+
+    // Rechaza horarios duplicados en el mismo día y hora
+    const duplicateRes = await injectAuthenticated(app, auth, {
+      method: 'PATCH',
+      url: '/api/polls/configuration',
+      payload: {
+        ...multiScheduleConfig,
+        weeklySchedule: [
+          { weekday: 1, sendTime: '10:00', templateIds: [t1] },
+          { weekday: 1, sendTime: '10:00', templateIds: [t2] },
+        ],
+      },
+    });
+    expect(duplicateRes.statusCode).toBe(400);
+
+    // Rechaza horario sin encuestas
+    const emptyRes = await injectAuthenticated(app, auth, {
+      method: 'PATCH',
+      url: '/api/polls/configuration',
+      payload: {
+        ...multiScheduleConfig,
+        weeklySchedule: [{ weekday: 1, sendTime: '10:00', templateIds: [] }],
+      },
+    });
+    expect(emptyRes.statusCode).toBe(400);
+  });
 });
 
 async function login(app: FastifyInstance): Promise<Authentication> {

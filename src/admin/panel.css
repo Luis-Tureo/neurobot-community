@@ -1164,30 +1164,108 @@ h3 {
 
 .poll-weekly-grid {
   display: grid;
-  gap: 0.75rem;
+  gap: 1rem;
 }
 
+.poll-weekly-day {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: #ffffff;
+  box-shadow: 0 0.1rem 0.3rem rgba(15, 23, 42, 0.04);
+}
+
+.poll-weekly-day-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.poll-weekly-day-header h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 750;
+}
+
+.poll-weekly-schedules-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.poll-weekly-schedule-row,
 .poll-weekly-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(8rem, 0.7fr) minmax(8rem, 0.65fr) minmax(15rem, 2fr);
+  grid-template-columns: minmax(7.5rem, 8.5rem) minmax(13rem, 1fr) auto;
   align-items: end;
   gap: 0.75rem;
-  padding: 0.85rem;
+  padding: 0.75rem 0.85rem;
   border: 1px solid var(--line);
   border-radius: 0.75rem;
+  background: #f8fafc;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.poll-weekly-schedule-row:hover,
+.poll-weekly-row:hover {
+  border-color: #cbd5e1;
   background: #ffffff;
 }
 
+.poll-weekly-schedule-row:has(.poll-weekly-choices[open]),
 .poll-weekly-row:has(.poll-weekly-choices[open]) {
   z-index: 30;
+  border-color: #c7d2fe;
+  background: #ffffff;
 }
 
+.poll-weekly-schedule-row label,
+.poll-weekly-row label {
+  margin-bottom: 0;
+}
+
+.poll-weekly-schedule-row h4,
 .poll-weekly-row h4 {
   align-self: center;
   margin: 0;
   color: var(--ink);
   font-weight: 700;
+}
+
+.poll-remove-schedule-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.875rem;
+  line-height: 1;
+}
+
+.poll-empty-day-note {
+  margin: 0;
+  padding: 0.5rem 0.25rem;
+  color: #64748b;
+  font-size: 0.875rem;
+  font-style: italic;
+}
+
+.poll-weekly-day-actions {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: 0.25rem;
+}
+
+.poll-add-schedule-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+  font-weight: 600;
 }
 
 .poll-weekly-choices {
@@ -1892,6 +1970,7 @@ legend {
 }
 
 @media (max-width: 820px) {
+  .poll-weekly-schedule-row,
   .poll-weekly-row {
     grid-template-columns: 1fr;
     align-items: stretch;
