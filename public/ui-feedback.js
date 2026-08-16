@@ -1,3 +1,5 @@
+import './auth-session-race-guard.js';
+
 let noticeTimer = null;
 
 function feedbackIcon(type) {
