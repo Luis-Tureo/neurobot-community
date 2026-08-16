@@ -85,7 +85,13 @@ function forceExpiredSessionLogin() {
 }
 
 function requestPath(input) {
-  if (typeof input === 'string') return input;
+  if (typeof input === 'string') {
+    try {
+      return new window.URL(input, window.location.origin).pathname;
+    } catch {
+      return input;
+    }
+  }
   if (typeof window.URL !== 'undefined' && input instanceof window.URL) return input.pathname;
   if (typeof window.Request !== 'undefined' && input instanceof window.Request) {
     try {
@@ -97,17 +103,84 @@ function requestPath(input) {
   return '';
 }
 
+function requestMethod(input, init) {
+  if (typeof init?.method === 'string') return init.method.toUpperCase();
+  if (typeof window.Request !== 'undefined' && input instanceof window.Request) {
+    return input.method.toUpperCase();
+  }
+  return 'GET';
+}
+
+function requestTimeout(path, method) {
+  if (path === '/api/auth/login' || path === '/api/auth/session') return 15_000;
+  if (method === 'GET') return 30_000;
+  return 45_000;
+}
+
+async function fetchWithTimeout(originalFetch, input, init, path) {
+  const method = requestMethod(input, init);
+  const timeoutMs = requestTimeout(path, method);
+  const controller = new window.AbortController();
+  const upstreamSignal =
+    init?.signal ||
+    (typeof window.Request !== 'undefined' && input instanceof window.Request ? input.signal : null);
+  let upstreamAbort = null;
+
+  if (upstreamSignal) {
+    if (upstreamSignal.aborted) {
+      controller.abort(upstreamSignal.reason);
+    } else {
+      upstreamAbort = () => controller.abort(upstreamSignal.reason);
+      upstreamSignal.addEventListener('abort', upstreamAbort, { once: true });
+    }
+  }
+
+  let timedOut = false;
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    return await originalFetch(input, { ...(init || {}), signal: controller.signal });
+  } catch (error) {
+    if (timedOut) {
+      const timeoutError = new Error(
+        'El servidor tardó demasiado en responder. Intenta nuevamente en unos segundos.',
+      );
+      timeoutError.code = 'REQUEST_TIMEOUT';
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+    if (upstreamSignal && upstreamAbort) {
+      upstreamSignal.removeEventListener('abort', upstreamAbort);
+    }
+  }
+}
+
 function installSessionExpiryGuard() {
   if (window.__neurobotLoginNavigationFetchGuard === true) return;
   window.__neurobotLoginNavigationFetchGuard = true;
   const originalFetch = window.fetch.bind(window);
-  window.fetch = async (...args) => {
-    const response = await originalFetch(...args);
-    const path = requestPath(args[0]);
+  window.fetch = async (input, init) => {
+    const path = requestPath(input);
+    const requestStartedWithActivePanel = !isLoginActive();
+    const response = await fetchWithTimeout(originalFetch, input, init, path);
+
+    // Una petición iniciada mientras el login estaba visible puede terminar después de
+    // una autenticación correcta. Ese 401 pertenece a la sesión anterior y nunca debe
+    // devolver al usuario al login. /api/auth/session también es una sonda de arranque,
+    // por lo que su 401 se gestiona en app.js/multibot-panel.js y no aquí.
     if (
       response.status === 401 &&
+      requestStartedWithActivePanel &&
+      !isLoginActive() &&
       path.startsWith('/api/') &&
-      path !== '/api/auth/login'
+      path !== '/api/auth/login' &&
+      path !== '/api/auth/session' &&
+      path !== '/api/auth/logout'
     ) {
       forceExpiredSessionLogin();
     }
