@@ -201,25 +201,51 @@ export class SessionStore {
   }
 }
 
+type LoginAttemptEntry = {
+  failures: number[];
+  lockedUntil: number;
+  nextRecoveryProbeAt: number;
+};
+
 export class LoginAttemptGate {
-  private readonly attempts = new Map<string, { failures: number[]; lockedUntil: number }>();
+  private readonly attempts = new Map<string, LoginAttemptEntry>();
 
   public constructor(
     private readonly maximumFailures = 5,
     private readonly windowMs = 15 * 60 * 1000,
     private readonly lockMs = 15 * 60 * 1000,
+    private readonly recoveryProbeIntervalMs = 30 * 1000,
   ) {}
 
   public canAttempt(key: string, now = Date.now()): boolean {
     const entry = this.attempts.get(key);
-    return entry === undefined || entry.lockedUntil <= now;
+    if (entry === undefined || entry.lockedUntil <= now) return true;
+
+    // Azure App Service puede presentar varias solicitudes a través de un mismo proxy.
+    // Un bloqueo absoluto por request.ip podría impedir durante 15 minutos que una
+    // contraseña correcta se compruebe. Durante el bloqueo permitimos una única
+    // comprobación de recuperación y, si vuelve a fallar, como máximo una cada 30 s.
+    if (entry.nextRecoveryProbeAt <= now) {
+      entry.nextRecoveryProbeAt = now + this.recoveryProbeIntervalMs;
+      this.attempts.set(key, entry);
+      return true;
+    }
+    return false;
   }
 
   public failure(key: string, now = Date.now()): void {
-    const current = this.attempts.get(key) ?? { failures: [], lockedUntil: 0 };
+    const current = this.attempts.get(key) ?? {
+      failures: [],
+      lockedUntil: 0,
+      nextRecoveryProbeAt: 0,
+    };
     current.failures = current.failures.filter((timestamp) => now - timestamp < this.windowMs);
     current.failures.push(now);
-    if (current.failures.length >= this.maximumFailures) current.lockedUntil = now + this.lockMs;
+    if (current.failures.length >= this.maximumFailures && current.lockedUntil <= now) {
+      current.lockedUntil = now + this.lockMs;
+      // Se permite que el siguiente intento actúe como comprobación de recuperación.
+      current.nextRecoveryProbeAt = now;
+    }
     this.attempts.set(key, current);
   }
 
