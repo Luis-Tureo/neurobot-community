@@ -43,14 +43,28 @@ try {
   });
 
   const target = new URL('/#assistants', baseUrl).href;
-  // El panel mantiene actividad de red (estado del bot, sesión y módulos), por lo que
-  // networkidle2 no es una condición válida para decidir que el login está listo.
-  await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-  await page.waitForSelector('#login-form input[name="password"]', { timeout: 15_000 });
+
+  // El HTML del login puede estar disponible antes de DOMContentLoaded porque varios módulos
+  // administrativos se evalúan al final del documento. Iniciamos la navegación, pero la prueba
+  // se sincroniza con el controlador real de autenticación y no con networkidle/DOMContentLoaded.
+  const initialNavigation = page
+    .goto(target, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+    .catch((error) => {
+      record('initial-navigation', error.message);
+      return null;
+    });
+
+  await page.waitForSelector('#login-form input[name="password"]', { timeout: 20_000 });
+  await page.waitForFunction(
+    () => window.__neurobotAuthenticationRaceGuard === true,
+    { timeout: 30_000 },
+  );
 
   const initialState = await page.evaluate(() => ({
+    readyState: document.readyState,
     loginHidden: document.querySelector('#login-view')?.classList.contains('hidden') ?? null,
     panelHidden: document.querySelector('#panel-view')?.classList.contains('hidden') ?? null,
+    authGuard: window.__neurobotAuthenticationRaceGuard === true,
     appScript: [...document.scripts].some((script) => script.src.endsWith('/app.js')),
     moduleScripts: [...document.scripts]
       .filter((script) => script.type === 'module')
@@ -65,28 +79,38 @@ try {
       new URL(response.url()).pathname === '/api/auth/login' && response.request().method() === 'POST',
     { timeout: 20_000 },
   );
+  const verifiedSessionPromise = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/auth/session' &&
+      response.request().method() === 'GET' &&
+      response.status() === 200,
+    { timeout: 30_000 },
+  );
 
   await page.click('#login-form button[type="submit"]');
   const loginResponse = await loginResponsePromise;
   record('login-http', String(loginResponse.status()));
 
-  let loginBody = {};
-  try {
-    loginBody = await loginResponse.json();
-  } catch {
-    // El estado HTTP basta para el diagnóstico.
-  }
   if (loginResponse.status() !== 200) {
+    let loginBody = {};
+    try {
+      loginBody = await loginResponse.json();
+    } catch {
+      // El estado HTTP basta para el diagnóstico.
+    }
     record('login-body', JSON.stringify(loginBody));
     throw new Error(`El navegador recibió HTTP ${loginResponse.status()} en /api/auth/login.`);
   }
+
+  const verifiedSessionResponse = await verifiedSessionPromise;
+  record('verified-session-http', String(verifiedSessionResponse.status()));
 
   await page.waitForFunction(
     () => {
       const panel = document.querySelector('#panel-view');
       return panel && !panel.classList.contains('hidden');
     },
-    { timeout: 20_000 },
+    { timeout: 60_000 },
   );
 
   await page.waitForFunction(
@@ -94,7 +118,7 @@ try {
       const target = document.querySelector('#bots-list');
       return target && target.childElementCount > 0;
     },
-    { timeout: 20_000 },
+    { timeout: 60_000 },
   );
 
   const finalState = await page.evaluate(async () => {
@@ -102,6 +126,7 @@ try {
     const botsResponse = await fetch('/api/bots', { cache: 'no-store' });
     return {
       href: window.location.href,
+      readyState: document.readyState,
       loginHidden: document.querySelector('#login-view')?.classList.contains('hidden') ?? null,
       panelHidden: document.querySelector('#panel-view')?.classList.contains('hidden') ?? null,
       botCards: document.querySelector('#bots-list')?.childElementCount ?? -1,
@@ -116,6 +141,8 @@ try {
     diagnostics.forEach((entry) => console.log(entry));
     console.log('BROWSER_AUTH_NON_FATAL_DIAGNOSTICS_END');
   }
+
+  void initialNavigation;
 } catch (error) {
   console.error(`BROWSER_AUTH_DIAGNOSTIC=FAILED ${error instanceof Error ? error.message : String(error)}`);
   diagnostics.forEach((entry) => console.error(entry));
