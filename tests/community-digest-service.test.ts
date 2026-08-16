@@ -1418,6 +1418,352 @@ describe('resiliencia del procesamiento de resúmenes', () => {
       database.close();
     }
   });
+
+  it('regresión #25: rate limit, Retry-After, retries y envío final conservan el job activo', async () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    database.saveAIQueueSettings('neurobot', {
+      ...database.getAIQueueSettings('neurobot'),
+      maxRetries: 2,
+      initialRetryDelaySeconds: 1,
+      maximumRetryDelaySeconds: 60,
+    });
+    database.synchronizeBotGroup('neurobot', {
+      id: GROUP_ID,
+      name: 'Grupo de resumen',
+      botIsMember: true,
+    });
+    const client = new SimulatedMessagingClient();
+    client.recentGroupMessages.set(GROUP_ID, largeMessages(8));
+    const retryWaits: number[] = [];
+    const retryReleases: Array<() => void> = [];
+    const queue = new AIRequestQueueService(
+      database,
+      createLogger('silent'),
+      'neurobot',
+      Date.now,
+      async (milliseconds) => {
+        retryWaits.push(milliseconds);
+        await new Promise<void>((resolve) => retryReleases.push(resolve));
+      },
+      () => 0.5,
+    );
+    const blockAttempts = new Map<string, number>();
+    const provider: AIProvider = {
+      ...createProvider(),
+      classifyProviderError: (error) =>
+        error instanceof AIProviderError ? error.code : 'AI_TEMPORARY_ERROR',
+      generateGroundedResponse: async (request) => {
+        if (request.question.startsWith('Condensa')) {
+          const attempt = (blockAttempts.get(request.context) ?? 0) + 1;
+          blockAttempts.set(request.context, attempt);
+          if (blockAttempts.size === 2 && attempt <= 2) {
+            throw new AIProviderError(
+              'AI_PROVIDER_RATE_LIMITED',
+              'Detalle privado que no debe persistirse.',
+              true,
+              attempt === 1 ? 58 : 2,
+            );
+          }
+          return {
+            text: `Resumen parcial seguro ${blockAttempts.size}.`,
+            usage: { inputTokens: 300, outputTokens: 30, totalTokens: 330 },
+          };
+        }
+        return createProvider().generateGroundedResponse(request);
+      },
+    };
+    const service = new CommunityDigestService(
+      database,
+      client,
+      provider,
+      createLogger('silent'),
+      new Anonymizer('x'.repeat(32)),
+      { botId: 'neurobot', aiQueue: queue, now: () => NOW },
+    );
+    try {
+      const configuration = service.configuration();
+      configuration.maxCharacters = 2_000;
+      service.saveConfiguration(configuration);
+
+      const started = service.startManualTest('daily', [GROUP_ID]);
+      const duplicate = service.startManualTest('daily', [GROUP_ID]);
+      expect(started).toMatchObject({ reused: false, run: { status: 'queued', totalSends: 1 } });
+      expect(duplicate).toMatchObject({ reused: true });
+      expect(duplicate.run.jobId).toBe(started.run.jobId);
+
+      await vi.waitFor(() => expect(retryReleases).toHaveLength(1));
+      const firstWait = service.getManualTest(started.run.jobId);
+      expect(firstWait).toMatchObject({
+        status: 'waiting_provider',
+        retryAfterSeconds: 58,
+        retryCount: 1,
+        completedSends: 0,
+        messageCount: 8,
+      });
+      expect(firstWait?.totalBlocks).toBeGreaterThan(1);
+      expect(firstWait?.errorMessage).toBeNull();
+      expect(service.listActiveManualTests().map((run) => run.jobId)).toContain(started.run.jobId);
+
+      const otherBotService = new CommunityDigestService(
+        database,
+        client,
+        provider,
+        createLogger('silent'),
+        new Anonymizer('x'.repeat(32)),
+        { botId: 'otro-bot', aiQueue: queue, now: () => NOW },
+      );
+      expect(otherBotService.getManualTest(started.run.jobId)).toBeNull();
+
+      retryReleases.shift()?.();
+      await vi.waitFor(() => expect(retryReleases).toHaveLength(1));
+      expect(service.getManualTest(started.run.jobId)).toMatchObject({
+        status: 'waiting_provider',
+        retryAfterSeconds: 2,
+        retryCount: 2,
+      });
+      retryReleases.shift()?.();
+
+      await vi.waitFor(() =>
+        expect(service.getManualTest(started.run.jobId)?.status).toBe('completed'),
+      );
+      const completed = service.getManualTest(started.run.jobId);
+      expect(completed).toMatchObject({
+        status: 'completed',
+        messageCount: 8,
+        retryCount: 2,
+        completedSends: 1,
+        failedSends: 0,
+        progressPercent: 100,
+      });
+      expect(retryWaits).toEqual([58_000, 2_000]);
+      expect(client.sentMessages).toHaveLength(1);
+      expect(JSON.stringify(completed)).not.toContain('Detalle privado');
+    } finally {
+      for (const release of retryReleases) release();
+      database.close();
+    }
+  });
+
+  it.each(['daily', 'weekly', 'monthly'] as const)(
+    'ejecución con estado completa el resumen %s sin cambiar su ventana',
+    async (period) => {
+      const current = new Date();
+      const database = new AppDatabase(':memory:');
+      database.migrate();
+      database.synchronizeBotGroup('neurobot', {
+        id: GROUP_ID,
+        name: 'Grupo de resumen',
+        botIsMember: true,
+      });
+      const client = new SimulatedMessagingClient();
+      client.recentGroupMessages.set(GROUP_ID, [
+        {
+          id: `mensaje-${period}`,
+          body: `Conversación para el resumen ${period}.`,
+          timestampMs: current.getTime() - 1_000,
+          fromMe: false,
+          participantId: null,
+          messageType: 'chat',
+        },
+      ]);
+      const service = new CommunityDigestService(
+        database,
+        client,
+        createProvider(),
+        createLogger('silent'),
+        new Anonymizer('x'.repeat(32)),
+        { botId: 'neurobot', now: () => current },
+      );
+      try {
+        const { run } = service.startManualTest(period, [GROUP_ID]);
+        await vi.waitFor(() => expect(service.getManualTest(run.jobId)?.status).toBe('completed'));
+        expect(service.getManualTest(run.jobId)).toMatchObject({
+          period,
+          completedSends: 1,
+          totalSends: 1,
+        });
+        expect(client.sentMessages).toHaveLength(1);
+      } finally {
+        database.close();
+      }
+    },
+  );
+
+  it('actualiza loading_history y generating con métricas reales del pipeline', async () => {
+    const current = new Date();
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    database.synchronizeBotGroup('neurobot', {
+      id: GROUP_ID,
+      name: 'Grupo de resumen',
+      botIsMember: true,
+    });
+    const client = new SimulatedMessagingClient();
+    client.recentGroupMessages.set(GROUP_ID, [
+      {
+        id: 'mensaje-progreso',
+        body: 'Conversación con progreso observable.',
+        timestampMs: current.getTime() - 1_000,
+        fromMe: false,
+        participantId: null,
+        messageType: 'chat',
+      },
+    ]);
+    let releaseHistory!: () => void;
+    let releaseAI!: () => void;
+    const historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    const aiGate = new Promise<void>((resolve) => {
+      releaseAI = resolve;
+    });
+    const originalFetch = client.fetchGroupMessageHistory.bind(client);
+    client.fetchGroupMessageHistory = async (request) => {
+      await historyGate;
+      return originalFetch(request);
+    };
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async (request) => {
+        await aiGate;
+        return createProvider().generateGroundedResponse(request);
+      },
+    };
+    const service = new CommunityDigestService(
+      database,
+      client,
+      provider,
+      createLogger('silent'),
+      new Anonymizer('x'.repeat(32)),
+      { botId: 'neurobot', now: () => current },
+    );
+    try {
+      const { run } = service.startManualTest('weekly', [GROUP_ID]);
+      await vi.waitFor(() =>
+        expect(service.getManualTest(run.jobId)?.status).toBe('loading_history'),
+      );
+      expect(service.getManualTest(run.jobId)?.progressPercent).toBeNull();
+
+      releaseHistory();
+      await vi.waitFor(() => expect(service.getManualTest(run.jobId)?.status).toBe('generating'));
+      expect(service.getManualTest(run.jobId)).toMatchObject({
+        messageCount: 1,
+        totalBlocks: 1,
+        aiCallCount: 1,
+      });
+
+      releaseAI();
+      await vi.waitFor(() => expect(service.getManualTest(run.jobId)?.status).toBe('completed'));
+    } finally {
+      releaseHistory();
+      releaseAI();
+      database.close();
+    }
+  });
+
+  it('mantiene el estado sending hasta que WhatsApp confirma el envío', async () => {
+    const current = new Date();
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    database.synchronizeBotGroup('neurobot', {
+      id: GROUP_ID,
+      name: 'Grupo de resumen',
+      botIsMember: true,
+    });
+    const client = new SimulatedMessagingClient();
+    client.recentGroupMessages.set(GROUP_ID, [
+      {
+        id: 'mensaje-envio',
+        body: 'Conversación lista para enviar.',
+        timestampMs: current.getTime() - 1_000,
+        fromMe: false,
+        participantId: null,
+        messageType: 'chat',
+      },
+    ]);
+    let confirmSend!: () => void;
+    const sendGate = new Promise<void>((resolve) => {
+      confirmSend = resolve;
+    });
+    const originalSend = client.sendMessage.bind(client);
+    client.sendMessage = async (chatId, text) => {
+      await sendGate;
+      await originalSend(chatId, text);
+    };
+    const service = new CommunityDigestService(
+      database,
+      client,
+      createProvider(),
+      createLogger('silent'),
+      new Anonymizer('x'.repeat(32)),
+      { botId: 'neurobot', now: () => current },
+    );
+    try {
+      const { run } = service.startManualTest('daily', [GROUP_ID]);
+      await vi.waitFor(() => expect(service.getManualTest(run.jobId)?.status).toBe('sending'));
+      expect(service.getManualTest(run.jobId)).toMatchObject({
+        completedSends: 0,
+        progressPercent: 95,
+      });
+      confirmSend();
+      await vi.waitFor(() => expect(service.getManualTest(run.jobId)?.status).toBe('completed'));
+      expect(client.sentMessages).toHaveLength(1);
+    } finally {
+      confirmSend();
+      database.close();
+    }
+  });
+
+  it('con varios grupos conserva éxitos parciales y termina fallido solo al concluir', async () => {
+    const GROUP_B = 'grupo-resumen-sin-mensajes@g.us';
+    const current = new Date();
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    database.synchronizeBotGroup('neurobot', {
+      id: GROUP_ID,
+      name: 'Grupo A',
+      botIsMember: true,
+    });
+    database.synchronizeBotGroup('neurobot', {
+      id: GROUP_B,
+      name: 'Grupo B',
+      botIsMember: true,
+    });
+    const client = new SimulatedMessagingClient();
+    client.recentGroupMessages.set(GROUP_ID, [
+      {
+        id: 'mensaje-a',
+        body: 'Conversación válida del grupo A.',
+        timestampMs: current.getTime() - 1_000,
+        fromMe: false,
+        participantId: null,
+        messageType: 'chat',
+      },
+    ]);
+    client.recentGroupMessages.set(GROUP_B, []);
+    const service = new CommunityDigestService(
+      database,
+      client,
+      createProvider(),
+      createLogger('silent'),
+      new Anonymizer('x'.repeat(32)),
+      { botId: 'neurobot', now: () => current },
+    );
+    try {
+      const { run } = service.startManualTest('daily', [GROUP_ID, GROUP_B]);
+      await vi.waitFor(() => expect(service.getManualTest(run.jobId)?.status).toBe('failed'));
+      expect(service.getManualTest(run.jobId)).toMatchObject({
+        totalSends: 2,
+        completedSends: 1,
+        failedSends: 1,
+        errorCode: 'NO_MESSAGES_IN_PERIOD',
+      });
+      expect(client.sentMessages).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
 });
 
 describe('automatización de resúmenes diario, semanal y mensual', () => {

@@ -9,6 +9,17 @@ let validationTimerId = null;
 let validationCountdown = 30;
 let simulatorTimerId = null;
 let simulatorCountdown = 30;
+const digestTrackers = new Map();
+const activeDigestStatuses = new Set([
+  'queued',
+  'loading_history',
+  'generating',
+  'waiting_provider',
+  'retrying',
+  'sending',
+]);
+const DIGEST_POLL_INTERVAL_MS = 1500;
+let moduleLoadGeneration = 0;
 
 const query = (selector, root = document) => root.querySelector(selector);
 const queryAll = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -353,19 +364,19 @@ function definitions() {
       id: 'daily-digest',
       title: 'Resumen diario',
       description: 'Analiza hasta 24 horas y envía un resumen.',
-      run: (groupKey) => sendDigestTest('daily', groupKey),
+      digestPeriod: 'daily',
     },
     {
       id: 'weekly-digest',
       title: 'Resumen semanal',
       description: 'Analiza hasta siete días y envía un resumen.',
-      run: (groupKey) => sendDigestTest('weekly', groupKey),
+      digestPeriod: 'weekly',
     },
     {
       id: 'monthly-digest',
       title: 'Resumen mensual',
       description: 'Analiza el último mes y envía un resumen.',
-      run: (groupKey) => sendDigestTest('monthly', groupKey),
+      digestPeriod: 'monthly',
     },
   ];
 }
@@ -378,6 +389,7 @@ function renderTests() {
     const item = document.createElement('li');
     item.className = 'automation-test-item';
     item.dataset.testId = test.id;
+    if (test.digestPeriod) item.dataset.digestPeriod = test.digestPeriod;
     const order = document.createElement('span');
     order.className = 'test-order';
     order.textContent = String(index + 1).padStart(2, '0');
@@ -388,9 +400,11 @@ function renderTests() {
     const description = document.createElement('p');
     description.className = 'muted';
     description.textContent = test.description;
-    const result = document.createElement('p');
+    const result = document.createElement('div');
     result.className = 'automation-test-result muted';
     result.textContent = 'Sin ejecutar';
+    result.setAttribute('role', 'status');
+    result.setAttribute('aria-live', 'polite');
     copy.append(title, description, result);
     const button = document.createElement('button');
     button.type = 'button';
@@ -403,6 +417,7 @@ function renderTests() {
 
 async function execute(test, button) {
   const result = query('.automation-test-result', button.closest('li'));
+  if (test.digestPeriod) return executeDigestTest(test.digestPeriod, button, result);
   try {
     const groupKeys = selectedGroups();
     button.disabled = true;
@@ -461,18 +476,275 @@ function sendPollTest(groupKey) {
   });
 }
 
-async function sendDigestTest(period, groupKey) {
-  const result = await api(botPath('/api/automatic-messages/digests/send-test'), {
+function sendDigestTest(period, groupKeys) {
+  return api(botPath('/api/automatic-messages/digests/send-test'), {
     method: 'POST',
-    body: JSON.stringify({ groupKey, period, confirmed: true }),
+    body: JSON.stringify({ groupKeys, period, confirmed: true }),
   });
-  if (result.status === 'SKIPPED' || result.status === 'FAILED') {
-    const error = new Error(result.error || 'La prueba no pudo completarse.');
-    error.code = result.errorCode;
-    error.causeCode = result.causeCode;
-    throw error;
+}
+
+async function executeDigestTest(period, button, result) {
+  let groupKeys;
+  try {
+    groupKeys = selectedGroups();
+  } catch (error) {
+    result.textContent = error.message;
+    result.className = 'automation-test-result failed';
+    return false;
   }
-  return result;
+
+  stopDigestTracking(period);
+  button.disabled = true;
+  button.textContent = 'Procesando…';
+  renderDigestPreparing(result, groupKeys.length);
+  try {
+    const run = await sendDigestTest(period, groupKeys);
+    trackDigestRun(run, button, result);
+    return true;
+  } catch (error) {
+    const active = await findActiveDigest(period).catch(() => null);
+    if (active) {
+      trackDigestRun(active, button, result);
+      return true;
+    }
+    button.disabled = false;
+    button.textContent = 'Probar';
+    if (error?.code) {
+      result.textContent = formatTestFailure(error);
+      result.className = 'automation-test-result failed';
+    } else {
+      result.textContent =
+        'No se pudo confirmar el inicio. La conexión se recuperará al volver a abrir el Centro de pruebas.';
+      result.className = 'automation-test-result pending';
+    }
+    return false;
+  }
+}
+
+function renderDigestPreparing(result, groupCount) {
+  result.replaceChildren();
+  result.className = 'automation-test-result pending digest-test-status';
+  const title = document.createElement('strong');
+  title.className = 'digest-status-title';
+  title.textContent = 'Preparando prueba…';
+  const count = document.createElement('span');
+  count.className = 'digest-status-detail';
+  count.textContent = `0 de ${groupCount} envíos completados`;
+  result.append(title, createDigestProgress(null), count);
+}
+
+function trackDigestRun(run, button, result) {
+  stopDigestTracking(run.period);
+  const tracker = {
+    run,
+    button,
+    result,
+    pollTimerId: null,
+    clockTimerId: null,
+    networkWarning: null,
+  };
+  digestTrackers.set(run.period, tracker);
+  button.disabled = activeDigestStatuses.has(run.status);
+  button.textContent = button.disabled ? 'Procesando…' : 'Probar';
+  renderDigestRun(tracker);
+  if (!activeDigestStatuses.has(run.status)) return;
+  tracker.clockTimerId = window.setInterval(() => refreshDigestClock(tracker), 1000);
+  scheduleDigestPoll(tracker, DIGEST_POLL_INTERVAL_MS);
+}
+
+function scheduleDigestPoll(tracker, delay) {
+  if (digestTrackers.get(tracker.run.period) !== tracker) return;
+  if (tracker.pollTimerId) window.clearTimeout(tracker.pollTimerId);
+  tracker.pollTimerId = window.setTimeout(() => void pollDigestRun(tracker), delay);
+}
+
+async function pollDigestRun(tracker) {
+  if (digestTrackers.get(tracker.run.period) !== tracker) return;
+  tracker.pollTimerId = null;
+  try {
+    const run = await api(
+      botPath(`/api/automatic-messages/digests/send-test/${encodeURIComponent(tracker.run.jobId)}`),
+    );
+    tracker.run = run;
+    tracker.networkWarning = null;
+    renderDigestRun(tracker);
+    if (!activeDigestStatuses.has(run.status)) {
+      finishDigestTracking(tracker);
+      return;
+    }
+    scheduleDigestPoll(tracker, DIGEST_POLL_INTERVAL_MS);
+  } catch {
+    tracker.networkWarning =
+      'Conexión inestable. La prueba sigue activa en el servidor y volveremos a consultar su estado.';
+    renderDigestRun(tracker);
+    scheduleDigestPoll(tracker, 3000);
+  }
+}
+
+function renderDigestRun(tracker) {
+  const { run, result } = tracker;
+  const active = activeDigestStatuses.has(run.status);
+  const failed = run.status === 'failed';
+  result.replaceChildren();
+  result.className = `automation-test-result digest-test-status ${active ? 'pending' : failed ? 'failed' : 'success'}`;
+
+  const title = document.createElement('strong');
+  title.className = 'digest-status-title';
+  title.textContent = digestStatusTitle(run);
+  const visibleProgress = failed && !Number.isFinite(run.progressPercent) ? 0 : run.progressPercent;
+  result.append(title, createDigestProgress(visibleProgress));
+
+  for (const detailText of digestStatusDetails(run, tracker.networkWarning)) {
+    const detail = document.createElement('span');
+    detail.className = 'digest-status-detail';
+    detail.textContent = detailText;
+    if (detailText.startsWith('Reintentando en aproximadamente')) {
+      detail.dataset.digestRetryCountdown = '';
+      detail.setAttribute('aria-live', 'off');
+    }
+    result.append(detail);
+  }
+
+  const elapsed = document.createElement('span');
+  elapsed.className = 'digest-elapsed';
+  elapsed.dataset.digestElapsed = '';
+  elapsed.setAttribute('role', 'timer');
+  elapsed.setAttribute('aria-live', 'off');
+  result.append(elapsed);
+  refreshDigestClock(tracker);
+}
+
+function createDigestProgress(progressPercent) {
+  if (!Number.isFinite(progressPercent)) {
+    const track = document.createElement('span');
+    track.className = 'digest-progress-track indeterminate';
+    track.setAttribute('role', 'progressbar');
+    track.setAttribute('aria-label', 'Progreso de la prueba de resumen');
+    track.setAttribute('aria-valuemin', '0');
+    track.setAttribute('aria-valuemax', '100');
+    const indicator = document.createElement('span');
+    indicator.className = 'digest-progress-indicator';
+    track.append(indicator);
+    return track;
+  }
+  const track = document.createElement('progress');
+  track.className = 'digest-progress-track';
+  track.setAttribute('aria-label', 'Progreso de la prueba de resumen');
+  track.max = 100;
+  const normalized = Math.max(0, Math.min(100, Math.round(progressPercent)));
+  track.value = normalized;
+  return track;
+}
+
+function digestStatusTitle(run) {
+  const titles = {
+    queued: 'Preparando prueba…',
+    loading_history: 'Recuperando mensajes del grupo…',
+    generating:
+      run.generationStage === 'finalizing'
+        ? 'Construyendo resumen final…'
+        : 'Generando resumen con IA…',
+    waiting_provider: 'Esperando disponibilidad de la IA…',
+    retrying: 'Reintentando generación con IA…',
+    sending: 'Resumen generado. Enviando al grupo…',
+    completed: 'Resumen enviado correctamente.',
+    failed: 'La prueba no pudo completarse.',
+  };
+  return titles[run.status] || 'Procesando resumen…';
+}
+
+function digestStatusDetails(run, networkWarning) {
+  const details = [];
+  if (run.messageCount > 0 && run.status !== 'loading_history') {
+    details.push(`${run.messageCount.toLocaleString('es-CL')} mensajes recuperados.`);
+  }
+  if (
+    run.status === 'generating' &&
+    run.generationStage === 'blocks' &&
+    Number.isInteger(run.currentBlock) &&
+    Number.isInteger(run.totalBlocks) &&
+    run.totalBlocks > 0
+  ) {
+    details.push(`Procesando bloque ${Math.max(1, run.currentBlock)} de ${run.totalBlocks}…`);
+  }
+  if (run.status === 'waiting_provider') {
+    details.push('Límite temporal de la IA. Neurobot reintentará automáticamente.');
+    const retrySeconds = remainingRetrySeconds(run);
+    if (retrySeconds !== null) details.push(`Reintentando en aproximadamente ${retrySeconds} s.`);
+  }
+  if (run.retryCount > 0 && activeDigestStatuses.has(run.status)) {
+    details.push(
+      `${run.retryCount} reintento${run.retryCount === 1 ? '' : 's'} realizado${run.retryCount === 1 ? '' : 's'}.`,
+    );
+  }
+  details.push(`${run.completedSends} de ${run.totalSends} envíos completados`);
+  if (run.status === 'failed' && run.errorMessage) details.push(run.errorMessage);
+  if (networkWarning) details.push(networkWarning);
+  return details;
+}
+
+function refreshDigestClock(tracker) {
+  if (digestTrackers.get(tracker.run.period) !== tracker) return;
+  const elapsed = query('[data-digest-elapsed]', tracker.result);
+  if (!elapsed) return;
+  const duration = Number.isFinite(tracker.run.durationMs)
+    ? tracker.run.durationMs
+    : Math.max(0, Date.now() - Date.parse(tracker.run.startedAt));
+  elapsed.textContent = `${activeDigestStatuses.has(tracker.run.status) ? 'Tiempo transcurrido' : 'Duración total'}: ${formatDigestDuration(duration)}`;
+  const retryDetail =
+    tracker.run.status === 'waiting_provider' ? remainingRetrySeconds(tracker.run) : null;
+  const retryRow = query('[data-digest-retry-countdown]', tracker.result);
+  if (retryRow && retryDetail !== null) {
+    retryRow.textContent = `Reintentando en aproximadamente ${retryDetail} s.`;
+  }
+}
+
+function remainingRetrySeconds(run) {
+  if (!run.retryAt) return Number.isFinite(run.retryAfterSeconds) ? run.retryAfterSeconds : null;
+  return Math.max(0, Math.ceil((Date.parse(run.retryAt) - Date.now()) / 1000));
+}
+
+function formatDigestDuration(milliseconds) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function finishDigestTracking(tracker) {
+  if (tracker.pollTimerId) window.clearTimeout(tracker.pollTimerId);
+  if (tracker.clockTimerId) window.clearInterval(tracker.clockTimerId);
+  tracker.pollTimerId = null;
+  tracker.clockTimerId = null;
+  tracker.button.disabled = false;
+  tracker.button.textContent = 'Probar';
+}
+
+function stopDigestTracking(period) {
+  const tracker = digestTrackers.get(period);
+  if (!tracker) return;
+  if (tracker.pollTimerId) window.clearTimeout(tracker.pollTimerId);
+  if (tracker.clockTimerId) window.clearInterval(tracker.clockTimerId);
+  digestTrackers.delete(period);
+}
+
+function stopAllDigestTracking() {
+  for (const period of [...digestTrackers.keys()]) stopDigestTracking(period);
+}
+
+async function findActiveDigest(period) {
+  const payload = await api(botPath('/api/automatic-messages/digests/send-test/active'));
+  return (payload.jobs || []).find((run) => run.period === period) || null;
+}
+
+async function resumeActiveDigestTests() {
+  const payload = await api(botPath('/api/automatic-messages/digests/send-test/active'));
+  for (const run of payload.jobs || []) {
+    const item = query(`[data-digest-period="${run.period}"]`);
+    const button = query('button', item);
+    const result = query('.automation-test-result', item);
+    if (button && result) trackDigestRun(run, button, result);
+  }
 }
 
 function formatTestFailure(error) {
@@ -649,6 +921,8 @@ function bindSimulator() {
 
 async function loadModule() {
   if (!botId) return;
+  const generation = ++moduleLoadGeneration;
+  stopAllDigestTracking();
   try {
     const context = await api(botPath('/api/automation-lab/context'));
     csrfToken = context.csrfToken;
@@ -657,12 +931,15 @@ async function loadModule() {
       api(botPath('/api/polls')),
       api(botPath('/api/automatic-messages/digests')),
     ]);
+    if (generation !== moduleLoadGeneration) return;
     authorizedGroups = automaticData.authorizedGroups || digestData.authorizedGroups || [];
     polls = (pollData.templates || []).filter((item) => item.enabled);
     renderGroupSelector();
     renderTests();
     invalidateBotValidation();
+    await resumeActiveDigestTests();
   } catch (error) {
+    if (generation !== moduleLoadGeneration) return;
     showNotice(error.message, true);
   }
 }
@@ -681,6 +958,8 @@ function bindModule() {
 }
 
 window.addEventListener('bot-services-load', (event) => {
+  moduleLoadGeneration += 1;
+  stopAllDigestTracking();
   botId = event.detail.botId;
   botValidation = null;
   botValidationSignature = '';
@@ -694,6 +973,8 @@ window.addEventListener('bot-services-load', (event) => {
   });
   if (visible) void loadModule();
 });
+
+window.addEventListener('pagehide', stopAllDigestTracking);
 
 createModule();
 bindSimulator();

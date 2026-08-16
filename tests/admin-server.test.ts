@@ -189,7 +189,7 @@ describe('API administrativa', () => {
     }
   });
 
-  it('expone un mensaje seguro y entendible cuando Groq limita la prueba de resumen', async () => {
+  it('inicia rápido y expone un fallo final seguro cuando la IA agota sus reintentos', async () => {
     const groupId = 'grupo-resumen-error@g.us';
     const anonymizer = new Anonymizer('x'.repeat(32));
     database.synchronizeBotGroup('neurobot', {
@@ -211,12 +211,7 @@ describe('API administrativa', () => {
       isConfigured: () => true,
       testConnection: async () => ({ successful: true }),
       generateGroundedResponse: async () => {
-        throw new AIProviderError(
-          'AI_PROVIDER_RATE_LIMITED',
-          'token=detalle-privado',
-          true,
-          30,
-        );
+        throw new AIProviderError('AI_PROVIDER_RATE_LIMITED', 'token=detalle-privado', true, 30);
       },
       getModelInformation: () => ({ provider: 'test', model: 'test' }),
       normalizeUsage: () => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
@@ -247,16 +242,33 @@ describe('API administrativa', () => {
         },
       });
 
-      expect(response.statusCode).toBe(502);
+      expect(response.statusCode).toBe(202);
       expect(response.json()).toMatchObject({
-        status: 'FAILED',
-        error:
-          'No fue posible completar el resumen porque el proveedor de IA alcanzó temporalmente su límite de uso.',
-        code: 'AI_SUMMARY_FAILED',
-        errorCode: 'AI_SUMMARY_FAILED',
-        causeCode: 'AI_PROVIDER_RATE_LIMITED',
+        period: 'daily',
+        status: 'queued',
+        totalSends: 1,
+        completedSends: 0,
+        reused: false,
       });
+      expect(response.json().jobId).toMatch(/^[0-9a-f-]{36}$/u);
       expect(response.body).not.toContain('detalle-privado');
+
+      const unauthorizedStatus = await app.inject({
+        method: 'GET',
+        url: `/api/automatic-messages/digests/send-test/${response.json().jobId}`,
+      });
+      expect(unauthorizedStatus.statusCode).toBe(401);
+
+      const final = await waitForDigestJob(app, auth, response.json().jobId);
+      expect(final).toMatchObject({
+        status: 'failed',
+        errorCode: 'AI_PROVIDER_RATE_LIMITED',
+        errorMessage:
+          'La IA mantuvo su límite temporal después de agotar los reintentos automáticos.',
+        failedSends: 1,
+      });
+      expect(JSON.stringify(final)).not.toContain('detalle-privado');
+      expect(final).not.toHaveProperty('summary');
     } finally {
       unregisterCommunityDigestService('neurobot', service);
     }
@@ -1003,4 +1015,23 @@ async function injectAuthenticated(
     ...(options.payload === undefined ? {} : { body: JSON.stringify(options.payload) }),
   });
   return response;
+}
+
+async function waitForDigestJob(
+  app: FastifyInstance,
+  auth: Authentication,
+  jobId: string,
+): Promise<Record<string, unknown>> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/automatic-messages/digests/send-test/${jobId}`,
+      headers: { cookie: auth.cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    const run = response.json() as Record<string, unknown>;
+    if (run.status === 'completed' || run.status === 'failed') return run;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('La prueba de resumen no alcanzó un estado final.');
 }

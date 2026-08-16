@@ -38,6 +38,16 @@ type RunInput<T> = {
   onWaitNotice?: () => Promise<void>;
   deadlineAtMs?: number;
   consumeRetryBudget?: () => boolean;
+  onRetryScheduled?: (notice: AIQueueRetryNotice) => void;
+  onRetryStarted?: (notice: AIQueueRetryNotice) => void;
+  onRetrySucceeded?: (notice: Pick<AIQueueRetryNotice, 'attempt' | 'code'>) => void;
+};
+
+export type AIQueueRetryNotice = {
+  attempt: number;
+  code: AIProviderErrorCode;
+  retryAfterSeconds: number;
+  retryAt: string;
 };
 
 export class AIRequestQueueService {
@@ -142,6 +152,9 @@ export class AIRequestQueueService {
             settings,
             input.deadlineAtMs,
             input.consumeRetryBudget,
+            input.onRetryScheduled,
+            input.onRetryStarted,
+            input.onRetrySucceeded,
           ),
         resolve: (result) => resolve(result as { value: T; coalesced: boolean }),
         reject,
@@ -203,14 +216,22 @@ export class AIRequestQueueService {
     settings: AIQueueSettings,
     deadlineAtMs?: number,
     consumeRetryBudget?: () => boolean,
+    onRetryScheduled?: (notice: AIQueueRetryNotice) => void,
+    onRetryStarted?: (notice: AIQueueRetryNotice) => void,
+    onRetrySucceeded?: (notice: Pick<AIQueueRetryNotice, 'attempt' | 'code'>) => void,
   ): Promise<T> {
+    let lastRetryCode: AIProviderErrorCode = 'AI_TEMPORARY_ERROR';
     for (let attempt = 0; attempt <= settings.maxRetries; attempt += 1) {
       try {
         const result = await operation();
-        if (attempt > 0) this.event('AI_PROVIDER_RETRY_SUCCESS', 'recovered');
+        if (attempt > 0) {
+          this.event('AI_PROVIDER_RETRY_SUCCESS', 'recovered');
+          notifySafely(onRetrySucceeded, { attempt, code: lastRetryCode });
+        }
         return result;
       } catch (error) {
         const code = classifyError(error);
+        lastRetryCode = code;
         this.lastSafeErrorCode = code;
         this.lastFailureAt = new Date(this.now()).toISOString();
         if (code === 'AI_TIMEOUT') {
@@ -263,7 +284,15 @@ export class AIRequestQueueService {
         }
         this.metric('retryCount');
         this.event('AI_PROVIDER_RETRY_SCHEDULED', code);
+        const notice: AIQueueRetryNotice = {
+          attempt: attempt + 1,
+          code,
+          retryAfterSeconds: Math.max(0, Math.ceil(roundedDelay / 1000)),
+          retryAt: new Date(this.now() + roundedDelay).toISOString(),
+        };
+        notifySafely(onRetryScheduled, notice);
         await this.sleep(roundedDelay);
+        notifySafely(onRetryStarted, notice);
       }
     }
     throw new Error('AI_RETRY_STATE_INVALID');
@@ -377,6 +406,14 @@ export class AIRequestQueueService {
       },
       'Evento seguro de cola de IA',
     );
+  }
+}
+
+function notifySafely<T>(callback: ((value: T) => void) | undefined, value: T): void {
+  try {
+    callback?.(value);
+  } catch {
+    // El progreso es informativo y nunca debe alterar el resultado de la solicitud de IA.
   }
 }
 

@@ -51,11 +51,25 @@ const configurationSchema = z
 
 const manualSchema = z
   .object({
-    groupKey: z.string().length(20),
+    groupKey: z.string().length(20).optional(),
+    groupKeys: z.array(z.string().length(20)).min(1).max(50).optional(),
     period: z.enum(['daily', 'weekly', 'monthly']),
     confirmed: z.literal(true),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if ((value.groupKey === undefined) === (value.groupKeys === undefined)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Selecciona uno o más grupos para la prueba.',
+      });
+    }
+    if (value.groupKeys !== undefined && new Set(value.groupKeys).size !== value.groupKeys.length) {
+      context.addIssue({ code: 'custom', message: 'La selección contiene grupos duplicados.' });
+    }
+  });
+
+const jobParamsSchema = z.object({ jobId: z.string().uuid() }).strict();
 
 const historySchema = botQuerySchema.extend({
   groupKey: z.string().length(20),
@@ -125,28 +139,64 @@ export function registerCommunityDigestRoutes(
       const service = getCommunityDigestService(botId);
       if (service === null) return unavailable(reply);
       const input = manualSchema.parse(request.body);
-      const groupId = context.database.resolveBotGroupKey(botId, input.groupKey, (identifier) =>
-        context.anonymizer.identifier(identifier),
-      );
-      if (groupId === null) {
+      const groupKeys = input.groupKeys ?? [input.groupKey as string];
+      const groupIds: string[] = [];
+      for (const groupKey of groupKeys) {
+        const groupId = context.database.resolveBotGroupKey(botId, groupKey, (identifier) =>
+          context.anonymizer.identifier(identifier),
+        );
+        if (groupId === null) {
+          return reply
+            .code(404)
+            .send({ error: 'No se encontró el grupo seleccionado.', code: 'GROUP_NOT_FOUND' });
+        }
+        if (!context.database.canBotSendToGroup(botId, groupId)) {
+          return reply.code(409).send({
+            error: 'El chat del grupo no está disponible en la sesión activa.',
+            code: 'GROUP_CHAT_NOT_AVAILABLE',
+          });
+        }
+        groupIds.push(groupId);
+      }
+      const started = service.startManualTest(input.period, groupIds);
+      return reply
+        .code(started.reused ? 200 : 202)
+        .header('cache-control', 'no-store, max-age=0')
+        .send({ ...started.run, reused: started.reused });
+    },
+  );
+
+  app.get(
+    '/api/automatic-messages/digests/send-test/active',
+    { preHandler: requireSession },
+    async (request, reply) => {
+      const botId = readBotId(request.query);
+      const service = getCommunityDigestService(botId);
+      if (service === null) return unavailable(reply);
+      return reply
+        .header('cache-control', 'no-store, max-age=0')
+        .send({ jobs: service.listActiveManualTests() });
+    },
+  );
+
+  app.get(
+    '/api/automatic-messages/digests/send-test/:jobId',
+    { preHandler: requireSession },
+    async (request, reply) => {
+      const botId = readBotId(request.query);
+      const service = getCommunityDigestService(botId);
+      if (service === null) return unavailable(reply);
+      const { jobId } = jobParamsSchema.parse(request.params);
+      const run = service.getManualTest(jobId);
+      if (run === null) {
         return reply
           .code(404)
-          .send({ error: 'No se encontró el grupo seleccionado.', code: 'GROUP_NOT_FOUND' });
+          .send({
+            error: 'No se encontró la ejecución solicitada.',
+            code: 'DIGEST_TEST_NOT_FOUND',
+          });
       }
-      if (!context.database.canBotSendToGroup(botId, groupId)) {
-        return reply.code(409).send({
-          error: 'El chat del grupo no está disponible en la sesión activa.',
-          code: 'GROUP_CHAT_NOT_AVAILABLE',
-        });
-      }
-      const result = await service.sendManual(input.period, groupId);
-      if (result.status === 'SENT') return reply.code(200).send(result);
-      const statusCode = result.status === 'SKIPPED' ? 200 : 502;
-      return reply.code(statusCode).send({
-        ...result,
-        code: result.errorCode,
-        error: digestErrorMessage(result.causeCode ?? result.errorCode),
-      });
+      return reply.header('cache-control', 'no-store, max-age=0').send(run);
     },
   );
 
@@ -204,35 +254,4 @@ function isValidTimezone(value: string): boolean {
   } catch {
     return false;
   }
-}
-
-function digestErrorMessage(errorCode: string | null): string {
-  const messages: Record<string, string> = {
-    NO_MESSAGES_IN_PERIOD: 'No se encontraron conversaciones para el período seleccionado.',
-    AI_SUMMARY_FAILED: 'La IA no pudo generar el resumen.',
-    WHATSAPP_NOT_CONNECTED: 'WhatsApp no está conectado.',
-    SUMMARY_SEND_FAILED: 'El resumen se generó, pero WhatsApp no pudo enviarlo.',
-    GROUP_NOT_FOUND: 'No se encontró el grupo seleccionado.',
-    GROUP_CHAT_NOT_AVAILABLE: 'El chat del grupo no está disponible en WhatsApp.',
-    CHAT_HISTORY_FAILED: 'No fue posible recuperar el historial de mensajes.',
-    AI_TIMEOUT: 'La solicitud a la IA excedió el tiempo máximo.',
-    AI_NETWORK_ERROR: 'No fue posible conectar con el proveedor de IA.',
-    AI_INVALID_KEY: 'Las credenciales del proveedor de IA no son válidas.',
-    AI_MODEL_UNAVAILABLE: 'El modelo de IA no está disponible.',
-    AI_PROVIDER_RATE_LIMITED:
-      'No fue posible completar el resumen porque el proveedor de IA alcanzó temporalmente su límite de uso.',
-    AI_EMPTY_RESPONSE: 'El proveedor de IA devolvió una respuesta vacía.',
-    AI_INVALID_RESPONSE: 'El proveedor de IA devolvió una respuesta inválida.',
-    AI_TEMPORARY_ERROR: 'Error temporal del proveedor de IA.',
-    AI_PERMANENT_ERROR: 'Error permanente del proveedor de IA.',
-    AI_QUEUE_FULL: 'Hay demasiadas solicitudes de IA en espera. Intenta nuevamente más tarde.',
-    AI_QUEUE_EXPIRED: 'El resumen esperó demasiado tiempo para acceder al proveedor de IA.',
-    AI_CIRCUIT_OPEN: 'El proveedor de IA está temporalmente protegido por fallos recientes.',
-    AI_QUEUE_CANCELLED: 'La solicitud de IA fue cancelada durante un reinicio seguro.',
-    AI_PROCESSING_BUDGET_EXCEEDED:
-      'No fue posible procesar todo el período dentro de los límites seguros del resumen.',
-    CONTEXT_TOO_LARGE: 'La conversación es demasiado extensa para resumirla de forma segura.',
-  };
-  if (errorCode === null) return 'La prueba no pudo completarse.';
-  return messages[errorCode] ?? 'La prueba no pudo completarse.';
 }

@@ -1,6 +1,6 @@
 import type { Logger } from 'pino';
 import type { AIProvider, AIProviderErrorCode } from '../ai/ai-provider.js';
-import { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
+import { AIRequestQueueService, type AIQueueRetryNotice } from '../ai/ai-request-queue-service.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import {
   GroupMessageHistoryError,
@@ -12,6 +12,11 @@ import {
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import { toLocalDateTime } from './automatic-message-service.js';
+import {
+  CommunityDigestTestRunStore,
+  type CommunityDigestTestRun,
+  type CommunityDigestTestStatus,
+} from './community-digest-test-run-store.js';
 
 export type CommunityDigestPeriod = 'daily' | 'weekly' | 'monthly';
 export type CommunityDigestWeekday = 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun';
@@ -42,6 +47,22 @@ export type CommunityDigestResult = {
   errorCode: string | null;
   causeCode: string | null;
 };
+
+type CommunityDigestProgress = {
+  status: Exclude<CommunityDigestTestStatus, 'queued' | 'completed' | 'failed'>;
+  phasePercent?: number | null;
+  messageCount?: number;
+  pageCount?: number;
+  currentBlock?: number | null;
+  totalBlocks?: number | null;
+  aiCallCount?: number;
+  retryCount?: number;
+  retryAfterSeconds?: number | null;
+  retryAt?: string | null;
+  generationStage?: CommunityDigestTestRun['generationStage'];
+};
+
+type CommunityDigestProgressReporter = (progress: CommunityDigestProgress) => void;
 
 export const DEFAULT_COMMUNITY_DIGEST_CONFIGURATION: CommunityDigestConfiguration = {
   timezone: 'America/Santiago',
@@ -227,15 +248,14 @@ class DigestProcessingBudget {
     if (Date.now() >= this.deadlineAtMs) throw new DigestProcessingBudgetError();
   }
 
-  public snapshot(): Pick<
-    DigestEventContext,
-    | 'blockCount'
-    | 'aiCallCount'
-    | 'retryCount'
-    | 'estimatedTokenCount'
-    | 'usedTokenCount'
-    | 'elapsedMs'
-  > {
+  public snapshot(): {
+    blockCount: number;
+    aiCallCount: number;
+    retryCount: number;
+    estimatedTokenCount: number;
+    usedTokenCount: number;
+    elapsedMs: number;
+  } {
     return {
       blockCount: this.blocks,
       aiCallCount: this.providerCalls,
@@ -253,7 +273,9 @@ export class CommunityDigestService {
   private readonly now: () => Date;
   private readonly aiQueue: AIRequestQueueService;
   private readonly processingBudget: CommunityDigestProcessingBudget;
+  private readonly testRuns: CommunityDigestTestRunStore;
   private readonly activeSends = new Map<string, Promise<CommunityDigestResult>>();
+  private readonly activeManualTests = new Map<string, Promise<void>>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running: Promise<void> | null = null;
   private started = false;
@@ -271,6 +293,7 @@ export class CommunityDigestService {
     this.now = options.now ?? (() => new Date());
     this.aiQueue = options.aiQueue ?? new AIRequestQueueService(database, logger, options.botId);
     this.processingBudget = normalizeProcessingBudget(options.processingBudget);
+    this.testRuns = new CommunityDigestTestRunStore(database, options.botId, this.now);
   }
 
   public start(): void {
@@ -468,10 +491,185 @@ export class CommunityDigestService {
     }
   }
 
+  public startManualTest(
+    period: CommunityDigestPeriod,
+    groupIds: string[],
+  ): { run: CommunityDigestTestRun; reused: boolean } {
+    if (groupIds.length === 0) throw codedError('COMMUNITY_DIGEST_TEST_GROUPS_REQUIRED');
+    const groupHashes = groupIds.map((groupId) => this.anonymizer.identifier(groupId));
+    const started = this.testRuns.start(period, groupHashes);
+    if (started.reused) {
+      this.event('COMMUNITY_DIGEST_TEST_REUSED', {
+        result: 'reused',
+        period,
+        operation: 'startManualTest',
+      });
+      return started;
+    }
+
+    this.event('COMMUNITY_DIGEST_TEST_STARTED', {
+      result: 'queued',
+      period,
+      itemCount: groupIds.length,
+      operation: 'startManualTest',
+    });
+    setImmediate(() => {
+      const operation = this.executeManualTest(started.run.jobId, period, groupIds).finally(() => {
+        if (this.activeManualTests.get(started.run.jobId) === operation) {
+          this.activeManualTests.delete(started.run.jobId);
+        }
+      });
+      this.activeManualTests.set(started.run.jobId, operation);
+      void operation.catch(() => undefined);
+    });
+    return started;
+  }
+
+  public getManualTest(jobId: string): CommunityDigestTestRun | null {
+    return this.testRuns.get(jobId);
+  }
+
+  public listActiveManualTests(): CommunityDigestTestRun[] {
+    return this.testRuns.listActive();
+  }
+
+  private async executeManualTest(
+    jobId: string,
+    period: CommunityDigestPeriod,
+    groupIds: string[],
+  ): Promise<void> {
+    let firstFailure: CommunityDigestResult | null = null;
+    try {
+      for (const [index, groupId] of groupIds.entries()) {
+        this.testRuns.update(jobId, (run) => ({
+          ...run,
+          status: 'loading_history',
+          currentGroup: index + 1,
+          messageCount: 0,
+          pageCount: 0,
+          currentBlock: null,
+          totalBlocks: null,
+          generationStage: null,
+          retryAfterSeconds: null,
+          retryAt: null,
+          progressPercent: this.overallTestProgress(run, 10),
+        }));
+        const result = await this.sendManual(period, groupId, this.now(), (progress) => {
+          this.updateManualTestProgress(jobId, progress);
+        });
+        this.testRuns.update(jobId, (run) => ({
+          ...run,
+          completedSends: run.completedSends + (result.status === 'SENT' ? 1 : 0),
+          failedSends: run.failedSends + (result.status === 'SENT' ? 0 : 1),
+          processedGroups: run.processedGroups + 1,
+          errorCode:
+            result.status === 'SENT' ? run.errorCode : (result.causeCode ?? result.errorCode),
+          errorMessage:
+            result.status === 'SENT'
+              ? run.errorMessage
+              : digestTestErrorMessage(result.causeCode ?? result.errorCode),
+        }));
+        if (result.status !== 'SENT' && firstFailure === null) firstFailure = result;
+      }
+
+      const finishedAt = this.now();
+      const finalStatus = firstFailure === null ? 'completed' : 'failed';
+      this.testRuns.update(jobId, (run) => ({
+        ...run,
+        status: finalStatus,
+        progressPercent: finalStatus === 'completed' ? 100 : run.progressPercent,
+        retryAfterSeconds: null,
+        retryAt: null,
+        finishedAt: finishedAt.toISOString(),
+        durationMs: Math.max(0, finishedAt.getTime() - Date.parse(run.startedAt)),
+        errorCode:
+          firstFailure === null ? null : (firstFailure.causeCode ?? firstFailure.errorCode),
+        errorMessage:
+          firstFailure === null
+            ? null
+            : digestTestErrorMessage(firstFailure.causeCode ?? firstFailure.errorCode),
+      }));
+      this.event(
+        finalStatus === 'completed'
+          ? 'COMMUNITY_DIGEST_TEST_COMPLETED'
+          : 'COMMUNITY_DIGEST_TEST_FAILED',
+        {
+          result: finalStatus,
+          period,
+          itemCount: groupIds.length,
+          errorCode:
+            firstFailure === null ? null : (firstFailure.causeCode ?? firstFailure.errorCode),
+          operation: 'executeManualTest',
+        },
+      );
+    } catch (error) {
+      const finishedAt = this.now();
+      const errorCode = safeErrorCode(error, 'COMMUNITY_DIGEST_TEST_FAILED');
+      this.testRuns.update(jobId, (run) => ({
+        ...run,
+        status: 'failed',
+        retryAfterSeconds: null,
+        retryAt: null,
+        errorCode,
+        errorMessage: digestTestErrorMessage(errorCode),
+        finishedAt: finishedAt.toISOString(),
+        durationMs: Math.max(0, finishedAt.getTime() - Date.parse(run.startedAt)),
+      }));
+      this.event('COMMUNITY_DIGEST_TEST_FAILED', {
+        result: 'failed',
+        period,
+        errorCode,
+        operation: 'executeManualTest',
+      });
+    }
+  }
+
+  private updateManualTestProgress(jobId: string, progress: CommunityDigestProgress): void {
+    this.testRuns.update(jobId, (run) => ({
+      ...run,
+      status: progress.status,
+      progressPercent:
+        progress.phasePercent === undefined
+          ? run.progressPercent
+          : progress.phasePercent === null
+            ? null
+            : this.overallTestProgress(run, progress.phasePercent),
+      messageCount: progress.messageCount ?? run.messageCount,
+      pageCount: progress.pageCount ?? run.pageCount,
+      currentBlock: progress.currentBlock === undefined ? run.currentBlock : progress.currentBlock,
+      totalBlocks: progress.totalBlocks === undefined ? run.totalBlocks : progress.totalBlocks,
+      aiCallCount: progress.aiCallCount ?? run.aiCallCount,
+      retryCount: progress.retryCount ?? run.retryCount,
+      retryAfterSeconds:
+        progress.retryAfterSeconds === undefined
+          ? progress.status === 'generating'
+            ? null
+            : run.retryAfterSeconds
+          : progress.retryAfterSeconds,
+      retryAt:
+        progress.retryAt === undefined
+          ? progress.status === 'generating'
+            ? null
+            : run.retryAt
+          : progress.retryAt,
+      generationStage:
+        progress.generationStage === undefined ? run.generationStage : progress.generationStage,
+    }));
+  }
+
+  private overallTestProgress(run: CommunityDigestTestRun, phasePercent: number): number {
+    if (run.totalSends <= 0) return Math.max(0, Math.min(99, Math.round(phasePercent)));
+    return Math.max(
+      0,
+      Math.min(99, Math.round(((run.processedGroups + phasePercent / 100) / run.totalSends) * 100)),
+    );
+  }
+
   public async sendManual(
     period: CommunityDigestPeriod,
     groupId: string,
     now = this.now(),
+    reportProgress?: CommunityDigestProgressReporter,
   ): Promise<CommunityDigestResult> {
     const groupHash = this.anonymizer.identifier(groupId);
     const group = this.database
@@ -530,7 +728,7 @@ export class CommunityDigestService {
       });
       return failed(period, 'GROUP_CHAT_NOT_AVAILABLE');
     }
-    const result = await this.send(period, groupId, now);
+    const result = await this.send(period, groupId, now, undefined, reportProgress);
     this.event(
       result.status === 'SENT'
         ? 'COMMUNITY_DIGEST_MANUAL_SENT'
@@ -606,6 +804,7 @@ export class CommunityDigestService {
     groupId: string,
     now: Date,
     periodKey?: string,
+    reportProgress?: CommunityDigestProgressReporter,
   ): Promise<CommunityDigestResult> {
     const configuration = this.configuration();
     const local = toLocalDateTime(now, configuration.timezone);
@@ -623,9 +822,11 @@ export class CommunityDigestService {
       });
       return active;
     }
-    const operation = this.executeSend(period, groupId, now, periodKey).finally(() => {
-      if (this.activeSends.get(flightKey) === operation) this.activeSends.delete(flightKey);
-    });
+    const operation = this.executeSend(period, groupId, now, periodKey, reportProgress).finally(
+      () => {
+        if (this.activeSends.get(flightKey) === operation) this.activeSends.delete(flightKey);
+      },
+    );
     this.activeSends.set(flightKey, operation);
     return operation;
   }
@@ -635,6 +836,7 @@ export class CommunityDigestService {
     groupId: string,
     now: Date,
     periodKey?: string,
+    reportProgress?: CommunityDigestProgressReporter,
   ): Promise<CommunityDigestResult> {
     const groupHash = this.anonymizer.identifier(groupId);
     const groupName =
@@ -657,6 +859,15 @@ export class CommunityDigestService {
       groupName,
       window,
       at: now,
+    });
+    reportProgress?.({
+      status: 'loading_history',
+      phasePercent: null,
+      messageCount: 0,
+      pageCount: 0,
+      currentBlock: null,
+      totalBlocks: null,
+      generationStage: null,
     });
 
     let messages: RecentGroupMessage[];
@@ -692,6 +903,15 @@ export class CommunityDigestService {
         operation: 'fetchGroupMessageHistory',
         window,
         at: now,
+      });
+      reportProgress?.({
+        status: 'generating',
+        phasePercent: 30,
+        messageCount: messages.length,
+        pageCount: loaded.history.pageCount,
+        currentBlock: 0,
+        totalBlocks: null,
+        generationStage: 'blocks',
       });
     } catch (error) {
       const errorCode =
@@ -770,7 +990,14 @@ export class CommunityDigestService {
     });
     let summary: string;
     try {
-      summary = await this.generate(period, messages, groupHash, window.periodKey, budget);
+      summary = await this.generate(
+        period,
+        messages,
+        groupHash,
+        window.periodKey,
+        budget,
+        reportProgress,
+      );
       const processing = budget.snapshot();
       this.event('COMMUNITY_DIGEST_AI_SUCCEEDED', {
         result: 'generated',
@@ -818,6 +1045,13 @@ export class CommunityDigestService {
       operation: 'sendMessage',
       window,
       at: now,
+    });
+    reportProgress?.({
+      status: 'sending',
+      phasePercent: 95,
+      retryAfterSeconds: null,
+      retryAt: null,
+      generationStage: 'finalizing',
     });
     try {
       const heading = digestHeading(period);
@@ -910,6 +1144,7 @@ export class CommunityDigestService {
     groupHash: string,
     runKey: string,
     budget: DigestProcessingBudget,
+    reportProgress?: CommunityDigestProgressReporter,
   ): Promise<string> {
     const configuration = this.configuration();
     // La ventana temporal ya fue aplicada al recuperar el historial. No exponemos
@@ -921,6 +1156,14 @@ export class CommunityDigestService {
     const originalChunks = packContextChunks(contextLines, contextLimit);
     if (originalChunks.length === 0) throw codedError('AI_EMPTY_RESPONSE');
     budget.registerBlocks(originalChunks.length);
+    reportProgress?.({
+      status: 'generating',
+      phasePercent: 35,
+      currentBlock: 0,
+      totalBlocks: originalChunks.length,
+      generationStage: 'blocks',
+      ...budget.snapshot(),
+    });
 
     const request = async (
       stage: string,
@@ -931,10 +1174,22 @@ export class CommunityDigestService {
       maximumOutputTokens: number,
     ): Promise<string> => {
       budget.assertActive();
+      const isOriginalBlock = stage === 'map';
+      reportProgress?.({
+        status: 'generating',
+        phasePercent: isOriginalBlock
+          ? 35 + Math.round((stageIndex / Math.max(1, originalChunks.length)) * 45)
+          : 85,
+        currentBlock: isOriginalBlock ? stageIndex + 1 : null,
+        totalBlocks: originalChunks.length,
+        generationStage: isOriginalBlock ? 'blocks' : 'finalizing',
+        ...budget.snapshot(),
+      });
       const estimatedTokens = estimateDigestTokens(
         `${systemInstruction}\n${context}\n${question}`,
         maximumOutputTokens,
       );
+      let retryAttemptActive = false;
       const flight = await this.aiQueue.run({
         flightKey: `${this.botId}:digest:${period}:${runKey}:${groupHash}:${stage}:${stageIndex}`,
         classifyError: (error) =>
@@ -943,8 +1198,33 @@ export class CommunityDigestService {
             : this.provider.classifyProviderError(error),
         deadlineAtMs: budget.deadlineAtMs,
         consumeRetryBudget: () => budget.consumeRetry(),
+        onRetryScheduled: (notice) =>
+          reportProgress?.(
+            retryProgress(
+              notice.code === 'AI_PROVIDER_RATE_LIMITED' ? 'waiting_provider' : 'retrying',
+              notice,
+              budget,
+            ),
+          ),
+        onRetryStarted: (notice) => {
+          retryAttemptActive = true;
+          reportProgress?.(retryProgress('retrying', notice, budget));
+        },
+        onRetrySucceeded: () => {
+          retryAttemptActive = false;
+          reportProgress?.({
+            status: 'generating',
+            retryAfterSeconds: null,
+            retryAt: null,
+            ...budget.snapshot(),
+          });
+        },
         operation: async () => {
           budget.beginProviderCall(estimatedTokens);
+          reportProgress?.({
+            status: retryAttemptActive ? 'retrying' : 'generating',
+            aiCallCount: budget.snapshot().aiCallCount,
+          });
           const response = await this.provider.generateGroundedResponse({
             systemInstruction,
             question,
@@ -1148,6 +1428,21 @@ export class CommunityDigestService {
   }
 }
 
+function retryProgress(
+  status: 'waiting_provider' | 'retrying',
+  notice: AIQueueRetryNotice,
+  budget: DigestProcessingBudget,
+): CommunityDigestProgress {
+  const snapshot = budget.snapshot();
+  return {
+    status,
+    retryCount: snapshot.retryCount,
+    aiCallCount: snapshot.aiCallCount,
+    retryAfterSeconds: status === 'waiting_provider' ? notice.retryAfterSeconds : null,
+    retryAt: status === 'waiting_provider' ? notice.retryAt : null,
+  };
+}
+
 function digestLogDescriptor(
   eventType: string,
   period?: CommunityDigestPeriod,
@@ -1194,6 +1489,26 @@ function digestLogDescriptor(
       message: `Iniciando prueba de resumen ${label}`,
       module: 'Resumen',
       level: 'info',
+    },
+    COMMUNITY_DIGEST_TEST_STARTED: {
+      message: `Prueba con estado de resumen ${label} iniciada`,
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_TEST_REUSED: {
+      message: `Prueba activa de resumen ${label} reutilizada`,
+      module: 'Resumen',
+      level: 'debug',
+    },
+    COMMUNITY_DIGEST_TEST_COMPLETED: {
+      message: `Prueba con estado de resumen ${label} completada`,
+      module: 'Resumen',
+      level: 'info',
+    },
+    COMMUNITY_DIGEST_TEST_FAILED: {
+      message: `Prueba con estado de resumen ${label} fallida`,
+      module: 'Resumen',
+      level: 'error',
     },
     COMMUNITY_DIGEST_GROUP_STARTED: {
       message: `Iniciando resumen ${label}`,
@@ -1815,6 +2130,39 @@ function isValidTimezone(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function digestTestErrorMessage(errorCode: string | null): string {
+  const messages: Record<string, string> = {
+    NO_MESSAGES_IN_PERIOD: 'No se encontraron conversaciones para el período seleccionado.',
+    AI_SUMMARY_FAILED: 'La IA no pudo generar el resumen.',
+    WHATSAPP_NOT_CONNECTED: 'WhatsApp no está conectado.',
+    SUMMARY_SEND_FAILED: 'El resumen se generó, pero WhatsApp no pudo enviarlo.',
+    GROUP_NOT_FOUND: 'No se encontró el grupo seleccionado.',
+    GROUP_CHAT_NOT_AVAILABLE: 'El chat del grupo no está disponible en WhatsApp.',
+    CHAT_HISTORY_FAILED: 'No fue posible recuperar el historial de mensajes.',
+    AI_TIMEOUT: 'La solicitud a la IA excedió el tiempo máximo.',
+    AI_NETWORK_ERROR: 'No fue posible conectar con la IA.',
+    AI_INVALID_KEY: 'Las credenciales de la IA no son válidas.',
+    AI_MODEL_UNAVAILABLE: 'La IA no está disponible.',
+    AI_PROVIDER_RATE_LIMITED:
+      'La IA mantuvo su límite temporal después de agotar los reintentos automáticos.',
+    AI_EMPTY_RESPONSE: 'La IA devolvió una respuesta vacía.',
+    AI_INVALID_RESPONSE: 'La IA devolvió una respuesta inválida.',
+    AI_TEMPORARY_ERROR: 'La IA no pudo recuperarse de un error temporal.',
+    AI_PERMANENT_ERROR: 'La IA rechazó definitivamente la solicitud.',
+    AI_QUEUE_FULL: 'Hay demasiadas solicitudes de IA en espera.',
+    AI_QUEUE_EXPIRED: 'El resumen esperó demasiado tiempo para acceder a la IA.',
+    AI_CIRCUIT_OPEN: 'La IA está temporalmente protegida por fallos recientes.',
+    AI_QUEUE_CANCELLED: 'La solicitud de IA fue interrumpida por un reinicio seguro.',
+    AI_PROCESSING_BUDGET_EXCEEDED:
+      'No fue posible procesar todo el período dentro de los límites seguros.',
+    CONTEXT_TOO_LARGE: 'La conversación es demasiado extensa para resumirla de forma segura.',
+    COMMUNITY_DIGEST_TEST_INTERRUPTED:
+      'La prueba se interrumpió porque el servicio fue reiniciado.',
+  };
+  if (errorCode === null) return 'La prueba no pudo completarse.';
+  return messages[errorCode] ?? 'La prueba no pudo completarse.';
 }
 
 function failed(

@@ -85,10 +85,26 @@ export function registerAutomationLabAIRoutes(app: FastifyInstance, context: Adm
     }
 
     const queue = context.multiBotManager?.aiQueue(input.botId) ?? undefined;
+    const anonymizeGroupId = (identifier: string): string =>
+      context.anonymizer.identifier(identifier);
     const queryService =
       queue === undefined
-        ? new AssistantQueryService(context.database, provider, context.logger, input.botId)
-        : new AssistantQueryService(context.database, provider, context.logger, input.botId, queue);
+        ? new AssistantQueryService(
+            context.database,
+            provider,
+            context.logger,
+            input.botId,
+            undefined,
+            anonymizeGroupId,
+          )
+        : new AssistantQueryService(
+            context.database,
+            provider,
+            context.logger,
+            input.botId,
+            queue,
+            anonymizeGroupId,
+          );
     const userHash = context.anonymizer.identifier(`automation-lab:${input.botId}`);
     const groupNames = new Map(validation.groups.map((group) => [group.key, group.name]));
     const responses: Array<{

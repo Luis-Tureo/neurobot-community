@@ -41,7 +41,7 @@ describe('requerimiento 20 - Centro de pruebas', () => {
     expect(clearAction).toBeGreaterThan(actionButtons);
     expect(sendAction).toBeGreaterThan(clearAction);
     expect(formEnd).toBeGreaterThan(sendAction);
-    expect(styles).toContain("[data-collapsible].is-collapsed > :not(.section-heading)");
+    expect(styles).toContain('[data-collapsible].is-collapsed > :not(.section-heading)');
     expect(styles).toContain('display: none !important;');
   });
 
@@ -90,8 +90,13 @@ describe('requerimiento 20 - Centro de pruebas', () => {
       '.lab-chat-message',
       '.lab-test-options-card',
       '.automation-test-item',
+      '.digest-test-status',
+      '.digest-progress-track',
+      '.digest-elapsed',
     ]) {
       expect(styles).toContain(selector);
     }
+    expect(labScript).not.toContain("document.createElement('style')");
+    expect(labScript).not.toContain("style.setProperty('--digest-progress'");
   });
 });

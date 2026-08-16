@@ -55,6 +55,7 @@ function setup(): {
 } {
   const database = new AppDatabase(':memory:');
   database.migrate();
+  database.upsertDetectedGroup('group', 'Grupo de prueba');
   const profile = database.getBotProfile('neurobot');
   const settings = database.getAISettings(profile.id);
   database.saveAISettings({ ...settings, enabled: true });
@@ -135,7 +136,7 @@ describe('respuestas locales, caché y consumo real de IA', () => {
       const { database, provider, service, profileId } = setup();
       addKnowledge(database, profileId, {
         title: 'Fuente oficial',
-        content: `La referencia oficial incluye información sobre ${lookupTerm}.`,
+        content: `La referencia oficial del Grupo de prueba incluye información sobre ${lookupTerm}.`,
         keywords: [],
       });
 
@@ -238,20 +239,23 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     'cuáles son las reglas del grupo',
     'dime las reglas de la comunidad',
     'cuáles son las normas',
-  ])('reutiliza una FAQ equivalente para: %s', async (question) => {
-    const { database, provider, service } = setup();
-    const faq = addFaq(
-      database,
-      '¿Cuáles son las normas de la comunidad?',
-      'Estas son las normas oficiales.',
-    );
-    expect((await service.answerQuestion(question, 'group', 'user')).text).toBe(
-      'Estas son las normas oficiales.',
-    );
-    expect(provider.calls).toBe(0);
-    expect(database.getCachedAnswer('neurobot', faq.id)?.variants).toContain(question);
-    database.close();
-  });
+  ])(
+    'prioriza las reglas configuradas actualmente sobre una FAQ global para: %s',
+    async (question) => {
+      const { database, provider, service } = setup();
+      addFaq(
+        database,
+        '¿Cuáles son las normas de la comunidad?',
+        'Estas son las normas oficiales.',
+      );
+      const result = await service.answerQuestion(question, 'group', 'user');
+      expect(result.code).toBe('CONTEXTUAL_DIRECT');
+      expect(result.text).toContain('Normas de la comunidad');
+      expect(result.text).not.toBe('Estas son las normas oficiales.');
+      expect(provider.calls).toBe(0);
+      database.close();
+    },
+  );
 
   it('fusiona consultas concurrentes idénticas en una sola llamada', async () => {
     const { database, provider, service, profileId } = setup();
@@ -326,7 +330,11 @@ describe('respuestas locales, caché y consumo real de IA', () => {
 
   it('registra en el historial de preguntas las consultas que la IA o el bot no pueden responder', async () => {
     const { database, service } = setup();
-    const result = await service.answerQuestion('¿Qué medicamento puedo tomar para la gripe?', 'group', 'user');
+    const result = await service.answerQuestion(
+      '¿Qué medicamento puedo tomar para la gripe?',
+      'group',
+      'user',
+    );
     expect(result.code).toBe('MEDICAL_SCOPE_REJECTED');
     const cached = database.listCachedAnswers('neurobot');
     expect(cached).toHaveLength(1);
@@ -335,7 +343,7 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     database.close();
   });
 
-  it('registra saludos comunitarios y preguntas con el pronombre mi en el historial', async () => {
+  it('registra saludos y evita globalizar en caché una respuesta dependiente del grupo', async () => {
     const { database, service } = setup();
     const greetingResult = await service.answerQuestion('hola neurobot', 'group', 'user');
     expect(greetingResult.code).toBe('COMMUNITY_GREETING');
@@ -344,17 +352,28 @@ describe('respuestas locales, caché y consumo real de IA', () => {
 
     await service.answerQuestion('¿Cuáles son las reglas de mi grupo?', 'group', 'user2');
     const questionCached = database.listCachedAnswers('neurobot');
-    expect(questionCached.some((item) => item.canonicalQuestion === '¿Cuáles son las reglas de mi grupo?')).toBe(true);
+    expect(
+      questionCached.some(
+        (item) => item.canonicalQuestion === '¿Cuáles son las reglas de mi grupo?',
+      ),
+    ).toBe(false);
+    expect(
+      database
+        .getTechnicalEvents()
+        .some((event) => event.event_type === 'STRUCTURED_CONTEXT_RESPONSE'),
+    ).toBe(true);
     database.close();
   });
 
-  it('no inventa TLP ni TDAH sin una fuente clínica oficial revisada', async () => {
+  it('permite educación general sobre TLP y TDAH sin exigir un fragmento clínico', async () => {
     const { database, provider, service } = setup();
+    provider.response =
+      'Puedo explicar el concepto de forma educativa general, sin diagnosticar a una persona.';
     const tlp = await service.answerQuestion('¿Qué significa TLP?', 'group', 'user');
     const tdah = await service.answerQuestion('¿Qué significa TDAH?', 'group', 'user');
-    expect(tlp.code).toBe('KNOWLEDGE_NOT_FOUND');
-    expect(tdah.code).toBe('KNOWLEDGE_NOT_FOUND');
-    expect(provider.calls).toBe(0);
+    expect(tlp.code).toBe('AI_RESPONSE');
+    expect(tdah.code).toBe('AI_RESPONSE');
+    expect(provider.calls).toBe(2);
     expect(`${tlp.text} ${tdah.text}`).not.toContain('Trastorno por Déficit de Atención');
     database.close();
   });
@@ -411,8 +430,8 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     const { database, provider, service } = setup();
     addFaq(database, '¿Qué significa TLP?', 'TLP significa Trastorno por Déficit de Atención.');
     const result = await service.answerQuestion('qué significa tlp', 'group', 'user');
-    expect(result.code).toBe('KNOWLEDGE_NOT_FOUND');
-    expect(provider.calls).toBe(0);
+    expect(result.code).toBe('AI_RESPONSE');
+    expect(provider.calls).toBe(1);
     expect(database.listCachedAnswers('neurobot')[0]?.status).toBe('DISABLED');
     expect(
       database

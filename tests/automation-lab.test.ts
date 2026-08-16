@@ -29,7 +29,9 @@ describe('centro de pruebas de automatizaciones', () => {
     expect(script).toContain('Grupos para las pruebas');
     expect(script).toContain('Esta selección solo define dónde se ejecuta la prueba.');
     expect(script).toContain('No cambia los grupos persistidos en Automatizaciones.');
-    expect(script).toContain("identity.textContent = `ID ${String(group.key).slice(0, 6).toUpperCase()}`");
+    expect(script).toContain(
+      'identity.textContent = `ID ${String(group.key).slice(0, 6).toUpperCase()}`',
+    );
     expect(script).toContain('selectedGroupKeys');
     expect(script).toContain('for (const groupKey of groupKeys)');
     expect(script).toContain('await test.run(groupKey)');
@@ -57,16 +59,40 @@ describe('centro de pruebas de automatizaciones', () => {
     expect(script).toContain('/api/automation-lab/context');
     expect(script).toContain("headers['x-csrf-token']");
     expect(script).toContain('/api/automatic-messages/digests/send-test');
-    expect(script).toContain("sendDigestTest('monthly', groupKey)");
+    expect(script).toContain("digestPeriod: 'monthly'");
+    expect(script).toContain('JSON.stringify({ groupKeys, period, confirmed: true })');
   });
 
-  it('interpreta correctamente estados SKIPPED y FAILED del resumen', () => {
-    expect(script).toContain("result.status === 'SKIPPED'");
-    expect(script).toContain("result.status === 'FAILED'");
-    expect(script).toContain('result.error');
-    expect(script).toContain('result.errorCode');
-    expect(script).toContain('result.causeCode');
-    expect(script).toContain('formatTestFailure(error)');
-    expect(script).toContain('`${message} · ${causeCode}`');
+  it('consulta el estado sin reejecutar y solo muestra fallo al recibir el estado final', () => {
+    for (const status of [
+      'queued',
+      'loading_history',
+      'generating',
+      'waiting_provider',
+      'retrying',
+      'sending',
+    ]) {
+      expect(script).toContain(`'${status}'`);
+    }
+    expect(script).toContain('DIGEST_POLL_INTERVAL_MS = 1500');
+    expect(script).toContain('/api/automatic-messages/digests/send-test/${encodeURIComponent');
+    expect(script).toContain("const failed = run.status === 'failed'");
+    expect(script).toContain('La prueba sigue activa en el servidor');
+    expect(script).toContain('window.clearTimeout(tracker.pollTimerId)');
+    expect(script).toContain('window.clearInterval(tracker.clockTimerId)');
+    expect(script).toContain("window.addEventListener('pagehide', stopAllDigestTracking)");
+    expect(script.match(/sendDigestTest\(period, groupKeys\)/gu)).toHaveLength(2);
+  });
+
+  it('muestra tiempo, progreso real, espera del proveedor y resultados agregados', () => {
+    expect(script).toContain('Tiempo transcurrido');
+    expect(script).toContain('Duración total');
+    expect(script).toContain('Procesando bloque ${Math.max(1, run.currentBlock)} de');
+    expect(script).toContain('Esperando disponibilidad de la IA…');
+    expect(script).toContain('Reintentando en aproximadamente ${retrySeconds} s.');
+    expect(script).toContain('${run.completedSends} de ${run.totalSends} envíos completados');
+    expect(script).toContain("document.createElement('progress')");
+    expect(styles).toContain('.digest-progress-track');
+    expect(styles).toContain('.digest-test-status.pending');
   });
 });

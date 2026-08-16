@@ -8,6 +8,8 @@ export type CacheMatch = {
   kind: 'FAQ' | 'EXACT' | 'EQUIVALENT';
 };
 
+export const ASSISTANT_CACHE_PROMPT_VERSION = 'community-v2';
+
 const activeFlights = new Map<string, Promise<unknown>>();
 
 export class AnswerCacheService {
@@ -66,7 +68,7 @@ export class AnswerCacheService {
       category: fragments[0]?.category ?? 'General',
       knowledgeSourceIds: fragments.map((fragment) => fragment.entryId),
       knowledgeVersion: knowledgeVersion(fragments),
-      promptVersion: 'community-v1',
+      promptVersion: ASSISTANT_CACHE_PROMPT_VERSION,
       status: 'AUTO_VERIFIED',
       sourceType: 'AI_GENERATED',
       confidence: 1,
@@ -94,7 +96,7 @@ export class AnswerCacheService {
       category,
       knowledgeSourceIds: [],
       knowledgeVersion: '',
-      promptVersion: 'community-v1',
+      promptVersion: ASSISTANT_CACHE_PROMPT_VERSION,
       status: 'AUTO_VERIFIED',
       sourceType: 'ADMIN_FAQ',
       confidence: 1,
@@ -127,7 +129,7 @@ export class AnswerCacheService {
       category,
       knowledgeSourceIds: [],
       knowledgeVersion: '',
-      promptVersion: 'community-v1',
+      promptVersion: ASSISTANT_CACHE_PROMPT_VERSION,
       status: 'INVALIDATED',
       sourceType: 'AI_GENERATED',
       confidence: 0,
@@ -161,6 +163,21 @@ export class AnswerCacheService {
     if (hasIncorrectTlpExpansion(answer.answer)) {
       this.database.setCachedAnswerStatus(this.botId, answer.id, 'DISABLED');
       this.event('INCORRECT_CACHED_ANSWER_DISABLED', 'INCORRECT_TLP_EXPANSION');
+      return false;
+    }
+    if (
+      answer.sourceType === 'AI_GENERATED' &&
+      answer.status !== 'ADMIN_APPROVED' &&
+      answer.status !== 'ADMIN_EDITED' &&
+      answer.promptVersion !== ASSISTANT_CACHE_PROMPT_VERSION
+    ) {
+      this.database.setCachedAnswerStatus(
+        this.botId,
+        answer.id,
+        'INVALIDATED',
+        'PROMPT_VERSION_CHANGED',
+      );
+      this.event('ANSWER_CACHE_INVALIDATED', 'PROMPT_VERSION_CHANGED');
       return false;
     }
     if (answer.knowledgeSourceIds.length === 0) return true;

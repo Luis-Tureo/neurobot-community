@@ -78,7 +78,7 @@ function addGeneralKnowledge(database: AppDatabase, keyword: string): void {
     profileId: profile.id,
     categoryId: category.id,
     title: 'Información oficial',
-    content: 'Esta fuente contiene información oficial de la comunidad.',
+    content: 'Esta fuente contiene información oficial del Grupo de prueba y de la comunidad.',
     keywords: [keyword],
     synonyms: [],
     enabled: true,
@@ -97,6 +97,7 @@ function createProcessor(input: {
   queryService?: AssistantQueryService;
 }): MessageProcessor {
   const botId = input.botId ?? 'neurobot';
+  const anonymizer = new Anonymizer('x'.repeat(32));
   return new MessageProcessor(
     input.database,
     input.client,
@@ -106,8 +107,10 @@ function createProcessor(input: {
         input.provider,
         input.logger ?? createLogger('silent'),
         botId,
+        undefined,
+        (identifier) => anonymizer.identifier(identifier),
       ),
-    new Anonymizer('x'.repeat(32)),
+    anonymizer,
     input.logger ?? createLogger('silent'),
     () => ({ state: 'connected', lastConnectedAt: null, reconnectAttempt: 0, lastErrorCode: null }),
     { maxMessageLength: 2000 },
@@ -165,6 +168,8 @@ describe('procesamiento por mención real y por modo', () => {
 
     expect(provider.requests).toHaveLength(1);
     expect(provider.requests[0]?.question).toBe('para que sirve este grupo?');
+    expect(provider.requests[0]?.context).toContain('Grupo de prueba');
+    expect(provider.requests[0]?.context).not.toContain('group-1@g.us');
     expect(client.sentMessages).toHaveLength(1);
     expect(client.sentMessages[0]?.text).toBe(provider.response);
     expect(client.sentMessages[0]?.text).not.toContain('Soy Neurobot');
@@ -223,6 +228,19 @@ describe('procesamiento por mención real y por modo', () => {
     ).resolves.toBe('responded');
 
     expect(provider.requests[0]?.question).toBe('qué actividades se hacen aquí?');
+    expect(client.sentMessages[0]?.text).toBe(provider.response);
+  });
+
+  it('responde una consulta educativa general sin exigir un fragmento de Knowledge', async () => {
+    await expect(
+      processor.process(
+        message({ id: 'general-education', body: '@Neurobot ¿qué es el masking autista?' }),
+      ),
+    ).resolves.toBe('responded');
+
+    expect(provider.requests).toHaveLength(1);
+    expect(provider.requests[0]?.question).toBe('¿qué es el masking autista?');
+    expect(provider.requests[0]?.context).toContain('GENERAL_EDUCATION');
     expect(client.sentMessages[0]?.text).toBe(provider.response);
   });
 

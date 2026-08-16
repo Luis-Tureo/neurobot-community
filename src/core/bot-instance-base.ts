@@ -114,7 +114,14 @@ export class BotInstance {
           ...(options.secretVault === undefined ? {} : { vault: options.secretVault }),
         })
       : null;
-    const query = new AssistantQueryService(database, provider, logger, bot.id, this.aiQueue);
+    const query = new AssistantQueryService(
+      database,
+      provider,
+      logger,
+      bot.id,
+      this.aiQueue,
+      (identifier) => anonymizer.identifier(identifier),
+    );
     if (bot.capabilities.communitySingleTurnMode) database.clearConversationStates(bot.id);
     const flow =
       bot.capabilities.conversationContinuationEnabled || bot.capabilities.interactiveMenusEnabled
@@ -212,9 +219,9 @@ export class BotInstance {
             eventType:
               state === 'authenticated' ? 'WHATSAPP_AUTHENTICATED' : 'WHATSAPP_LINK_FAILED',
             result: state,
-            ...(reason === undefined
-              ? {}
-              : { errorCode: normalizeWhatsAppErrorCode(reason) }),
+          ...(reason === undefined
+            ? {}
+            : { errorCode: normalizeWhatsAppErrorCode(reason) }),
           });
         }
         if (state === 'disconnected' || state === 'auth_failure') this.discovery.cancel();

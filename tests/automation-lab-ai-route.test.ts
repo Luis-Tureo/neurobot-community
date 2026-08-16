@@ -16,6 +16,7 @@ describe('simulador conversacional del Centro de pruebas', () => {
   let app: FastifyInstance;
   let database: AppDatabase;
   let client: SimulatedMessagingClient;
+  let providerRequests: Array<Parameters<AIProvider['generateGroundedResponse']>[0]>;
 
   beforeEach(async () => {
     database = new AppDatabase(':memory:');
@@ -31,6 +32,7 @@ describe('simulador conversacional del Centro de pruebas', () => {
     });
     database.upsertDetectedGroup('grupo-laboratorio@g.us', 'Grupo laboratorio');
     database.setGroupAuthorized('grupo-laboratorio@g.us', true);
+    providerRequests = [];
 
     client = new SimulatedMessagingClient();
     const logger = createLogger('silent');
@@ -54,21 +56,21 @@ describe('simulador conversacional del Centro de pruebas', () => {
     const provider: AIProvider = {
       isConfigured: () => true,
       testConnection: async () => ({ successful: true }),
-      generateGroundedResponse: async () => ({
-        text: 'Respuesta generada durante la prueba.',
-        usage: { inputTokens: 3, outputTokens: 4, totalTokens: 7 },
-      }),
+      generateGroundedResponse: async (request) => {
+        providerRequests.push(request);
+        return {
+          text: 'Respuesta generada durante la prueba.',
+          usage: { inputTokens: 3, outputTokens: 4, totalTokens: 7 },
+        };
+      },
       getModelInformation: () => ({ provider: 'test', model: 'modelo-prueba' }),
       normalizeUsage: () => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
       classifyProviderError: () => 'AI_TEMPORARY_ERROR',
     };
-    const automaticMessages = new AutomaticMessageService(
-      database,
-      client,
-      logger,
-      anonymizer,
-      { retryDelayMs: 0, sleep: async () => undefined },
-    );
+    const automaticMessages = new AutomaticMessageService(database, client, logger, anonymizer, {
+      retryDelayMs: 0,
+      sleep: async () => undefined,
+    });
 
     app = await buildAdminServer({
       database,
@@ -167,7 +169,63 @@ describe('simulador conversacional del Centro de pruebas', () => {
       validation: { healthy: false },
     });
   });
+
+  it('usa la misma composición contextual para preguntas internas y educativas', async () => {
+    const auth = await login(app);
+    const automatic = await app.inject({
+      method: 'GET',
+      url: '/api/automatic-messages',
+      headers: { cookie: auth.cookie },
+    });
+    const groupKey = automatic.json().authorizedGroups[0]?.key as string | undefined;
+    expect(groupKey).toHaveLength(20);
+    database.saveGroupModerationDraft(
+      'neurobot',
+      groupKey as string,
+      'Finalidad confirmada de Grupo laboratorio: probar el asistente con contexto real.',
+      'laboratory-purpose',
+    );
+
+    const purpose = await simulate(app, auth, groupKey as string, '¿Para qué sirve este grupo?');
+    const education = await simulate(
+      app,
+      auth,
+      groupKey as string,
+      '¿Qué es la sobrecarga sensorial?',
+    );
+
+    expect(purpose.statusCode).toBe(200);
+    expect(education.statusCode).toBe(200);
+    expect(purpose.json()).toMatchObject({
+      pipeline: 'AssistantQueryService',
+      sentToWhatsApp: false,
+      responses: [{ groupKey, code: 'AI_RESPONSE' }],
+    });
+    expect(education.json()).toMatchObject({
+      pipeline: 'AssistantQueryService',
+      responses: [{ groupKey, code: 'AI_RESPONSE' }],
+    });
+    expect(providerRequests[0]?.context).toContain('Grupo laboratorio');
+    expect(providerRequests[1]?.context).toContain('GENERAL_EDUCATION');
+  });
 });
+
+function simulate(app: FastifyInstance, auth: Authentication, groupKey: string, question: string) {
+  return app.inject({
+    method: 'POST',
+    url: '/api/automation-lab/ai-simulator',
+    headers: {
+      cookie: auth.cookie,
+      'x-csrf-token': auth.csrf,
+    },
+    payload: {
+      botId: 'neurobot',
+      groupKeys: [groupKey],
+      question,
+      confirmed: true,
+    },
+  });
+}
 
 async function login(app: FastifyInstance): Promise<Authentication> {
   const response = await app.inject({

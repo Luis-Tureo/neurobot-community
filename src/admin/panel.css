@@ -565,6 +565,90 @@
     @apply text-red-600;
   }
 
+  .digest-test-status {
+    @apply grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-slate-700;
+  }
+
+  .digest-test-status.pending {
+    @apply border-indigo-200 bg-indigo-50/60 text-indigo-950;
+  }
+
+  .digest-test-status.success {
+    @apply border-emerald-200 bg-emerald-50/70 text-emerald-950;
+  }
+
+  .digest-test-status.failed {
+    @apply border-red-200 bg-red-50/70 text-red-950;
+  }
+
+  .digest-status-title {
+    @apply text-sm font-bold leading-snug;
+  }
+
+  .digest-status-detail,
+  .digest-elapsed {
+    @apply text-xs font-medium leading-relaxed;
+  }
+
+  .digest-elapsed {
+    @apply text-slate-600 tabular-nums;
+  }
+
+  .digest-progress-track {
+    @apply block h-2 w-full overflow-hidden rounded-full border-0 bg-slate-200 accent-indigo-600;
+    appearance: none;
+  }
+
+  .digest-progress-track::-webkit-progress-bar {
+    @apply rounded-full bg-slate-200;
+  }
+
+  .digest-progress-track::-webkit-progress-value {
+    @apply rounded-full bg-indigo-600;
+    transition: width 180ms ease;
+  }
+
+  .digest-progress-track::-moz-progress-bar {
+    @apply rounded-full bg-indigo-600;
+    transition: width 180ms ease;
+  }
+
+  .digest-progress-track.indeterminate {
+    position: relative;
+  }
+
+  .digest-progress-indicator {
+    display: block;
+    width: 38%;
+    height: 100%;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, #c7d2fe, #4f46e5, #c7d2fe);
+    animation: digest-progress-indeterminate 1.25s ease-in-out infinite;
+  }
+
+  @keyframes digest-progress-indeterminate {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(250%);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .digest-progress-track,
+    .digest-progress-indicator,
+    .digest-progress-track::-webkit-progress-value,
+    .digest-progress-track::-moz-progress-bar {
+      animation: none !important;
+      transition: none !important;
+    }
+
+    .digest-progress-indicator {
+      transform: translateX(82%);
+    }
+  }
+
   .automatic-messages-layout {
     @apply mt-5;
   }
