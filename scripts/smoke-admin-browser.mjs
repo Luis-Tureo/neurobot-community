@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 import process from 'node:process';
 import puppeteer from 'puppeteer';
 
