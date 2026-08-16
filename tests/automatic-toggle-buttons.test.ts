@@ -3,9 +3,9 @@ import { resolve } from 'node:path';
 
 describe('switches accesibles y reutilizables de estado', () => {
   const html = readFileSync(resolve('public', 'index.html'), 'utf8');
-  const script = readFileSync(resolve('public', 'app.js'), 'utf8');
+  const script = readFileSync(resolve('public', 'app-panel.js'), 'utf8');
   const shared = readFileSync(resolve('public', 'status-switch.js'), 'utf8');
-  const multiBot = readFileSync(resolve('public', 'multibot-panel.js'), 'utf8');
+  const multiBot = readFileSync(resolve('public', 'multibot-panel-runtime.js'), 'utf8');
   const panelUi = readFileSync(resolve('public', 'panel-ui-core.js'), 'utf8');
   const styles = readFileSync(resolve('src', 'admin', 'panel.css'), 'utf8');
 

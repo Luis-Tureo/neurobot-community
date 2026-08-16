@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 describe('panel del ciclo de grupos', () => {
   const html = readFileSync(resolve('public', 'index.html'), 'utf8');
-  const script = readFileSync(resolve('public', 'app.js'), 'utf8');
+  const script = readFileSync(resolve('public', 'app-panel.js'), 'utf8');
 
   it('incluye filtros, estado, publicación y acciones de ciclo de vida', () => {
     for (const text of [

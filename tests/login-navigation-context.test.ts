@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 describe('Requerimiento #28 — limpiar navegación residual al volver al login', () => {
-  const bootstrap = readFileSync(resolve('public', 'panel-ui.js'), 'utf8');
+  const bootstrap = readFileSync(resolve('public', 'panel-ui-runtime.js'), 'utf8');
   const source = readFileSync(resolve('public', 'login-navigation-context.js'), 'utf8');
   const html = readFileSync(resolve('public', 'index.html'), 'utf8');
 

@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 describe('Requerimiento #5 — Mejorar diseño y animaciones de la pantalla de login', () => {
   const html = readFileSync(resolve('public', 'index.html'), 'utf8');
-  const script = readFileSync(resolve('public', 'app.js'), 'utf8');
+  const script = readFileSync(resolve('public', 'app-panel.js'), 'utf8');
   const styles = readFileSync(resolve('src', 'admin', 'panel.css'), 'utf8');
 
   it('incluye elementos y atributos de usabilidad en el HTML de login', () => {

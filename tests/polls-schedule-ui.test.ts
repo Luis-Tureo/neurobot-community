@@ -95,7 +95,7 @@ class MockElement {
 }
 
 describe('pruebas funcionales de UI para programación semanal de encuestas', () => {
-  const scriptContent = readFileSync(resolve('public', 'app.js'), 'utf8');
+  const scriptContent = readFileSync(resolve('public', 'app-panel.js'), 'utf8');
 
   it('verifica que el script contiene las funciones y selectores necesarios', () => {
     expect(scriptContent).toContain('renderWeeklyPollSchedule');

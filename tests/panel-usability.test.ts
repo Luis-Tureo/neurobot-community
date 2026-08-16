@@ -4,8 +4,8 @@ import { resolve } from 'node:path';
 describe('interfaz simplificada del panel', () => {
   const html = readFileSync(resolve('public', 'index.html'), 'utf8');
   const styles = readFileSync(resolve('src', 'admin', 'panel.css'), 'utf8');
-  const navigation = readFileSync(resolve('public', 'app.js'), 'utf8');
-  const panel = readFileSync(resolve('public', 'multibot-panel.js'), 'utf8');
+  const navigation = readFileSync(resolve('public', 'app-panel.js'), 'utf8');
+  const panel = readFileSync(resolve('public', 'multibot-panel-runtime.js'), 'utf8');
 
   it('usa navegación vertical breve y selector móvil', () => {
     expect(html).toContain('class="panel-sidebar"');

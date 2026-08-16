@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const labScript = readFileSync('public/automation-lab.js', 'utf8');
+const labScript = readFileSync('public/automation-lab-runtime.js', 'utf8');
 const panelUi = readFileSync('public/panel-ui-core.js', 'utf8');
 const styles = readFileSync('src/admin/panel.css', 'utf8');
 
