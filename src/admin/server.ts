@@ -17,6 +17,7 @@ export async function buildAdminServer(context: AdminServerContext) {
   try {
     const app = await buildBaseAdminServer(context);
     installAzureForwardedHttps(app);
+    installAuthenticationResultLogging(app, context);
     registerAIModerationPanelRoutes(app, context);
     registerAutomationLabContextRoute(app, context.sessionSecret);
     registerAutomationLabAIRoutes(app, context);
@@ -26,4 +27,36 @@ export async function buildAdminServer(context: AdminServerContext) {
   } finally {
     SessionStore.disableSharedSecret(context.sessionSecret);
   }
+}
+
+function installAuthenticationResultLogging(
+  app: Awaited<ReturnType<typeof buildBaseAdminServer>>,
+  context: AdminServerContext,
+): void {
+  app.server.on('request', (request, response) => {
+    const pathname = request.url?.split('?')[0] ?? '';
+    if (request.method !== 'POST' || pathname !== '/api/auth/login') return;
+
+    response.once('finish', () => {
+      const httpStatus = response.statusCode;
+      const operation =
+        httpStatus === 200
+          ? 'ADMIN_LOGIN_SUCCEEDED'
+          : httpStatus === 401
+            ? 'ADMIN_LOGIN_INVALID_CREDENTIALS'
+            : httpStatus === 429
+              ? 'ADMIN_LOGIN_RATE_LIMITED'
+              : 'ADMIN_LOGIN_FAILED';
+      const details = {
+        module: 'Administrador',
+        operation,
+        httpStatus,
+      };
+      if (httpStatus === 200) {
+        context.logger.info(details, 'Inicio de sesión administrativo aceptado');
+      } else {
+        context.logger.warn(details, 'Inicio de sesión administrativo rechazado');
+      }
+    });
+  });
 }
