@@ -881,7 +881,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
-        styleSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:'],
         connectSrc: ["'self'"],
         frameAncestors: ["'none'"],
