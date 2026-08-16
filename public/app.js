@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 const loginForm = document.querySelector('#login-form');
 const loginView = document.querySelector('#login-view');
 const panelView = document.querySelector('#panel-view');
