@@ -1,6 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { GroundedResponseResult } from '../ai/ai-provider.js';
 import { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
 import type {
   AIModerationCategory,
@@ -86,7 +85,7 @@ export function registerAIModerationPanelRoutes(
   app.get(
     '/api/bots/:botId/ai-moderation/panel-state',
     { preHandler: requireSession },
-    async (request) => {
+    async (request, reply) => {
       const { botId } = botParamsSchema.parse(request.params);
       const settings = context.database.getAIModerationSettings(botId);
       const automatic = context.database.getAutomaticMessageConfiguration(botId);
@@ -102,12 +101,15 @@ export function registerAIModerationPanelRoutes(
           rulesConfigured: rulesText.length > 0,
         }));
 
-      return {
-        adminPhone,
-        adminPhoneConfigured: settings.adminPhoneHash !== null,
-        rulesSource: 'automatic_messages.dailyRules',
-        groups,
-      };
+      return reply
+        .header('cache-control', 'no-store, max-age=0')
+        .header('pragma', 'no-cache')
+        .send({
+          adminPhone,
+          adminPhoneConfigured: settings.adminPhoneHash !== null,
+          rulesSource: 'automatic_messages.dailyRules',
+          groups,
+        });
     },
   );
 
@@ -136,7 +138,9 @@ export function registerAIModerationPanelRoutes(
           .send({ error: 'La IA no está configurada para este asistente.', code: 'AI_NOT_CONFIGURED' });
       }
 
-      const rulesText = context.database.getAutomaticMessageConfiguration(botId).dailyRules.template.trim();
+      const rulesText = context.database
+        .getAutomaticMessageConfiguration(botId)
+        .dailyRules.template.trim();
       if (rulesText.length === 0) {
         return reply.code(409).send({
           error: 'Este asistente no tiene reglas configuradas en Automatizaciones.',
@@ -194,7 +198,7 @@ export function registerAIModerationPanelRoutes(
           result: analysis.violationDetected ? 'possible_violation' : 'allowed',
         });
 
-        return {
+        return reply.header('cache-control', 'no-store, max-age=0').send({
           simulation: true,
           notice: 'SIMULACIÓN: no se creó ningún incidente ni se envió un mensaje por WhatsApp.',
           group: { groupHash: input.groupHash, name: group.name },
@@ -202,7 +206,7 @@ export function registerAIModerationPanelRoutes(
           analysis,
           warning,
           usage: response.usage,
-        };
+        });
       } catch (error) {
         const errorCode = simulationErrorCode(error, provider.classifyProviderError(error));
         context.database.recordTechnicalEvent({
@@ -213,7 +217,12 @@ export function registerAIModerationPanelRoutes(
           errorCode,
         });
         context.logger.warn(
-          { operation: 'AI_MODERATION_SIMULATION_FAILED', botId, groupHash: input.groupHash, errorCode },
+          {
+            operation: 'AI_MODERATION_SIMULATION_FAILED',
+            botId,
+            groupHash: input.groupHash,
+            errorCode,
+          },
           'Falló una simulación segura de moderación asistida',
         );
         return reply.code(422).send({
@@ -279,7 +288,7 @@ function stableSimulationKey(value: string): string {
     hash ^= character.codePointAt(0) ?? 0;
     hash = Math.imul(hash, 16777619);
   }
-  return Math.abs(hash >>> 0).toString(16);
+  return (hash >>> 0).toString(16);
 }
 
 function severityRank(severity: AIModerationSeverity): number {
