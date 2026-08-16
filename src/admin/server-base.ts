@@ -11,6 +11,7 @@ import QRCode from 'qrcode';
 import { z } from 'zod';
 import type { AIProvider } from '../ai/ai-provider.js';
 import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
+import { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
 import { hashNormalizedQuestion, normalizeQuestionForCache } from '../ai/answer-cache-service.js';
 import type { AutomaticMessageService } from '../core/automatic-message-service.js';
 import { CatalogService } from '../core/catalog-service.js';
@@ -50,6 +51,11 @@ import { verifyPassword } from '../security/password.js';
 import { LocalModerationEngine } from '../moderation/local-moderation-engine.js';
 import { normalizeModerationConfigurationValue } from '../moderation/moderation-service.js';
 import { GroupModerationService } from '../moderation/group-moderation-service.js';
+import {
+  AIModerationService,
+  renderAIModerationWarningTemplate,
+} from '../moderation/ai-moderation-service.js';
+import { canonicalPhoneIdentity } from '../messaging/identifiers.js';
 import { assertPlainText, normalizeBotIdentifier } from '../utils/text.js';
 import { LoginAttemptGate, SessionStore, type PanelSession } from './session-store.js';
 
@@ -586,6 +592,73 @@ const aiQueueSimulationSchema = z
   .object({
     requests: z.number().int().min(1).max(30),
     scenario: z.enum(['normal', 'repeated', 'rate_limited', 'timeout']),
+  })
+  .strict();
+
+const aiModerationSeveritySchema = z.enum(['BAJO', 'MEDIO', 'ALTO', 'CRITICO']);
+const aiModerationStatusSchema = z.enum([
+  'pending',
+  'approved',
+  'dismissed',
+  'warning_sent',
+  'warning_failed',
+  'expired',
+]);
+const aiModerationSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    adminPhone: z.string().trim().max(40).optional(),
+    clearAdminPhone: z.boolean().default(false),
+    warningTemplate: z.string().trim().min(20).max(2000),
+    minSeverity: aiModerationSeveritySchema,
+    dedupWindowMinutes: z.number().int().min(1).max(1440),
+    pendingExpiryHours: z.number().int().min(1).max(168),
+    selectedGroups: z.array(z.string().regex(/^[a-f0-9]{20}$/u)).max(500),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.clearAdminPhone && value.adminPhone !== undefined && value.adminPhone !== '')
+      context.addIssue({
+        code: 'custom',
+        path: ['adminPhone'],
+        message: 'No puedes guardar y quitar el número al mismo tiempo.',
+      });
+  });
+const aiModerationIncidentQuerySchema = z
+  .object({
+    group: z
+      .string()
+      .regex(/^[a-f0-9]{20}$/u)
+      .optional(),
+    status: aiModerationStatusSchema.optional(),
+    severity: aiModerationSeveritySchema.optional(),
+    from: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/u)
+      .optional(),
+    to: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/u)
+      .optional(),
+  })
+  .strict();
+const aiModerationReviewSchema = z.object({ decision: z.enum(['send', 'dismiss']) }).strict();
+const aiModerationTestSchema = z
+  .object({
+    text: z.string().trim().min(1).max(4000),
+    groupHash: z
+      .string()
+      .regex(/^[a-f0-9]{20}$/u)
+      .optional(),
+  })
+  .strict();
+const aiModerationPreviewSchema = z
+  .object({
+    template: z.string().trim().min(20).max(2000),
+    nombre: z.string().trim().max(120).optional(),
+    grupo: z.string().trim().max(160).optional(),
+    regla: z.string().trim().max(200).optional(),
+    motivo: z.string().trim().max(600).optional(),
   })
   .strict();
 
@@ -1663,6 +1736,264 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
               ? 'AI_TIMEOUT'
               : 'AI_PROVIDER_RATE_LIMITED',
       };
+    },
+  );
+
+  app.get(
+    '/api/bots/:botId/ai-moderation',
+    { preHandler: requireSession(sessions) },
+    async (request) => {
+      const botId = parseBotId(request.params);
+      const settings = context.database.getAIModerationSettings(botId);
+      const groups = context.database
+        .listBotGroups(botId, (identifier) => context.anonymizer.identifier(identifier))
+        .filter((group) => group.active && !group.blocked)
+        .map((group) => ({
+          groupHash: group.groupHash,
+          name: group.name,
+          selected: settings.selectedGroups.includes(group.groupHash),
+        }));
+      const incidents = context.database.listAIModerationIncidents(botId, { limit: 200 });
+      return {
+        settings: {
+          ...settings,
+          adminPhoneConfigured: settings.adminPhoneHash !== null,
+        },
+        groups,
+        incidents: incidents.map(aiModerationIncidentForPanel),
+        metrics: context.database.getAIModerationMetrics(botId),
+        summary: {
+          pendingIncidents: incidents.filter((incident) => incident.status === 'pending').length,
+          selectedGroups: settings.selectedGroups.length,
+          lastIncidentAt: incidents[0]?.detectedAt ?? null,
+        },
+        mediaSupport: {
+          text: true,
+          images: false,
+          stickers: false,
+          audio: false,
+          video: false,
+          notice:
+            'El proveedor actual analiza solamente texto. Imágenes, stickers, audio y video no se envían a esta moderación.',
+        },
+      };
+    },
+  );
+
+  app.put(
+    '/api/bots/:botId/ai-moderation/settings',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request, reply) => {
+      const botId = parseBotId(request.params);
+      const input = aiModerationSettingsSchema.parse(request.body);
+      const activeGroups = new Set(
+        context.database
+          .listBotGroups(botId, (identifier) => context.anonymizer.identifier(identifier))
+          .filter((group) => group.active && !group.blocked)
+          .map((group) => group.groupHash),
+      );
+      if (input.selectedGroups.some((groupHash) => !activeGroups.has(groupHash)))
+        return reply.code(400).send({ error: 'La selección contiene un grupo no disponible.' });
+
+      const current = context.database.getAIModerationSettings(botId);
+      let adminPhone: { hash: string; encrypted: string } | null | undefined;
+      if (input.clearAdminPhone) {
+        adminPhone = null;
+      } else if (input.adminPhone !== undefined && input.adminPhone !== '') {
+        const normalized = canonicalPhoneIdentity(input.adminPhone);
+        if (normalized === null)
+          return reply
+            .code(400)
+            .send({ error: 'Ingresa el número con código de país, sin extensiones.' });
+        if (context.secretVault?.isConfigured() !== true)
+          return reply
+            .code(409)
+            .send({ error: 'El cifrado local debe estar disponible para guardar el número.' });
+        adminPhone = {
+          hash: context.anonymizer.identifier(normalized),
+          encrypted: context.secretVault.encrypt(
+            `whatsapp:${normalized}`,
+            `ai-moderation:${botId}:admin`,
+          ).encrypted,
+        };
+      }
+      const adminPhoneConfigured =
+        adminPhone === null
+          ? false
+          : adminPhone === undefined
+            ? current.adminPhoneHash !== null
+            : true;
+      if (input.enabled && !adminPhoneConfigured)
+        return reply
+          .code(400)
+          .send({ error: 'Configura el número de la persona administradora antes de activar.' });
+      if (input.enabled && input.selectedGroups.length === 0)
+        return reply.code(400).send({ error: 'Selecciona al menos un grupo antes de activar.' });
+      const provider = aiProviderFor(context, botId);
+      if (input.enabled && provider?.isConfigured() !== true)
+        return reply
+          .code(409)
+          .send({ error: 'Configura el proveedor de IA antes de activar esta moderación.' });
+      if (input.enabled && context.secretVault?.isConfigured() !== true)
+        return reply
+          .code(409)
+          .send({ error: 'El cifrado local no está disponible para este flujo.' });
+
+      const saved = context.database.saveAIModerationSettings(botId, {
+        enabled: input.enabled,
+        warningTemplate: input.warningTemplate,
+        minSeverity: input.minSeverity,
+        dedupWindowMinutes: input.dedupWindowMinutes,
+        pendingExpiryHours: input.pendingExpiryHours,
+        selectedGroups: input.selectedGroups,
+        ...(adminPhone === undefined ? {} : { adminPhone }),
+      });
+      context.database.recordTechnicalEvent({
+        botId,
+        eventType: 'AI_MODERATION_SETTINGS_UPDATED',
+        result: saved.enabled ? 'enabled' : 'disabled',
+        itemCount: saved.selectedGroups.length,
+      });
+      audit(context, 'ai_moderation_settings_save', botId, 'ok', botId);
+      return {
+        settings: {
+          ...saved,
+          adminPhoneConfigured: saved.adminPhoneHash !== null,
+        },
+      };
+    },
+  );
+
+  app.get(
+    '/api/bots/:botId/ai-moderation/incidents',
+    { preHandler: requireSession(sessions) },
+    async (request) => {
+      const botId = parseBotId(request.params);
+      const query = aiModerationIncidentQuerySchema.parse(request.query ?? {});
+      const incidents = context.database.listAIModerationIncidents(botId, {
+        ...(query.group === undefined ? {} : { groupHash: query.group }),
+        ...(query.status === undefined ? {} : { status: query.status }),
+        ...(query.severity === undefined ? {} : { severity: query.severity }),
+        ...(query.from === undefined ? {} : { from: `${query.from}T00:00:00.000Z` }),
+        ...(query.to === undefined ? {} : { to: nextUtcDate(query.to) }),
+        limit: 500,
+      });
+      return { incidents: incidents.map(aiModerationIncidentForPanel) };
+    },
+  );
+
+  app.post(
+    '/api/bots/:botId/ai-moderation/incidents/:id/review',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request, reply) => {
+      const botId = parseBotId(request.params);
+      const incidentId = z
+        .object({ id: z.coerce.number().int().positive() })
+        .parse(request.params).id;
+      const { decision } = aiModerationReviewSchema.parse(request.body);
+      const runtimeService = context.multiBotManager?.aiModerationService(botId) ?? null;
+      if (decision === 'send' && runtimeService === null)
+        return reply.code(409).send({
+          error:
+            'El asistente debe estar iniciado y conectado para enviar la advertencia por WhatsApp.',
+        });
+      try {
+        let incident;
+        if (runtimeService !== null) {
+          incident = await runtimeService.reviewIncident(incidentId, decision);
+        } else {
+          const existing = context.database.getAIModerationIncident(botId, incidentId);
+          if (existing === null) return reply.code(404).send({ error: 'Incidente no encontrado.' });
+          const now = new Date().toISOString();
+          if (
+            existing.status !== 'pending' ||
+            !context.database.updateAIModerationIncidentStatus(botId, incidentId, 'dismissed', {
+              expectedStatus: 'pending',
+              adminDecisionAt: now,
+            })
+          )
+            return reply.code(409).send({ error: 'Este incidente ya fue revisado o expiró.' });
+          context.database.incrementAIModerationMetric(botId, 'incidentsDismissed');
+          incident = context.database.getAIModerationIncident(botId, incidentId);
+        }
+        audit(context, 'ai_moderation_incident_review', String(incidentId), 'ok', botId);
+        return { reviewed: true, incident: aiModerationIncidentForPanel(incident!) };
+      } catch (error) {
+        const code = error instanceof Error ? error.message : '';
+        if (code === 'AI_MODERATION_INCIDENT_NOT_FOUND')
+          return reply.code(404).send({ error: 'Incidente no encontrado.' });
+        if (code === 'AI_MODERATION_INCIDENT_ALREADY_REVIEWED')
+          return reply.code(409).send({ error: 'Este incidente ya fue revisado o expiró.' });
+        throw error;
+      }
+    },
+  );
+
+  app.post(
+    '/api/bots/:botId/ai-moderation/test',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request, reply) => {
+      const botId = parseBotId(request.params);
+      const input = aiModerationTestSchema.parse(request.body);
+      const provider = aiProviderFor(context, botId);
+      if (provider?.isConfigured() !== true)
+        return reply
+          .code(503)
+          .send({ error: 'El proveedor de IA no está configurado.', code: 'AI_NOT_CONFIGURED' });
+      const service =
+        context.multiBotManager?.aiModerationService(botId) ??
+        createPanelAIModerationService(context, botId, provider);
+      const groupRules =
+        input.groupHash === undefined
+          ? undefined
+          : context.database
+              .listGroupModerationProfiles(botId)
+              .find((profile) => profile.groupHash === input.groupHash)?.rulesText;
+      try {
+        const simulation = await service.test(input.text, groupRules);
+        context.database.recordTechnicalEvent({
+          botId,
+          eventType: 'AI_MODERATION_SIMULATION_COMPLETED',
+          result: simulation.analysis.violationDetected ? 'possible_violation' : 'allowed',
+        });
+        return {
+          ...simulation,
+          notice: 'SIMULACIÓN: no se creó ningún incidente ni se envió un mensaje por WhatsApp.',
+        };
+      } catch (error) {
+        const errorCode = provider.classifyProviderError(error);
+        context.database.recordTechnicalEvent({
+          botId,
+          eventType: 'AI_MODERATION_SIMULATION_FAILED',
+          result: 'failed',
+          errorCode,
+        });
+        return reply.code(422).send({
+          error: 'No fue posible completar la simulación. Revisa la conexión con la IA.',
+          code: errorCode,
+        });
+      }
+    },
+  );
+
+  app.post(
+    '/api/bots/:botId/ai-moderation/preview',
+    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
+    async (request) => {
+      const botId = parseBotId(request.params);
+      const input = aiModerationPreviewSchema.parse(request.body);
+      const warning = renderAIModerationWarningTemplate(input.template, {
+        nombre: input.nombre ?? 'Integrante de ejemplo',
+        grupo: input.grupo ?? 'Grupo de ejemplo',
+        regla: input.regla ?? 'Regla de convivencia',
+        motivo: input.motivo ?? 'posible incumplimiento detectado para revisión humana',
+      });
+      context.database.recordTechnicalEvent({
+        botId,
+        eventType: 'AI_MODERATION_WARNING_PREVIEWED',
+        result: 'simulation',
+      });
+      return { simulation: true, warning };
     },
   );
 
@@ -4282,6 +4613,7 @@ function parseBotIdQuery(query: unknown, context: AdminServerContext): string {
 }
 
 function moduleForProtectedRoute(route: string): AssistantModuleKey | null {
+  if (route.includes('/ai-moderation')) return 'ai-moderation';
   if (route.includes('/moderation')) return 'moderation';
   if (route.startsWith('/api/polls')) return 'polls';
   if (route.startsWith('/api/automatic-messages')) return 'automatic-messages';
@@ -4292,6 +4624,55 @@ function moduleForProtectedRoute(route: string): AssistantModuleKey | null {
   if (route.includes('/requests')) return 'requests';
   if (route.includes('/menus')) return 'menus';
   return null;
+}
+
+function aiProviderFor(context: AdminServerContext, botId: string): AIProvider | null {
+  return context.aiProviderFactory?.forBot(botId) ?? context.aiProvider ?? null;
+}
+
+function createPanelAIModerationService(
+  context: AdminServerContext,
+  botId: string,
+  provider: AIProvider,
+): AIModerationService {
+  const queue =
+    context.multiBotManager?.aiQueue(botId) ??
+    new AIRequestQueueService(context.database, context.logger, botId);
+  return new AIModerationService({
+    database: context.database,
+    provider,
+    logger: context.logger,
+    assistantId: botId,
+    anonymizer: context.anonymizer,
+    aiQueue: queue,
+    ...(context.secretVault === undefined ? {} : { vault: context.secretVault }),
+  });
+}
+
+function aiModerationIncidentForPanel(
+  incident: NonNullable<ReturnType<AppDatabase['getAIModerationIncident']>>,
+) {
+  return {
+    id: incident.id,
+    groupHash: incident.groupHash,
+    groupName: incident.groupName,
+    participantHash: incident.participantHash,
+    detectedAt: incident.detectedAt,
+    ruleViolated: incident.ruleViolated,
+    category: incident.category,
+    severity: incident.severity,
+    confidence: incident.confidence,
+    status: incident.status,
+    adminDecisionAt: incident.adminDecisionAt,
+    warningSentAt: incident.warningSentAt,
+    warningError: incident.warningError,
+  };
+}
+
+function nextUtcDate(date: string): string {
+  const start = Date.parse(`${date}T00:00:00.000Z`);
+  if (!Number.isFinite(start)) throw new Error('La fecha no es válida.');
+  return new Date(start + 86_400_000).toISOString();
 }
 
 function sanitizeModerationRule(

@@ -14,6 +14,7 @@ import type { PollScheduler } from './poll-scheduler.js';
 import type { PollService } from './poll-service.js';
 import type { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
 import type { ModerationService } from '../moderation/moderation-service.js';
+import type { AIModerationService } from '../moderation/ai-moderation-service.js';
 
 type ClientFactory = (
   bot: BotRecord,
@@ -48,6 +49,7 @@ export class MultiBotManager {
           sessionPath: bot.sessionPath,
           clientId: bot.clientId,
           acceptPrivateMessages: bot.privateMessagesEnabled,
+          acceptPrivateModerationCommands: bot.groupChannelEnabled,
           maxMessageLength: options.maxMessageLength,
           developmentMode: options.developmentMode,
           communityPollVotesNoAction: bot.capabilities.communitySingleTurnMode,
@@ -187,6 +189,10 @@ export class MultiBotManager {
 
   public moderationService(botId: string): ModerationService | null {
     return this.instances.get(botId)?.moderationService() ?? null;
+  }
+
+  public aiModerationService(botId: string): AIModerationService | null {
+    return this.instances.get(botId)?.aiModerationService() ?? null;
   }
 
   public async restart(botId: string): Promise<void> {

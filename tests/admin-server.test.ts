@@ -810,6 +810,92 @@ describe('API administrativa', () => {
     expect(initial.statusCode).toBe(404);
   });
 
+  it('configura y previsualiza la moderación asistida sin exponer el número guardado', async () => {
+    const auth = await login(app);
+    const groupId = 'grupo-ai-moderation@g.us';
+    const anonymizer = new Anonymizer('x'.repeat(32));
+    const groupHash = anonymizer.identifier(groupId);
+    database.synchronizeBotGroup('neurobot', {
+      id: groupId,
+      name: 'Grupo moderado',
+      botIsMember: true,
+    });
+    const initial = await app.inject({
+      method: 'GET',
+      url: '/api/bots/neurobot/ai-moderation',
+      headers: { cookie: auth.cookie },
+    });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toMatchObject({
+      settings: { enabled: false, adminPhoneConfigured: false },
+      mediaSupport: { text: true, images: false, audio: false },
+    });
+
+    const saved = await injectAuthenticated(app, auth, {
+      method: 'PUT',
+      url: '/api/bots/neurobot/ai-moderation/settings',
+      payload: {
+        enabled: false,
+        adminPhone: '+56 9 0000 0000',
+        clearAdminPhone: false,
+        warningTemplate:
+          'Hola {nombre}. Posible incumplimiento en {grupo}: {regla}. Motivo: {motivo}.',
+        minSeverity: 'MEDIO',
+        dedupWindowMinutes: 5,
+        pendingExpiryHours: 24,
+        selectedGroups: [groupHash],
+      },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toMatchObject({
+      settings: { enabled: false, adminPhoneConfigured: true, selectedGroups: [groupHash] },
+    });
+    expect(saved.body).not.toContain('+56 9 0000 0000');
+    expect(saved.body).not.toContain('56900000000@c.us');
+
+    database.createAIModerationIncident({
+      assistantId: 'neurobot',
+      groupHash,
+      groupName: 'Grupo moderado',
+      participantHash: anonymizer.identifier('participante-privado'),
+      participantDisplayName: 'Nombre privado',
+      messageHash: 'mensaje-privado-para-panel',
+      encryptedParticipantPhone: 'identificador-cifrado-de-prueba',
+      detectedAt: new Date().toISOString(),
+      messagePreview: 'Contenido privado que el panel no debe mostrar',
+      contextMessages: ['Contexto privado que el panel no debe mostrar'],
+      ruleViolated: 'Respeto',
+      category: 'insulto',
+      severity: 'MEDIO',
+      confidence: 'ALTA',
+      aiExplanation: 'Explicación privada que el panel no debe mostrar',
+      warningSnapshot: 'Advertencia privada que el panel no debe mostrar',
+      dedupWindowMinutes: 5,
+    });
+    const incidents = await app.inject({
+      method: 'GET',
+      url: '/api/bots/neurobot/ai-moderation/incidents',
+      headers: { cookie: auth.cookie },
+    });
+    expect(incidents.statusCode).toBe(200);
+    expect(incidents.body).not.toContain('Nombre privado');
+    expect(incidents.body).not.toContain('Contenido privado');
+    expect(incidents.body).not.toContain('Contexto privado');
+    expect(incidents.body).not.toContain('Explicación privada');
+    expect(incidents.body).not.toContain('Advertencia privada');
+
+    const preview = await injectAuthenticated(app, auth, {
+      method: 'POST',
+      url: '/api/bots/neurobot/ai-moderation/preview',
+      payload: {
+        template: 'Hola {nombre}. Revisión en {grupo}: {regla}. Motivo: {motivo}.',
+      },
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toMatchObject({ simulation: true });
+    expect(preview.json().warning).not.toMatch(/\{(?:nombre|grupo|regla|motivo)\}/u);
+  });
+
   it('gestiona la IA actual y conserva un historial de cambios sin exponer tokens', async () => {
     const auth = await login(app);
     const initialResponse = await app.inject({

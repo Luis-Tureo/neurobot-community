@@ -17,6 +17,7 @@ export type IncomingMessage = {
   timestampMs?: number;
   chatId: string;
   participantId: string;
+  participantDisplayName?: string | null;
   administratorId?: string | null;
   participantIdentityStatus?: 'phone' | 'lid_resolved' | 'lid_unresolved' | 'missing';
   messageType?: string;
@@ -535,6 +536,69 @@ export type ModerationResult = {
   action: ModerationAction;
   exceptionsApplied: string[];
   duplicate: boolean;
+};
+
+export type AIModerationCategory =
+  | 'insulto'
+  | 'hostigamiento'
+  | 'provocación'
+  | 'odio'
+  | 'amenaza'
+  | 'sexual'
+  | 'spam'
+  | 'regla_específica'
+  | 'otro';
+
+export type AIModerationSeverity = 'BAJO' | 'MEDIO' | 'ALTO' | 'CRITICO';
+export type AIModerationConfidence = 'BAJA' | 'MEDIA' | 'ALTA';
+
+export type AIModerationIncidentStatus =
+  'pending' | 'approved' | 'dismissed' | 'warning_sent' | 'warning_failed' | 'expired';
+
+export type AIModerationSettings = {
+  enabled: boolean;
+  adminPhoneHash: string | null;
+  warningTemplate: string;
+  minSeverity: AIModerationSeverity;
+  dedupWindowMinutes: number;
+  pendingExpiryHours: number;
+  selectedGroups: string[];
+};
+
+export type AIModerationIncident = {
+  id: number;
+  assistantId: string;
+  groupHash: string;
+  groupName: string | null;
+  participantHash: string;
+  participantDisplayName: string | null;
+  detectedAt: string;
+  messagePreview: string;
+  ruleViolated: string | null;
+  category: AIModerationCategory;
+  severity: AIModerationSeverity;
+  confidence: AIModerationConfidence;
+  aiExplanation: string;
+  warningSnapshot: string;
+  status: AIModerationIncidentStatus;
+  adminDecisionAt: string | null;
+  warningSentAt: string | null;
+  warningError: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AIModerationMetrics = {
+  localDate: string;
+  messagesAnalyzed: number;
+  incidentsCreated: number;
+  incidentsApproved: number;
+  incidentsDismissed: number;
+  warningsSent: number;
+  warningsFailed: number;
+  aiErrors: number;
+  aiTokensUsed: number;
+  updatedAt: string | null;
 };
 
 export type AIProviderStatus = {

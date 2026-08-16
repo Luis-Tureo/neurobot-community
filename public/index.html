@@ -79,6 +79,9 @@
               <option value="status" data-bot-only>Inicio</option>
               <option value="state-metrics" data-bot-only>Estado y estadísticas</option>
               <option value="ai" data-bot-only>Inteligencia Artificial</option>
+              <option value="ai-moderation" data-bot-only data-module="ai-moderation">
+                Moderación asistida por IA
+              </option>
               <option value="menus" data-bot-only data-module="menus">Menú de respuestas</option>
               <option value="catalog" data-bot-only data-module="catalog">
                 Productos y servicios
@@ -142,6 +145,13 @@
               </button>
 
               <p class="nav-group-title bot-only hidden">Comunidad</p>
+              <button
+                data-section="ai-moderation"
+                data-module="ai-moderation"
+                class="bot-only hidden"
+              >
+                <span aria-hidden="true">◇</span> Moderación con IA
+              </button>
               <button
                 data-section="automatic-messages"
                 data-module="automatic-messages"
@@ -522,6 +532,238 @@
                 <input name="logoPath" type="hidden" />
                 <button type="submit">Guardar identidad</button>
               </form>
+            </section>
+
+            <section id="section-ai-moderation" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Decisión humana obligatoria</p>
+                  <h2>Moderación asistida por IA</h2>
+                </div>
+                <div id="ai-moderation-status" class="status-badge" aria-live="polite">
+                  Cargando estado
+                </div>
+              </div>
+
+              <p class="info-callout ai-moderation-safety-notice">
+                La IA solo identifica posibles incumplimientos. Una persona administradora debe
+                aprobar cada advertencia antes de que se envíe por WhatsApp.
+              </p>
+              <div id="ai-moderation-metrics" class="status-grid compact"></div>
+
+              <div class="ai-moderation-grid">
+                <form id="ai-moderation-settings-form" class="card inset ai-moderation-card">
+                  <div class="section-heading compact-heading">
+                    <div>
+                      <h3>Configuración</h3>
+                      <p class="muted">El análisis se aplica únicamente a los grupos elegidos.</p>
+                    </div>
+                    <div id="ai-moderation-toggle-host"></div>
+                  </div>
+
+                  <label>
+                    Número de la persona administradora
+                    <input
+                      name="adminPhone"
+                      type="tel"
+                      autocomplete="tel"
+                      inputmode="tel"
+                      maxlength="40"
+                      placeholder="Ej.: +56 9 1234 5678"
+                      aria-describedby="ai-moderation-admin-help"
+                    />
+                  </label>
+                  <p id="ai-moderation-admin-help" class="muted">
+                    Incluye el código de país. Si ya hay un número guardado, dejar el campo vacío lo
+                    conserva.
+                  </p>
+                  <label class="inline-check ai-moderation-clear-phone">
+                    <input name="clearAdminPhone" type="checkbox" /> Quitar el número guardado
+                  </label>
+
+                  <div class="form-row">
+                    <label>
+                      Severidad mínima
+                      <select name="minSeverity" required>
+                        <option value="BAJO">Baja</option>
+                        <option value="MEDIO">Media</option>
+                        <option value="ALTO">Alta</option>
+                        <option value="CRITICO">Crítica</option>
+                      </select>
+                    </label>
+                    <label>
+                      Agrupar durante
+                      <select name="dedupWindowMinutes" required>
+                        <option value="1">1 minuto</option>
+                        <option value="5">5 minutos</option>
+                        <option value="10">10 minutos</option>
+                        <option value="30">30 minutos</option>
+                        <option value="60">1 hora</option>
+                      </select>
+                    </label>
+                    <label>
+                      Expirar decisiones en
+                      <select name="pendingExpiryHours" required>
+                        <option value="1">1 hora</option>
+                        <option value="6">6 horas</option>
+                        <option value="12">12 horas</option>
+                        <option value="24">24 horas</option>
+                        <option value="48">48 horas</option>
+                        <option value="72">72 horas</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <fieldset>
+                    <legend>Grupos que se analizarán</legend>
+                    <p class="muted">Selecciona uno o más grupos activos.</p>
+                    <div id="ai-moderation-group-options" class="lab-group-options"></div>
+                  </fieldset>
+
+                  <div class="actions">
+                    <button type="submit">Guardar configuración</button>
+                  </div>
+                </form>
+
+                <form id="ai-moderation-warning-form" class="card inset ai-moderation-card">
+                  <div class="section-heading compact-heading">
+                    <div>
+                      <h3>Mensaje de advertencia</h3>
+                      <p class="muted">
+                        Se guarda una copia por incidente para conservar lo aprobado.
+                      </p>
+                    </div>
+                  </div>
+                  <label>
+                    Plantilla
+                    <textarea
+                      name="warningTemplate"
+                      rows="9"
+                      minlength="20"
+                      maxlength="2000"
+                      required
+                    ></textarea>
+                  </label>
+                  <p class="muted ai-moderation-variables">
+                    Variables disponibles: <code>{nombre}</code>, <code>{grupo}</code>,
+                    <code>{regla}</code> y <code>{motivo}</code>.
+                  </p>
+                  <div class="actions">
+                    <button id="ai-moderation-preview-button" class="secondary" type="button">
+                      Ver vista previa
+                    </button>
+                    <button type="submit">Guardar mensaje</button>
+                  </div>
+                  <div
+                    id="ai-moderation-warning-preview"
+                    class="ai-moderation-preview hidden"
+                    role="status"
+                    aria-live="polite"
+                  ></div>
+                </form>
+              </div>
+
+              <form id="ai-moderation-test-form" class="card inset ai-moderation-card">
+                <div class="section-heading compact-heading">
+                  <div>
+                    <p class="eyebrow">SIMULACIÓN</p>
+                    <h3>Probar moderación</h3>
+                  </div>
+                </div>
+                <label>
+                  Reglas de un grupo (opcional)
+                  <select name="groupHash">
+                    <option value="">Usar reglas generales</option>
+                  </select>
+                </label>
+                <label>
+                  Texto ficticio
+                  <textarea
+                    name="text"
+                    rows="5"
+                    maxlength="4000"
+                    placeholder="Escribe un ejemplo que no contenga datos reales."
+                    required
+                  ></textarea>
+                </label>
+                <div class="actions">
+                  <button type="submit">Probar sin enviar</button>
+                </div>
+                <div
+                  id="ai-moderation-test-result"
+                  class="ai-moderation-simulation hidden"
+                  role="status"
+                  aria-live="polite"
+                ></div>
+              </form>
+
+              <article class="card inset ai-moderation-card">
+                <div class="section-heading compact-heading">
+                  <div>
+                    <h3>Historial de incidentes</h3>
+                    <p class="muted">
+                      No se muestran números telefónicos ni contenido de mensajes.
+                    </p>
+                  </div>
+                </div>
+                <form id="ai-moderation-filters" class="ai-moderation-filters">
+                  <label>
+                    Grupo
+                    <select name="group">
+                      <option value="">Todos</option>
+                    </select>
+                  </label>
+                  <label>
+                    Estado
+                    <select name="status">
+                      <option value="">Todos</option>
+                      <option value="pending">Pendiente</option>
+                      <option value="approved">Aprobado</option>
+                      <option value="dismissed">Omitido</option>
+                      <option value="warning_sent">Advertencia enviada</option>
+                      <option value="warning_failed">Envío fallido</option>
+                      <option value="expired">Expirado</option>
+                    </select>
+                  </label>
+                  <label>
+                    Severidad
+                    <select name="severity">
+                      <option value="">Todas</option>
+                      <option value="BAJO">Baja</option>
+                      <option value="MEDIO">Media</option>
+                      <option value="ALTO">Alta</option>
+                      <option value="CRITICO">Crítica</option>
+                    </select>
+                  </label>
+                  <label>Desde<input name="from" type="date" /></label>
+                  <label>Hasta<input name="to" type="date" /></label>
+                  <button class="secondary" type="submit">Aplicar filtros</button>
+                </form>
+                <div
+                  class="table-shell"
+                  role="region"
+                  aria-label="Historial de moderación asistida"
+                  tabindex="0"
+                >
+                  <table class="data-table ai-moderation-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Integrante</th>
+                        <th>Grupo</th>
+                        <th>Categoría</th>
+                        <th>Severidad</th>
+                        <th>Regla</th>
+                        <th>Estado</th>
+                        <th>Decisión</th>
+                      </tr>
+                    </thead>
+                    <tbody id="ai-moderation-incidents"></tbody>
+                  </table>
+                </div>
+              </article>
+
+              <p id="ai-moderation-media-notice" class="info-callout"></p>
             </section>
 
             <section id="section-menus" class="panel-section hidden">

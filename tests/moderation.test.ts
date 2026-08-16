@@ -20,15 +20,17 @@ describe('moderación local aislada por asistente', () => {
 
   it('retira el módulo administrativo de todos los asistentes', () => {
     const visibility = new AssistantModuleVisibilityService();
-    expect(
-      visibility.visibleModules(
-        database.getBot('neurobot') as NonNullable<ReturnType<AppDatabase['getBot']>>,
-      ),
-    ).not.toContain('moderation');
+    const communityModules = visibility.visibleModules(
+      database.getBot('neurobot') as NonNullable<ReturnType<AppDatabase['getBot']>>,
+    );
+    expect(communityModules).not.toContain('moderation');
+    expect(communityModules).toContain('ai-moderation');
     const privateBot = createBot(database, 'negocio-privado', 'business');
     const mixedBot = createBot(database, 'negocio-mixto', 'mixed');
     expect(visibility.visibleModules(privateBot)).not.toContain('moderation');
+    expect(visibility.visibleModules(privateBot)).not.toContain('ai-moderation');
     expect(visibility.visibleModules(mixedBot)).not.toContain('moderation');
+    expect(visibility.visibleModules(mixedBot)).toContain('ai-moderation');
   });
 
   it('migra desactivada, sin IA, expulsión ni eliminación automática', () => {

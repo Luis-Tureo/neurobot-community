@@ -32,6 +32,11 @@ import type {
   AISettings,
   AIProviderStatus,
   AIProviderHealthState,
+  AIModerationIncident,
+  AIModerationIncidentStatus,
+  AIModerationMetrics,
+  AIModerationSettings,
+  AIModerationSeverity,
   AIQueueMetrics,
   AIQueueSettings,
   AIReservationDecision,
@@ -72,6 +77,7 @@ import type {
   ScheduledDeliveryRecord,
   ScheduledDeliveryStatus,
 } from '../domain/types.js';
+import { DEFAULT_AI_MODERATION_WARNING_TEMPLATE } from '../moderation/ai-moderation-defaults.js';
 type CommandRow = {
   id: number;
   name: string;
@@ -125,6 +131,45 @@ export type GroupModerationProfile = {
   lastTestedAt: string | null;
   activatedAt: string | null;
   updatedAt: string;
+};
+
+export type SaveAIModerationSettingsInput = {
+  enabled: boolean;
+  warningTemplate: string;
+  minSeverity: AIModerationSeverity;
+  dedupWindowMinutes: number;
+  pendingExpiryHours: number;
+  selectedGroups: string[];
+  adminPhone?: { hash: string; encrypted: string } | null;
+};
+
+export type CreateAIModerationIncidentInput = {
+  assistantId: string;
+  groupHash: string;
+  groupName: string | null;
+  participantHash: string;
+  participantDisplayName: string | null;
+  messageHash: string;
+  encryptedParticipantPhone: string;
+  detectedAt: string;
+  messagePreview: string;
+  contextMessages: string[];
+  ruleViolated: string | null;
+  category: AIModerationIncident['category'];
+  severity: AIModerationSeverity;
+  confidence: AIModerationIncident['confidence'];
+  aiExplanation: string;
+  warningSnapshot: string;
+  dedupWindowMinutes: number;
+};
+
+export type AIModerationIncidentFilters = {
+  groupHash?: string;
+  status?: AIModerationIncidentStatus;
+  severity?: AIModerationSeverity;
+  from?: string;
+  to?: string;
+  limit?: number;
 };
 
 type KeywordRow = {
@@ -1961,6 +2006,84 @@ export class AppDatabase {
           );
           CREATE INDEX idx_welcome_event_deduplication_expiry
             ON bot_welcome_event_deduplication(bot_id, expires_at);
+        `,
+      },
+      {
+        version: 31,
+        sql: `
+          CREATE TABLE ai_moderation_settings (
+            assistant_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
+            enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0, 1)),
+            admin_phone_hash TEXT,
+            admin_encrypted_phone TEXT,
+            warning_template TEXT NOT NULL DEFAULT 'Hola {nombre}. Una persona administradora revisó un posible incumplimiento en {grupo} relacionado con {regla}. Motivo: {motivo}. Este aviso no implica una sanción automática; por favor revisa las reglas de convivencia.',
+            min_severity TEXT NOT NULL DEFAULT 'MEDIO'
+              CHECK(min_severity IN ('BAJO', 'MEDIO', 'ALTO', 'CRITICO')),
+            dedup_window_minutes INTEGER NOT NULL DEFAULT 5
+              CHECK(dedup_window_minutes BETWEEN 1 AND 1440),
+            pending_expiry_hours INTEGER NOT NULL DEFAULT 24
+              CHECK(pending_expiry_hours BETWEEN 1 AND 168),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+
+          CREATE TABLE ai_moderation_group_selection (
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            group_hash TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(assistant_id, group_hash)
+          );
+
+          CREATE TABLE ai_moderation_incidents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            group_hash TEXT NOT NULL,
+            group_name TEXT,
+            participant_hash TEXT NOT NULL,
+            participant_display_name TEXT,
+            message_hash TEXT NOT NULL,
+            admin_encrypted_participant_phone TEXT NOT NULL,
+            detected_at TEXT NOT NULL,
+            message_preview TEXT NOT NULL,
+            context_messages TEXT NOT NULL DEFAULT '[]',
+            rule_violated TEXT,
+            category TEXT NOT NULL,
+            severity TEXT NOT NULL CHECK(severity IN ('BAJO', 'MEDIO', 'ALTO', 'CRITICO')),
+            confidence TEXT NOT NULL DEFAULT 'MEDIA'
+              CHECK(confidence IN ('BAJA', 'MEDIA', 'ALTA')),
+            ai_explanation TEXT NOT NULL,
+            warning_snapshot TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+              CHECK(status IN ('pending','approved','dismissed','warning_sent','warning_failed','expired')),
+            admin_decision_at TEXT,
+            warning_sent_at TEXT,
+            warning_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(assistant_id, message_hash)
+          );
+
+          CREATE INDEX idx_ai_mod_incidents_status
+            ON ai_moderation_incidents(assistant_id, status, created_at DESC);
+          CREATE INDEX idx_ai_mod_incidents_dedup
+            ON ai_moderation_incidents(assistant_id, participant_hash, group_hash, created_at DESC);
+
+          CREATE TABLE ai_moderation_metrics (
+            assistant_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            local_date TEXT NOT NULL,
+            messages_analyzed INTEGER NOT NULL DEFAULT 0,
+            incidents_created INTEGER NOT NULL DEFAULT 0,
+            incidents_approved INTEGER NOT NULL DEFAULT 0,
+            incidents_dismissed INTEGER NOT NULL DEFAULT 0,
+            warnings_sent INTEGER NOT NULL DEFAULT 0,
+            warnings_failed INTEGER NOT NULL DEFAULT 0,
+            ai_errors INTEGER NOT NULL DEFAULT 0,
+            ai_tokens_used INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(assistant_id, local_date)
+          );
         `,
       },
     ];
@@ -7981,6 +8104,409 @@ export class AppDatabase {
       .run(username, passwordHash, now, now);
   }
 
+  public getAIModerationSettings(assistantId: string): AIModerationSettings {
+    this.ensureAIModerationSettings(assistantId);
+    const row = this.db
+      .prepare('SELECT * FROM ai_moderation_settings WHERE assistant_id=?')
+      .get(assistantId) as {
+      enabled: number;
+      admin_phone_hash: string | null;
+      warning_template: string;
+      min_severity: AIModerationSeverity;
+      dedup_window_minutes: number;
+      pending_expiry_hours: number;
+    };
+    return {
+      enabled: row.enabled === 1,
+      adminPhoneHash: row.admin_phone_hash,
+      warningTemplate: row.warning_template,
+      minSeverity: row.min_severity,
+      dedupWindowMinutes: row.dedup_window_minutes,
+      pendingExpiryHours: row.pending_expiry_hours,
+      selectedGroups: this.listAIModerationGroups(assistantId),
+    };
+  }
+
+  public saveAIModerationSettings(
+    assistantId: string,
+    input: SaveAIModerationSettingsInput,
+  ): AIModerationSettings {
+    this.ensureAIModerationSettings(assistantId);
+    const warningTemplate = input.warningTemplate.normalize('NFKC').trim();
+    if (
+      warningTemplate.length < 20 ||
+      warningTemplate.length > 2000 ||
+      warningTemplate.includes('\u0000')
+    )
+      throw new Error('AI_MODERATION_WARNING_TEMPLATE_INVALID');
+    if (
+      !Number.isInteger(input.dedupWindowMinutes) ||
+      input.dedupWindowMinutes < 1 ||
+      input.dedupWindowMinutes > 1440
+    )
+      throw new Error('AI_MODERATION_DEDUP_WINDOW_INVALID');
+    if (
+      !Number.isInteger(input.pendingExpiryHours) ||
+      input.pendingExpiryHours < 1 ||
+      input.pendingExpiryHours > 168
+    )
+      throw new Error('AI_MODERATION_EXPIRY_INVALID');
+    const selectedGroups = [...new Set(input.selectedGroups)];
+    if (
+      selectedGroups.length > 500 ||
+      selectedGroups.some((groupHash) => !/^[a-f0-9]{20}$/u.test(groupHash))
+    )
+      throw new Error('AI_MODERATION_GROUP_SELECTION_INVALID');
+    if (
+      input.adminPhone !== undefined &&
+      input.adminPhone !== null &&
+      (!/^[a-f0-9]{20}$/u.test(input.adminPhone.hash) || input.adminPhone.encrypted.length < 20)
+    )
+      throw new Error('AI_MODERATION_ADMIN_PHONE_INVALID');
+
+    const save = this.db.transaction(() => {
+      const now = new Date().toISOString();
+      const current = this.db
+        .prepare(
+          'SELECT admin_phone_hash,admin_encrypted_phone FROM ai_moderation_settings WHERE assistant_id=?',
+        )
+        .get(assistantId) as {
+        admin_phone_hash: string | null;
+        admin_encrypted_phone: string | null;
+      };
+      const phoneHash =
+        input.adminPhone === undefined
+          ? current.admin_phone_hash
+          : input.adminPhone === null
+            ? null
+            : input.adminPhone.hash;
+      const encryptedPhone =
+        input.adminPhone === undefined
+          ? current.admin_encrypted_phone
+          : input.adminPhone === null
+            ? null
+            : input.adminPhone.encrypted;
+      this.db
+        .prepare(
+          `UPDATE ai_moderation_settings SET enabled=?,admin_phone_hash=?,admin_encrypted_phone=?,
+           warning_template=?,min_severity=?,dedup_window_minutes=?,pending_expiry_hours=?,updated_at=?
+           WHERE assistant_id=?`,
+        )
+        .run(
+          input.enabled ? 1 : 0,
+          phoneHash,
+          encryptedPhone,
+          warningTemplate,
+          input.minSeverity,
+          input.dedupWindowMinutes,
+          input.pendingExpiryHours,
+          now,
+          assistantId,
+        );
+      this.db
+        .prepare('DELETE FROM ai_moderation_group_selection WHERE assistant_id=?')
+        .run(assistantId);
+      const insert = this.db.prepare(
+        `INSERT INTO ai_moderation_group_selection(assistant_id,group_hash,enabled,created_at)
+         VALUES(?,?,1,?)`,
+      );
+      for (const groupHash of selectedGroups) insert.run(assistantId, groupHash, now);
+    });
+    save();
+    return this.getAIModerationSettings(assistantId);
+  }
+
+  public listAIModerationGroups(assistantId: string): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT group_hash FROM ai_moderation_group_selection
+           WHERE assistant_id=? AND enabled=1 ORDER BY group_hash`,
+        )
+        .all(assistantId) as Array<{ group_hash: string }>
+    ).map((row) => row.group_hash);
+  }
+
+  public setAIModerationGroup(assistantId: string, groupHash: string, enabled: boolean): void {
+    this.ensureAIModerationSettings(assistantId);
+    if (!/^[a-f0-9]{20}$/u.test(groupHash)) throw new Error('AI_MODERATION_GROUP_INVALID');
+    if (!enabled) {
+      this.db
+        .prepare('DELETE FROM ai_moderation_group_selection WHERE assistant_id=? AND group_hash=?')
+        .run(assistantId, groupHash);
+      return;
+    }
+    this.db
+      .prepare(
+        `INSERT INTO ai_moderation_group_selection(assistant_id,group_hash,enabled,created_at)
+         VALUES(?,?,1,?) ON CONFLICT(assistant_id,group_hash) DO UPDATE SET enabled=1`,
+      )
+      .run(assistantId, groupHash, new Date().toISOString());
+  }
+
+  public hasRecentAIModerationIncident(
+    assistantId: string,
+    groupHash: string,
+    participantHash: string,
+    dedupWindowMinutes: number,
+    now = new Date(),
+  ): boolean {
+    const cutoff = new Date(now.getTime() - dedupWindowMinutes * 60_000).toISOString();
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM ai_moderation_incidents
+           WHERE assistant_id=? AND group_hash=? AND participant_hash=? AND created_at>=? LIMIT 1`,
+        )
+        .get(assistantId, groupHash, participantHash, cutoff) !== undefined
+    );
+  }
+
+  public createAIModerationIncident(
+    input: CreateAIModerationIncidentInput,
+  ): AIModerationIncident | null {
+    this.ensureAIModerationSettings(input.assistantId);
+    const create = this.db.transaction(() => {
+      const detectedAt = new Date(input.detectedAt);
+      if (Number.isNaN(detectedAt.getTime())) throw new Error('AI_MODERATION_DATE_INVALID');
+      if (
+        this.hasRecentAIModerationIncident(
+          input.assistantId,
+          input.groupHash,
+          input.participantHash,
+          input.dedupWindowMinutes,
+          detectedAt,
+        )
+      )
+        return null;
+      const timestamp = detectedAt.toISOString();
+      const result = this.db
+        .prepare(
+          `INSERT OR IGNORE INTO ai_moderation_incidents(
+             assistant_id,group_hash,group_name,participant_hash,participant_display_name,message_hash,
+             admin_encrypted_participant_phone,detected_at,message_preview,context_messages,rule_violated,
+             category,severity,confidence,ai_explanation,warning_snapshot,status,created_at,updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)`,
+        )
+        .run(
+          input.assistantId,
+          input.groupHash,
+          input.groupName,
+          input.participantHash,
+          input.participantDisplayName,
+          input.messageHash,
+          input.encryptedParticipantPhone,
+          timestamp,
+          input.messagePreview,
+          JSON.stringify(input.contextMessages),
+          input.ruleViolated,
+          input.category,
+          input.severity,
+          input.confidence,
+          input.aiExplanation,
+          input.warningSnapshot,
+          timestamp,
+          timestamp,
+        );
+      return result.changes === 1 ? Number(result.lastInsertRowid) : null;
+    });
+    const incidentId = create();
+    return incidentId === null ? null : this.getAIModerationIncident(input.assistantId, incidentId);
+  }
+
+  public getAIModerationIncident(
+    assistantId: string,
+    incidentId: number,
+  ): AIModerationIncident | null {
+    const row = this.db
+      .prepare('SELECT * FROM ai_moderation_incidents WHERE assistant_id=? AND id=?')
+      .get(assistantId, incidentId) as Record<string, unknown> | undefined;
+    return row === undefined ? null : mapAIModerationIncident(row);
+  }
+
+  public getPendingAIModerationIncidentForAdmin(
+    assistantId: string,
+    now = new Date(),
+  ): AIModerationIncident | null {
+    this.expireAIModerationIncidents(assistantId, now);
+    const row = this.db
+      .prepare(
+        `SELECT * FROM ai_moderation_incidents WHERE assistant_id=? AND status='pending'
+         ORDER BY created_at DESC,id DESC LIMIT 1`,
+      )
+      .get(assistantId) as Record<string, unknown> | undefined;
+    return row === undefined ? null : mapAIModerationIncident(row);
+  }
+
+  public listAIModerationIncidents(
+    assistantId: string,
+    filters: AIModerationIncidentFilters = {},
+  ): AIModerationIncident[] {
+    this.expireAIModerationIncidents(assistantId);
+    const conditions = ['assistant_id=?'];
+    const values: Array<string | number> = [assistantId];
+    if (filters.groupHash !== undefined) {
+      conditions.push('group_hash=?');
+      values.push(filters.groupHash);
+    }
+    if (filters.status !== undefined) {
+      conditions.push('status=?');
+      values.push(filters.status);
+    }
+    if (filters.severity !== undefined) {
+      conditions.push('severity=?');
+      values.push(filters.severity);
+    }
+    if (filters.from !== undefined) {
+      if (Number.isNaN(Date.parse(filters.from))) throw new Error('AI_MODERATION_DATE_INVALID');
+      conditions.push('detected_at>=?');
+      values.push(filters.from);
+    }
+    if (filters.to !== undefined) {
+      if (Number.isNaN(Date.parse(filters.to))) throw new Error('AI_MODERATION_DATE_INVALID');
+      conditions.push('detected_at<?');
+      values.push(filters.to);
+    }
+    const limit = Math.max(1, Math.min(500, Math.trunc(filters.limit ?? 200)));
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM ai_moderation_incidents WHERE ${conditions.join(' AND ')}
+           ORDER BY created_at DESC,id DESC LIMIT ${limit}`,
+        )
+        .all(...values) as Array<Record<string, unknown>>
+    ).map(mapAIModerationIncident);
+  }
+
+  public updateAIModerationIncidentStatus(
+    assistantId: string,
+    incidentId: number,
+    status: AIModerationIncidentStatus,
+    options: {
+      expectedStatus?: AIModerationIncidentStatus;
+      adminDecisionAt?: string;
+      warningSentAt?: string;
+      warningError?: string | null;
+    } = {},
+  ): boolean {
+    const updates = ['status=?', 'updated_at=?'];
+    const values: Array<string | number | null> = [status, new Date().toISOString()];
+    if (options.adminDecisionAt !== undefined) {
+      updates.push('admin_decision_at=?');
+      values.push(options.adminDecisionAt);
+    }
+    if (options.warningSentAt !== undefined) {
+      updates.push('warning_sent_at=?');
+      values.push(options.warningSentAt);
+    }
+    if (options.warningError !== undefined) {
+      updates.push('warning_error=?');
+      values.push(options.warningError);
+    }
+    values.push(assistantId, incidentId);
+    if (options.expectedStatus !== undefined) values.push(options.expectedStatus);
+    const result = this.db
+      .prepare(
+        `UPDATE ai_moderation_incidents SET ${updates.join(',')}
+         WHERE assistant_id=? AND id=?${options.expectedStatus === undefined ? '' : ' AND status=?'}`,
+      )
+      .run(...values);
+    return result.changes === 1;
+  }
+
+  public expireAIModerationIncidents(assistantId: string, now = new Date()): number {
+    const settings = this.getAIModerationSettings(assistantId);
+    const cutoff = new Date(now.getTime() - settings.pendingExpiryHours * 3_600_000).toISOString();
+    const timestamp = now.toISOString();
+    return this.db
+      .prepare(
+        `UPDATE ai_moderation_incidents SET status='expired',updated_at=?
+         WHERE assistant_id=? AND status='pending' AND created_at<=?`,
+      )
+      .run(timestamp, assistantId, cutoff).changes;
+  }
+
+  public incrementAIModerationMetric(
+    assistantId: string,
+    field: keyof Omit<AIModerationMetrics, 'localDate' | 'updatedAt'>,
+    amount = 1,
+    now = new Date(),
+  ): void {
+    const columns: Record<keyof Omit<AIModerationMetrics, 'localDate' | 'updatedAt'>, string> = {
+      messagesAnalyzed: 'messages_analyzed',
+      incidentsCreated: 'incidents_created',
+      incidentsApproved: 'incidents_approved',
+      incidentsDismissed: 'incidents_dismissed',
+      warningsSent: 'warnings_sent',
+      warningsFailed: 'warnings_failed',
+      aiErrors: 'ai_errors',
+      aiTokensUsed: 'ai_tokens_used',
+    };
+    if (!Number.isInteger(amount) || amount < 0) throw new Error('AI_MODERATION_METRIC_INVALID');
+    const column = columns[field];
+    const timestamp = now.toISOString();
+    const localDate = localDateInTimezone(now, this.getBot(assistantId)?.timezone ?? 'UTC');
+    this.db
+      .prepare(
+        `INSERT INTO ai_moderation_metrics(assistant_id,local_date,${column},created_at,updated_at)
+         VALUES(?,?,?, ?,?) ON CONFLICT(assistant_id,local_date) DO UPDATE SET
+         ${column}=${column}+excluded.${column},updated_at=excluded.updated_at`,
+      )
+      .run(assistantId, localDate, amount, timestamp, timestamp);
+  }
+
+  public getAIModerationMetrics(assistantId: string, now = new Date()): AIModerationMetrics {
+    const localDate = localDateInTimezone(now, this.getBot(assistantId)?.timezone ?? 'UTC');
+    const row = this.db
+      .prepare('SELECT * FROM ai_moderation_metrics WHERE assistant_id=? AND local_date=?')
+      .get(assistantId, localDate) as Record<string, unknown> | undefined;
+    return {
+      localDate,
+      messagesAnalyzed: Number(row?.messages_analyzed ?? 0),
+      incidentsCreated: Number(row?.incidents_created ?? 0),
+      incidentsApproved: Number(row?.incidents_approved ?? 0),
+      incidentsDismissed: Number(row?.incidents_dismissed ?? 0),
+      warningsSent: Number(row?.warnings_sent ?? 0),
+      warningsFailed: Number(row?.warnings_failed ?? 0),
+      aiErrors: Number(row?.ai_errors ?? 0),
+      aiTokensUsed: Number(row?.ai_tokens_used ?? 0),
+      updatedAt: row === undefined ? null : String(row.updated_at),
+    };
+  }
+
+  public getEncryptedAIModerationAdminPhone(assistantId: string): string | null {
+    this.ensureAIModerationSettings(assistantId);
+    const row = this.db
+      .prepare('SELECT admin_encrypted_phone FROM ai_moderation_settings WHERE assistant_id=?')
+      .get(assistantId) as { admin_encrypted_phone: string | null };
+    return row.admin_encrypted_phone;
+  }
+
+  public getAIModerationIncidentDelivery(
+    assistantId: string,
+    incidentId: number,
+  ): { encryptedParticipantPhone: string; messageHash: string } | null {
+    const row = this.db
+      .prepare(
+        `SELECT admin_encrypted_participant_phone AS encryptedParticipantPhone,message_hash AS messageHash
+         FROM ai_moderation_incidents WHERE assistant_id=? AND id=?`,
+      )
+      .get(assistantId, incidentId) as
+      { encryptedParticipantPhone: string; messageHash: string } | undefined;
+    return row ?? null;
+  }
+
+  private ensureAIModerationSettings(assistantId: string): void {
+    if (this.getBot(assistantId) === null) throw new Error('ASSISTANT_NOT_FOUND');
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO ai_moderation_settings(
+           assistant_id,warning_template,created_at,updated_at) VALUES(?,?,?,?)`,
+      )
+      .run(assistantId, DEFAULT_AI_MODERATION_WARNING_TEMPLATE, now, now);
+  }
+
   public getGroupModerationProfile(assistantId: string, groupHash: string): GroupModerationProfile {
     const now = new Date().toISOString();
     this.db
@@ -8767,6 +9293,51 @@ export class AppDatabase {
         now,
       );
   }
+}
+
+function mapAIModerationIncident(row: Record<string, unknown>): AIModerationIncident {
+  return {
+    id: Number(row.id),
+    assistantId: String(row.assistant_id),
+    groupHash: String(row.group_hash),
+    groupName: row.group_name === null ? null : String(row.group_name),
+    participantHash: String(row.participant_hash),
+    participantDisplayName:
+      row.participant_display_name === null ? null : String(row.participant_display_name),
+    detectedAt: String(row.detected_at),
+    messagePreview: String(row.message_preview),
+    ruleViolated: row.rule_violated === null ? null : String(row.rule_violated),
+    category: String(row.category) as AIModerationIncident['category'],
+    severity: String(row.severity) as AIModerationSeverity,
+    confidence: String(row.confidence) as AIModerationIncident['confidence'],
+    aiExplanation: String(row.ai_explanation),
+    warningSnapshot: String(row.warning_snapshot),
+    status: String(row.status) as AIModerationIncidentStatus,
+    adminDecisionAt: row.admin_decision_at === null ? null : String(row.admin_decision_at),
+    warningSentAt: row.warning_sent_at === null ? null : String(row.warning_sent_at),
+    warningError: row.warning_error === null ? null : String(row.warning_error),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function localDateInTimezone(value: Date, timezone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(value);
+    const year = parts.find((part) => part.type === 'year')?.value;
+    const month = parts.find((part) => part.type === 'month')?.value;
+    const day = parts.find((part) => part.type === 'day')?.value;
+    if (year !== undefined && month !== undefined && day !== undefined)
+      return `${year}-${month}-${day}`;
+  } catch {
+    // Una zona inválida no debe impedir que se registren métricas seguras.
+  }
+  return value.toISOString().slice(0, 10);
 }
 
 function mapGroupModerationProfile(row: Record<string, unknown>): GroupModerationProfile {

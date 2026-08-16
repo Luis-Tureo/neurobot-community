@@ -41,6 +41,7 @@ import {
 
 const { Client, LocalAuth, MessageMedia, Poll } = WhatsApp;
 const supportedMessageTypes = new Set(['chat']);
+const aiModerationAdminCommandPattern = /^\s*(?:ENVIAR|OMITIR)(?:\s+#?\d{1,12})?\s*$/iu;
 const DEFAULT_GROUP_ADMINISTRATOR_CACHE_TTL_MS = 5 * 60_000;
 const DEFAULT_GROUP_ADMINISTRATOR_STALE_TTL_MS = 15 * 60_000;
 const DEFAULT_GROUP_ADMINISTRATOR_TIMEOUT_MS = 3_000;
@@ -375,6 +376,7 @@ export type WhatsAppAdapterOptions = {
   sessionPath: string;
   clientId?: string;
   acceptPrivateMessages?: boolean;
+  acceptPrivateModerationCommands?: boolean;
   maxMessageLength: number;
   developmentMode: boolean;
   messageDeduplicationTtlMs?: number;
@@ -1680,7 +1682,13 @@ export class WhatsAppWebAdapter implements MessagingClient {
           ? 'to'
           : null;
       const isGroup = detectedGroupSource !== null;
-      const privateChatAllowed = this.options.acceptPrivateMessages === true;
+      const rawBody = readUnknown(message, 'body');
+      const privateModerationCommandAllowed =
+        this.options.acceptPrivateModerationCommands === true &&
+        typeof rawBody === 'string' &&
+        aiModerationAdminCommandPattern.test(rawBody.normalize('NFKC'));
+      const privateChatAllowed =
+        this.options.acceptPrivateMessages === true || privateModerationCommandAllowed;
       const privateIdentifier = isParticipantId(from) ? from : null;
       const groupIdSource = detectedGroupSource ?? (privateIdentifier === null ? null : 'from');
       chatId =
@@ -1703,7 +1711,6 @@ export class WhatsAppWebAdapter implements MessagingClient {
         return;
       }
 
-      const rawBody = readUnknown(message, 'body');
       if (typeof rawBody !== 'string') {
         this.logAdaptationRejected('INVALID_BODY', { messageType, messageHash });
         return;
@@ -1782,7 +1789,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
       );
       const administratorId = isGroup
         ? await this.resolveGroupAdministratorIdentity(chatId, participantId)
-        : null;
+        : participantIdentity.administratorId;
       const isReplyToBot = await this.detectReplyToBot(message);
       const timestampMs = normalizeMessageTimestamp(readUnknown(message, 'timestamp'));
 
@@ -1960,7 +1967,10 @@ export class WhatsAppWebAdapter implements MessagingClient {
     if (classifyWhatsAppId(participantId) !== 'lid') {
       return { administratorId: null, status: 'missing' };
     }
-    if (!body.trim().toLocaleLowerCase('es').startsWith('!bot')) {
+    if (
+      !body.trim().toLocaleLowerCase('es').startsWith('!bot') &&
+      !aiModerationAdminCommandPattern.test(body.normalize('NFKC'))
+    ) {
       return { administratorId: null, status: 'lid_unresolved' };
     }
     try {

@@ -9,6 +9,7 @@ import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import type { SecretVault } from '../security/secret-vault.js';
 import { ModerationService } from '../moderation/moderation-service.js';
+import { AIModerationService } from '../moderation/ai-moderation-service.js';
 import { AutomaticMessageService } from './automatic-message-service.js';
 import { ConnectionManager, normalizeWhatsAppErrorCode } from './connection-manager.js';
 import { ConversationFlowService } from './conversation-flow-service.js';
@@ -54,6 +55,7 @@ export class BotInstance {
   private readonly aiQueue: AIRequestQueueService;
   private readonly outboundQueue: OutboundMessageQueueService;
   private readonly moderation: ModerationService | null;
+  private readonly aiModeration: AIModerationService | null;
   private activeQr: ActiveQr | null = null;
   private qrGeneration = 0;
   private latestQrClientGeneration = 0;
@@ -98,6 +100,19 @@ export class BotInstance {
     this.outboundQueue = new OutboundMessageQueueService(client, database, logger, bot.id);
     this.moderation = bot.groupChannelEnabled
       ? new ModerationService(database, this.outboundQueue, logger, bot.id, options.secretVault)
+      : null;
+    this.aiModeration = bot.groupChannelEnabled
+      ? new AIModerationService({
+          database,
+          provider,
+          logger,
+          assistantId: bot.id,
+          anonymizer,
+          aiQueue: this.aiQueue,
+          outbound: this.outboundQueue,
+          client,
+          ...(options.secretVault === undefined ? {} : { vault: options.secretVault }),
+        })
       : null;
     const query = new AssistantQueryService(database, provider, logger, bot.id, this.aiQueue);
     if (bot.capabilities.communitySingleTurnMode) database.clearConversationStates(bot.id);
@@ -144,9 +159,25 @@ export class BotInstance {
       flow,
       this.outboundQueue,
       this.moderation ?? undefined,
+      this.aiModeration ?? undefined,
     );
     client.setEvents({
       onMessage: async (message) => {
+        if (this.aiModeration !== null && !message.isGroup) {
+          try {
+            const review = await this.aiModeration.processAdminResponse(message);
+            if (review.handled) return;
+          } catch {
+            logger.error(
+              {
+                operation: 'AI_MODERATION_ADMIN_RESPONSE_FAILED',
+                botId: bot.id,
+                errorCode: 'AI_MODERATION_ADMIN_RESPONSE_FAILED',
+              },
+              'No fue posible procesar una decisión de moderación asistida',
+            );
+          }
+        }
         await this.processor.process(message);
       },
       onStateChange: (state, reason) => {
@@ -342,6 +373,10 @@ export class BotInstance {
 
   public moderationService(): ModerationService | null {
     return this.moderation;
+  }
+
+  public aiModerationService(): AIModerationService | null {
+    return this.aiModeration;
   }
 
   public async stop(): Promise<void> {

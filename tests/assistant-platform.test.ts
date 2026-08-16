@@ -43,15 +43,16 @@ describe('plataforma de asistentes', () => {
     });
 
     expect(visibility.visibleModules(community)).toEqual(
-      expect.arrayContaining(['automatic-messages', 'polls']),
+      expect.arrayContaining(['automatic-messages', 'polls', 'ai-moderation']),
     );
     expect(visibility.visibleModules(community)).not.toContain('catalog');
     expect(visibility.visibleModules(business)).toEqual(
       expect.arrayContaining(['menus', 'catalog', 'hours', 'requests']),
     );
     expect(visibility.visibleModules(business)).not.toContain('polls');
+    expect(visibility.visibleModules(business)).not.toContain('ai-moderation');
     expect(visibility.visibleModules(mixed)).toEqual(
-      expect.arrayContaining(['polls', 'automatic-messages', 'menus', 'catalog']),
+      expect.arrayContaining(['polls', 'automatic-messages', 'ai-moderation', 'menus', 'catalog']),
     );
   });
 

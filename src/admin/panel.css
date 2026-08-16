@@ -2713,6 +2713,134 @@ body.login-mode {
   transition: opacity 0.15s ease-in-out;
 }
 
+#section-ai-moderation {
+  display: grid;
+  gap: 1.25rem;
+}
+
+#section-ai-moderation.hidden {
+  display: none;
+}
+
+.ai-moderation-safety-notice,
+#ai-moderation-media-notice {
+  margin: 0;
+}
+
+.ai-moderation-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.ai-moderation-card {
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  padding: 1.25rem;
+}
+
+.ai-moderation-card .compact-heading {
+  margin-bottom: 0;
+}
+
+#ai-moderation-settings-form > .form-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ai-moderation-clear-phone {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.65rem;
+  width: fit-content;
+}
+
+#section-ai-moderation input[type='checkbox'] {
+  width: 1.25rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  margin: 0;
+  padding: 0;
+  accent-color: #4f46e5;
+}
+
+#ai-moderation-group-options .lab-group-option {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(0, 1fr);
+  align-items: center;
+}
+
+.ai-moderation-variables code {
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.35rem;
+  color: #3730a3;
+  background: #eef2ff;
+  font-weight: 700;
+}
+
+.ai-moderation-preview,
+.ai-moderation-simulation {
+  padding: 1rem;
+  border: 1px solid #c7d2fe;
+  border-radius: 0.75rem;
+  color: #1e1b4b;
+  background: #eef2ff;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.ai-moderation-simulation {
+  border-color: #67e8f9;
+  background: #ecfeff;
+}
+
+.ai-moderation-filters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(8rem, 1fr)) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.ai-moderation-filters button {
+  min-height: 2.75rem;
+}
+
+.ai-moderation-table {
+  min-width: 72rem;
+}
+
+.ai-moderation-decision {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 9.5rem;
+}
+
+.ai-moderation-decision button {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 1100px) {
+  .ai-moderation-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ai-moderation-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  #ai-moderation-settings-form > .form-row,
+  .ai-moderation-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Control de estado compartido para automatizaciones, asistentes, IA y moderación. */
 button.status-switch {
   position: relative;

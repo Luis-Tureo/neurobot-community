@@ -325,12 +325,14 @@ La administración de plantillas predeterminadas está aislada por asistente. Co
 
 Los asistentes con canal grupal disponen de [moderación simplificada por grupo](docs/MODERACION_SIMPLIFICADA_POR_GRUPO.md): la IA prepara las reglas una sola vez cuando el administrador lo solicita y la revisión diaria es completamente local, sin expulsión ni eliminación automática.
 
+Como segunda capa opcional, la [moderación asistida por IA](docs/MODERACION_ASISTIDA_POR_IA.md) analiza en tiempo real solo texto que la moderación local dejó pasar. Cada advertencia requiere aprobación humana explícita; imágenes, stickers, audio y video no son compatibles con el proveedor actual.
+
 La [bienvenida de integrantes](docs/BIENVENIDA_DE_INTEGRANTES.md) usa localmente el nombre público configurado en WhatsApp, menciones reales cuando son compatibles y un texto genérico sin exponer números.
 
 - Dependencia no oficial de la interfaz de WhatsApp Web.
 - La prueba real necesita un teléfono, número exclusivo y escaneo QR.
 - No modifica automáticamente Comunidades, canales ni participantes; la moderación disponible se limita a advertencias locales y revisión humana.
-- Neurobot no atiende consultas privadas; solo puede enviar avisos privados de reincidencia a administradores seleccionados expresamente en la moderación del grupo.
+- Neurobot no atiende consultas privadas. En ese canal solo procesa los comandos exactos `ENVIAR`/`OMITIR` de la persona autorizada para moderación asistida y envía los avisos administrativos configurados.
 - La IA es opcional, acotada al conocimiento oficial y depende de una clave válida y de los límites configurados.
 - Los botones y listas nativos dependen de funciones obsoletas de `whatsapp-web.js`; la alternativa numerada es el modo compatible garantizado.
 - El estado de sesiones activas del panel vive en memoria y se pierde al reiniciar, lo que obliga a iniciar sesión otra vez.

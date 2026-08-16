@@ -11,6 +11,8 @@ const panelState = {
   cachedAnswers: [],
   aiSettings: null,
   aiCurrentProvider: null,
+  aiModeration: null,
+  aiModerationDraftEnabled: false,
   menus: [],
   menuOptions: [],
   catalogCategories: [],
@@ -342,6 +344,7 @@ async function loadSelectedBot() {
   if (visible.has('media')) loaders.push(loadMedia());
   if (visible.has('hours')) loaders.push(loadHours());
   if (visible.has('requests')) loaders.push(loadRequests());
+  if (visible.has('ai-moderation')) loaders.push(loadAIModeration());
   await Promise.all(loaders);
 }
 
@@ -832,6 +835,385 @@ function bindSimpleModeration() {
         ariaLabel: 'moderación del grupo',
       });
       notify(error.message, true);
+    }
+  });
+}
+
+async function loadAIModeration() {
+  if (!panelState.selectedBotId || !panelState.visibleModules.includes('ai-moderation')) return;
+  const data = await panelApi(
+    `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai-moderation`,
+  );
+  panelState.aiModeration = data;
+  panelState.aiModerationDraftEnabled = Boolean(data.settings.enabled);
+  renderAIModeration(data);
+}
+
+function renderAIModeration(data) {
+  const settings = data.settings;
+  const status = document.querySelector('#ai-moderation-status');
+  status.textContent = settings.enabled ? 'Activa' : 'Inactiva';
+  status.classList.toggle('inactive', !settings.enabled);
+  setCardGrid('#ai-moderation-metrics', [
+    ['Analizados hoy', data.metrics.messagesAnalyzed],
+    ['Incidentes hoy', data.metrics.incidentsCreated],
+    ['Aprobados hoy', data.metrics.incidentsApproved],
+    ['Omitidos hoy', data.metrics.incidentsDismissed],
+    ['Advertencias enviadas', data.metrics.warningsSent],
+    ['Errores de IA', data.metrics.aiErrors],
+  ]);
+
+  const form = document.querySelector('#ai-moderation-settings-form');
+  form.elements.adminPhone.value = '';
+  form.elements.adminPhone.disabled = false;
+  form.elements.adminPhone.placeholder = settings.adminPhoneConfigured
+    ? 'Número cifrado guardado; déjalo vacío para conservarlo'
+    : 'Ej.: +56 9 1234 5678';
+  form.elements.clearAdminPhone.checked = false;
+  form.elements.clearAdminPhone.disabled = !settings.adminPhoneConfigured;
+  form.elements.minSeverity.value = settings.minSeverity;
+  form.elements.dedupWindowMinutes.value = String(settings.dedupWindowMinutes);
+  form.elements.pendingExpiryHours.value = String(settings.pendingExpiryHours);
+  renderAIModerationToggle(settings.enabled);
+  renderAIModerationGroups(data.groups, settings.selectedGroups);
+
+  document.querySelector('#ai-moderation-warning-form').elements.warningTemplate.value =
+    settings.warningTemplate;
+  const preview = document.querySelector('#ai-moderation-warning-preview');
+  preview.textContent = '';
+  preview.classList.add('hidden');
+  renderAIModerationGroupSelects(data.groups);
+  renderAIModerationIncidents(data.incidents);
+  document.querySelector('#ai-moderation-media-notice').textContent = data.mediaSupport.notice;
+}
+
+function renderAIModerationToggle(enabled) {
+  const host = document.querySelector('#ai-moderation-toggle-host');
+  const toggle = createStatusSwitch({
+    checked: enabled,
+    ariaLabel: 'moderación asistida por IA',
+  });
+  toggle.id = 'ai-moderation-toggle';
+  toggle.addEventListener('click', () => {
+    panelState.aiModerationDraftEnabled = !panelState.aiModerationDraftEnabled;
+    setStatusSwitchState(toggle, {
+      checked: panelState.aiModerationDraftEnabled,
+      ariaLabel: 'moderación asistida por IA',
+    });
+    const status = document.querySelector('#ai-moderation-status');
+    status.textContent = 'Cambio pendiente de guardar';
+    status.classList.add('inactive');
+  });
+  host.replaceChildren(toggle);
+}
+
+function renderAIModerationGroups(groups, selectedGroups) {
+  const target = document.querySelector('#ai-moderation-group-options');
+  target.replaceChildren();
+  if (groups.length === 0) {
+    target.append(emptyState('No hay grupos activos disponibles.'));
+    return;
+  }
+  const selected = new Set(selectedGroups);
+  groups.forEach((group) => {
+    const label = node('label', undefined, 'lab-group-option');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.name = 'selectedGroups';
+    checkbox.value = group.groupHash;
+    checkbox.checked = selected.has(group.groupHash);
+    label.append(checkbox, node('span', group.name));
+    target.append(label);
+  });
+}
+
+function renderAIModerationGroupSelects(groups) {
+  const definitions = [
+    ['#ai-moderation-test-form select[name="groupHash"]', 'Usar reglas generales'],
+    ['#ai-moderation-filters select[name="group"]', 'Todos'],
+  ];
+  definitions.forEach(([selector, firstLabel]) => {
+    const select = document.querySelector(selector);
+    const previous = select.value;
+    const first = document.createElement('option');
+    first.value = '';
+    first.textContent = firstLabel;
+    select.replaceChildren(first);
+    groups.forEach((group) => {
+      const option = document.createElement('option');
+      option.value = group.groupHash;
+      option.textContent = group.name;
+      select.append(option);
+    });
+    if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+  });
+}
+
+function renderAIModerationIncidents(incidents) {
+  const target = document.querySelector('#ai-moderation-incidents');
+  target.replaceChildren();
+  if (incidents.length === 0) {
+    const row = node('tr');
+    const cell = node(
+      'td',
+      'No hay incidentes para los filtros seleccionados.',
+      'empty-table-cell',
+    );
+    cell.colSpan = 8;
+    row.append(cell);
+    target.append(row);
+    return;
+  }
+  incidents.forEach((incident) => {
+    const row = node('tr');
+    row.append(
+      node('td', safeDate(incident.detectedAt)),
+      node('td', incident.participantHash),
+      node('td', incident.groupName || 'Grupo sin nombre'),
+      node('td', aiModerationCategoryLabel(incident.category)),
+      node('td', aiModerationSeverityLabel(incident.severity)),
+      node('td', incident.ruleViolated || 'Reglas de convivencia'),
+      node('td', aiModerationStatusLabel(incident.status)),
+    );
+    const decisionCell = node('td');
+    if (incident.status === 'pending') {
+      const actions = node('div', undefined, 'ai-moderation-decision');
+      actions.append(
+        actionButton('Enviar advertencia', 'primary', async () => {
+          if (
+            !(await confirmAction('¿Enviar esta advertencia privada al integrante?', {
+              title: 'Aprobar advertencia',
+              confirmLabel: 'Enviar advertencia',
+            }))
+          )
+            return;
+          await reviewAIModerationIncident(incident.id, 'send');
+        }),
+        actionButton('Omitir', 'secondary', async () => {
+          if (
+            !(await confirmAction('¿Omitir este incidente sin enviar una advertencia?', {
+              title: 'Omitir incidente',
+              confirmLabel: 'Omitir incidente',
+            }))
+          )
+            return;
+          await reviewAIModerationIncident(incident.id, 'dismiss');
+        }),
+      );
+      decisionCell.append(actions);
+    } else {
+      decisionCell.textContent = incident.adminDecisionAt
+        ? safeDate(incident.adminDecisionAt)
+        : 'Sin decisión registrada';
+    }
+    row.append(decisionCell);
+    target.append(row);
+  });
+}
+
+async function reviewAIModerationIncident(incidentId, decision) {
+  const response = await panelApi(
+    `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai-moderation/incidents/${incidentId}/review`,
+    { method: 'POST', body: JSON.stringify({ decision }) },
+  );
+  await loadAIModeration();
+  if (decision === 'dismiss') {
+    notify('Incidente omitido. No se envió ninguna advertencia.');
+  } else if (response.incident.status === 'warning_sent') {
+    notify('Advertencia aprobada y enviada por privado.');
+  } else {
+    notify('La aprobación quedó registrada, pero el envío no pudo completarse.', true);
+  }
+}
+
+function aiModerationCategoryLabel(category) {
+  return (
+    {
+      insulto: 'Insulto',
+      hostigamiento: 'Hostigamiento',
+      provocación: 'Provocación',
+      odio: 'Odio',
+      amenaza: 'Amenaza',
+      sexual: 'Contenido sexual',
+      spam: 'Spam',
+      regla_específica: 'Regla específica',
+      otro: 'Otro',
+    }[category] || category
+  );
+}
+
+function aiModerationSeverityLabel(severity) {
+  return { BAJO: 'Baja', MEDIO: 'Media', ALTO: 'Alta', CRITICO: 'Crítica' }[severity] || severity;
+}
+
+function aiModerationStatusLabel(status) {
+  return (
+    {
+      pending: 'Pendiente',
+      approved: 'Aprobado',
+      dismissed: 'Omitido',
+      warning_sent: 'Advertencia enviada',
+      warning_failed: 'Envío fallido',
+      expired: 'Expirado',
+    }[status] || status
+  );
+}
+
+function aiModerationSettingsPayloadFromForm() {
+  const form = document.querySelector('#ai-moderation-settings-form');
+  const adminPhone = form.elements.adminPhone.value.trim();
+  return {
+    enabled: panelState.aiModerationDraftEnabled,
+    ...(adminPhone ? { adminPhone } : {}),
+    clearAdminPhone: form.elements.clearAdminPhone.checked,
+    warningTemplate: panelState.aiModeration.settings.warningTemplate,
+    minSeverity: form.elements.minSeverity.value,
+    dedupWindowMinutes: Number(form.elements.dedupWindowMinutes.value),
+    pendingExpiryHours: Number(form.elements.pendingExpiryHours.value),
+    selectedGroups: [...form.querySelectorAll('input[name="selectedGroups"]:checked')].map(
+      (input) => input.value,
+    ),
+  };
+}
+
+async function saveAIModerationSettings(payload) {
+  await panelApi(
+    `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai-moderation/settings`,
+    { method: 'PUT', body: JSON.stringify(payload) },
+  );
+  await loadAIModeration();
+}
+
+async function loadFilteredAIModerationIncidents() {
+  const form = document.querySelector('#ai-moderation-filters');
+  const params = new window.URLSearchParams();
+  for (const field of ['group', 'status', 'severity', 'from', 'to']) {
+    const value = form.elements[field].value;
+    if (value) params.set(field, value);
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  const response = await panelApi(
+    `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai-moderation/incidents${suffix}`,
+  );
+  renderAIModerationIncidents(response.incidents);
+}
+
+function bindAIModerationForms() {
+  const settingsForm = document.querySelector('#ai-moderation-settings-form');
+  if (settingsForm === null) return;
+  settingsForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = event.currentTarget.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await saveAIModerationSettings(aiModerationSettingsPayloadFromForm());
+      notify('Configuración de moderación asistida guardada.');
+    } catch (error) {
+      notify(friendlyPanelError(error), true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  settingsForm.elements.clearAdminPhone.addEventListener('change', (event) => {
+    settingsForm.elements.adminPhone.disabled = event.currentTarget.checked;
+    if (event.currentTarget.checked) settingsForm.elements.adminPhone.value = '';
+  });
+
+  const warningForm = document.querySelector('#ai-moderation-warning-form');
+  warningForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = event.currentTarget.querySelector('button[type="submit"]');
+    button.disabled = true;
+    const current = panelState.aiModeration.settings;
+    try {
+      await saveAIModerationSettings({
+        enabled: current.enabled,
+        clearAdminPhone: false,
+        warningTemplate: event.currentTarget.elements.warningTemplate.value,
+        minSeverity: current.minSeverity,
+        dedupWindowMinutes: current.dedupWindowMinutes,
+        pendingExpiryHours: current.pendingExpiryHours,
+        selectedGroups: current.selectedGroups,
+      });
+      notify('Mensaje de advertencia guardado para incidentes futuros.');
+    } catch (error) {
+      notify(friendlyPanelError(error), true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  document
+    .querySelector('#ai-moderation-preview-button')
+    .addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        const response = await panelApi(
+          `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai-moderation/preview`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ template: warningForm.elements.warningTemplate.value }),
+          },
+        );
+        const target = document.querySelector('#ai-moderation-warning-preview');
+        target.textContent = response.warning;
+        target.classList.remove('hidden');
+      } catch (error) {
+        notify(friendlyPanelError(error), true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+  const testForm = document.querySelector('#ai-moderation-test-form');
+  testForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = event.currentTarget.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const groupHash = event.currentTarget.elements.groupHash.value;
+      const response = await panelApi(
+        `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai-moderation/test`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            text: event.currentTarget.elements.text.value,
+            ...(groupHash ? { groupHash } : {}),
+          }),
+        },
+      );
+      const analysis = response.analysis;
+      const target = document.querySelector('#ai-moderation-test-result');
+      target.textContent = [
+        'SIMULACIÓN — no se envió ningún mensaje',
+        `Resultado: ${analysis.violationDetected ? 'Posible incumplimiento' : 'Sin infracción clara'}`,
+        `Categoría: ${aiModerationCategoryLabel(analysis.category)}`,
+        `Severidad: ${aiModerationSeverityLabel(analysis.severity)}`,
+        `Confianza: ${analysis.confidence}`,
+        `Regla: ${analysis.ruleViolated || 'Ninguna'}`,
+        `Explicación: ${analysis.reason}`,
+        response.warning ? `\nAdvertencia propuesta:\n${response.warning}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+      target.classList.remove('hidden');
+    } catch (error) {
+      notify(friendlyPanelError(error), true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  document.querySelector('#ai-moderation-filters').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = event.currentTarget.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await loadFilteredAIModerationIncidents();
+    } catch (error) {
+      notify(friendlyPanelError(error), true);
+    } finally {
+      button.disabled = false;
     }
   });
 }
@@ -1923,6 +2305,7 @@ function configureForms() {
     }
   });
   document.querySelector('#section-moderation')?.remove();
+  bindAIModerationForms();
   document
     .querySelector('#back-to-assistants')
     .addEventListener('click', () => setGlobalContext('bots'));
