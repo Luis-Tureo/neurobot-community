@@ -86,10 +86,10 @@ function forceExpiredSessionLogin() {
 
 function requestPath(input) {
   if (typeof input === 'string') return input;
-  if (input instanceof URL) return input.pathname;
-  if (typeof Request !== 'undefined' && input instanceof Request) {
+  if (typeof window.URL !== 'undefined' && input instanceof window.URL) return input.pathname;
+  if (typeof window.Request !== 'undefined' && input instanceof window.Request) {
     try {
-      return new URL(input.url, window.location.origin).pathname;
+      return new window.URL(input.url, window.location.origin).pathname;
     } catch {
       return input.url;
     }
@@ -115,10 +115,10 @@ function installSessionExpiryGuard() {
   };
 }
 
-const bodyObserver = new MutationObserver(synchronizeLoginNavigationContext);
+const bodyObserver = new window.MutationObserver(synchronizeLoginNavigationContext);
 bodyObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
-const viewObserver = new MutationObserver(synchronizeLoginNavigationContext);
+const viewObserver = new window.MutationObserver(synchronizeLoginNavigationContext);
 if (loginView) viewObserver.observe(loginView, { attributes: true, attributeFilter: ['class'] });
 if (panelView) viewObserver.observe(panelView, { attributes: true, attributeFilter: ['class'] });
 
