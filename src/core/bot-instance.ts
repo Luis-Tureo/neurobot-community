@@ -41,6 +41,7 @@ export class BotInstance extends BaseBotInstance {
     this.communityDigest = bot.groupChannelEnabled
       ? new CommunityDigestService(database, client, provider, logger, anonymizer, {
           botId: bot.id,
+          aiQueue: this.aiRequestQueue(),
         })
       : null;
     if (this.communityDigest !== null) {

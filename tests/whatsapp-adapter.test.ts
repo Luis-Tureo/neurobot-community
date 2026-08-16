@@ -63,6 +63,10 @@ function createSubject(
     onMessage?: (message: IncomingMessage) => Promise<void>;
     messageDeduplicationTtlMs?: number;
     communityPollVotesNoAction?: boolean;
+    groupAdministratorCacheTtlMs?: number;
+    groupAdministratorStaleTtlMs?: number;
+    groupAdministratorTimeoutMs?: number;
+    groupAdministratorRetryCooldownMs?: number;
   } = {},
 ) {
   const fake = new FakeWhatsAppClient();
@@ -82,6 +86,18 @@ function createSubject(
       ...(options.messageDeduplicationTtlMs === undefined
         ? {}
         : { messageDeduplicationTtlMs: options.messageDeduplicationTtlMs }),
+      ...(options.groupAdministratorCacheTtlMs === undefined
+        ? {}
+        : { groupAdministratorCacheTtlMs: options.groupAdministratorCacheTtlMs }),
+      ...(options.groupAdministratorStaleTtlMs === undefined
+        ? {}
+        : { groupAdministratorStaleTtlMs: options.groupAdministratorStaleTtlMs }),
+      ...(options.groupAdministratorTimeoutMs === undefined
+        ? {}
+        : { groupAdministratorTimeoutMs: options.groupAdministratorTimeoutMs }),
+      ...(options.groupAdministratorRetryCooldownMs === undefined
+        ? {}
+        : { groupAdministratorRetryCooldownMs: options.groupAdministratorRetryCooldownMs }),
     },
     options.logger ?? createLogger('silent'),
     new Anonymizer('x'.repeat(32)),
@@ -229,6 +245,7 @@ describe('adaptador de WhatsApp', () => {
     expect(fake.listenerCount('group_join')).toBe(1);
     expect(fake.listenerCount('group_leave')).toBe(1);
     expect(fake.listenerCount('group_update')).toBe(1);
+    expect(fake.listenerCount('group_admin_changed')).toBe(1);
 
     fake.emit('authenticated');
     fake.emit('authenticated');
@@ -248,6 +265,7 @@ describe('adaptador de WhatsApp', () => {
     expect(fake.listenerCount('group_join')).toBe(1);
     expect(fake.listenerCount('group_leave')).toBe(1);
     expect(fake.listenerCount('group_update')).toBe(1);
+    expect(fake.listenerCount('group_admin_changed')).toBe(1);
 
     await adapter.destroy();
 
@@ -257,6 +275,7 @@ describe('adaptador de WhatsApp', () => {
     expect(fake.listenerCount('group_join')).toBe(0);
     expect(fake.listenerCount('group_leave')).toBe(0);
     expect(fake.listenerCount('group_update')).toBe(0);
+    expect(fake.listenerCount('group_admin_changed')).toBe(0);
     expect(fake.destroy).toHaveBeenCalledOnce();
   });
 
@@ -587,6 +606,111 @@ describe('adaptador de WhatsApp', () => {
       '56912345678@c.us',
       '56987654321@c.us',
     ]);
+  });
+
+  it('agrupa consultas simultáneas de administradores en una sola lectura de WhatsApp', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { adapter, fake } = createSubject();
+    fake.getChatById.mockImplementation(async () => {
+      await gate;
+      return {
+        isGroup: true,
+        participants: [{ id: { _serialized: '56987654321@c.us' }, isAdmin: true }],
+      };
+    });
+    await adapter.initialize();
+    fake.emit('ready');
+
+    const first = adapter.getGroupAdministratorIds('grupo-normal@g.us');
+    const second = adapter.getGroupAdministratorIds('grupo-normal@g.us');
+    release();
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      ['56987654321@c.us'],
+      ['56987654321@c.us'],
+    ]);
+    expect(fake.getChatById).toHaveBeenCalledTimes(1);
+  });
+
+  it('reutiliza el último resultado válido si una renovación temporal falla', async () => {
+    const captured = createCapturedLogger();
+    const { adapter, fake } = createSubject({
+      logger: captured.logger,
+      groupAdministratorCacheTtlMs: 1,
+      groupAdministratorStaleTtlMs: 1_000,
+      groupAdministratorTimeoutMs: 100,
+    });
+    fake.chatsById.set('grupo-normal@g.us', {
+      isGroup: true,
+      participants: [{ id: { _serialized: '56987654321@c.us' }, isAdmin: true }],
+    });
+    await adapter.initialize();
+    fake.emit('ready');
+    await expect(adapter.getGroupAdministratorIds('grupo-normal@g.us')).resolves.toEqual([
+      '56987654321@c.us',
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    fake.getChatById.mockRejectedValueOnce(new Error('token=secreto-no-registrar'));
+
+    await expect(adapter.getGroupAdministratorIds('grupo-normal@g.us')).resolves.toEqual([
+      '56987654321@c.us',
+    ]);
+
+    expect(fake.getChatById).toHaveBeenCalledTimes(2);
+    expect(
+      captured.entries.some(
+        (entry) =>
+          typeof entry.first === 'object' &&
+          entry.first !== null &&
+          Reflect.get(entry.first, 'operation') === 'reuseStaleGroupAdministrators',
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(captured.entries)).not.toContain('secreto-no-registrar');
+  });
+
+  it('aplica timeout y enfriamiento cuando no existe un valor previo', async () => {
+    const { adapter, fake } = createSubject({
+      groupAdministratorTimeoutMs: 10,
+      groupAdministratorRetryCooldownMs: 1_000,
+    });
+    fake.getChatById.mockImplementation(async () => await new Promise(() => undefined));
+    await adapter.initialize();
+    fake.emit('ready');
+
+    await expect(adapter.getGroupAdministratorIds('grupo-normal@g.us')).rejects.toMatchObject({
+      code: 'GROUP_ADMINISTRATORS_FETCH_TIMEOUT',
+    });
+    await expect(adapter.getGroupAdministratorIds('grupo-normal@g.us')).rejects.toMatchObject({
+      code: 'GROUP_ADMINISTRATORS_FETCH_COOLDOWN',
+    });
+    expect(fake.getChatById).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalida la caché cuando WhatsApp informa un cambio de administradores', async () => {
+    const { adapter, fake } = createSubject();
+    fake.chatsById.set('grupo-normal@g.us', {
+      isGroup: true,
+      participants: [{ id: { _serialized: '56987654321@c.us' }, isAdmin: true }],
+    });
+    await adapter.initialize();
+    fake.emit('ready');
+    await expect(adapter.getGroupAdministratorIds('grupo-normal@g.us')).resolves.toEqual([
+      '56987654321@c.us',
+    ]);
+
+    fake.chatsById.set('grupo-normal@g.us', {
+      isGroup: true,
+      participants: [{ id: { _serialized: '56911111111@c.us' }, isSuperAdmin: true }],
+    });
+    fake.emit('group_admin_changed', { chatId: 'grupo-normal@g.us', type: 'promote' });
+
+    await expect(adapter.getGroupAdministratorIds('grupo-normal@g.us')).resolves.toEqual([
+      '56911111111@c.us',
+    ]);
+    expect(fake.getChatById).toHaveBeenCalledTimes(2);
   });
 
   it('confirma si la cuenta del bot continúa entre los participantes del grupo', async () => {

@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
 import { AIProviderError, type AIProvider } from '../src/ai/ai-provider.js';
-import { CommunityDigestService } from '../src/core/community-digest-service.js';
+import { AIRequestQueueService } from '../src/ai/ai-request-queue-service.js';
+import {
+  CommunityDigestService,
+  type CommunityDigestProcessingBudget,
+} from '../src/core/community-digest-service.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { GroupMessageHistoryError } from '../src/messaging/messaging-client.js';
@@ -87,6 +91,55 @@ function createSubject(
     { botId: 'neurobot' },
   );
   return { database, client, service };
+}
+
+function createQueuedSubject(
+  provider: AIProvider,
+  options: {
+    maxRetries?: number;
+    processingBudget?: Partial<CommunityDigestProcessingBudget>;
+  } = {},
+) {
+  const database = new AppDatabase(':memory:');
+  database.migrate();
+  database.saveAIQueueSettings('neurobot', {
+    ...database.getAIQueueSettings('neurobot'),
+    maxRetries: options.maxRetries ?? 2,
+    initialRetryDelaySeconds: 1,
+    maximumRetryDelaySeconds: 10,
+  });
+  database.synchronizeBotGroup('neurobot', {
+    id: GROUP_ID,
+    name: 'Grupo de resumen',
+    botIsMember: true,
+  });
+  const client = new SimulatedMessagingClient();
+  const waits: number[] = [];
+  const queue = new AIRequestQueueService(
+    database,
+    createLogger('silent'),
+    'neurobot',
+    Date.now,
+    async (milliseconds) => {
+      waits.push(milliseconds);
+    },
+    () => 0.5,
+  );
+  const service = new CommunityDigestService(
+    database,
+    client,
+    provider,
+    createLogger('silent'),
+    new Anonymizer('x'.repeat(32)),
+    {
+      botId: 'neurobot',
+      aiQueue: queue,
+      ...(options.processingBudget === undefined
+        ? {}
+        : { processingBudget: options.processingBudget }),
+    },
+  );
+  return { database, client, service, waits };
 }
 
 describe('resúmenes comunitarios', () => {
@@ -503,6 +556,10 @@ describe('resumen diario — centro de pruebas', () => {
   it('caso 4: IA falla no intenta enviar a WhatsApp', async () => {
     const database = new AppDatabase(':memory:');
     database.migrate();
+    database.saveAIQueueSettings('neurobot', {
+      ...database.getAIQueueSettings('neurobot'),
+      maxRetries: 0,
+    });
     database.synchronizeBotGroup('neurobot', {
       id: GROUP_ID,
       name: 'Grupo de resumen',
@@ -1157,6 +1214,10 @@ describe('sanitización y contexto grande de resúmenes', () => {
       };
       const { database, client, service } = createSubject(NOW, provider);
       try {
+        database.saveAIQueueSettings('neurobot', {
+          ...database.getAIQueueSettings('neurobot'),
+          maxRetries: 0,
+        });
         const result = await service.sendManual('daily', GROUP_ID, NOW);
         expect(result).toMatchObject({
           status: 'FAILED',
@@ -1199,6 +1260,160 @@ describe('sanitización y contexto grande de resúmenes', () => {
         causeCode: 'CONTEXT_TOO_LARGE',
       });
       expect(generate).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe('resiliencia del procesamiento de resúmenes', () => {
+  function largeMessages(count: number) {
+    return Array.from({ length: count }, (_, index) => ({
+      id: `resilient-${index}`,
+      body: `Tema ${index} ${'detalle relevante '.repeat(45)}`,
+      timestampMs: NOW.getTime() - (count - index) * 1_000,
+      fromMe: false,
+      participantId: null,
+      messageType: 'chat',
+    }));
+  }
+
+  it('reanuda el bloque limitado sin repetir los bloques anteriores y envía una sola vez', async () => {
+    const attempts = new Map<string, number>();
+    const provider: AIProvider = {
+      ...createProvider(),
+      classifyProviderError: (error) =>
+        error instanceof AIProviderError ? error.code : 'AI_TEMPORARY_ERROR',
+      generateGroundedResponse: async (request) => {
+        if (request.question.startsWith('Condensa')) {
+          const count = (attempts.get(request.context) ?? 0) + 1;
+          attempts.set(request.context, count);
+          if (attempts.size === 2 && count === 1) {
+            throw new AIProviderError(
+              'AI_PROVIDER_RATE_LIMITED',
+              'Detalle privado del límite.',
+              true,
+              3,
+            );
+          }
+          return {
+            text: `Resumen parcial seguro ${attempts.size}.`,
+            usage: { inputTokens: 300, outputTokens: 30, totalTokens: 330 },
+          };
+        }
+        return createProvider().generateGroundedResponse(request);
+      },
+    };
+    const { database, client, service, waits } = createQueuedSubject(provider);
+    try {
+      const configuration = service.configuration();
+      configuration.maxCharacters = 2_000;
+      service.saveConfiguration(configuration);
+      client.recentGroupMessages.set(GROUP_ID, largeMessages(8));
+
+      const result = await service.sendManual('weekly', GROUP_ID, NOW);
+      const blockAttempts = [...attempts.values()];
+
+      expect(result).toMatchObject({ status: 'SENT', messageCount: 8 });
+      expect(blockAttempts.length).toBeGreaterThan(1);
+      expect(blockAttempts[0]).toBe(1);
+      expect(blockAttempts[1]).toBe(2);
+      expect(waits).toEqual([3_000]);
+      expect(client.sentMessages).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('aborta de forma controlada cuando el límite persiste y agota los reintentos', async () => {
+    let calls = 0;
+    const provider: AIProvider = {
+      ...createProvider(),
+      classifyProviderError: (error) =>
+        error instanceof AIProviderError ? error.code : 'AI_TEMPORARY_ERROR',
+      generateGroundedResponse: async () => {
+        calls += 1;
+        throw new AIProviderError('AI_PROVIDER_RATE_LIMITED', 'Detalle privado.', true);
+      },
+    };
+    const { database, client, service, waits } = createQueuedSubject(provider, { maxRetries: 1 });
+    try {
+      client.recentGroupMessages.set(GROUP_ID, largeMessages(1));
+
+      const result = await service.sendManual('daily', GROUP_ID, NOW);
+
+      expect(result).toMatchObject({
+        status: 'FAILED',
+        errorCode: 'AI_SUMMARY_FAILED',
+        causeCode: 'AI_PROVIDER_RATE_LIMITED',
+      });
+      expect(calls).toBe(2);
+      expect(waits).toEqual([1_000]);
+      expect(client.sentMessages).toHaveLength(0);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('no presenta un resumen parcial cuando se agota el presupuesto global', async () => {
+    let calls = 0;
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async (request) => {
+        calls += 1;
+        return createProvider().generateGroundedResponse(request);
+      },
+    };
+    const { database, client, service } = createQueuedSubject(provider, {
+      processingBudget: { maxProviderCalls: 1 },
+    });
+    try {
+      const configuration = service.configuration();
+      configuration.maxCharacters = 2_000;
+      service.saveConfiguration(configuration);
+      client.recentGroupMessages.set(GROUP_ID, largeMessages(8));
+
+      const result = await service.sendManual('monthly', GROUP_ID, NOW);
+
+      expect(result).toMatchObject({
+        status: 'FAILED',
+        errorCode: 'AI_SUMMARY_FAILED',
+        causeCode: 'AI_PROCESSING_BUDGET_EXCEEDED',
+      });
+      expect(calls).toBe(1);
+      expect(client.sentMessages).toHaveLength(0);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('coalesce dos ejecuciones manuales simultáneas para impedir dobles envíos', async () => {
+    let release!: () => void;
+    let calls = 0;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async (request) => {
+        calls += 1;
+        await gate;
+        return createProvider().generateGroundedResponse(request);
+      },
+    };
+    const { database, client, service } = createQueuedSubject(provider);
+    try {
+      client.recentGroupMessages.set(GROUP_ID, largeMessages(1));
+      const first = service.sendManual('daily', GROUP_ID, NOW);
+      await vi.waitFor(() => expect(calls).toBe(1));
+      const second = service.sendManual('daily', GROUP_ID, NOW);
+      release();
+
+      const results = await Promise.all([first, second]);
+
+      expect(results.map((result) => result.status)).toEqual(['SENT', 'SENT']);
+      expect(calls).toBe(1);
+      expect(client.sentMessages).toHaveLength(1);
     } finally {
       database.close();
     }
@@ -1435,6 +1650,10 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     const GROUP_B = 'continua-ia-b@g.us';
     const database = new AppDatabase(':memory:');
     database.migrate();
+    database.saveAIQueueSettings('neurobot', {
+      ...database.getAIQueueSettings('neurobot'),
+      maxRetries: 0,
+    });
     database.synchronizeBotGroup('neurobot', { id: GROUP_A, name: 'Grupo A', botIsMember: true });
     database.synchronizeBotGroup('neurobot', { id: GROUP_B, name: 'Grupo B', botIsMember: true });
     database.replaceAutomationGroupIds('neurobot', [GROUP_A, GROUP_B]);

@@ -1,3 +1,4 @@
+import { AIProviderError } from '../src/ai/ai-provider.js';
 import { GroqAIProvider } from '../src/ai/groq-ai-provider.js';
 
 describe('GroqAIProvider — prueba de conexión', () => {
@@ -5,7 +6,10 @@ describe('GroqAIProvider — prueba de conexión', () => {
 
   it('valida la credencial usando el listado oficial de modelos y acepta IDs con barra', async () => {
     const requests: Array<{ url: string; authorization: string | null }> = [];
-    const fetchImplementation = async (input: string | URL, init?: RequestInit): Promise<Response> => {
+    const fetchImplementation = async (
+      input: string | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
       requests.push({
         url: String(input),
         authorization: new Headers(init?.headers).get('authorization'),
@@ -93,5 +97,97 @@ describe('GroqAIProvider — prueba de conexión', () => {
       errorCode: 'AI_NOT_CONFIGURED',
     });
     expect(calls).toBe(0);
+  });
+
+  it('conserva Retry-After y diagnostica de forma categórica un límite de tokens', async () => {
+    const provider = new GroqAIProvider(
+      'gsk_token-de-prueba',
+      model,
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              message: 'Rate limit reached on tokens per minute (TPM). gsk_secreto-no-debe-salir',
+              type: 'tokens',
+            },
+          }),
+          {
+            status: 429,
+            headers: {
+              'retry-after': '17',
+              'x-ratelimit-limit-requests': '1000',
+              'x-ratelimit-remaining-requests': '999',
+              'x-ratelimit-limit-tokens': '8000',
+              'x-ratelimit-remaining-tokens': '0',
+              'x-ratelimit-reset-requests': '23h59m',
+              'x-ratelimit-reset-tokens': '17s',
+            },
+          },
+        ),
+    );
+
+    const error = await provider
+      .generateGroundedResponse({
+        systemInstruction: 'Resume.',
+        question: '¿Qué ocurrió?',
+        context: 'Contexto seguro.',
+        maximumOutputTokens: 100,
+        temperature: 0.1,
+        timeoutMs: 1_000,
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(AIProviderError);
+    expect(error).toMatchObject({
+      code: 'AI_PROVIDER_RATE_LIMITED',
+      retryable: true,
+      retryAfterSeconds: 17,
+      rateLimitDiagnostic: {
+        type: 'tokens_per_minute',
+        retryAfterSeconds: 17,
+        requestLimit: 1000,
+        requestRemaining: 999,
+        tokenLimit: 8000,
+        tokenRemaining: 0,
+        requestReset: '23h59m',
+        tokenReset: '17s',
+      },
+    });
+    expect(JSON.stringify(error)).not.toContain('gsk_secreto');
+  });
+
+  it('mantiene Retry-After ausente y no inventa un límite que Groq no reportó', async () => {
+    const provider = new GroqAIProvider(
+      'gsk_token-de-prueba',
+      model,
+      async () =>
+        new Response(JSON.stringify({ error: { message: 'Too many requests.' } }), {
+          status: 429,
+          headers: {
+            'x-ratelimit-remaining-requests': '12',
+            'x-ratelimit-remaining-tokens': '345',
+          },
+        }),
+    );
+
+    const error = await provider
+      .generateGroundedResponse({
+        systemInstruction: 'Resume.',
+        question: '¿Qué ocurrió?',
+        context: 'Contexto seguro.',
+        maximumOutputTokens: 100,
+        temperature: 0.1,
+        timeoutMs: 1_000,
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      code: 'AI_PROVIDER_RATE_LIMITED',
+      retryAfterSeconds: null,
+      rateLimitDiagnostic: {
+        type: 'unknown',
+        retryAfterSeconds: null,
+      },
+    });
   });
 });

@@ -189,7 +189,7 @@ describe('API administrativa', () => {
     }
   });
 
-  it('expone una causa segura cuando falla la IA en la prueba manual de resumen', async () => {
+  it('expone un mensaje seguro y entendible cuando Groq limita la prueba de resumen', async () => {
     const groupId = 'grupo-resumen-error@g.us';
     const anonymizer = new Anonymizer('x'.repeat(32));
     database.synchronizeBotGroup('neurobot', {
@@ -200,7 +200,7 @@ describe('API administrativa', () => {
     client.recentGroupMessages.set(groupId, [
       {
         id: 'mensaje-error',
-        body: 'Conversación para probar el timeout.',
+        body: 'Conversación para probar el límite temporal.',
         timestampMs: Date.now() - 1_000,
         fromMe: false,
         participantId: null,
@@ -211,12 +211,21 @@ describe('API administrativa', () => {
       isConfigured: () => true,
       testConnection: async () => ({ successful: true }),
       generateGroundedResponse: async () => {
-        throw new AIProviderError('AI_TIMEOUT', 'token=detalle-privado');
+        throw new AIProviderError(
+          'AI_PROVIDER_RATE_LIMITED',
+          'token=detalle-privado',
+          true,
+          30,
+        );
       },
       getModelInformation: () => ({ provider: 'test', model: 'test' }),
       normalizeUsage: () => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
-      classifyProviderError: () => 'AI_TIMEOUT',
+      classifyProviderError: () => 'AI_PROVIDER_RATE_LIMITED',
     };
+    database.saveAIQueueSettings('neurobot', {
+      ...database.getAIQueueSettings('neurobot'),
+      maxRetries: 0,
+    });
     const service = new CommunityDigestService(
       database,
       client,
@@ -241,10 +250,11 @@ describe('API administrativa', () => {
       expect(response.statusCode).toBe(502);
       expect(response.json()).toMatchObject({
         status: 'FAILED',
-        error: 'La IA no pudo generar el resumen.',
+        error:
+          'No fue posible completar el resumen porque el proveedor de IA alcanzó temporalmente su límite de uso.',
         code: 'AI_SUMMARY_FAILED',
         errorCode: 'AI_SUMMARY_FAILED',
-        causeCode: 'AI_TIMEOUT',
+        causeCode: 'AI_PROVIDER_RATE_LIMITED',
       });
       expect(response.body).not.toContain('detalle-privado');
     } finally {

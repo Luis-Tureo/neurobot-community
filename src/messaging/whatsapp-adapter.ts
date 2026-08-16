@@ -41,7 +41,17 @@ import {
 
 const { Client, LocalAuth, MessageMedia, Poll } = WhatsApp;
 const supportedMessageTypes = new Set(['chat']);
+const DEFAULT_GROUP_ADMINISTRATOR_CACHE_TTL_MS = 5 * 60_000;
+const DEFAULT_GROUP_ADMINISTRATOR_STALE_TTL_MS = 15 * 60_000;
+const DEFAULT_GROUP_ADMINISTRATOR_TIMEOUT_MS = 3_000;
+const DEFAULT_GROUP_ADMINISTRATOR_RETRY_COOLDOWN_MS = 30_000;
 let nextClientGeneration = 0;
+
+type GroupAdministratorCacheEntry = {
+  identifiers: string[];
+  freshUntil: number;
+  staleUntil: number;
+};
 
 type BrowserChatSnapshot = {
   id: string | null;
@@ -371,6 +381,10 @@ export type WhatsAppAdapterOptions = {
   chromeExecutablePath?: string;
   communityPollVotesNoAction?: boolean;
   freshLinkingSession?: boolean;
+  groupAdministratorCacheTtlMs?: number;
+  groupAdministratorStaleTtlMs?: number;
+  groupAdministratorTimeoutMs?: number;
+  groupAdministratorRetryCooldownMs?: number;
 };
 
 type ClientFactory = () => WhatsAppClient;
@@ -411,10 +425,10 @@ export class WhatsAppWebAdapter implements MessagingClient {
     string,
     { chatId: string; options: Set<string>; expiresAt: number }
   >();
-  private readonly groupAdministratorCache = new Map<
-    string,
-    { identifiers: string[]; expiresAt: number }
-  >();
+  private readonly groupAdministratorCache = new Map<string, GroupAdministratorCacheEntry>();
+  private readonly groupAdministratorLoads = new Map<string, Promise<string[]>>();
+  private readonly groupAdministratorRetryAt = new Map<string, number>();
+  private readonly groupAdministratorVersions = new Map<string, number>();
   private botIdentityResolution: Promise<void> = Promise.resolve();
 
   public constructor(
@@ -780,10 +794,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
           resolvedAdministratorIds?.filter((identifier) => !this.isOwnIdentifier(identifier)) ??
           resolvedAdministratorIds;
         if (administratorIds !== null) {
-          this.groupAdministratorCache.set(id, {
-            identifiers: administratorIds,
-            expiresAt: Date.now() + 60_000,
-          });
+          this.cacheGroupAdministrators(id, administratorIds);
         }
         groups.push({
           id,
@@ -846,22 +857,119 @@ export class WhatsAppWebAdapter implements MessagingClient {
 
   public async getGroupAdministratorIds(chatId: string): Promise<string[]> {
     if (!isSupportedGroupId(chatId)) return [];
+    const now = Date.now();
     const cached = this.groupAdministratorCache.get(chatId);
-    if (cached !== undefined && cached.expiresAt > Date.now()) return [...cached.identifiers];
+    if (cached !== undefined && cached.freshUntil > now) return [...cached.identifiers];
+
+    const retryAt = this.groupAdministratorRetryAt.get(chatId) ?? 0;
+    if (retryAt > now) {
+      if (cached !== undefined && cached.staleUntil > now) return [...cached.identifiers];
+      throw codedAdapterError('GROUP_ADMINISTRATORS_FETCH_COOLDOWN');
+    }
+
+    const active = this.groupAdministratorLoads.get(chatId);
+    if (active !== undefined) return [...(await active)];
+
+    const version = this.groupAdministratorVersions.get(chatId) ?? 0;
+    const load = this.loadGroupAdministratorIds(chatId, cached, version);
+    this.groupAdministratorLoads.set(chatId, load);
+    try {
+      return [...(await load)];
+    } finally {
+      if (this.groupAdministratorLoads.get(chatId) === load) {
+        this.groupAdministratorLoads.delete(chatId);
+      }
+    }
+  }
+
+  private async loadGroupAdministratorIds(
+    chatId: string,
+    stale: GroupAdministratorCacheEntry | undefined,
+    version: number,
+  ): Promise<string[]> {
     const client = this.requireReadyClient();
-    const chat = await client.getChatById(chatId);
-    const identifiers = await this.resolveGroupParticipantIds(
-      client,
-      readGroupAdministratorIds(chat),
+    try {
+      const administrators = await withTimeout(
+        (async () => {
+          const chat = await client.getChatById(chatId);
+          const rawIdentifiers = readGroupAdministratorIds(chat);
+          if (rawIdentifiers === null) {
+            throw codedAdapterError('GROUP_ADMINISTRATORS_UNAVAILABLE');
+          }
+          const identifiers = await this.resolveGroupParticipantIds(client, rawIdentifiers);
+          return [
+            ...new Set(
+              (identifiers ?? []).filter((identifier) => !this.isOwnIdentifier(identifier)),
+            ),
+          ];
+        })(),
+        this.groupAdministratorTimeoutMs(),
+        'GROUP_ADMINISTRATORS_FETCH_TIMEOUT',
+      );
+      if ((this.groupAdministratorVersions.get(chatId) ?? 0) === version) {
+        this.cacheGroupAdministrators(chatId, administrators);
+        this.groupAdministratorRetryAt.delete(chatId);
+      }
+      return administrators;
+    } catch (error) {
+      if ((this.groupAdministratorVersions.get(chatId) ?? 0) !== version) {
+        throw codedAdapterError('GROUP_ADMINISTRATORS_CHANGED_DURING_FETCH');
+      }
+      const now = Date.now();
+      this.groupAdministratorRetryAt.set(
+        chatId,
+        now +
+          positiveDuration(
+            this.options.groupAdministratorRetryCooldownMs,
+            DEFAULT_GROUP_ADMINISTRATOR_RETRY_COOLDOWN_MS,
+          ),
+      );
+      if (stale !== undefined && stale.staleUntil > now) {
+        const errorCode = serializeError(
+          error,
+          'GROUP_ADMINISTRATORS_FETCH_FAILED',
+          false,
+        ).errorCode;
+        this.logger.warn(
+          {
+            errorCode,
+            operation: 'reuseStaleGroupAdministrators',
+            groupHash: this.hash(chatId),
+            cachedAdministratorCount: stale.identifiers.length,
+          },
+          'Se reutilizó temporalmente la última lista válida de administradores',
+        );
+        return [...stale.identifiers];
+      }
+      throw error;
+    }
+  }
+
+  private cacheGroupAdministrators(chatId: string, identifiers: string[]): void {
+    const now = Date.now();
+    const freshFor = positiveDuration(
+      this.options.groupAdministratorCacheTtlMs,
+      DEFAULT_GROUP_ADMINISTRATOR_CACHE_TTL_MS,
     );
-    const administrators = [
-      ...new Set((identifiers ?? []).filter((identifier) => !this.isOwnIdentifier(identifier))),
-    ];
+    const staleFor = Math.max(
+      freshFor,
+      positiveDuration(
+        this.options.groupAdministratorStaleTtlMs,
+        DEFAULT_GROUP_ADMINISTRATOR_STALE_TTL_MS,
+      ),
+    );
     this.groupAdministratorCache.set(chatId, {
-      identifiers: administrators,
-      expiresAt: Date.now() + 60_000,
+      identifiers: [...new Set(identifiers)],
+      freshUntil: now + freshFor,
+      staleUntil: now + staleFor,
     });
-    return administrators;
+  }
+
+  private groupAdministratorTimeoutMs(): number {
+    return positiveDuration(
+      this.options.groupAdministratorTimeoutMs,
+      DEFAULT_GROUP_ADMINISTRATOR_TIMEOUT_MS,
+    );
   }
 
   private async readChats(
@@ -1046,6 +1154,19 @@ export class WhatsAppWebAdapter implements MessagingClient {
     this.botIdentifiers.clear();
     this.botIdentityResolution = Promise.resolve();
     this.selectableMenuPolls.clear();
+    for (const groupId of new Set([
+      ...this.groupAdministratorCache.keys(),
+      ...this.groupAdministratorLoads.keys(),
+      ...this.groupAdministratorVersions.keys(),
+    ])) {
+      this.groupAdministratorVersions.set(
+        groupId,
+        (this.groupAdministratorVersions.get(groupId) ?? 0) + 1,
+      );
+    }
+    this.groupAdministratorCache.clear();
+    this.groupAdministratorLoads.clear();
+    this.groupAdministratorRetryAt.clear();
     if (client === null) return;
     client.removeAllListeners();
     try {
@@ -1410,6 +1531,12 @@ export class WhatsAppWebAdapter implements MessagingClient {
       if (!isSupportedGroupId(groupId)) return;
       await this.notifyGroupChanged(groupId, 'UPDATE', false, generation);
     });
+    client.on('group_admin_changed', async (notification: GroupNotification) => {
+      if (!this.isCurrent(client, generation)) return;
+      const groupId = getSerializedId(notification.chatId);
+      if (!isSupportedGroupId(groupId)) return;
+      await this.notifyGroupChanged(groupId, 'UPDATE', false, generation);
+    });
 
     const messageListeners = client.listenerCount('message');
     const messageCreateListeners = client.listenerCount('message_create');
@@ -1425,6 +1552,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
     );
     const groupLeaveListeners = client.listenerCount('group_leave');
     const groupUpdateListeners = client.listenerCount('group_update');
+    const groupAdminChangedListeners = client.listenerCount('group_admin_changed');
     this.logger.info(
       {
         operation: 'registerListeners',
@@ -1437,6 +1565,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
         groupJoinListeners,
         groupLeaveListeners,
         groupUpdateListeners,
+        groupAdminChangedListeners,
       },
       'Listeners de WhatsApp registrados',
     );
@@ -1446,7 +1575,8 @@ export class WhatsAppWebAdapter implements MessagingClient {
       voteUpdateListeners !== 1 ||
       groupJoinListeners !== 1 ||
       groupLeaveListeners !== 1 ||
-      groupUpdateListeners !== 1
+      groupUpdateListeners !== 1 ||
+      groupAdminChangedListeners !== 1
     ) {
       this.logger.error(
         {
@@ -1459,6 +1589,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
           groupJoinListeners,
           groupLeaveListeners,
           groupUpdateListeners,
+          groupAdminChangedListeners,
         },
         'La instancia activa no tiene exactamente un listener de mensajes',
       );
@@ -1874,9 +2005,14 @@ export class WhatsAppWebAdapter implements MessagingClient {
         ) ?? null
       );
     } catch (error) {
+      const errorCode = serializeError(
+        error,
+        'GROUP_ADMINISTRATORS_FETCH_FAILED',
+        false,
+      ).errorCode;
       this.logger.warn(
         {
-          ...serializeError(error, 'GROUP_ADMINISTRATORS_FETCH_FAILED', false),
+          errorCode,
           operation: 'resolveGroupAdministrator',
           groupHash: this.hash(groupId),
         },
@@ -2011,6 +2147,13 @@ export class WhatsAppWebAdapter implements MessagingClient {
     generation: number,
     participantIds: string[] = [],
   ): Promise<void> {
+    this.groupAdministratorCache.delete(groupId);
+    this.groupAdministratorLoads.delete(groupId);
+    this.groupAdministratorRetryAt.delete(groupId);
+    this.groupAdministratorVersions.set(
+      groupId,
+      (this.groupAdministratorVersions.get(groupId) ?? 0) + 1,
+    );
     if (this.events?.onGroupChanged === undefined) return;
     try {
       await this.events.onGroupChanged({
@@ -2322,6 +2465,34 @@ function safeConstructorName(value: unknown): string {
   } catch {
     return 'UnknownChat';
   }
+}
+
+async function withTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  errorCode: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(codedAdapterError(errorCode)), timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+}
+
+function codedAdapterError(code: string): Error & { code: string } {
+  const error = new Error(code) as Error & { code: string };
+  error.code = code;
+  return error;
+}
+
+function positiveDuration(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 1
+    ? Math.trunc(value)
+    : fallback;
 }
 
 function allocateClientGeneration(): number {

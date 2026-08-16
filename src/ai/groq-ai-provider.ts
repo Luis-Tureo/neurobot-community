@@ -3,6 +3,8 @@ import {
   type AIProvider,
   type AIProviderConnectionResult,
   type AIProviderErrorCode,
+  type AIRateLimitDiagnostic,
+  type AIRateLimitType,
   type GroundedResponseRequest,
   type GroundedResponseResult,
 } from './ai-provider.js';
@@ -58,7 +60,10 @@ export class GroqAIProvider implements AIProvider {
     request: GroundedResponseRequest,
   ): Promise<GroundedResponseResult> {
     if (!this.isConfigured()) {
-      throw new AIProviderError('AI_NOT_CONFIGURED', 'La configuración del proveedor está incompleta.');
+      throw new AIProviderError(
+        'AI_NOT_CONFIGURED',
+        'La configuración del proveedor está incompleta.',
+      );
     }
     const response = await this.performRequest(
       `${this.endpoint}/chat/completions`,
@@ -83,15 +88,21 @@ export class GroqAIProvider implements AIProvider {
       false,
     );
     const value: unknown = await response.json().catch(() => null);
-    if (!isRecord(value)) throw new AIProviderError('AI_INVALID_RESPONSE', 'Respuesta JSON inválida.');
+    if (!isRecord(value))
+      throw new AIProviderError('AI_INVALID_RESPONSE', 'Respuesta JSON inválida.');
     const choices = value.choices;
     if (!Array.isArray(choices) || !isRecord(choices[0]) || !isRecord(choices[0].message)) {
-      throw new AIProviderError('AI_INVALID_RESPONSE', 'La respuesta no contiene alternativas válidas.');
+      throw new AIProviderError(
+        'AI_INVALID_RESPONSE',
+        'La respuesta no contiene alternativas válidas.',
+      );
     }
     const content = choices[0].message.content;
-    if (typeof content !== 'string') throw new AIProviderError('AI_INVALID_RESPONSE', 'Contenido inválido.');
+    if (typeof content !== 'string')
+      throw new AIProviderError('AI_INVALID_RESPONSE', 'Contenido inválido.');
     const text = content.trim();
-    if (text === '') throw new AIProviderError('AI_EMPTY_RESPONSE', 'El proveedor devolvió una respuesta vacía.');
+    if (text === '')
+      throw new AIProviderError('AI_EMPTY_RESPONSE', 'El proveedor devolvió una respuesta vacía.');
     return { text, usage: this.normalizeUsage(value.usage) };
   }
 
@@ -99,7 +110,11 @@ export class GroqAIProvider implements AIProvider {
     return { provider: 'groq', model: this.model };
   }
 
-  public normalizeUsage(value: unknown): { inputTokens: number; outputTokens: number; totalTokens: number } {
+  public normalizeUsage(value: unknown): {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  } {
     if (!isRecord(value)) return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
     const inputTokens = safeTokenCount(value.prompt_tokens);
     const outputTokens = safeTokenCount(value.completion_tokens);
@@ -138,7 +153,7 @@ export class GroqAIProvider implements AIProvider {
           signal: controller.signal,
         });
         if (response.ok) return response;
-        const providerError = errorFromStatus(response.status, parseRetryAfter(response.headers.get('retry-after')));
+        const providerError = await errorFromResponse(response);
         if (!providerError.retryable || attempt + 1 >= attempts) throw providerError;
         lastError = providerError;
       } catch (error) {
@@ -147,7 +162,11 @@ export class GroqAIProvider implements AIProvider {
             ? new AIProviderError('AI_TIMEOUT', 'La solicitud excedió el tiempo máximo.', true)
             : error instanceof AIProviderError
               ? error
-              : new AIProviderError('AI_NETWORK_ERROR', 'No fue posible conectar con el proveedor.', true);
+              : new AIProviderError(
+                  'AI_NETWORK_ERROR',
+                  'No fue posible conectar con el proveedor.',
+                  true,
+                );
         if (!classified.retryable || attempt + 1 >= attempts) throw classified;
         lastError = classified;
       } finally {
@@ -160,12 +179,88 @@ export class GroqAIProvider implements AIProvider {
   }
 }
 
-function errorFromStatus(status: number, retryAfterSeconds: number | null): AIProviderError {
-  if (status === 401 || status === 403) return new AIProviderError('AI_INVALID_KEY', 'Acceso rechazado.');
+async function errorFromResponse(response: Response): Promise<AIProviderError> {
+  const status = response.status;
+  const retryAfterSeconds = parseRetryAfter(response.headers.get('retry-after'));
+  if (status === 401 || status === 403)
+    return new AIProviderError('AI_INVALID_KEY', 'Acceso rechazado.');
   if (status === 404) return new AIProviderError('AI_MODEL_UNAVAILABLE', 'Modelo no disponible.');
-  if (status === 429) return new AIProviderError('AI_PROVIDER_RATE_LIMITED', 'Cuota del proveedor alcanzada.', true, retryAfterSeconds);
-  if (status >= 500) return new AIProviderError('AI_TEMPORARY_ERROR', 'Error temporal del proveedor.', true, retryAfterSeconds);
+  if (status === 429) {
+    const payload: unknown = await response.json().catch(() => null);
+    const diagnostic = rateLimitDiagnostic(response.headers, payload, retryAfterSeconds);
+    return new AIProviderError(
+      'AI_PROVIDER_RATE_LIMITED',
+      'Cuota del proveedor alcanzada.',
+      true,
+      retryAfterSeconds,
+      diagnostic,
+    );
+  }
+  if (status >= 500)
+    return new AIProviderError(
+      'AI_TEMPORARY_ERROR',
+      'Error temporal del proveedor.',
+      true,
+      retryAfterSeconds,
+    );
   return new AIProviderError('AI_PERMANENT_ERROR', 'Solicitud rechazada por el proveedor.');
+}
+
+function rateLimitDiagnostic(
+  headers: Headers,
+  payload: unknown,
+  retryAfterSeconds: number | null,
+): AIRateLimitDiagnostic {
+  const requestLimit = parseNonNegativeHeader(headers.get('x-ratelimit-limit-requests'));
+  const requestRemaining = parseNonNegativeHeader(headers.get('x-ratelimit-remaining-requests'));
+  const tokenLimit = parseNonNegativeHeader(headers.get('x-ratelimit-limit-tokens'));
+  const tokenRemaining = parseNonNegativeHeader(headers.get('x-ratelimit-remaining-tokens'));
+  const reportedMessage = readProviderErrorMessage(payload);
+  let type = classifyRateLimitType(reportedMessage);
+  if (type === 'unknown' && requestRemaining === 0) type = 'requests_per_day';
+  if (type === 'unknown' && tokenRemaining === 0) type = 'tokens_per_minute';
+  return {
+    type,
+    retryAfterSeconds,
+    requestLimit,
+    requestRemaining,
+    tokenLimit,
+    tokenRemaining,
+    requestReset: parseResetHeader(headers.get('x-ratelimit-reset-requests')),
+    tokenReset: parseResetHeader(headers.get('x-ratelimit-reset-tokens')),
+  };
+}
+
+function classifyRateLimitType(message: string | null): AIRateLimitType {
+  if (message === null) return 'unknown';
+  const normalized = message.toLocaleLowerCase('en');
+  if (/input tokens per minute|\bitpm\b/u.test(normalized)) return 'input_tokens_per_minute';
+  if (/output tokens per minute|\botpm\b/u.test(normalized)) return 'output_tokens_per_minute';
+  if (/tokens per day|\btpd\b/u.test(normalized)) return 'tokens_per_day';
+  if (/tokens per minute|\btpm\b/u.test(normalized)) return 'tokens_per_minute';
+  if (/requests per day|\brpd\b/u.test(normalized)) return 'requests_per_day';
+  if (/requests per minute|\brpm\b|request rate limit/u.test(normalized)) {
+    return 'requests_per_minute';
+  }
+  return 'unknown';
+}
+
+function readProviderErrorMessage(payload: unknown): string | null {
+  if (!isRecord(payload) || !isRecord(payload.error)) return null;
+  const message = payload.error.message;
+  return typeof message === 'string' ? message.slice(0, 500) : null;
+}
+
+function parseNonNegativeHeader(value: string | null): number | null {
+  if (value === null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : null;
+}
+
+function parseResetHeader(value: string | null): string | null {
+  if (value === null) return null;
+  const normalized = value.trim().toLowerCase();
+  return /^[0-9dhms.]{1,32}$/u.test(normalized) ? normalized : null;
 }
 
 function parseRetryAfter(value: string | null): number | null {

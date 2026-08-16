@@ -13,8 +13,27 @@ export type AIProviderErrorCode =
   | 'AI_PERMANENT_ERROR';
 
 export type AIProviderConnectionResult =
-  | { successful: true }
-  | { successful: false; errorCode: AIProviderErrorCode };
+  { successful: true } | { successful: false; errorCode: AIProviderErrorCode };
+
+export type AIRateLimitType =
+  | 'requests_per_minute'
+  | 'requests_per_day'
+  | 'tokens_per_minute'
+  | 'tokens_per_day'
+  | 'input_tokens_per_minute'
+  | 'output_tokens_per_minute'
+  | 'unknown';
+
+export type AIRateLimitDiagnostic = {
+  type: AIRateLimitType;
+  retryAfterSeconds: number | null;
+  requestLimit: number | null;
+  requestRemaining: number | null;
+  tokenLimit: number | null;
+  tokenRemaining: number | null;
+  requestReset: string | null;
+  tokenReset: string | null;
+};
 
 export type GroundedResponseRequest = {
   systemInstruction: string;
@@ -45,6 +64,7 @@ export class AIProviderError extends Error {
     message: string,
     public readonly retryable = false,
     public readonly retryAfterSeconds: number | null = null,
+    public readonly rateLimitDiagnostic: AIRateLimitDiagnostic | null = null,
   ) {
     super(message);
     this.name = 'AIProviderError';

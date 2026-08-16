@@ -1,5 +1,6 @@
 import type { Logger } from 'pino';
 import type { AIProvider, AIProviderErrorCode } from '../ai/ai-provider.js';
+import { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import {
   GroupMessageHistoryError,
@@ -51,10 +52,21 @@ export const DEFAULT_COMMUNITY_DIGEST_CONFIGURATION: CommunityDigestConfiguratio
   maxCharacters: 24_000,
 };
 
+export type CommunityDigestProcessingBudget = {
+  maxBlocks: number;
+  maxProviderCalls: number;
+  maxEstimatedTokens: number;
+  maxUsedTokens: number;
+  maxDurationMs: number;
+  maxRetries: number;
+};
+
 type CommunityDigestServiceOptions = {
   botId: string;
   tickIntervalMs?: number;
   now?: () => Date;
+  aiQueue?: AIRequestQueueService;
+  processingBudget?: Partial<CommunityDigestProcessingBudget>;
 };
 
 type DueDigest = {
@@ -97,6 +109,12 @@ type DigestEventContext = {
   reason?: string;
   errorName?: string;
   errorStack?: string;
+  blockCount?: number;
+  aiCallCount?: number;
+  retryCount?: number;
+  estimatedTokenCount?: number;
+  usedTokenCount?: number;
+  elapsedMs?: number;
   window?: DigestWindow;
   at?: Date;
 };
@@ -115,8 +133,15 @@ type StoredCommunityDigestConfiguration = Partial<CommunityDigestConfiguration> 
 const DIGEST_CONTEXT_TARGET_CHARACTERS = 18_000;
 const DIGEST_MESSAGE_MAX_CHARACTERS = 600;
 const DIGEST_INTERMEDIATE_MAX_CHARACTERS = 1_200;
-const DIGEST_MAX_AI_CALLS = 512;
 const DIGEST_MAX_REDUCTION_LEVELS = 8;
+const DEFAULT_DIGEST_PROCESSING_BUDGET: CommunityDigestProcessingBudget = {
+  maxBlocks: 384,
+  maxProviderCalls: 512,
+  maxEstimatedTokens: 500_000,
+  maxUsedTokens: 500_000,
+  maxDurationMs: 5 * 60_000,
+  maxRetries: 8,
+};
 const SAFE_AI_CAUSE_CODES = new Set<string>([
   'AI_NOT_CONFIGURED',
   'AI_TIMEOUT',
@@ -128,6 +153,11 @@ const SAFE_AI_CAUSE_CODES = new Set<string>([
   'AI_INVALID_RESPONSE',
   'AI_TEMPORARY_ERROR',
   'AI_PERMANENT_ERROR',
+  'AI_QUEUE_FULL',
+  'AI_QUEUE_EXPIRED',
+  'AI_CIRCUIT_OPEN',
+  'AI_QUEUE_CANCELLED',
+  'AI_PROCESSING_BUDGET_EXCEEDED',
   'CONTEXT_TOO_LARGE',
 ]);
 const FINAL_DIGEST_SYSTEM_INSTRUCTION =
@@ -135,10 +165,95 @@ const FINAL_DIGEST_SYSTEM_INSTRUCTION =
 const INTERMEDIATE_DIGEST_SYSTEM_INSTRUCTION =
   'Resume únicamente el contexto entregado de forma factual y muy compacta. Conserva temas, acuerdos, pendientes y posibles alertas generales de convivencia. Agrupa repeticiones, omite saludos y detalles operativos. No incluyas nombres, teléfonos, correos, identificadores, URLs, fechas, horas ni citas extensas. No inventes datos y no agregues introducciones.';
 
+class DigestProcessingBudgetError extends Error {
+  public readonly code = 'AI_PROCESSING_BUDGET_EXCEEDED';
+
+  public constructor() {
+    super('AI_PROCESSING_BUDGET_EXCEEDED');
+    this.name = 'DigestProcessingBudgetError';
+  }
+}
+
+class DigestProcessingBudget {
+  private readonly startedAtMs = Date.now();
+  private blocks = 0;
+  private providerCalls = 0;
+  private retries = 0;
+  private estimatedTokens = 0;
+  private usedTokens = 0;
+
+  public constructor(private readonly limits: CommunityDigestProcessingBudget) {}
+
+  public get deadlineAtMs(): number {
+    return this.startedAtMs + this.limits.maxDurationMs;
+  }
+
+  public registerBlocks(count: number): void {
+    this.blocks = count;
+    if (count > this.limits.maxBlocks) throw codedError('CONTEXT_TOO_LARGE');
+    this.assertActive();
+  }
+
+  public beginProviderCall(estimatedTokens: number): void {
+    this.assertActive();
+    if (
+      this.providerCalls + 1 > this.limits.maxProviderCalls ||
+      this.estimatedTokens + estimatedTokens > this.limits.maxEstimatedTokens
+    ) {
+      throw new DigestProcessingBudgetError();
+    }
+    this.providerCalls += 1;
+    this.estimatedTokens += estimatedTokens;
+  }
+
+  public recordUsage(totalTokens: number): void {
+    this.usedTokens += Math.max(0, Math.trunc(totalTokens));
+    if (this.usedTokens > this.limits.maxUsedTokens) throw new DigestProcessingBudgetError();
+    this.assertActive();
+  }
+
+  public consumeRetry(): boolean {
+    if (Date.now() >= this.deadlineAtMs || this.retries >= this.limits.maxRetries) return false;
+    this.retries += 1;
+    return true;
+  }
+
+  public providerTimeoutMs(configuredTimeoutMs: number): number {
+    this.assertActive();
+    return Math.max(1, Math.min(configuredTimeoutMs, this.deadlineAtMs - Date.now()));
+  }
+
+  public assertActive(): void {
+    if (Date.now() >= this.deadlineAtMs) throw new DigestProcessingBudgetError();
+  }
+
+  public snapshot(): Pick<
+    DigestEventContext,
+    | 'blockCount'
+    | 'aiCallCount'
+    | 'retryCount'
+    | 'estimatedTokenCount'
+    | 'usedTokenCount'
+    | 'elapsedMs'
+  > {
+    return {
+      blockCount: this.blocks,
+      aiCallCount: this.providerCalls,
+      retryCount: this.retries,
+      estimatedTokenCount: this.estimatedTokens,
+      usedTokenCount: this.usedTokens,
+      elapsedMs: Math.max(0, Date.now() - this.startedAtMs),
+    };
+  }
+}
+
 export class CommunityDigestService {
   private readonly botId: string;
   private readonly tickIntervalMs: number;
   private readonly now: () => Date;
+  private readonly aiQueue: AIRequestQueueService;
+  private readonly processingBudget: CommunityDigestProcessingBudget;
+  private readonly activeSends = new Map<string, Promise<CommunityDigestResult>>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running: Promise<void> | null = null;
   private started = false;
@@ -154,6 +269,8 @@ export class CommunityDigestService {
     this.botId = options.botId;
     this.tickIntervalMs = options.tickIntervalMs ?? 30_000;
     this.now = options.now ?? (() => new Date());
+    this.aiQueue = options.aiQueue ?? new AIRequestQueueService(database, logger, options.botId);
+    this.processingBudget = normalizeProcessingBudget(options.processingBudget);
   }
 
   public start(): void {
@@ -484,7 +601,36 @@ export class CommunityDigestService {
     this.timer.unref?.();
   }
 
-  private async send(
+  private send(
+    period: CommunityDigestPeriod,
+    groupId: string,
+    now: Date,
+    periodKey?: string,
+  ): Promise<CommunityDigestResult> {
+    const configuration = this.configuration();
+    const local = toLocalDateTime(now, configuration.timezone);
+    const runKey = periodKey ?? periodKeyForDate(period, local.date);
+    const groupHash = this.anonymizer.identifier(groupId);
+    const flightKey = `${period}:${runKey}:${groupHash}`;
+    const active = this.activeSends.get(flightKey);
+    if (active !== undefined) {
+      this.event('COMMUNITY_DIGEST_DUPLICATE_BLOCKED', {
+        result: 'coalesced',
+        period,
+        groupHash,
+        errorCode: 'DUPLICATE_IN_FLIGHT',
+        at: now,
+      });
+      return active;
+    }
+    const operation = this.executeSend(period, groupId, now, periodKey).finally(() => {
+      if (this.activeSends.get(flightKey) === operation) this.activeSends.delete(flightKey);
+    });
+    this.activeSends.set(flightKey, operation);
+    return operation;
+  }
+
+  private async executeSend(
     period: CommunityDigestPeriod,
     groupId: string,
     now: Date,
@@ -503,6 +649,7 @@ export class CommunityDigestService {
       configuration.timezone,
       periodKey ?? periodKeyForDate(period, local.date),
     );
+    const budget = new DigestProcessingBudget(this.processingBudget);
     this.event('COMMUNITY_DIGEST_GROUP_STARTED', {
       result: 'started',
       period,
@@ -623,19 +770,22 @@ export class CommunityDigestService {
     });
     let summary: string;
     try {
-      summary = await this.generate(period, messages);
+      summary = await this.generate(period, messages, groupHash, window.periodKey, budget);
+      const processing = budget.snapshot();
       this.event('COMMUNITY_DIGEST_AI_SUCCEEDED', {
         result: 'generated',
         period,
         groupHash,
         groupName,
         itemCount: messages.length,
+        ...processing,
         operation: 'generateCommunityDigest',
         window,
         at: now,
       });
     } catch (error) {
       const causeCode = this.aiErrorCode(error);
+      const processing = budget.snapshot();
       this.event('COMMUNITY_DIGEST_AI_FAILED', {
         result: 'failed',
         period,
@@ -644,6 +794,7 @@ export class CommunityDigestService {
         itemCount: messages.length,
         errorCode: 'AI_SUMMARY_FAILED',
         causeCode,
+        ...processing,
         operation: 'generateCommunityDigest',
         reason: `La generación del resumen falló con el código seguro ${causeCode}.`,
         window,
@@ -756,6 +907,9 @@ export class CommunityDigestService {
   private async generate(
     period: CommunityDigestPeriod,
     messages: RecentGroupMessage[],
+    groupHash: string,
+    runKey: string,
+    budget: DigestProcessingBudget,
   ): Promise<string> {
     const configuration = this.configuration();
     // La ventana temporal ya fue aplicada al recuperar el historial. No exponemos
@@ -766,26 +920,46 @@ export class CommunityDigestService {
     const contextLimit = Math.min(configuration.maxCharacters, DIGEST_CONTEXT_TARGET_CHARACTERS);
     const originalChunks = packContextChunks(contextLines, contextLimit);
     if (originalChunks.length === 0) throw codedError('AI_EMPTY_RESPONSE');
-    if (originalChunks.length >= DIGEST_MAX_AI_CALLS) throw codedError('CONTEXT_TOO_LARGE');
+    budget.registerBlocks(originalChunks.length);
 
-    let aiCalls = 0;
     const request = async (
+      stage: string,
+      stageIndex: number,
       systemInstruction: string,
       question: string,
       context: string,
       maximumOutputTokens: number,
     ): Promise<string> => {
-      aiCalls += 1;
-      if (aiCalls > DIGEST_MAX_AI_CALLS) throw codedError('CONTEXT_TOO_LARGE');
-      const response = await this.provider.generateGroundedResponse({
-        systemInstruction,
-        question,
-        context,
+      budget.assertActive();
+      const estimatedTokens = estimateDigestTokens(
+        `${systemInstruction}\n${context}\n${question}`,
         maximumOutputTokens,
-        temperature: 0.1,
-        timeoutMs: 45_000,
+      );
+      const flight = await this.aiQueue.run({
+        flightKey: `${this.botId}:digest:${period}:${runKey}:${groupHash}:${stage}:${stageIndex}`,
+        classifyError: (error) =>
+          error instanceof DigestProcessingBudgetError
+            ? 'AI_PERMANENT_ERROR'
+            : this.provider.classifyProviderError(error),
+        deadlineAtMs: budget.deadlineAtMs,
+        consumeRetryBudget: () => budget.consumeRetry(),
+        operation: async () => {
+          budget.beginProviderCall(estimatedTokens);
+          const response = await this.provider.generateGroundedResponse({
+            systemInstruction,
+            question,
+            context,
+            maximumOutputTokens,
+            temperature: 0.1,
+            timeoutMs: budget.providerTimeoutMs(
+              this.database.getAIQueueSettings(this.botId).providerTimeoutSeconds * 1000,
+            ),
+          });
+          budget.recordUsage(response.usage.totalTokens);
+          return response.text;
+        },
       });
-      const text = response.text.trim();
+      const text = flight.value.trim();
       if (text === '') throw codedError('AI_EMPTY_RESPONSE');
       return text;
     };
@@ -793,8 +967,10 @@ export class CommunityDigestService {
     let finalContext = originalChunks[0] as string;
     if (originalChunks.length > 1) {
       let summaries: string[] = [];
-      for (const chunk of originalChunks) {
+      for (const [index, chunk] of originalChunks.entries()) {
         const mapped = await request(
+          'map',
+          index,
           INTERMEDIATE_DIGEST_SYSTEM_INSTRUCTION,
           'Condensa este bloque por temas, acuerdos, pendientes y posibles alertas generales. Omite saludos y repeticiones. No inventes información.',
           chunk,
@@ -816,8 +992,10 @@ export class CommunityDigestService {
           throw codedError('CONTEXT_TOO_LARGE');
         }
         const reduced: string[] = [];
-        for (const chunk of reductionChunks) {
+        for (const [index, chunk] of reductionChunks.entries()) {
           const mapped = await request(
+            `reduce-${level}`,
+            index,
             INTERMEDIATE_DIGEST_SYSTEM_INSTRUCTION,
             'Fusiona estos resúmenes parciales sin perder temas, acuerdos, pendientes ni alertas generales. Elimina duplicados y no inventes información.',
             chunk,
@@ -830,6 +1008,8 @@ export class CommunityDigestService {
     }
 
     const responseText = await request(
+      'final',
+      0,
       FINAL_DIGEST_SYSTEM_INSTRUCTION,
       digestQuestion(period),
       finalContext,
@@ -937,6 +1117,12 @@ export class CommunityDigestService {
       messageCount: context.itemCount ?? null,
       historyMessageCount: context.historyItemCount ?? null,
       pageCount: context.pageCount ?? null,
+      blockCount: context.blockCount ?? null,
+      aiCallCount: context.aiCallCount ?? null,
+      retryCount: context.retryCount ?? null,
+      estimatedTokenCount: context.estimatedTokenCount ?? null,
+      usedTokenCount: context.usedTokenCount ?? null,
+      elapsedMs: context.elapsedMs ?? null,
       reason: context.reason ?? null,
       errorName: context.errorName ?? null,
     };
@@ -1164,6 +1350,47 @@ const COMMUNITY_DIGEST_WEEKDAYS: CommunityDigestWeekday[] = [
   'Sat',
   'Sun',
 ];
+
+function normalizeProcessingBudget(
+  value: Partial<CommunityDigestProcessingBudget> | undefined,
+): CommunityDigestProcessingBudget {
+  return {
+    maxBlocks: positiveInteger(value?.maxBlocks, DEFAULT_DIGEST_PROCESSING_BUDGET.maxBlocks),
+    maxProviderCalls: positiveInteger(
+      value?.maxProviderCalls,
+      DEFAULT_DIGEST_PROCESSING_BUDGET.maxProviderCalls,
+    ),
+    maxEstimatedTokens: positiveInteger(
+      value?.maxEstimatedTokens,
+      DEFAULT_DIGEST_PROCESSING_BUDGET.maxEstimatedTokens,
+    ),
+    maxUsedTokens: positiveInteger(
+      value?.maxUsedTokens,
+      DEFAULT_DIGEST_PROCESSING_BUDGET.maxUsedTokens,
+    ),
+    maxDurationMs: positiveInteger(
+      value?.maxDurationMs,
+      DEFAULT_DIGEST_PROCESSING_BUDGET.maxDurationMs,
+    ),
+    maxRetries: nonNegativeInteger(value?.maxRetries, DEFAULT_DIGEST_PROCESSING_BUDGET.maxRetries),
+  };
+}
+
+function estimateDigestTokens(value: string, maximumOutputTokens: number): number {
+  return Math.max(1, Math.ceil(value.length / 4)) + Math.max(0, Math.trunc(maximumOutputTokens));
+}
+
+function positiveInteger(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 1
+    ? Math.trunc(value)
+    : fallback;
+}
+
+function nonNegativeInteger(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.trunc(value)
+    : fallback;
+}
 
 function normalizeConfiguration(
   configuration: StoredCommunityDigestConfiguration,

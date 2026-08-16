@@ -12,6 +12,15 @@ El módulo **Centro de pruebas > Resúmenes** permite activar un resumen diario,
 - La IA recibe únicamente el texto necesario y debe devolver un resumen sin nombres ni datos personales.
 - La moderación en tiempo real sigue funcionando en paralelo y mantiene los avisos privados agregados, sin expulsiones ni sanciones automáticas.
 
+## Resiliencia y límites
+
+- Cada bloque del resumen usa la misma cola, concurrencia, circuit breaker y política de reintentos que las consultas normales de IA.
+- Ante un `429`, Neurobot respeta `Retry-After`; si no viene informado, aplica backoff con variación para evitar ráfagas. Los reintentos son limitados y un período de espera que exceda el tiempo seguro del trabajo cancela el resumen en vez de reintentar antes de tiempo.
+- Los bloques ya resumidos se conservan solo en memoria durante la ejecución. Si un bloque posterior se recupera después de un límite temporal, el proceso continúa desde ese bloque sin volver a enviar los anteriores ni persistir conversaciones o resúmenes parciales.
+- Un resumen tiene presupuesto interno de bloques, llamadas, tokens estimados y utilizados, reintentos y cinco minutos de procesamiento. Si se agota, no se envía un resultado parcial.
+- Las ejecuciones simultáneas del mismo período y grupo se agrupan, y la marca persistente de las automatizaciones mantiene un único envío diario, semanal o mensual.
+- La lista de administradores de cada grupo se reutiliza durante cinco minutos. Ante un fallo temporal puede usarse el último resultado válido por hasta quince minutos; las consultas simultáneas se agrupan, tienen timeout de tres segundos y la caché se invalida ante cambios del grupo o de administradores.
+
 ## Prueba
 
 1. Abre **Centro de pruebas**.

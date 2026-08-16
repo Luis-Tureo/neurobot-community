@@ -47,7 +47,12 @@ export class OutboundMessageQueueService {
   }
 
   public async getGroupAdministratorIds(chatId: string): Promise<string[]> {
-    return (await this.client.getGroupAdministratorIds?.(chatId)) ?? [];
+    try {
+      return (await this.client.getGroupAdministratorIds?.(chatId)) ?? [];
+    } catch {
+      this.event('GROUP_ADMINISTRATORS_FETCH_FAILED', 'failed');
+      return [];
+    }
   }
 
   private event(eventType: string, result: string): void {
