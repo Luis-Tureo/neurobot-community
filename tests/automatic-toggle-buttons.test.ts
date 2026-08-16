@@ -6,7 +6,7 @@ describe('switches accesibles y reutilizables de estado', () => {
   const script = readFileSync(resolve('public', 'app.js'), 'utf8');
   const shared = readFileSync(resolve('public', 'status-switch.js'), 'utf8');
   const multiBot = readFileSync(resolve('public', 'multibot-panel.js'), 'utf8');
-  const panelUi = readFileSync(resolve('public', 'panel-ui.js'), 'utf8');
+  const panelUi = readFileSync(resolve('public', 'panel-ui-core.js'), 'utf8');
   const styles = readFileSync(resolve('src', 'admin', 'panel.css'), 'utf8');
 
   it('reemplaza los checkboxes de activación por botones dinámicos en HTML', () => {
