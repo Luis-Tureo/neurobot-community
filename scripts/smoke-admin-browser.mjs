@@ -43,7 +43,9 @@ try {
   });
 
   const target = new URL('/#assistants', baseUrl).href;
-  await page.goto(target, { waitUntil: 'networkidle2', timeout: 60_000 });
+  // El panel mantiene actividad de red (estado del bot, sesión y módulos), por lo que
+  // networkidle2 no es una condición válida para decidir que el login está listo.
+  await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.waitForSelector('#login-form input[name="password"]', { timeout: 15_000 });
 
   const initialState = await page.evaluate(() => ({
