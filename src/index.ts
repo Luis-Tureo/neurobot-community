@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { AIProviderFactory } from './ai/ai-provider-factory.js';
 import { buildAdminServer } from './admin/server.js';
 import { loadEnvironment } from './config/environment.js';
+import { GroupDiscoveryService } from './core/group-discovery-service.js';
 import { MultiBotManager } from './core/multi-bot-manager.js';
 import { WhatsAppSessionManager } from './core/whatsapp-session-manager.js';
 import { createLogger } from './infrastructure/logger.js';
@@ -52,6 +53,18 @@ async function main(): Promise<void> {
       selectedGroups: aiModerationSettings.selectedGroups,
     });
   }
+
+  // Política de producción: no recorrer periódicamente todos los chats de WhatsApp.
+  // La detección de grupos sigue disponible al conectar, ante eventos de grupo y mediante
+  // la actualización manual del panel. Esto evita llamadas repetitivas a getChats() y
+  // reduce la dependencia de estructuras internas de WhatsApp Web.
+  GroupDiscoveryService.prototype.startPeriodic = function disablePeriodicGroupDiscovery(): void {
+    // No-op deliberado. refreshAfterReady(), handleGroupChange() y refreshNow() siguen operativos.
+  };
+  logger.info(
+    { module: 'Grupos', operation: 'GROUP_DISCOVERY_PERIODIC_DISABLED' },
+    'Sondeo periódico de chats desactivado; se usarán conexión, eventos y actualización manual',
+  );
 
   database.setBotSessionPath('neurobot', environment.sessionPath);
   await ensureInitialAdministrator(database, environment.panelInitialPassword);
