@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 
 const html = readFileSync('public/index.html', 'utf8');
-const script = readFileSync('public/multibot-panel.js', 'utf8');
+const script = readFileSync('public/multibot-panel-runtime.js', 'utf8');
 const css = readFileSync('src/admin/panel.css', 'utf8');
 
 describe('módulo mínimo de inteligencia artificial', () => {

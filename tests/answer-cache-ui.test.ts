@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 describe('panel de respuestas guardadas y consumo', () => {
   const html = readFileSync(resolve('public/index.html'), 'utf8');
-  const javascript = readFileSync(resolve('public/multibot-panel.js'), 'utf8');
+  const javascript = readFileSync(resolve('public/multibot-panel-runtime.js'), 'utf8');
 
   it('incluye navegación móvil y lateral sin depender de desplazamiento horizontal', () => {
     expect(html).toContain('value="cached-answers"');

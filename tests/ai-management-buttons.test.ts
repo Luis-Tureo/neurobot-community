@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 describe('Requerimiento #3 — Reordenar y diferenciar botones de gestión de IA', () => {
   const html = readFileSync(resolve('public', 'index.html'), 'utf8');
-  const script = readFileSync(resolve('public', 'multibot-panel.js'), 'utf8');
+  const script = readFileSync(resolve('public', 'multibot-panel-runtime.js'), 'utf8');
   const styles = readFileSync(resolve('src', 'admin', 'panel.css'), 'utf8');
 
   it('ordena los botones en la secuencia exacta: Probar conexión -> Cambiar IA -> Desactivar/Activar IA', () => {

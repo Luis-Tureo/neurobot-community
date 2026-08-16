@@ -206,7 +206,7 @@ describe('plataforma de asistentes', () => {
 
 describe('navegación global y por asistente', () => {
   const html = readFileSync(resolve('public', 'index.html'), 'utf8');
-  const panel = readFileSync(resolve('public', 'multibot-panel.js'), 'utf8');
+  const panel = readFileSync(resolve('public', 'multibot-panel-runtime.js'), 'utf8');
 
   it('usa encabezado genérico y separa la navegación global', () => {
     expect(html).toContain('<title>Panel de Asistentes</title>');

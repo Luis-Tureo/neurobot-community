@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const cleanup = readFileSync('public/ai-moderation-layout-cleanup.js', 'utf8');
-const panelUi = readFileSync('public/panel-ui.js', 'utf8');
+const panelUi = readFileSync('public/panel-ui-runtime.js', 'utf8');
 
 describe('limpieza visual de Moderación con IA', () => {
   it('elimina todos los botones de ayuda con signo de interrogación', () => {

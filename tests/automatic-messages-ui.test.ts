@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 describe('interfaz de mensajes automáticos', () => {
   const html = readFileSync(resolve('public', 'index.html'), 'utf8');
-  const script = readFileSync(resolve('public', 'app.js'), 'utf8');
+  const script = readFileSync(resolve('public', 'app-panel.js'), 'utf8');
   const styles = readFileSync(resolve('src', 'admin', 'panel.css'), 'utf8');
 
   it('configura bienvenida dinámica y conserva las demás automatizaciones', () => {
