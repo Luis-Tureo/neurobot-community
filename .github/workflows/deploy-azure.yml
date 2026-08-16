@@ -96,9 +96,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # LocalAuth guarda el perfil Chromium en /home. Un restart directo puede
-          # solapar por unos segundos el contenedor anterior y el nuevo usando el
-          # mismo perfil. Detener primero garantiza un único propietario del perfil.
           APP_STOPPED=false
           restore_app_on_failure() {
             if [ "$APP_STOPPED" = "true" ]; then
@@ -157,8 +154,6 @@ jobs:
               GROQ_MODEL=llama-3.1-8b-instant \
             >/dev/null
 
-          # Se despliega la etiqueta inmutable del commit, no latest, para evitar
-          # que un build anterior o una caché del registro cambien el artefacto.
           az webapp config container set \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_WEBAPP_NAME" \
@@ -277,6 +272,27 @@ jobs:
           fi
 
           echo "AUTH_DIAGNOSTIC=BACKEND_AUTHENTICATION_OK"
+
+      - name: Smoke test admin login in Chrome
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_container)
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOST_NAME=$(az webapp show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            --query defaultHostName \
+            --output tsv)
+          PANEL_PASSWORD=$(az webapp config appsettings list \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            --query "[?name=='PANEL_INITIAL_PASSWORD'].value | [0]" \
+            --output tsv)
+          echo "Preparando Chrome administrado para reproducir el login del panel..."
+          npx puppeteer browsers install chrome
+          NEUROBOT_SMOKE_URL="https://${HOST_NAME}" \
+          NEUROBOT_SMOKE_PASSWORD="$PANEL_PASSWORD" \
+            node scripts/smoke-admin-browser.mjs
 
       - name: Show deployed image
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_container)
