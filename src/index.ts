@@ -38,6 +38,21 @@ async function main(): Promise<void> {
   }
   const database = new AppDatabase(environment.databasePath);
   database.migrate();
+
+  // Desactivación temporal: la revisión automática de mensajes por moderación IA queda apagada
+  // mientras se realizan mejoras. Se conserva toda su configuración para poder reactivarla después.
+  const aiModerationSettings = database.getAIModerationSettings('neurobot');
+  if (aiModerationSettings.enabled) {
+    database.saveAIModerationSettings('neurobot', {
+      enabled: false,
+      warningTemplate: aiModerationSettings.warningTemplate,
+      minSeverity: aiModerationSettings.minSeverity,
+      dedupWindowMinutes: aiModerationSettings.dedupWindowMinutes,
+      pendingExpiryHours: aiModerationSettings.pendingExpiryHours,
+      selectedGroups: aiModerationSettings.selectedGroups,
+    });
+  }
+
   database.setBotSessionPath('neurobot', environment.sessionPath);
   await ensureInitialAdministrator(database, environment.panelInitialPassword);
 
