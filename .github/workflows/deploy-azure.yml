@@ -206,6 +206,78 @@ jobs:
           echo "ERROR: el contenedor no respondió correctamente dentro del tiempo esperado." >&2
           exit 1
 
+      - name: Smoke test production authentication
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_container)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          HOST_NAME=$(az webapp show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            --query defaultHostName \
+            --output tsv)
+
+          PANEL_PASSWORD=$(az webapp config appsettings list \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            --query "[?name=='PANEL_INITIAL_PASSWORD'].value | [0]" \
+            --output tsv)
+
+          if [ -z "$PANEL_PASSWORD" ]; then
+            echo "AUTH_DIAGNOSTIC=PANEL_INITIAL_PASSWORD_NOT_CONFIGURED"
+            exit 1
+          fi
+
+          COOKIE_JAR=$(mktemp)
+          LOGIN_BODY=$(mktemp)
+          SESSION_BODY=$(mktemp)
+          BOTS_BODY=$(mktemp)
+          trap 'rm -f "$COOKIE_JAR" "$LOGIN_BODY" "$SESSION_BODY" "$BOTS_BODY"' EXIT
+
+          LOGIN_PAYLOAD=$(jq -cn --arg password "$PANEL_PASSWORD" '{username:"admin",password:$password}')
+          LOGIN_STATUS=$(curl --silent --show-error \
+            --max-time 20 \
+            --cookie-jar "$COOKIE_JAR" \
+            --header 'content-type: application/json' \
+            --data "$LOGIN_PAYLOAD" \
+            --output "$LOGIN_BODY" \
+            --write-out '%{http_code}' \
+            "https://${HOST_NAME}/api/auth/login")
+
+          echo "AUTH_LOGIN_HTTP_STATUS=${LOGIN_STATUS}"
+          if [ "$LOGIN_STATUS" != "200" ]; then
+            ERROR_MESSAGE=$(jq -r '.error // "respuesta sin error legible"' "$LOGIN_BODY" 2>/dev/null || true)
+            echo "AUTH_LOGIN_RESULT=${ERROR_MESSAGE}"
+            exit 1
+          fi
+
+          SESSION_STATUS=$(curl --silent --show-error \
+            --max-time 20 \
+            --cookie "$COOKIE_JAR" \
+            --output "$SESSION_BODY" \
+            --write-out '%{http_code}' \
+            "https://${HOST_NAME}/api/auth/session")
+          echo "AUTH_SESSION_HTTP_STATUS=${SESSION_STATUS}"
+          if [ "$SESSION_STATUS" != "200" ]; then
+            echo "AUTH_DIAGNOSTIC=COOKIE_OR_SESSION_REJECTED"
+            exit 1
+          fi
+
+          BOTS_STATUS=$(curl --silent --show-error \
+            --max-time 20 \
+            --cookie "$COOKIE_JAR" \
+            --output "$BOTS_BODY" \
+            --write-out '%{http_code}' \
+            "https://${HOST_NAME}/api/bots")
+          echo "AUTH_BOTS_HTTP_STATUS=${BOTS_STATUS}"
+          if [ "$BOTS_STATUS" != "200" ]; then
+            echo "AUTH_DIAGNOSTIC=PROTECTED_API_REJECTED"
+            exit 1
+          fi
+
+          echo "AUTH_DIAGNOSTIC=BACKEND_AUTHENTICATION_OK"
+
       - name: Show deployed image
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_container)
         run: echo "Azure configurado con ${IMAGE_NAME}:${GITHUB_SHA}"
