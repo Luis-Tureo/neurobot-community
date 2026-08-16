@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const panelUi = readFileSync('public/panel-ui.js', 'utf8');
+const panelUi = readFileSync('public/panel-ui-core.js', 'utf8');
 const devScript = readFileSync('scripts/start-dev.ps1', 'utf8');
 
 describe('panel de consumo de IA con Tailwind', () => {
