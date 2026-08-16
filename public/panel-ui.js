@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 let runtimeStarted = false;
 
 async function startRuntime() {
