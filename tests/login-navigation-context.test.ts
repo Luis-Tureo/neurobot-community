@@ -17,31 +17,23 @@ describe('Requerimiento #28 — limpiar navegación residual al volver al login'
     expect(source).toContain("panelView?.classList.remove('assistant-context-active')");
     expect(source).toContain('clearResidualAssistantRoute();');
     expect(source).toContain("/^#assistants\\/[^/]+(?:\\/.*)?$/u");
-    expect(source).toContain("window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)");
+    expect(source).toContain(
+      "window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)",
+    );
   });
 
-  it('reinicia el estado interno reutilizando el flujo global existente al autenticarse de nuevo', () => {
-    expect(source).toContain('backToAssistantsButton?.click();');
-    expect(source).toContain("window.location.hash === '#assistants'");
-    expect(source).toContain("window.addEventListener('multibot-panel-load'");
-    expect(source).toContain('pendingGlobalReset');
+  it('no intercepta la red ni intenta reconstruir la sesión desde un módulo visual', () => {
+    expect(source).not.toContain('window.fetch =');
+    expect(source).not.toContain('originalFetch');
+    expect(source).not.toContain('forceExpiredSessionLogin');
+    expect(source).not.toContain('retryGlobalReset');
+    expect(source).not.toContain('AbortController');
   });
 
-  it('también vuelve al login ante una sesión expirada sin usar CSS ni almacenamiento residual', () => {
-    expect(source).toContain('response.status === 401');
-    expect(source).toContain("path.startsWith('/api/')");
-    expect(source).toContain("path !== '/api/auth/login'");
-    expect(source).toContain('forceExpiredSessionLogin();');
-    expect(source).not.toContain('localStorage');
-    expect(source).not.toContain('sessionStorage');
-    expect(source).not.toContain('style.display');
-  });
-
-  it('vuelve a sincronizar el estado al recargar, navegar o cerrar sesión', () => {
+  it('vuelve a sincronizar únicamente el contexto visual al recargar o navegar', () => {
     expect(source).toContain("window.addEventListener('pageshow', synchronizeLoginNavigationContext)");
     expect(source).toContain("window.addEventListener('popstate', synchronizeLoginNavigationContext)");
-    expect(source).toContain("window.addEventListener('hashchange'");
-    expect(source).toContain("logoutButton?.addEventListener('click'");
+    expect(source).toContain("window.addEventListener('hashchange', synchronizeLoginNavigationContext)");
     expect(source).toContain('synchronizeLoginNavigationContext();');
   });
 });
