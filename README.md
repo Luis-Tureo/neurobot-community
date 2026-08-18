@@ -86,7 +86,7 @@ La IA solo se consulta cuando hay una pregunta válida, conocimiento oficial rel
 
 La clave global se lee desde `GROQ_API_KEY`. Una clave por asistente se cifra con AES-256-GCM usando `APP_ENCRYPTION_KEY` y contexto asociado al `botId`; el servidor solo informa **Clave configurada**. Configure el panel detrás de HTTPS si deja de escuchar exclusivamente en localhost.
 
-`GROQ_MODEL=llama-3.1-8b-instant` se conserva como valor solicitado y configurable. Groq anunció su retiro para el 16 de agosto de 2026 y recomienda `openai/gpt-oss-20b`; cambie el modelo y ejecute la prueba de conexión antes de esa fecha. Consulte la [tabla oficial de deprecaciones](https://console.groq.com/docs/deprecations).
+`GROQ_MODEL=openai/gpt-oss-20b` es el modelo predeterminado y configurable recomendado por Groq tras el retiro de `llama-3.1-8b-instant`. Consulte la [tabla oficial de deprecaciones](https://console.groq.com/docs/deprecations).
 
 ## Requisitos
 

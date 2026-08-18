@@ -25,6 +25,7 @@ describe('API administrativa', () => {
   let app: FastifyInstance;
   let database: AppDatabase;
   let client: SimulatedMessagingClient;
+  let testSecretVault: SecretVault;
 
   beforeEach(async () => {
     database = new AppDatabase(':memory:');
@@ -46,6 +47,7 @@ describe('API administrativa', () => {
     );
     const anonymizer = new Anonymizer('x'.repeat(32));
     const secretVault = new SecretVault('clave-de-cifrado-para-pruebas');
+    testSecretVault = secretVault;
     const aiProviderFactory = new AIProviderFactory(
       database,
       secretVault,
@@ -982,6 +984,99 @@ describe('API administrativa', () => {
       'PROVIDER_ADDED',
     ]);
     expect(JSON.stringify(current)).not.toContain('token-de-prueba');
+  });
+
+  it('no sobrescribe la clave API cuando se envía una enmascarada', async () => {
+    const auth = await login(app);
+    // Configurar API key inicial
+    await injectAuthenticated(app, auth, {
+      method: 'PUT',
+      url: '/api/bots/neurobot/ai/provider',
+      payload: {
+        displayName: 'Asistente IA',
+        apiKey: 'token-de-prueba-original-super-largo',
+        enabled: true,
+      },
+    });
+
+    // Enviar API key enmascarada (con asteriscos o viñetas)
+    const response = await injectAuthenticated(app, auth, {
+      method: 'PUT',
+      url: '/api/bots/neurobot/ai/provider',
+      payload: {
+        displayName: 'Asistente IA Editado',
+        apiKey: '•••••••••••••••••••••largo',
+        enabled: true,
+      },
+    });
+    expect(response.statusCode).toBe(200);
+
+    // Recuperar credencial para comprobar que no se ha sobrescrito la clave encriptada real
+    const cred = database.getBotEncryptedCredential('neurobot');
+    expect(cred.displayName).toBe('Asistente IA Editado');
+    // Al desencriptar debe retornar la clave original
+    const rawKey = testSecretVault.decrypt(cred.encryptedApiKey!, 'bot:neurobot:groq');
+    expect(rawKey).toBe('token-de-prueba-original-super-largo');
+
+    // Enviar API key vacía
+    const responseEmpty = await injectAuthenticated(app, auth, {
+      method: 'PUT',
+      url: '/api/bots/neurobot/ai/provider',
+      payload: {
+        displayName: 'Asistente IA Vacío',
+        apiKey: '   ',
+        enabled: true,
+      },
+    });
+    expect(responseEmpty.statusCode).toBe(200);
+    const cred2 = database.getBotEncryptedCredential('neurobot');
+    expect(cred2.displayName).toBe('Asistente IA Vacío');
+    const rawKey2 = testSecretVault.decrypt(cred2.encryptedApiKey!, 'bot:neurobot:groq');
+    expect(rawKey2).toBe('token-de-prueba-original-super-largo');
+  });
+
+  it('retorna errorCode cuando test-connection falla', async () => {
+    const auth = await login(app);
+    const response = await injectAuthenticated(app, auth, {
+      method: 'POST',
+      url: '/api/bots/neurobot/ai/test-connection',
+    });
+    expect(response.statusCode).toBe(200);
+    // Dado que no está configurado inicialmente o fallará
+    expect(response.json()).toHaveProperty('errorCode');
+  });
+
+  it('filtra respuestas en caché que tienen la categoría "Error de IA"', async () => {
+    database.saveCachedAnswer({
+      botId: 'neurobot',
+      canonicalQuestion: 'Pregunta normal',
+      normalizedQuestionHash: '0000000000000000000000000000000000000000000000000000000000000001',
+      answer: 'Respuesta normal',
+      category: 'General',
+      knowledgeSourceIds: [],
+      knowledgeVersion: '1',
+      promptVersion: '1',
+      status: 'ADMIN_APPROVED',
+      sourceType: 'ADMIN_FAQ',
+      confidence: 1.0,
+    });
+    database.saveCachedAnswer({
+      botId: 'neurobot',
+      canonicalQuestion: 'Pregunta errónea',
+      normalizedQuestionHash: '0000000000000000000000000000000000000000000000000000000000000002',
+      answer: 'Hubo un error de IA',
+      category: 'Error de IA',
+      knowledgeSourceIds: [],
+      knowledgeVersion: '1',
+      promptVersion: '1',
+      status: 'ADMIN_APPROVED',
+      sourceType: 'ADMIN_FAQ',
+      confidence: 1.0,
+    });
+
+    const list = database.listReusableCachedAnswers('neurobot');
+    expect(list.some(a => a.category === 'Error de IA')).toBe(false);
+    expect(list.some(a => a.category === 'General')).toBe(true);
   });
 });
 

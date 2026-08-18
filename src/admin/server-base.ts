@@ -1585,6 +1585,13 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           .send({ error: 'Las claves solo pueden configurarse mediante HTTPS o localhost.' });
       const botId = parseBotId(request.params);
       const profile = context.database.getBotProfile(botId);
+      const body = { ...(request.body as Record<string, unknown>) };
+      if (
+        typeof body.apiKey === 'string' &&
+        (body.apiKey.trim() === '' || body.apiKey.includes('•') || body.apiKey.includes('*'))
+      ) {
+        delete body.apiKey;
+      }
       const input = z
         .object({
           displayName: z.string().trim().min(1).max(80),
@@ -1592,7 +1599,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           enabled: z.boolean(),
         })
         .strict()
-        .parse(request.body);
+        .parse(body);
       const previousCredential = context.database.getBotEncryptedCredential(botId);
       const previousSettings = context.database.getAISettings(profile.id);
       const wasConfigured = context.aiProviderFactory?.forBot(botId).isConfigured() ?? false;
@@ -2665,6 +2672,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       return {
         configured: provider.isConfigured(),
         connection: result.successful ? 'successful' : 'failed',
+        errorCode: result.successful ? null : result.errorCode,
       };
     },
   );
@@ -3559,6 +3567,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       return {
         configured: context.aiProvider.isConfigured(),
         connection: result.successful ? 'successful' : 'failed',
+        errorCode: result.successful ? null : result.errorCode,
       };
     },
   );

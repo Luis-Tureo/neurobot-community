@@ -9,7 +9,7 @@ if (existsSync(destination)) {
   const missing: string[] = [];
   if (!/^AI_PROVIDER=/mu.test(current)) missing.push('AI_PROVIDER=groq');
   if (!/^GROQ_API_KEY=/mu.test(current)) missing.push('GROQ_API_KEY=');
-  if (!/^GROQ_MODEL=/mu.test(current)) missing.push('GROQ_MODEL=llama-3.1-8b-instant');
+  if (!/^GROQ_MODEL=/mu.test(current)) missing.push('GROQ_MODEL=openai/gpt-oss-20b');
   if (!/^APP_ENCRYPTION_KEY=/mu.test(current)) {
     missing.push(`APP_ENCRYPTION_KEY=${randomBytes(32).toString('base64url')}`);
   }
@@ -21,7 +21,6 @@ if (existsSync(destination)) {
     encoding: 'utf8',
     mode: 0o600,
   });
-  process.stdout.write('Se agregaron variables faltantes a .env sin reemplazar valores existentes.\n');
   process.exit(0);
 }
 
@@ -43,7 +42,7 @@ DEVELOPMENT_MODE=false
 CHROME_EXECUTABLE_PATH=
 AI_PROVIDER=groq
 GROQ_API_KEY=
-GROQ_MODEL=llama-3.1-8b-instant
+GROQ_MODEL=openai/gpt-oss-20b
 APP_ENCRYPTION_KEY=${appEncryptionKey}
 `;
 

@@ -151,7 +151,7 @@ jobs:
               PUPPETEER_CACHE_DIR=/app/.cache/puppeteer \
               CHROME_EXECUTABLE_PATH=/usr/local/bin/neurobot-chrome \
               AI_PROVIDER=groq \
-              GROQ_MODEL=llama-3.1-8b-instant \
+              GROQ_MODEL=openai/gpt-oss-20b \
             >/dev/null
 
           az webapp config container set \

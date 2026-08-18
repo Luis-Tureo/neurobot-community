@@ -6288,6 +6288,7 @@ export class AppDatabase {
     return this.listCachedAnswers(botId).filter(
       (answer) =>
         ['AUTO_VERIFIED', 'ADMIN_APPROVED', 'ADMIN_EDITED'].includes(answer.status) &&
+        answer.category !== 'Error de IA' &&
         (answer.expiresAt === null || answer.expiresAt > now.toISOString()),
     );
   }

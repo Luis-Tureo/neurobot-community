@@ -12,7 +12,7 @@ describe('configuración de entorno', () => {
     expect(environment.panelPort).toBe(3000);
     expect(environment.databasePath).toContain('data');
     expect(environment.developmentMode).toBe(false);
-    expect(environment.groqModel).toBe('llama-3.1-8b-instant');
+    expect(environment.groqModel).toBe('openai/gpt-oss-20b');
   });
 
   it('convierte y valida opciones de ejecución', () => {

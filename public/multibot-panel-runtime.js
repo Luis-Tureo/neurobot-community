@@ -2266,7 +2266,19 @@ function configureForms() {
       if (result.connection === 'successful') {
         notify('Conexión con la API de Groq exitosa.');
       } else {
-        notify('No se pudo conectar con la API de Groq. Verifica el token.', true);
+        let errorMsg = 'No se pudo conectar con la API de Groq. Verifica el token.';
+        if (result.errorCode === 'AI_INVALID_KEY') {
+          errorMsg = 'El token de Groq no es válido o fue revocado.';
+        } else if (result.errorCode === 'AI_MODEL_UNAVAILABLE') {
+          errorMsg = 'El token es válido, pero el modelo seleccionado no está habilitado para este proyecto de Groq o no está disponible.';
+        } else if (result.errorCode === 'AI_PROVIDER_RATE_LIMITED') {
+          errorMsg = 'Groq alcanzó temporalmente su límite de uso. Intenta nuevamente más tarde.';
+        } else if (result.errorCode === 'AI_TIMEOUT') {
+          errorMsg = 'Groq está temporalmente no disponible (timeout).';
+        } else if (result.errorCode === 'AI_TEMPORARY_ERROR') {
+          errorMsg = 'Groq está temporalmente no disponible (5xx).';
+        }
+        notify(errorMsg, true);
       }
     } catch (error) {
       notify(error.message, true);
