@@ -109,7 +109,10 @@ export class AIProviderFactory {
 
     // Conservar el override actual o el modelo global/default efectivo no requiere
     // una llamada de catálogo: son valores ya confiados por la configuración vigente.
-    if (normalizedModel === persistedModel || (persistedModel === null && normalizedModel === effectiveModel)) {
+    if (
+      normalizedModel === persistedModel ||
+      (persistedModel === null && normalizedModel === effectiveModel)
+    ) {
       return { allowed: true, catalogStatus: 'unavailable' };
     }
 
@@ -213,7 +216,8 @@ class ScopedBotAIProvider implements AIProvider {
     let availableModels: string[] = [];
 
     // La elegibilidad para chat y la existencia real en Groq son conceptos distintos.
-    // Solo activeModelIds puede demostrar que un modelo desapareció del proveedor.
+    // Una ausencia aparente (incluso desde una lectura live) siempre requiere una
+    // segunda consulta forzada antes de persistir una promoción automática.
     try {
       const knownCatalog = await this.catalog.fetchChatModels(
         apiKey,
@@ -225,10 +229,8 @@ class ScopedBotAIProvider implements AIProvider {
       }
 
       let confirmedRetirementCatalog: CatalogResult | null = null;
-      if (knownCatalog.status === 'live' && !knownCatalog.activeModelIds.includes(principalModel)) {
-        confirmedRetirementCatalog = knownCatalog;
-      } else if (
-        knownCatalog.status === 'cached' &&
+      if (
+        (knownCatalog.status === 'live' || knownCatalog.status === 'cached') &&
         !knownCatalog.activeModelIds.includes(principalModel)
       ) {
         const liveCatalog = await this.catalog.fetchChatModels(
