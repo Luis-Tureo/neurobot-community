@@ -6,7 +6,7 @@ import type {
   KnowledgeFragment,
 } from '../domain/types.js';
 import type { AppDatabase } from '../persistence/database.js';
-import type { AIProvider, GroundedResponseResult } from './ai-provider.js';
+import type { AIProvider, AIProviderErrorCode, GroundedResponseResult } from './ai-provider.js';
 import { AIProviderError } from './ai-provider.js';
 import {
   ASSISTANT_CACHE_PROMPT_VERSION,
@@ -195,7 +195,7 @@ export class AssistantQueryService {
         userHash,
       );
     } else {
-      this.logger.info(
+      this.safeLoggerInfo(
         {
           operation: 'KNOWLEDGE_FOUND',
           botId: this.botId,
@@ -259,6 +259,8 @@ export class AssistantQueryService {
     }
 
     const context = bundle.context;
+    const INTERNAL_ERROR_MESSAGE =
+      'Ocurrió un problema interno al procesar la respuesta. Intenta nuevamente más tarde.';
     const estimatedInputTokens = estimateTokens(
       `${systemInstruction}\n${context}\n${normalizedQuestion}`,
     );
@@ -272,6 +274,9 @@ export class AssistantQueryService {
         classifyError: (error) => this.provider.classifyProviderError(error),
         ...(onWaitNotice === undefined ? {} : { onWaitNotice }),
         operation: async (): Promise<AssistantQueryResult> => {
+          // =========================================================================
+          // ETAPA A: PRE-PROVEEDOR (Reserva de cuota y validaciones internas)
+          // =========================================================================
           const period = localPeriod(now, profile.timezone);
           let decision;
           try {
@@ -288,7 +293,7 @@ export class AssistantQueryService {
               now,
             });
           } catch (reservationError) {
-            this.database.recordTechnicalEvent({
+            this.safeRecordTechnicalEvent({
               botId: this.botId,
               eventType: 'AI_RESERVATION_FAILED',
               result: 'FAILED',
@@ -297,7 +302,7 @@ export class AssistantQueryService {
               userHash,
             });
             this.log('AI_INTERNAL_PROCESSING_FAILED', 'RESERVATION_FAILED', groupHash, userHash);
-            this.logger.error(
+            this.safeLoggerError(
               {
                 operation: 'AI_RESERVATION_FAILED',
                 botId: this.botId,
@@ -311,7 +316,7 @@ export class AssistantQueryService {
               'Fallo al reservar cuota de IA antes de consultar al proveedor',
             );
             return {
-              text: 'Ocurrió un problema interno al procesar la respuesta. Intenta nuevamente en un momento.',
+              text: INTERNAL_ERROR_MESSAGE,
               code: 'AI_INTERNAL_ERROR',
             };
           }
@@ -329,6 +334,9 @@ export class AssistantQueryService {
           }
           this.log('AI_QUOTA_RESERVED', 'RESERVED', groupHash, userHash);
 
+          // =========================================================================
+          // ETAPA B: PROVEEDOR (Llamada exclusiva a la IA)
+          // =========================================================================
           let generated: GroundedResponseResult;
           try {
             this.log('BOT_AI_REQUEST_STARTED', 'STARTED', groupHash, userHash);
@@ -352,150 +360,207 @@ export class AssistantQueryService {
             throw providerError;
           }
 
-          // Registrar inmediatamente el éxito del proveedor tras recibir la respuesta
-          const modelUsed = generated.model ?? this.provider.getModelInformation().model;
-          this.database.recordTechnicalEvent({
-            botId: this.botId,
-            eventType: 'AI_PROVIDER_CALL_SUCCEEDED',
-            result: 'SUCCESS',
-            groupHash,
-            userHash,
-            itemCount: generated.usage.totalTokens,
-            source: modelUsed,
-          });
-          this.logger.info(
-            {
-              operation: 'AI_PROVIDER_CALL_SUCCEEDED',
+          // =========================================================================
+          // ETAPA C: POST-PROVEEDOR (Aislamiento total tras HTTP 200 / éxito de tokens)
+          // =========================================================================
+          // Una vez que generateGroundedResponse retornó con éxito, NINGÚN error posterior
+          // puede propagarse a la cola como fallo de proveedor ni disparar reintentos.
+          const providerSucceeded = true;
+          void providerSucceeded;
+          try {
+            // 1. Registro inmediato del éxito del proveedor
+            const modelUsed = generated.model ?? this.provider.getModelInformation().model;
+            this.safeRecordTechnicalEvent({
               botId: this.botId,
+              eventType: 'AI_PROVIDER_CALL_SUCCEEDED',
               result: 'SUCCESS',
-              model: modelUsed,
-              inputTokens: generated.usage.inputTokens,
-              outputTokens: generated.usage.outputTokens,
-              totalTokens: generated.usage.totalTokens,
               groupHash,
               userHash,
-            },
-            'Llamada al proveedor de IA completada exitosamente',
-          );
-
-          // Validación de la respuesta generada
-          let validated: string | null;
-          try {
-            const generatedValidated = validateGeneratedResponse(generated.text, settings);
-            validated =
-              generatedValidated === null
-                ? null
-                : bundle.missingInternalEvidence && bundle.plan.generalEducation
-                  ? validateGeneratedResponse(
-                      appendRequiredFallback(
-                        generatedValidated,
-                        profile.noInformationMessage,
-                        settings,
-                      ),
-                      settings,
-                    )
-                  : generatedValidated;
-          } catch (validationError) {
-            this.logger.error(
+              itemCount: generated.usage.totalTokens,
+              source: modelUsed,
+            });
+            this.safeLoggerInfo(
               {
-                operation: 'AI_RESPONSE_VALIDATION_FAILED',
+                operation: 'AI_PROVIDER_CALL_SUCCEEDED',
+                botId: this.botId,
+                result: 'SUCCESS',
+                model: modelUsed,
+                inputTokens: generated.usage.inputTokens,
+                outputTokens: generated.usage.outputTokens,
+                totalTokens: generated.usage.totalTokens,
+                groupHash,
+                userHash,
+              },
+              'Llamada al proveedor de IA completada exitosamente',
+            );
+
+            // 2. Validación de la respuesta generada
+            let validated: string | null;
+            try {
+              const generatedValidated = validateGeneratedResponse(generated.text, settings);
+              validated =
+                generatedValidated === null
+                  ? null
+                  : bundle.missingInternalEvidence && bundle.plan.generalEducation
+                    ? validateGeneratedResponse(
+                        appendRequiredFallback(
+                          generatedValidated,
+                          profile.noInformationMessage,
+                          settings,
+                        ),
+                        settings,
+                      )
+                    : generatedValidated;
+            } catch (validationError) {
+              this.safeRecordTechnicalEvent({
+                botId: this.botId,
+                eventType: 'AI_RESPONSE_VALIDATION_INTERNAL_FAILED',
+                result: 'FAILED',
+                errorCode: 'VALIDATION_EXCEPTION',
+                groupHash,
+                userHash,
+              });
+              this.log(
+                'AI_INTERNAL_PROCESSING_FAILED',
+                'VALIDATION_EXCEPTION',
+                groupHash,
+                userHash,
+              );
+              this.safeLoggerError(
+                {
+                  operation: 'AI_RESPONSE_VALIDATION_INTERNAL_FAILED',
+                  botId: this.botId,
+                  groupHash,
+                  userHash,
+                  error:
+                    validationError instanceof Error
+                      ? validationError.message
+                      : String(validationError),
+                },
+                'Error inesperado durante la ejecución del validador de respuesta',
+              );
+              try {
+                this.database.releaseAIUsageReservation(decision.reservation.id);
+              } catch {
+                // Liberación best-effort
+              }
+              return {
+                text: INTERNAL_ERROR_MESSAGE,
+                code: 'AI_INTERNAL_ERROR',
+              };
+            }
+
+            if (validated === null) {
+              try {
+                this.database.releaseAIUsageReservation(decision.reservation.id);
+              } catch {
+                // Liberación best-effort
+              }
+              this.log('AI_QUOTA_RELEASED', 'AI_RESPONSE_REJECTED', groupHash, userHash);
+              this.log('AI_RESPONSE_REJECTED', 'REJECTED', groupHash, userHash);
+              this.log('AI_CALL_FAILED', 'AI_RESPONSE_REJECTED', groupHash, userHash);
+              return { text: profile.noInformationMessage, code: 'AI_RESPONSE_REJECTED' };
+            }
+
+            this.log('AI_RESPONSE_VALIDATED', 'VALIDATED', groupHash, userHash);
+
+            // 3. Confirmación de cuota y consumo en persistencia
+            try {
+              this.database.completeAIUsageReservation(
+                decision.reservation.id,
+                generated.usage,
+                'success',
+                null,
+                period.hour,
+              );
+              this.log('AI_QUOTA_CONFIRMED', 'CONFIRMED', groupHash, userHash);
+            } catch (quotaError) {
+              this.safeRecordTechnicalEvent({
+                botId: this.botId,
+                eventType: 'AI_USAGE_FINALIZATION_FAILED',
+                result: 'FAILED',
+                errorCode: 'SQLITE_ERROR',
+                groupHash,
+                userHash,
+              });
+              this.log(
+                'AI_INTERNAL_PROCESSING_FAILED',
+                'USAGE_FINALIZATION_FAILED',
+                groupHash,
+                userHash,
+              );
+              this.safeLoggerError(
+                {
+                  operation: 'AI_USAGE_FINALIZATION_FAILED',
+                  botId: this.botId,
+                  groupHash,
+                  userHash,
+                  error: quotaError instanceof Error ? quotaError.message : String(quotaError),
+                },
+                'Fallo al finalizar la reserva de cuota de IA en la base de datos',
+              );
+              try {
+                this.database.releaseAIUsageReservation(decision.reservation.id);
+              } catch {
+                // Compensación best-effort
+              }
+              return {
+                text: INTERNAL_ERROR_MESSAGE,
+                code: 'AI_INTERNAL_ERROR',
+              };
+            }
+
+            // 4. Guardado en caché (optimización no crítica: no interrumpe la entrega de respuesta válida)
+            if (bundle.plan.scope === 'GENERAL_EDUCATION' && recentTurn === null) {
+              try {
+                const saved = this.answerCache.saveGenerated(normalizedQuestion, validated, fragments);
+                if (saved !== null) {
+                  this.log('AI_CACHE_WRITE_SUCCEEDED', 'SUCCEEDED', groupHash, userHash);
+                }
+              } catch (cacheError) {
+                this.log('AI_CACHE_WRITE_FAILED', 'CACHE_ERROR', groupHash, userHash);
+                this.safeLoggerWarn(
+                  {
+                    operation: 'AI_CACHE_WRITE_FAILED',
+                    botId: this.botId,
+                    groupHash,
+                    userHash,
+                    error: cacheError instanceof Error ? cacheError.message : String(cacheError),
+                  },
+                  'No fue posible guardar la respuesta en caché; la respuesta del asistente se entregará normalmente',
+                );
+              }
+            }
+
+            this.log('AI_CALL_SUCCESS', 'SUCCESS', groupHash, userHash);
+            return { text: validated, code: 'AI_RESPONSE' };
+          } catch (postProviderError) {
+            this.safeRecordTechnicalEvent({
+              botId: this.botId,
+              eventType: 'AI_INTERNAL_PROCESSING_FAILED',
+              result: 'POST_PROVIDER_UNHANDLED',
+              errorCode: 'INTERNAL_ERROR',
+              groupHash,
+              userHash,
+            });
+            this.safeLoggerError(
+              {
+                operation: 'AI_INTERNAL_PROCESSING_FAILED',
                 botId: this.botId,
                 groupHash,
                 userHash,
                 error:
-                  validationError instanceof Error
-                    ? validationError.message
-                    : String(validationError),
+                  postProviderError instanceof Error
+                    ? postProviderError.message
+                    : String(postProviderError),
               },
-              'Error interno durante la validación de la respuesta de IA',
+              'Error interno no controlado en la etapa post-proveedor',
             );
-            validated = null;
-          }
-
-          if (validated === null) {
-            try {
-              this.database.releaseAIUsageReservation(decision.reservation.id);
-            } catch {
-              // Liberación best-effort
-            }
-            this.log('AI_QUOTA_RELEASED', 'AI_RESPONSE_REJECTED', groupHash, userHash);
-            this.log('AI_RESPONSE_REJECTED', 'REJECTED', groupHash, userHash);
-            this.log('AI_CALL_FAILED', 'AI_RESPONSE_REJECTED', groupHash, userHash);
-            return { text: profile.noInformationMessage, code: 'AI_RESPONSE_REJECTED' };
-          }
-
-          this.log('AI_RESPONSE_VALIDATED', 'VALIDATED', groupHash, userHash);
-
-          // Confirmación de cuota y consumo en persistencia
-          try {
-            this.database.completeAIUsageReservation(
-              decision.reservation.id,
-              generated.usage,
-              'success',
-              null,
-              period.hour,
-            );
-            this.log('AI_QUOTA_CONFIRMED', 'CONFIRMED', groupHash, userHash);
-          } catch (quotaError) {
-            this.database.recordTechnicalEvent({
-              botId: this.botId,
-              eventType: 'AI_USAGE_FINALIZATION_FAILED',
-              result: 'FAILED',
-              errorCode: 'SQLITE_ERROR',
-              groupHash,
-              userHash,
-            });
-            this.log(
-              'AI_INTERNAL_PROCESSING_FAILED',
-              'USAGE_FINALIZATION_FAILED',
-              groupHash,
-              userHash,
-            );
-            this.logger.error(
-              {
-                operation: 'AI_USAGE_FINALIZATION_FAILED',
-                botId: this.botId,
-                groupHash,
-                userHash,
-                error: quotaError instanceof Error ? quotaError.message : String(quotaError),
-              },
-              'Fallo al finalizar la reserva de cuota de IA en la base de datos',
-            );
-            try {
-              this.database.releaseAIUsageReservation(decision.reservation.id);
-            } catch {
-              // Compensación best-effort
-            }
             return {
-              text: 'Ocurrió un problema interno al procesar la respuesta. Intenta nuevamente en un momento.',
+              text: INTERNAL_ERROR_MESSAGE,
               code: 'AI_INTERNAL_ERROR',
             };
           }
-
-          // Guardado en caché (optimización no crítica: no interrumpe la entrega de respuesta válida)
-          if (bundle.plan.scope === 'GENERAL_EDUCATION' && recentTurn === null) {
-            try {
-              const saved = this.answerCache.saveGenerated(normalizedQuestion, validated, fragments);
-              if (saved !== null) {
-                this.log('AI_CACHE_WRITE_SUCCEEDED', 'SUCCEEDED', groupHash, userHash);
-              }
-            } catch (cacheError) {
-              this.log('AI_CACHE_WRITE_FAILED', 'CACHE_ERROR', groupHash, userHash);
-              this.logger.warn(
-                {
-                  operation: 'AI_CACHE_WRITE_FAILED',
-                  botId: this.botId,
-                  groupHash,
-                  userHash,
-                  error: cacheError instanceof Error ? cacheError.message : String(cacheError),
-                },
-                'No fue posible guardar la respuesta en caché; la respuesta del asistente se entregará normalmente',
-              );
-            }
-          }
-
-          this.log('AI_CALL_SUCCESS', 'SUCCESS', groupHash, userHash);
-          return { text: validated, code: 'AI_RESPONSE' };
         },
       });
       if (flight.coalesced) {
@@ -526,24 +591,10 @@ export class AssistantQueryService {
             code: 'AI_CIRCUIT_OPEN',
           };
       }
-      if (
-        error instanceof AIProviderError ||
-        (error instanceof DOMException && error.name === 'AbortError') ||
-        (error instanceof Error && !error.name.includes('Sqlite') && !error.message.includes('SQLITE'))
-      ) {
-        const providerCode = this.provider.classifyProviderError(error);
-        const text =
-          providerCode === 'AI_PROVIDER_RATE_LIMITED'
-            ? 'Hay mucha actividad en el servicio de inteligencia artificial. Intenta nuevamente en unos minutos.'
-            : 'No pude consultar la inteligencia artificial en este momento. Intenta nuevamente en 1 minuto.';
-        this.answerCache.saveUnanswered(normalizedQuestion, text, 'Error de IA', providerCode);
-        return { text, code: 'AI_ERROR' };
-      }
-      this.log('AI_INTERNAL_PROCESSING_FAILED', 'UNEXPECTED_ERROR', groupHash, userHash);
-      return {
-        text: 'Ocurrió un problema interno al procesar la respuesta. Intenta nuevamente en un momento.',
-        code: 'AI_INTERNAL_ERROR',
-      };
+      const providerCode = this.provider.classifyProviderError(error);
+      const text = formatProviderErrorMessage(error, providerCode);
+      this.answerCache.saveUnanswered(normalizedQuestion, text, 'Error de IA', providerCode);
+      return { text, code: 'AI_ERROR' };
     }
   }
 
@@ -596,15 +647,47 @@ export class AssistantQueryService {
     }
   }
 
+  private safeRecordTechnicalEvent(event: Parameters<AppDatabase['recordTechnicalEvent']>[0]): void {
+    try {
+      this.database.recordTechnicalEvent(event);
+    } catch {
+      // Telemetría en base de datos es best-effort y no debe alterar el flujo funcional
+    }
+  }
+
+  private safeLoggerInfo(obj: object, msg: string): void {
+    try {
+      this.logger.info(obj, msg);
+    } catch {
+      // Logger es best-effort
+    }
+  }
+
+  private safeLoggerWarn(obj: object, msg: string): void {
+    try {
+      this.logger.warn(obj, msg);
+    } catch {
+      // Logger es best-effort
+    }
+  }
+
+  private safeLoggerError(obj: object, msg: string): void {
+    try {
+      this.logger.error(obj, msg);
+    } catch {
+      // Logger es best-effort
+    }
+  }
+
   private log(operation: string, result: string, groupHash: string, userHash: string): void {
-    this.database.recordTechnicalEvent({
+    this.safeRecordTechnicalEvent({
       botId: this.botId,
       eventType: operation,
       result,
       groupHash,
       userHash,
     });
-    this.logger.info(
+    this.safeLoggerInfo(
       { operation, botId: this.botId, result, groupHash, userHash },
       'Evento seguro del asistente',
     );
@@ -874,4 +957,19 @@ function limitEvent(code: string): string {
   if (code.includes('GROUP')) return 'AI_LIMIT_GROUP_REACHED';
   if (code.includes('MONTHLY')) return 'AI_LIMIT_MONTHLY_REACHED';
   return 'AI_LIMIT_DAILY_REACHED';
+}
+
+function formatProviderErrorMessage(error: unknown, providerCode: AIProviderErrorCode): string {
+  if (providerCode === 'AI_PROVIDER_RATE_LIMITED') {
+    const retry = error instanceof AIProviderError ? error.retryAfterSeconds : null;
+    if (typeof retry === 'number' && retry > 0) {
+      if (retry < 60) {
+        return `El servicio de inteligencia artificial está temporalmente limitado. Intenta nuevamente en ${retry} segundos.`;
+      }
+      const minutes = Math.ceil(retry / 60);
+      return `El servicio de inteligencia artificial está temporalmente limitado. Intenta nuevamente en aproximadamente ${minutes} minuto${minutes === 1 ? '' : 's'}.`;
+    }
+    return 'El servicio de inteligencia artificial está temporalmente limitado. Intenta nuevamente más tarde.';
+  }
+  return 'El servicio de inteligencia artificial no está disponible temporalmente. Intenta nuevamente más tarde.';
 }

@@ -110,6 +110,7 @@ export class AnswerCacheService {
       this.event('LOCAL_ANSWER_RECORDED', reason);
       return saved;
     } catch {
+      this.event('LOCAL_ANSWER_WRITE_FAILED', 'DB_ERROR');
       return null;
     }
   }
@@ -149,6 +150,7 @@ export class AnswerCacheService {
       this.event('UNANSWERED_QUESTION_RECORDED', reason);
       return saved;
     } catch {
+      this.event('UNANSWERED_QUESTION_WRITE_FAILED', 'DB_ERROR');
       return null;
     }
   }
@@ -161,14 +163,18 @@ export class AnswerCacheService {
     const current = activeFlights.get(key) as Promise<T> | undefined;
     if (current !== undefined) {
       this.event('CONCURRENT_QUERY_COALESCED', 'REUSED_IN_FLIGHT');
-      return { value: await current, coalesced: true };
+      const value = await current;
+      return { value, coalesced: true };
     }
     const flight = operation();
     activeFlights.set(key, flight);
     try {
-      return { value: await flight, coalesced: false };
+      const value = await flight;
+      return { value, coalesced: false };
     } finally {
-      if (activeFlights.get(key) === flight) activeFlights.delete(key);
+      if (activeFlights.get(key) === flight) {
+        activeFlights.delete(key);
+      }
     }
   }
 
@@ -223,16 +229,24 @@ export class AnswerCacheService {
     kind: CacheMatch['kind'],
     matchedQuestion?: string,
   ): CacheMatch {
-    this.database.recordCachedAnswerHit(this.botId, answer.id);
-    const usedAnswer =
-      matchedQuestion !== undefined
-        ? this.database.addCachedAnswerVariant(
-            this.botId,
-            answer.id,
-            matchedQuestion.trim(),
-            hashNormalizedQuestion(normalizeQuestionForCache(matchedQuestion)),
-          )
-        : answer;
+    try {
+      this.database.recordCachedAnswerHit(this.botId, answer.id);
+    } catch {
+      // Best-effort
+    }
+    let usedAnswer = answer;
+    if (matchedQuestion !== undefined) {
+      try {
+        usedAnswer = this.database.addCachedAnswerVariant(
+          this.botId,
+          answer.id,
+          matchedQuestion.trim(),
+          hashNormalizedQuestion(normalizeQuestionForCache(matchedQuestion)),
+        );
+      } catch {
+        usedAnswer = answer;
+      }
+    }
     this.event(
       kind === 'FAQ'
         ? 'LOCAL_FAQ_RESPONSE'
@@ -245,11 +259,19 @@ export class AnswerCacheService {
   }
 
   private event(eventType: string, result: string): void {
-    this.database.recordTechnicalEvent({ botId: this.botId, eventType, result });
-    this.logger.info(
-      { operation: eventType, botId: this.botId, result },
-      'Evento seguro de respuestas guardadas',
-    );
+    try {
+      this.database.recordTechnicalEvent({ botId: this.botId, eventType, result });
+    } catch {
+      // Telemetría en persistencia es best-effort
+    }
+    try {
+      this.logger.info(
+        { operation: eventType, botId: this.botId, result },
+        'Evento seguro de respuestas guardadas',
+      );
+    } catch {
+      // Logger es best-effort
+    }
   }
 }
 

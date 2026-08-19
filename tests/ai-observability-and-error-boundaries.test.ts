@@ -172,8 +172,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     expect(providerSuccessEvent?.item_count).toBe(761);
   });
 
-  // 2. Groq error real -> clasificación de proveedor
-  it('2. Groq error real 500 se clasifica como error del proveedor y registra AI_CALL_FAILED', async () => {
+  // 2. Groq error real 500
+  it('2. Groq error real 500 se clasifica como error del proveedor y registra AI_CALL_FAILED sin prometer "1 minuto"', async () => {
     ctx.provider.failure = new AIProviderError('AI_TEMPORARY_ERROR', 'Groq server error', true);
     ctx.database.saveAIQueueSettings('neurobot', {
       ...ctx.database.getAIQueueSettings('neurobot'),
@@ -188,8 +188,9 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
 
     expect(result.code).toBe('AI_ERROR');
     expect(result.text).toBe(
-      'No pude consultar la inteligencia artificial en este momento. Intenta nuevamente en 1 minuto.',
+      'El servicio de inteligencia artificial no está disponible temporalmente. Intenta nuevamente más tarde.',
     );
+    expect(result.text).not.toContain('1 minuto');
     expect(ctx.provider.calls).toBe(1);
 
     const events = ctx.database.getTechnicalEvents();
@@ -197,8 +198,28 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     expect(events.some((e) => e.event_type === 'AI_CALL_FAILED' && e.result === 'AI_TEMPORARY_ERROR')).toBe(true);
   });
 
-  // 3. Groq 429 -> mensaje de rate limit
-  it('3. Groq 429 rate limit devuelve mensaje adecuado de espera', async () => {
+  // 3. Groq timeout real
+  it('3. Groq timeout reintenta según configuración de la cola', async () => {
+    ctx.provider.failure = new AIProviderError('AI_TIMEOUT', 'Timeout en solicitud', true);
+    ctx.database.saveAIQueueSettings('neurobot', {
+      ...ctx.database.getAIQueueSettings('neurobot'),
+      maxRetries: 1,
+      initialRetryDelaySeconds: 1,
+      maximumRetryDelaySeconds: 1,
+    });
+
+    const result = await ctx.service.answerQuestion(
+      TEST_QUESTION,
+      ctx.groupHash,
+      ctx.userHash,
+    );
+
+    expect(result.code).toBe('AI_ERROR');
+    expect(ctx.provider.calls).toBe(2);
+  });
+
+  // 4. Groq 429 con Retry-After < 60 segundos
+  it('4. Groq 429 con Retry-After < 60s devuelve el tiempo exacto en segundos', async () => {
     ctx.provider.failure = new AIProviderError(
       'AI_PROVIDER_RATE_LIMITED',
       'Rate limit exceeded',
@@ -218,18 +239,21 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
 
     expect(result.code).toBe('AI_ERROR');
     expect(result.text).toBe(
-      'Hay mucha actividad en el servicio de inteligencia artificial. Intenta nuevamente en unos minutos.',
+      'El servicio de inteligencia artificial está temporalmente limitado. Intenta nuevamente en 30 segundos.',
     );
   });
 
-  // 4. Groq timeout -> retry/fallback
-  it('4. Groq timeout reintenta según configuración de la cola', async () => {
-    ctx.provider.failure = new AIProviderError('AI_TIMEOUT', 'Timeout en solicitud', true);
+  // 5. Groq 429 con Retry-After >= 60 segundos
+  it('5. Groq 429 con Retry-After >= 60s devuelve el tiempo en minutos', async () => {
+    ctx.provider.failure = new AIProviderError(
+      'AI_PROVIDER_RATE_LIMITED',
+      'Rate limit exceeded',
+      true,
+      120,
+    );
     ctx.database.saveAIQueueSettings('neurobot', {
       ...ctx.database.getAIQueueSettings('neurobot'),
-      maxRetries: 1,
-      initialRetryDelaySeconds: 1,
-      maximumRetryDelaySeconds: 1,
+      maxRetries: 0,
     });
 
     const result = await ctx.service.answerQuestion(
@@ -239,12 +263,39 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     );
 
     expect(result.code).toBe('AI_ERROR');
-    // Se intentó la llamada inicial + 1 reintento
-    expect(ctx.provider.calls).toBe(2);
+    expect(result.text).toBe(
+      'El servicio de inteligencia artificial está temporalmente limitado. Intenta nuevamente en aproximadamente 2 minutos.',
+    );
   });
 
-  // 5. Groq success + respuesta inválida -> AI_RESPONSE_REJECTED
-  it('5. Groq success + respuesta rechazada por validación clasifica como AI_RESPONSE_REJECTED sin reintentar Groq', async () => {
+  // 6. Groq 429 sin Retry-After
+  it('6. Groq 429 sin Retry-After devuelve "más tarde" sin inventar tiempo arbitrario', async () => {
+    ctx.provider.failure = new AIProviderError(
+      'AI_PROVIDER_RATE_LIMITED',
+      'Rate limit exceeded',
+      true,
+      null,
+    );
+    ctx.database.saveAIQueueSettings('neurobot', {
+      ...ctx.database.getAIQueueSettings('neurobot'),
+      maxRetries: 0,
+    });
+
+    const result = await ctx.service.answerQuestion(
+      TEST_QUESTION,
+      ctx.groupHash,
+      ctx.userHash,
+    );
+
+    expect(result.code).toBe('AI_ERROR');
+    expect(result.text).toBe(
+      'El servicio de inteligencia artificial está temporalmente limitado. Intenta nuevamente más tarde.',
+    );
+    expect(result.text).not.toContain('1 minuto');
+  });
+
+  // 7. Groq success + respuesta rechazada por validación de seguridad
+  it('7. Groq success + respuesta rechazada clasifica como AI_RESPONSE_REJECTED sin reintentar Groq', async () => {
     ctx.provider.responseText = 'Debes tomar 50mg de este medicamento diariamente.';
 
     const result = await ctx.service.answerQuestion(
@@ -259,17 +310,48 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     const events = ctx.database.getTechnicalEvents();
     const eventTypes = events.map((e) => e.event_type);
 
-    // El proveedor tuvo éxito primero
     expect(eventTypes).toContain('AI_PROVIDER_CALL_SUCCEEDED');
-    // Luego se rechazó por validación
     expect(eventTypes).toContain('AI_RESPONSE_REJECTED');
     expect(eventTypes).toContain('AI_QUOTA_RELEASED');
     expect(eventTypes).not.toContain('AI_QUOTA_CONFIRMED');
   });
 
-  // 6, 7, 8. ESCENARIO EXACTO DE LAS 08:43 (Groq success HTTP 200 + completeAIUsageReservation falla)
-  it('6-8. Escenario 08:43: Groq responde correctamente pero completeAIUsageReservation lanza excepción', async () => {
-    // Simular que completeAIUsageReservation falla internamente (ej. SQLite disk I/O o lock)
+  // 8. Groq success + excepción inesperada en validación
+  it('8. Groq success + excepción en validación clasifica como AI_INTERNAL_ERROR (no AI_RESPONSE_REJECTED, no retry)', async () => {
+    ctx.provider.responseText = 'Texto para forzar error en validador';
+    const originalSplit = String.prototype.split;
+    let thrown = false;
+    String.prototype.split = function (separator: unknown, limit?: unknown): string[] {
+      if (this.includes('Texto para forzar error en validador') && !thrown) {
+        thrown = true;
+        throw new TypeError('Simulated unexpected validator breakdown');
+      }
+      return (originalSplit as (s: unknown, l?: unknown) => string[]).call(this, separator, limit);
+    };
+
+    try {
+      const result = await ctx.service.answerQuestion(
+        TEST_QUESTION,
+        ctx.groupHash,
+        ctx.userHash,
+      );
+
+      expect(ctx.provider.calls).toBe(1);
+      expect(result.code).toBe('AI_INTERNAL_ERROR');
+      expect(result.text).toBe(
+        'Ocurrió un problema interno al procesar la respuesta. Intenta nuevamente más tarde.',
+      );
+
+      const events = ctx.database.getTechnicalEvents();
+      expect(events.some((e) => e.event_type === 'AI_RESPONSE_VALIDATION_INTERNAL_FAILED')).toBe(true);
+      expect(events.some((e) => e.event_type === 'AI_PROVIDER_CALL_SUCCEEDED')).toBe(true);
+    } finally {
+      String.prototype.split = originalSplit;
+    }
+  });
+
+  // 9. ESCENARIO EXACTO DE LAS 08:43 (Groq success HTTP 200 + completeAIUsageReservation falla)
+  it('9. Escenario 08:43: Groq responde 200 pero completeAIUsageReservation lanza SQLITE_BUSY', async () => {
     const originalComplete = ctx.database.completeAIUsageReservation.bind(ctx.database);
     ctx.database.completeAIUsageReservation = () => {
       throw new Error('SQLITE_BUSY: database is locked');
@@ -281,17 +363,17 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
       ctx.userHash,
     );
 
-    // Comprobar 1: Groq fue llamado exactamente UNA vez
+    // Groq fue llamado exactamente UNA vez
     expect(ctx.provider.calls).toBe(1);
 
-    // Comprobar 2: El resultado refleja fallo interno, no error de proveedor
+    // El resultado refleja fallo interno, no error de proveedor
     expect(result.code).toBe('AI_INTERNAL_ERROR');
     expect(result.text).toBe(
-      'Ocurrió un problema interno al procesar la respuesta. Intenta nuevamente en un momento.',
+      'Ocurrió un problema interno al procesar la respuesta. Intenta nuevamente más tarde.',
     );
     expect(result.text).not.toContain('No pude consultar la inteligencia artificial');
 
-    // Comprobar 3: Telemetría registra éxito del proveedor y fallo interno
+    // Telemetría registra éxito del proveedor y fallo interno
     const events = ctx.database.getTechnicalEvents();
     const eventTypes = events.map((e) => e.event_type);
 
@@ -305,13 +387,65 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     const callFailedEvent = events.find((e) => e.event_type === 'AI_CALL_FAILED');
     expect(callFailedEvent).toBeUndefined();
 
-    // Restaurar método
     ctx.database.completeAIUsageReservation = originalComplete;
   });
 
-  // 9, 10. Groq success + cache write falla
-  it('9-10. Groq success + fallo al escribir en caché no degrada la respuesta del asistente', async () => {
-    // Simular que saveCachedAnswer falla en base de datos
+  // 10. Groq success + releaseAIUsageReservation lanza excepción
+  it('10. Groq success + fallo en release de compensación no rompe el retorno de error interno', async () => {
+    const originalComplete = ctx.database.completeAIUsageReservation.bind(ctx.database);
+    const originalRelease = ctx.database.releaseAIUsageReservation.bind(ctx.database);
+
+    ctx.database.completeAIUsageReservation = () => {
+      throw new Error('SQLITE_BUSY: database is locked');
+    };
+    ctx.database.releaseAIUsageReservation = () => {
+      throw new Error('SQLITE_BUSY: release also locked');
+    };
+
+    const result = await ctx.service.answerQuestion(
+      TEST_QUESTION,
+      ctx.groupHash,
+      ctx.userHash,
+    );
+
+    expect(ctx.provider.calls).toBe(1);
+    expect(result.code).toBe('AI_INTERNAL_ERROR');
+    expect(result.text).toBe(
+      'Ocurrió un problema interno al procesar la respuesta. Intenta nuevamente más tarde.',
+    );
+
+    ctx.database.completeAIUsageReservation = originalComplete;
+    ctx.database.releaseAIUsageReservation = originalRelease;
+  });
+
+  // 11. Groq success + fallo en telemetría de AI_PROVIDER_CALL_SUCCEEDED
+  it('11. Groq success + fallo al escribir evento de telemetría entrega AI_RESPONSE normalmente', async () => {
+    const originalRecord = ctx.database.recordTechnicalEvent.bind(ctx.database);
+    let failedOnce = false;
+    ctx.database.recordTechnicalEvent = (event) => {
+      if (event.eventType === 'AI_PROVIDER_CALL_SUCCEEDED') {
+        failedOnce = true;
+        throw new Error('SQLITE_BUSY: telemetry disk locked');
+      }
+      return originalRecord(event);
+    };
+
+    const result = await ctx.service.answerQuestion(
+      TEST_QUESTION,
+      ctx.groupHash,
+      ctx.userHash,
+    );
+
+    expect(failedOnce).toBe(true);
+    expect(ctx.provider.calls).toBe(1);
+    expect(result.code).toBe('AI_RESPONSE');
+    expect(result.text).toContain('La dispraxia');
+
+    ctx.database.recordTechnicalEvent = originalRecord;
+  });
+
+  // 12. Groq success + cache write falla
+  it('12. Groq success + fallo al escribir en caché entrega respuesta AI_RESPONSE y registra AI_CACHE_WRITE_FAILED', async () => {
     const originalSave = ctx.database.saveCachedAnswer.bind(ctx.database);
     ctx.database.saveCachedAnswer = () => {
       throw new Error('SQLITE_READONLY: attempt to write a readonly database');
@@ -323,7 +457,6 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
       ctx.userHash,
     );
 
-    // La respuesta se entrega exitosamente
     expect(result.code).toBe('AI_RESPONSE');
     expect(result.text).toContain('La dispraxia');
     expect(ctx.provider.calls).toBe(1);
@@ -335,8 +468,70 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     ctx.database.saveCachedAnswer = originalSave;
   });
 
-  // 11. Error interno previo a consultar Groq (reserva de cuota falla)
-  it('11. Error interno en reserva no llama a Groq y retorna AI_INTERNAL_ERROR', async () => {
+  // 13. Groq success + cache throw Y telemetry throw
+  it('13. Groq success + cache AND telemetry throw entrega AI_RESPONSE sin lanzar', async () => {
+    const originalSave = ctx.database.saveCachedAnswer.bind(ctx.database);
+    const originalRecord = ctx.database.recordTechnicalEvent.bind(ctx.database);
+
+    ctx.database.saveCachedAnswer = () => {
+      throw new Error('SQLITE_BUSY: cache locked');
+    };
+    ctx.database.recordTechnicalEvent = () => {
+      throw new Error('SQLITE_BUSY: all telemetry locked');
+    };
+
+    const result = await ctx.service.answerQuestion(
+      TEST_QUESTION,
+      ctx.groupHash,
+      ctx.userHash,
+    );
+
+    expect(result.code).toBe('AI_RESPONSE');
+    expect(result.text).toContain('La dispraxia');
+    expect(ctx.provider.calls).toBe(1);
+
+    ctx.database.saveCachedAnswer = originalSave;
+    ctx.database.recordTechnicalEvent = originalRecord;
+  });
+
+  // 14. SQLite completamente bloqueado post-provider
+  it('14. SQLite completamente bloqueado post-provider retorna AI_INTERNAL_ERROR de forma segura con provider.calls === 1', async () => {
+    const originalComplete = ctx.database.completeAIUsageReservation.bind(ctx.database);
+    const originalRecord = ctx.database.recordTechnicalEvent.bind(ctx.database);
+    const originalRelease = ctx.database.releaseAIUsageReservation.bind(ctx.database);
+
+    // Hacer que TODAS las operaciones post-provider de SQLite fallen
+    ctx.database.completeAIUsageReservation = () => {
+      throw new Error('SQLITE_CORRUPT: disk image is malformed');
+    };
+    ctx.database.recordTechnicalEvent = () => {
+      throw new Error('SQLITE_CORRUPT: disk image is malformed');
+    };
+    ctx.database.releaseAIUsageReservation = () => {
+      throw new Error('SQLITE_CORRUPT: disk image is malformed');
+    };
+
+    const result = await ctx.service.answerQuestion(
+      TEST_QUESTION,
+      ctx.groupHash,
+      ctx.userHash,
+    );
+
+    // Groq fue llamado exactamente 1 vez (no reintentos a pesar de la caída de SQLite)
+    expect(ctx.provider.calls).toBe(1);
+    expect(result.code).toBe('AI_INTERNAL_ERROR');
+    expect(result.text).toBe(
+      'Ocurrió un problema interno al procesar la respuesta. Intenta nuevamente más tarde.',
+    );
+    expect(result.text).not.toContain('No pude consultar la inteligencia artificial');
+
+    ctx.database.completeAIUsageReservation = originalComplete;
+    ctx.database.recordTechnicalEvent = originalRecord;
+    ctx.database.releaseAIUsageReservation = originalRelease;
+  });
+
+  // 15. SQLite bloqueado pre-provider (reserva falla)
+  it('15. SQLite bloqueado pre-provider no llama a Groq y retorna AI_INTERNAL_ERROR', async () => {
     const originalReserve = ctx.database.reserveAIUsage.bind(ctx.database);
     ctx.database.reserveAIUsage = () => {
       throw new Error('SQLITE_CORRUPT: database disk image is malformed');
@@ -351,7 +546,7 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     expect(ctx.provider.calls).toBe(0);
     expect(result.code).toBe('AI_INTERNAL_ERROR');
     expect(result.text).toBe(
-      'Ocurrió un problema interno al procesar la respuesta. Intenta nuevamente en un momento.',
+      'Ocurrió un problema interno al procesar la respuesta. Intenta nuevamente más tarde.',
     );
 
     const events = ctx.database.getTechnicalEvents();
@@ -361,27 +556,111 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     ctx.database.reserveAIUsage = originalReserve;
   });
 
-  // 12, 13, 14. Verificación de seguridad en logs
-  it('12-14. Los eventos técnicos no contienen API keys, prompts completos ni teléfonos reales', async () => {
+  // 16. Provider success nunca incrementa consecutiveFailures ni abre circuit breaker
+  it('16-17. Fallo interno post-provider no degrada la salud del proveedor ni abre circuit breaker', async () => {
+    const originalComplete = ctx.database.completeAIUsageReservation.bind(ctx.database);
+    ctx.database.completeAIUsageReservation = () => {
+      throw new Error('SQLITE_BUSY: database is locked');
+    };
+
+    // Ejecutar 5 consultas consecutivas que fallan en SQLite tras éxito de Groq
+    for (let i = 0; i < 5; i += 1) {
+      const result = await ctx.service.answerQuestion(
+        TEST_QUESTION,
+        ctx.groupHash,
+        ctx.userHash,
+      );
+      expect(result.code).toBe('AI_INTERNAL_ERROR');
+    }
+
+    expect(ctx.provider.calls).toBe(5);
+
+    // Comprobar que una 6ta llamada sigue pudiendo consultar a Groq (el circuito NO se abrió)
+    ctx.database.completeAIUsageReservation = originalComplete;
+    const recoveredResult = await ctx.service.answerQuestion(
+      TEST_QUESTION,
+      ctx.groupHash,
+      ctx.userHash,
+    );
+
+    expect(recoveredResult.code).toBe('AI_RESPONSE');
+    expect(ctx.provider.calls).toBe(6);
+  });
+
+  // 18. Logger throw si es posible simularlo
+  it('18. Logger throw durante post-provider no altera la entrega de la respuesta', async () => {
+    const logger = ctx.service['logger'];
+    const originalInfo = logger.info.bind(logger);
+    logger.info = () => {
+      throw new Error('Logger write failure: disk full');
+    };
+
+    try {
+      const result = await ctx.service.answerQuestion(
+        TEST_QUESTION,
+        ctx.groupHash,
+        ctx.userHash,
+      );
+
+      expect(ctx.provider.calls).toBe(1);
+      expect(result.code).toBe('AI_RESPONSE');
+      expect(result.text).toContain('La dispraxia');
+    } finally {
+      logger.info = originalInfo;
+    }
+  });
+
+  // 19. Error interno nunca dispara fallback de modelo
+  it('19. Error interno post-provider nunca altera el modelo activo ni dispara fallback', async () => {
+    const originalComplete = ctx.database.completeAIUsageReservation.bind(ctx.database);
+    ctx.database.completeAIUsageReservation = () => {
+      throw new Error('SQLITE_BUSY: database is locked');
+    };
+
     await ctx.service.answerQuestion(
       TEST_QUESTION,
       ctx.groupHash,
       ctx.userHash,
     );
 
-    const events = ctx.database.getTechnicalEvents();
-    for (const event of events) {
-      const serialized = JSON.stringify(event);
-      expect(serialized).not.toContain('gsk_');
-      expect(serialized).not.toContain('DATOS DE CONTEXTO');
-      expect(serialized).not.toContain('UNTRUSTED_DATA_ONLY');
-      expect(serialized).not.toContain('56912345678');
-      expect(serialized).not.toContain('comunidad-neurodivergente@g.us');
-    }
+    expect(ctx.provider.getModelInformation().model).toBe('openai/gpt-oss-20b');
+
+    ctx.database.completeAIUsageReservation = originalComplete;
   });
 
-  // 15, 16, 17, 18. Requerimiento #29 intacto con ScopedBotAIProvider
-  it('15-18. Requerimiento #29: resolución de modelos y fallbacks intactos con AIProviderFactory', async () => {
+  // 20. Mensajes al usuario: verificación exhaustiva de strings
+  it('20. Mensajes de usuario no contienen "1 minuto" arbitrariamente y usan Retry-After real', async () => {
+    // A. Error interno post-Groq
+    const originalComplete = ctx.database.completeAIUsageReservation.bind(ctx.database);
+    ctx.database.completeAIUsageReservation = () => {
+      throw new Error('SQLITE_BUSY');
+    };
+    const internalResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(internalResult.text).toBe('Ocurrió un problema interno al procesar la respuesta. Intenta nuevamente más tarde.');
+    expect(internalResult.text).not.toContain('No pude consultar la inteligencia artificial');
+    expect(internalResult.text).not.toContain('1 minuto');
+    ctx.database.completeAIUsageReservation = originalComplete;
+
+    // B. Error temporal Groq
+    ctx.provider.failure = new AIProviderError('AI_TEMPORARY_ERROR', 'Temporary fail', true);
+    ctx.database.saveAIQueueSettings('neurobot', { ...ctx.database.getAIQueueSettings('neurobot'), maxRetries: 0 });
+    const tempResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(tempResult.text).toBe('El servicio de inteligencia artificial no está disponible temporalmente. Intenta nuevamente más tarde.');
+    expect(tempResult.text).not.toContain('1 minuto');
+
+    // C. 429 con Retry-After 45s
+    ctx.provider.failure = new AIProviderError('AI_PROVIDER_RATE_LIMITED', 'Rate limited', true, 45);
+    const rateResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(rateResult.text).toBe('El servicio de inteligencia artificial está temporalmente limitado. Intenta nuevamente en 45 segundos.');
+
+    // D. 429 con Retry-After 180s
+    ctx.provider.failure = new AIProviderError('AI_PROVIDER_RATE_LIMITED', 'Rate limited', true, 180);
+    const rateResultMinutes = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(rateResultMinutes.text).toBe('El servicio de inteligencia artificial está temporalmente limitado. Intenta nuevamente en aproximadamente 3 minutos.');
+  });
+
+  // 21. Requerimiento #29: resolución de modelos y aislamiento multibot intactos
+  it('21-23. Requerimiento #29: resolución de modelos, fallbacks y aislamiento multibot intactos', async () => {
     const vault = new SecretVault('test-secret-key-32-chars-long-vault');
     const factory = new AIProviderFactory(
       ctx.database,
@@ -411,5 +690,48 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
 
     const secondProvider = factory.forBot('bot-secundario');
     expect(secondProvider.getModelInformation().model).toBe('openai/gpt-oss-20b');
+  });
+
+  // 24-25. Verificación de seguridad en logs
+  it('24-25. Los eventos técnicos no contienen API keys, prompts completos ni teléfonos reales', async () => {
+    await ctx.service.answerQuestion(
+      TEST_QUESTION,
+      ctx.groupHash,
+      ctx.userHash,
+    );
+
+    const events = ctx.database.getTechnicalEvents();
+    for (const event of events) {
+      const serialized = JSON.stringify(event);
+      expect(serialized).not.toContain('gsk_');
+      expect(serialized).not.toContain('DATOS DE CONTEXTO');
+      expect(serialized).not.toContain('UNTRUSTED_DATA_ONLY');
+      expect(serialized).not.toContain('56912345678');
+      expect(serialized).not.toContain('comunidad-neurodivergente@g.us');
+    }
+  });
+
+  // 26. saveLocalAnswer y saveUnanswered capturan errores SQLite y emiten eventos
+  it('26. saveLocalAnswer y saveUnanswered capturan fallos de persistencia y emiten eventos seguros', () => {
+    const originalSave = ctx.database.saveCachedAnswer.bind(ctx.database);
+    ctx.database.saveCachedAnswer = () => {
+      throw new Error('SQLITE_BUSY: cache locked');
+    };
+
+    // saveLocalAnswer con error SQLite
+    const localResult = (ctx.service as unknown as { answerCache: { saveLocalAnswer: (q: string, a: string) => unknown } })
+      .answerCache.saveLocalAnswer('¿Cómo participar?', 'Respuesta local');
+    expect(localResult).toBeNull();
+
+    // saveUnanswered con error SQLite
+    const unansweredResult = (ctx.service as unknown as { answerCache: { saveUnanswered: (q: string, a: string) => unknown } })
+      .answerCache.saveUnanswered('¿Pregunta sin respuesta?', 'Respuesta fallback');
+    expect(unansweredResult).toBeNull();
+
+    const events = ctx.database.getTechnicalEvents();
+    expect(events.some((e) => e.event_type === 'LOCAL_ANSWER_WRITE_FAILED')).toBe(true);
+    expect(events.some((e) => e.event_type === 'UNANSWERED_QUESTION_WRITE_FAILED')).toBe(true);
+
+    ctx.database.saveCachedAnswer = originalSave;
   });
 });

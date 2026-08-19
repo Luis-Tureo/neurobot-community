@@ -346,38 +346,61 @@ export class AIRequestQueueService {
   }
 
   private persistHealth(state: 'AVAILABLE' | 'RATE_LIMITED' | 'DEGRADED' | 'UNAVAILABLE'): void {
-    this.database.saveAIProviderQueueHealth({
-      botId: this.botId,
-      provider: 'groq',
-      state,
-      consecutiveFailures: this.consecutiveFailures,
-      circuitState: this.circuitState,
-      circuitOpenedAt:
-        this.circuitOpenedAt === null ? null : new Date(this.circuitOpenedAt).toISOString(),
-      circuitRetryAt:
-        this.circuitOpenedAt === null
-          ? null
-          : new Date(this.circuitOpenedAt + 60_000).toISOString(),
-      lastSuccessAt: this.lastSuccessAt,
-      lastFailureAt: this.lastFailureAt,
-      lastSafeErrorCode: this.lastSafeErrorCode,
-    });
+    try {
+      this.database.saveAIProviderQueueHealth({
+        botId: this.botId,
+        provider: 'groq',
+        state,
+        consecutiveFailures: this.consecutiveFailures,
+        circuitState: this.circuitState,
+        circuitOpenedAt:
+          this.circuitOpenedAt === null ? null : new Date(this.circuitOpenedAt).toISOString(),
+        circuitRetryAt:
+          this.circuitOpenedAt === null
+            ? null
+            : new Date(this.circuitOpenedAt + 60_000).toISOString(),
+        lastSuccessAt: this.lastSuccessAt,
+        lastFailureAt: this.lastFailureAt,
+        lastSafeErrorCode: this.lastSafeErrorCode,
+      });
+    } catch {
+      // Telemetría de salud en persistencia es best-effort
+    }
   }
 
   private settings(): AIQueueSettings {
-    return this.database.getAIQueueSettings(this.botId);
+    try {
+      return this.database.getAIQueueSettings(this.botId);
+    } catch {
+      return {
+        maxConcurrent: 3,
+        maxQueueSize: 20,
+        maxQueueWaitSeconds: 45,
+        waitNoticeSeconds: 8,
+        providerTimeoutSeconds: 30,
+        maxRetries: 2,
+        initialRetryDelaySeconds: 2,
+        maximumRetryDelaySeconds: 10,
+        suggestedRetrySeconds: 45,
+        outboundMessageIntervalMs: 1200,
+      };
+    }
   }
 
   private metric(
     field: keyof Omit<AIQueueMetrics, 'averageWaitMs' | 'maximumWaitMs'>,
     waitMs = 0,
   ): void {
-    this.database.recordAIQueueMetric(
-      this.botId,
-      new Date(this.now()).toISOString().slice(0, 10),
-      field,
-      waitMs,
-    );
+    try {
+      this.database.recordAIQueueMetric(
+        this.botId,
+        new Date(this.now()).toISOString().slice(0, 10),
+        field,
+        waitMs,
+      );
+    } catch {
+      // Métrica de cola en persistencia es best-effort
+    }
   }
 
   private event(
@@ -385,27 +408,35 @@ export class AIRequestQueueService {
     result: string,
     diagnostic: AIRateLimitDiagnostic | null = null,
   ): void {
-    this.database.recordTechnicalEvent({ botId: this.botId, eventType, result });
-    this.logger.info(
-      {
-        operation: eventType,
-        botId: this.botId,
-        result,
-        ...(diagnostic === null
-          ? {}
-          : {
-              rateLimitType: diagnostic.type,
-              retryAfterSeconds: diagnostic.retryAfterSeconds,
-              requestLimit: diagnostic.requestLimit,
-              requestRemaining: diagnostic.requestRemaining,
-              tokenLimit: diagnostic.tokenLimit,
-              tokenRemaining: diagnostic.tokenRemaining,
-              requestReset: diagnostic.requestReset,
-              tokenReset: diagnostic.tokenReset,
-            }),
-      },
-      'Evento seguro de cola de IA',
-    );
+    try {
+      this.database.recordTechnicalEvent({ botId: this.botId, eventType, result });
+    } catch {
+      // Telemetría de eventos en persistencia es best-effort
+    }
+    try {
+      this.logger.info(
+        {
+          operation: eventType,
+          botId: this.botId,
+          result,
+          ...(diagnostic === null
+            ? {}
+            : {
+                rateLimitType: diagnostic.type,
+                retryAfterSeconds: diagnostic.retryAfterSeconds,
+                requestLimit: diagnostic.requestLimit,
+                requestRemaining: diagnostic.requestRemaining,
+                tokenLimit: diagnostic.tokenLimit,
+                tokenRemaining: diagnostic.tokenRemaining,
+                requestReset: diagnostic.requestReset,
+                tokenReset: diagnostic.tokenReset,
+              }),
+        },
+        'Evento seguro de cola de IA',
+      );
+    } catch {
+      // Logger es best-effort
+    }
   }
 }
 
