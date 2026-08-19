@@ -1912,6 +1912,12 @@ async function loadAI() {
   panelState.aiCurrentProvider = currentProvider;
   document.querySelector('#ai-provider-current-name').textContent =
     currentProvider.name || 'Sin IA configurada';
+  const currentModelSpan = document.querySelector('#ai-provider-current-model');
+  if (currentModelSpan) {
+    currentModelSpan.textContent = panelState.aiSettings?.model
+      ? `(${panelState.aiSettings.model})`
+      : '(Sin override / Predeterminado)';
+  }
   const toggleButton = document.querySelector('#toggle-ai-enabled');
   setStatusSwitchState(toggleButton, {
     checked: currentProvider.enabled,
@@ -1920,6 +1926,42 @@ async function loadAI() {
   const providerForm = document.querySelector('#ai-provider-form');
   providerForm.elements.displayName.value = currentProvider.name || 'Groq';
   providerForm.elements.apiKey.value = '';
+
+  const modelSelect = providerForm.elements.model || document.querySelector('#ai-provider-model');
+  const currentModel = panelState.aiSettings?.model || '';
+  try {
+    const modelsResult = await panelApi(
+      `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/models`,
+    );
+    const modelsList = Array.isArray(modelsResult?.models) ? modelsResult.models : [];
+    if (modelSelect) {
+      modelSelect.replaceChildren();
+      const defaultOption = document.createElement('option');
+      defaultOption.value = '';
+      defaultOption.textContent = '(Sin override / Predeterminado global)';
+      modelSelect.append(defaultOption);
+
+      const allModels = [...new Set([currentModel, ...modelsList].filter(Boolean))];
+      allModels.forEach((m) => {
+        const option = document.createElement('option');
+        option.value = m;
+        option.textContent = m === 'openai/gpt-oss-20b' ? `${m} (Predeterminado)` : m;
+        modelSelect.append(option);
+      });
+      modelSelect.value = currentModel;
+    }
+  } catch {
+    if (modelSelect) {
+      if (currentModel && ![...modelSelect.options].some((opt) => opt.value === currentModel)) {
+        const option = document.createElement('option');
+        option.value = currentModel;
+        option.textContent = currentModel;
+        modelSelect.append(option);
+      }
+      modelSelect.value = currentModel;
+    }
+  }
+
   document.querySelector('#ai-token-help').textContent = currentProvider.configured
     ? 'El token está configurado. Déjalo vacío para conservarlo o escribe uno nuevo para cambiarlo.'
     : 'Agrega el token para poder activar la inteligencia artificial.';
@@ -2015,6 +2057,7 @@ async function saveAIProviderWithCompatibility(payload) {
     method: 'PATCH',
     body: JSON.stringify({
       ...editableSettings,
+      model: payload.model !== undefined ? payload.model : editableSettings.model,
       enabled: payload.enabled,
       provider: payload.enabled ? 'groq' : 'disabled',
       confirmIncreasedLimits: true,
@@ -2603,9 +2646,11 @@ function configureForms() {
     event.preventDefault();
     const form = event.currentTarget;
     const apiKey = form.elements.apiKey.value.trim();
+    const model = form.elements.model?.value?.trim() || null;
     const payload = {
       displayName: form.elements.displayName.value.trim(),
       enabled: Boolean(panelState.aiCurrentProvider?.enabled),
+      model,
       ...(apiKey ? { apiKey } : {}),
     };
     try {

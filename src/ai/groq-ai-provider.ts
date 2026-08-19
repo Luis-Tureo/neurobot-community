@@ -85,7 +85,7 @@ export class GroqAIProvider implements AIProvider {
         }),
       },
       request.timeoutMs,
-      false,
+      true,
     );
     const value: unknown = await response.json().catch(() => null);
     if (!isRecord(value))
@@ -103,7 +103,7 @@ export class GroqAIProvider implements AIProvider {
     const text = content.trim();
     if (text === '')
       throw new AIProviderError('AI_EMPTY_RESPONSE', 'El proveedor devolvió una respuesta vacía.');
-    return { text, usage: this.normalizeUsage(value.usage) };
+    return { text, usage: this.normalizeUsage(value.usage), model: this.model };
   }
 
   public getModelInformation(): { provider: string; model: string } {
@@ -154,7 +154,9 @@ export class GroqAIProvider implements AIProvider {
         });
         if (response.ok) return response;
         const providerError = await errorFromResponse(response);
-        if (!providerError.retryable || attempt + 1 >= attempts) throw providerError;
+        if (!providerError.retryable || attempt + 1 >= attempts || response.status === 429) {
+          throw providerError;
+        }
         lastError = providerError;
       } catch (error) {
         const classified =
@@ -167,7 +169,9 @@ export class GroqAIProvider implements AIProvider {
                   'No fue posible conectar con el proveedor.',
                   true,
                 );
-        if (!classified.retryable || attempt + 1 >= attempts) throw classified;
+        if (!classified.retryable || attempt + 1 >= attempts || classified.code === 'AI_PROVIDER_RATE_LIMITED') {
+          throw classified;
+        }
         lastError = classified;
       } finally {
         clearTimeout(timeout);

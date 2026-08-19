@@ -382,6 +382,7 @@ export type AISettings = {
   profileId: number;
   enabled: boolean;
   provider: 'groq' | 'disabled';
+  model: string | null;
   questionMaxChars: number;
   contextMaxTokens: number;
   inputMaxTokens: number;

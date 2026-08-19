@@ -47,6 +47,7 @@ export type GroundedResponseRequest = {
 export type GroundedResponseResult = {
   text: string;
   usage: AIUsage;
+  model?: string;
 };
 
 export interface AIProvider {

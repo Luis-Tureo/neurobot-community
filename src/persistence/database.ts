@@ -2086,6 +2086,12 @@ export class AppDatabase {
           );
         `,
       },
+      {
+        version: 32,
+        sql: `
+          ALTER TABLE ai_settings ADD COLUMN model TEXT;
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -6486,9 +6492,17 @@ export class AppDatabase {
       .run(now, now, owner.bot_id, entryId).changes;
   }
 
+  public getBotAIModel(botId: string): string | null {
+    const profile = this.getBotProfile(botId);
+    const row = this.db.prepare('SELECT model FROM ai_settings WHERE profile_id = ?').get(profile.id) as
+      | { model: string | null }
+      | undefined;
+    return typeof row?.model === 'string' && row.model.trim().length > 0 ? row.model.trim() : null;
+  }
+
   public getAISettings(profileId: number): AISettings {
     const row = this.db.prepare('SELECT * FROM ai_settings WHERE profile_id = ?').get(profileId) as
-      Record<string, number | string> | undefined;
+      Record<string, number | string | null> | undefined;
     if (row === undefined) throw new Error('No existe configuración de IA para el perfil.');
     return mapAISettings(row);
   }
@@ -6496,9 +6510,13 @@ export class AppDatabase {
   public saveAISettings(settings: AISettings): AISettings {
     validateAISettings(settings);
     const now = new Date().toISOString();
+    const modelToSave =
+      typeof settings.model === 'string' && settings.model.trim().length > 0
+        ? settings.model.trim()
+        : null;
     const result = this.db
       .prepare(
-        `UPDATE ai_settings SET enabled = ?, provider = ?, question_max_chars = ?,
+        `UPDATE ai_settings SET enabled = ?, provider = ?, model = ?, question_max_chars = ?,
            context_max_tokens = ?, input_max_tokens = ?, response_max_tokens = ?,
            response_max_chars = ?, response_max_lines = ?, temperature = ?,
            user_hourly_limit = ?, user_daily_limit = ?,
@@ -6509,6 +6527,7 @@ export class AppDatabase {
       .run(
         settings.enabled ? 1 : 0,
         settings.provider,
+        modelToSave,
         settings.questionMaxChars,
         settings.contextMaxTokens,
         settings.inputMaxTokens,
@@ -9592,11 +9611,15 @@ function parseNumberArray(value: string): number[] {
   }
 }
 
-function mapAISettings(row: Record<string, number | string>): AISettings {
+function mapAISettings(row: Record<string, number | string | null>): AISettings {
   return {
     profileId: Number(row.profile_id),
     enabled: row.enabled === 1,
     provider: row.provider === 'disabled' ? 'disabled' : 'groq',
+    model:
+      typeof row.model === 'string' && row.model.trim().length > 0
+        ? row.model.trim()
+        : null,
     questionMaxChars: Number(row.question_max_chars),
     contextMaxTokens: Number(row.context_max_tokens),
     inputMaxTokens: Number(row.input_max_tokens),
@@ -9777,6 +9800,15 @@ function validateAISettings(settings: AISettings): void {
     throw new Error('El límite diario por grupo no puede ser menor que el límite horario.');
   if (settings.globalMonthlyLimit < settings.globalDailyLimit)
     throw new Error('El límite mensual no puede ser menor que el diario.');
+  if (settings.model !== null && settings.model !== undefined) {
+    if (typeof settings.model !== 'string') {
+      throw new Error('El modelo de IA no es válido.');
+    }
+    const trimmed = settings.model.trim();
+    if (trimmed.length < 1 || trimmed.length > 120 || !/^[a-zA-Z0-9_.:/-]+$/u.test(trimmed)) {
+      throw new Error('El modelo de IA no es válido.');
+    }
+  }
 }
 
 function validateTextArray(values: string[], field: string, maximumItems = 30): string[] {

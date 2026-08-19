@@ -132,6 +132,14 @@ const aiSettingsSchema = z
   .object({
     enabled: z.boolean(),
     provider: z.enum(['groq', 'disabled']),
+    model: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .regex(/^[a-zA-Z0-9_.:/-]+$/u, 'El identificador del modelo no es válido.')
+      .nullable()
+      .optional(),
     questionMaxChars: z.number().int().min(1).max(3000),
     contextMaxTokens: z.number().int().min(1).max(7000),
     inputMaxTokens: z.number().int().min(1).max(10_000),
@@ -1575,6 +1583,19 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     };
   });
 
+  app.get('/api/bots/:botId/ai/models', { preHandler: requireSession(sessions) }, async (request) => {
+    const botId = parseBotId(request.params);
+    const result = await (context.aiProviderFactory !== undefined
+      ? context.aiProviderFactory.listAvailableModels(botId)
+      : Promise.resolve({
+          models: [],
+          currentModel: 'openai/gpt-oss-20b',
+          defaultModel: 'openai/gpt-oss-20b',
+          catalogStatus: 'unavailable' as const,
+        }));
+    return result;
+  });
+
   app.put(
     '/api/bots/:botId/ai/provider',
     { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
@@ -1597,6 +1618,14 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           displayName: z.string().trim().min(1).max(80),
           apiKey: z.string().trim().min(16).max(500).optional(),
           enabled: z.boolean(),
+          model: z
+            .string()
+            .trim()
+            .min(1)
+            .max(120)
+            .regex(/^[a-zA-Z0-9_.:/-]+$/u, 'El identificador del modelo no es válido.')
+            .nullable()
+            .optional(),
         })
         .strict()
         .parse(body);
@@ -1650,6 +1679,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
 
       const settings = context.database.saveAISettings({
         ...previousSettings,
+        ...(input.model !== undefined ? { model: input.model ? input.model.trim() : null } : {}),
         enabled: input.enabled,
         provider: input.enabled ? 'groq' : 'disabled',
         updatedAt: new Date().toISOString(),
@@ -2630,10 +2660,18 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           code: 'AI_LIMIT_INCREASE_CONFIRMATION_REQUIRED',
         });
       }
-      const { confirmIncreasedLimits, ...values } = input;
+      const { confirmIncreasedLimits, model, ...values } = input;
       void confirmIncreasedLimits;
+      const modelToSave =
+        model !== undefined
+          ? typeof model === 'string' && model.trim().length > 0
+            ? model.trim()
+            : null
+          : previousSettings.model;
       const settings = context.database.saveAISettings({
+        ...previousSettings,
         ...values,
+        model: modelToSave,
         profileId: profile.id,
         updatedAt: new Date().toISOString(),
       });
@@ -3536,10 +3574,19 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           code: 'AI_LIMIT_INCREASE_CONFIRMATION_REQUIRED',
         });
       }
-      const { confirmIncreasedLimits, ...values } = input;
+      const previousSettings = context.database.getAISettings(profile.id);
+      const { confirmIncreasedLimits, model, ...values } = input;
       void confirmIncreasedLimits;
+      const modelToSave =
+        model !== undefined
+          ? typeof model === 'string' && model.trim().length > 0
+            ? model.trim()
+            : null
+          : previousSettings.model;
       const settings = context.database.saveAISettings({
+        ...previousSettings,
         ...values,
+        model: modelToSave,
         profileId: profile.id,
         updatedAt: new Date().toISOString(),
       });

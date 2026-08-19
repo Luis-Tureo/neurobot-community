@@ -1107,6 +1107,7 @@
                   <p class="eyebrow">Inteligencia artificial actual</p>
                   <div class="ai-provider-current-line">
                     <strong id="ai-provider-current-name">Sin IA configurada</strong>
+                    <span id="ai-provider-current-model" class="muted" style="font-size: 0.88rem; margin-left: 0.5rem;"></span>
                   </div>
                 </div>
                 <div
@@ -1151,6 +1152,14 @@
                 <label>
                   Nombre de la IA
                   <input name="displayName" maxlength="80" placeholder="Ej.: Groq" required />
+                </label>
+                <label>
+                  Modelo principal
+                  <select id="ai-provider-model" name="model">
+                    <option value="">(Sin override / Predeterminado global)</option>
+                    <option value="openai/gpt-oss-20b">openai/gpt-oss-20b</option>
+                    <option value="openai/gpt-oss-120b">openai/gpt-oss-120b</option>
+                  </select>
                 </label>
                 <label>
                   Token o nuevo token
