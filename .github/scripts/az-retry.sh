@@ -13,21 +13,23 @@ fi
 is_transient_azure_error() {
   local message="$1"
   printf '%s' "$message" | grep -Eiq \
-    'connection (reset|aborted|closed)|connectionreseterror|remote disconnected|remotedisconnected|broken pipe|read timed out|connect timed out|timeout|timed out|temporar(il|y)|too many requests|(^|[^0-9])429([^0-9]|$)|(^|[^0-9])500([^0-9]|$)|(^|[^0-9])502([^0-9]|$)|(^|[^0-9])503([^0-9]|$)|(^|[^0-9])504([^0-9]|$)|service unavailable|bad gateway|gateway timeout|eof|name resolution|temporary failure in name resolution|ssl.*(error|eof)|server disconnected|connection refused'
+    'connection (reset|aborted|closed)|connectionreseterror|remote disconnected|remotedisconnected|broken pipe|read timed out|connect timed out|timeout|timed out|temporar(y|ily)|too many requests|(^|[^0-9])429([^0-9]|$)|(^|[^0-9])500([^0-9]|$)|(^|[^0-9])502([^0-9]|$)|(^|[^0-9])503([^0-9]|$)|(^|[^0-9])504([^0-9]|$)|service unavailable|bad gateway|gateway timeout|eof|name resolution|temporary failure in name resolution|ssl.*(error|eof)|server disconnected|connection refused'
 }
 
 attempt=1
 while [ "$attempt" -le "$MAX_ATTEMPTS" ]; do
   error_file="$(mktemp)"
   output=""
+  status=0
 
   if output="$(az "$@" 2>"$error_file")"; then
     rm -f "$error_file"
     printf '%s' "$output"
     exit 0
+  else
+    status=$?
   fi
 
-  status=$?
   error_message="$(cat "$error_file")"
   rm -f "$error_file"
 
