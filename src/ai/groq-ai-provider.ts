@@ -18,6 +18,7 @@ export class GroqAIProvider implements AIProvider {
     private readonly apiKey: string | undefined,
     private readonly model: string,
     private readonly fetchImplementation: FetchImplementation = fetch,
+    private readonly retryTransientRequests = false,
   ) {}
 
   public isConfigured(): boolean {
@@ -27,11 +28,6 @@ export class GroqAIProvider implements AIProvider {
   public async testConnection(timeoutMs = 15_000): Promise<AIProviderConnectionResult> {
     if (!this.isConfigured()) return { successful: false, errorCode: 'AI_NOT_CONFIGURED' };
     try {
-      // Se usa el endpoint de listado documentado por Groq en vez de construir una
-      // ruta con el ID del modelo. Algunos IDs válidos contienen una barra (por
-      // ejemplo, openai/gpt-oss-20b), lo que hace innecesariamente frágil una
-      // comprobación basada en /models/{model}. El listado valida la credencial y
-      // permite confirmar que el modelo configurado está realmente disponible.
       const response = await this.performRequest(
         `${this.endpoint}/models`,
         { method: 'GET' },
@@ -85,7 +81,7 @@ export class GroqAIProvider implements AIProvider {
         }),
       },
       request.timeoutMs,
-      true,
+      this.retryTransientRequests,
     );
     const value: unknown = await response.json().catch(() => null);
     if (!isRecord(value))
@@ -169,7 +165,11 @@ export class GroqAIProvider implements AIProvider {
                   'No fue posible conectar con el proveedor.',
                   true,
                 );
-        if (!classified.retryable || attempt + 1 >= attempts || classified.code === 'AI_PROVIDER_RATE_LIMITED') {
+        if (
+          !classified.retryable ||
+          attempt + 1 >= attempts ||
+          classified.code === 'AI_PROVIDER_RATE_LIMITED'
+        ) {
           throw classified;
         }
         lastError = classified;

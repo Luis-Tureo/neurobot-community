@@ -13,6 +13,7 @@ import { GroqAIProvider } from './groq-ai-provider.js';
 import {
   DEFAULT_CHAT_MODEL,
   GroqModelCatalog,
+  type CatalogResult,
   type CatalogStatus,
   type FetchImplementation,
 } from './groq-model-catalog.js';
@@ -27,6 +28,12 @@ const RECOVERABLE_FALLBACK_ERRORS: ReadonlySet<AIProviderErrorCode> = new Set([
 function isRecoverableForFallback(errorCode: AIProviderErrorCode): boolean {
   return RECOVERABLE_FALLBACK_ERRORS.has(errorCode);
 }
+
+export type AIModelSelectionValidation = {
+  allowed: boolean;
+  catalogStatus: CatalogStatus;
+  reason?: 'MODEL_NOT_AVAILABLE' | 'CATALOG_UNAVAILABLE';
+};
 
 export class AIProviderFactory {
   private readonly catalog: GroqModelCatalog;
@@ -50,7 +57,7 @@ export class AIProviderFactory {
       this.database,
       this.vault,
       this.globalApiKey,
-      this.defaultModel,
+      this.effectiveDefaultModel(),
       this.providerName,
       this.fetchImplementation,
       this.catalog,
@@ -65,9 +72,7 @@ export class AIProviderFactory {
   }> {
     const provider = this.forBot(botId);
     const currentModel = provider.getModelInformation().model;
-    const defaultModel = this.defaultModel && this.defaultModel.trim().length > 0
-      ? this.defaultModel.trim()
-      : DEFAULT_CHAT_MODEL;
+    const defaultModel = this.effectiveDefaultModel();
     const apiKey = this.resolveApiKey(botId);
 
     if (!apiKey) {
@@ -93,18 +98,80 @@ export class AIProviderFactory {
     };
   }
 
+  public async validateModelSelection(
+    botId: string,
+    model: string,
+    candidateApiKey?: string,
+  ): Promise<AIModelSelectionValidation> {
+    const normalizedModel = model.trim();
+    const persistedModel = this.database.getBotAIModel(botId);
+    const effectiveModel = persistedModel ?? this.effectiveDefaultModel();
+
+    // Conservar el override actual o el modelo global/default efectivo no requiere
+    // una llamada de catálogo: son valores ya confiados por la configuración vigente.
+    if (
+      normalizedModel === persistedModel ||
+      (persistedModel === null && normalizedModel === effectiveModel)
+    ) {
+      return { allowed: true, catalogStatus: 'unavailable' };
+    }
+
+    const suppliedKey = candidateApiKey?.trim();
+    const apiKey = suppliedKey && suppliedKey.length > 0 ? suppliedKey : this.resolveApiKey(botId);
+    if (!apiKey) {
+      return {
+        allowed: false,
+        catalogStatus: 'unavailable',
+        reason: 'CATALOG_UNAVAILABLE',
+      };
+    }
+
+    try {
+      const catalogResult = await this.catalog.fetchChatModels(
+        apiKey,
+        this.fetchImplementation,
+        true,
+      );
+      if (catalogResult.status !== 'live') {
+        return {
+          allowed: false,
+          catalogStatus: catalogResult.status,
+          reason: 'CATALOG_UNAVAILABLE',
+        };
+      }
+      if (!catalogResult.models.includes(normalizedModel)) {
+        return {
+          allowed: false,
+          catalogStatus: 'live',
+          reason: 'MODEL_NOT_AVAILABLE',
+        };
+      }
+      return { allowed: true, catalogStatus: 'live' };
+    } catch {
+      return {
+        allowed: false,
+        catalogStatus: 'unavailable',
+        reason: 'CATALOG_UNAVAILABLE',
+      };
+    }
+  }
+
   private resolveApiKey(botId: string): string | undefined {
     if (this.providerName === 'disabled') return undefined;
     const credential = this.database.getBotEncryptedCredential(botId);
-    if (credential.mode === 'global') {
-      return this.globalApiKey;
-    }
+    if (credential.mode === 'global') return this.globalApiKey;
     if (credential.encryptedApiKey === null || !this.vault.isConfigured()) return undefined;
     try {
       return this.vault.decrypt(credential.encryptedApiKey, `bot:${botId}:groq`);
     } catch {
       return undefined;
     }
+  }
+
+  private effectiveDefaultModel(): string {
+    return this.defaultModel && this.defaultModel.trim().length > 0
+      ? this.defaultModel.trim()
+      : DEFAULT_CHAT_MODEL;
   }
 }
 
@@ -146,127 +213,109 @@ class ScopedBotAIProvider implements AIProvider {
 
     const apiKey = this.resolveApiKey() as string;
     let principalModel = this.resolveEffectiveModel();
-
-    // 1. Verificación de retiro de modelo: REQUIERE confirmación LIVE
     let availableModels: string[] = [];
+
+    // La elegibilidad para chat y la existencia real en Groq son conceptos distintos.
+    // Una ausencia aparente (incluso desde una lectura live) siempre requiere una
+    // segunda consulta forzada antes de persistir una promoción automática.
     try {
-      const cachedCatalog = await this.catalog.fetchChatModels(
+      const knownCatalog = await this.catalog.fetchChatModels(
         apiKey,
         this.fetchImplementation,
         false,
       );
-      if (cachedCatalog.status === 'live' || cachedCatalog.status === 'cached') {
-        availableModels = cachedCatalog.models;
+      if (knownCatalog.status === 'live' || knownCatalog.status === 'cached') {
+        availableModels = knownCatalog.models;
       }
 
-      // Si el modelo principal no aparece en el catálogo conocido:
-      if (availableModels.length > 0 && !availableModels.includes(principalModel)) {
-        // NO promover todavía por caché; exigir confirmación LIVE
+      let confirmedRetirementCatalog: CatalogResult | null = null;
+      if (
+        (knownCatalog.status === 'live' || knownCatalog.status === 'cached') &&
+        !knownCatalog.activeModelIds.includes(principalModel)
+      ) {
         const liveCatalog = await this.catalog.fetchChatModels(
           apiKey,
           this.fetchImplementation,
-          true, // forceRefresh
+          true,
         );
-        if (liveCatalog.status === 'live' && liveCatalog.models.length > 0) {
+        if (liveCatalog.status === 'live') {
           availableModels = liveCatalog.models;
-          if (!availableModels.includes(principalModel)) {
-            // Confirmado LIVE que el modelo fue retirado de Groq
-            const promotedModel = availableModels[0] ?? DEFAULT_CHAT_MODEL;
-            const persisted = this.persistPromotedModel(promotedModel);
-            if (persisted) {
-              this.database.recordTechnicalEvent({
-                botId: this.botId,
-                eventType: 'AI_MODEL_RETIRED_PROMOTED',
-                result: promotedModel,
-              });
-              principalModel = promotedModel;
-            } else {
-              this.database.recordTechnicalEvent({
-                botId: this.botId,
-                eventType: 'AI_MODEL_PROMOTION_PERSISTENCE_FAILED',
-                result: promotedModel,
-              });
-              // Si falla la persistencia, usar temporalmente para esta llamada
-              principalModel = promotedModel;
-            }
+          if (!liveCatalog.activeModelIds.includes(principalModel)) {
+            confirmedRetirementCatalog = liveCatalog;
           }
         }
       }
+
+      const promotedModel = confirmedRetirementCatalog?.models[0];
+      if (promotedModel !== undefined) {
+        const persisted = this.persistPromotedModel(promotedModel);
+        if (persisted) {
+          this.recordModelEvent('AI_MODEL_RETIRED_PROMOTED', promotedModel);
+        } else {
+          this.recordModelEvent('AI_MODEL_PROMOTION_PERSISTENCE_FAILED', promotedModel);
+        }
+        // Si la persistencia falla, el reemplazo confirmado se usa únicamente
+        // para esta operación y el siguiente request volverá a resolver desde DB.
+        principalModel = promotedModel;
+      }
     } catch {
-      // Fallo de red/timeout en catálogo no significa retiro; mantener principal
+      // Un fallo de catálogo nunca equivale a retiro. Se conserva el principal.
     }
 
-    // 2. Intentar ejecutar con el modelo principal
+    // El principal recibe un único retry corto ante errores transitorios. Los
+    // fallbacks no reintentan internamente; si toda la cadena falla, la cola puede
+    // aplicar su política de backoff a nivel de operación.
     const primaryProvider = new GroqAIProvider(
       apiKey,
       principalModel,
       this.fetchImplementation,
+      true,
     );
 
     try {
       const result = await primaryProvider.generateGroundedResponse(request);
+      this.recordModelEvent('AI_MODEL_RESPONSE_SUCCEEDED', principalModel);
       return { ...result, model: principalModel };
     } catch (error) {
       const errorCode = this.classifyProviderError(error);
+      if (!isRecoverableForFallback(errorCode)) throw error;
 
-      // Fallback permitido ÚNICAMENTE para errores explícitamente recuperables
-      if (!isRecoverableForFallback(errorCode)) {
-        throw error;
-      }
-
-      // 3. Obtener candidatos de fallback confirmados
       if (availableModels.length === 0) {
         try {
-          const cat = await this.catalog.fetchChatModels(
+          const catalogResult = await this.catalog.fetchChatModels(
             apiKey,
             this.fetchImplementation,
             false,
           );
-          if (cat.models.length > 0) {
-            availableModels = cat.models;
+          if (catalogResult.status === 'live' || catalogResult.status === 'cached') {
+            availableModels = catalogResult.models;
           }
         } catch {
-          // No inventar modelos si el catálogo no está disponible
+          // No inventar modelos si el catálogo no está disponible.
         }
       }
 
-      const fallbackCandidates = availableModels.filter((m) => m !== principalModel);
-      if (fallbackCandidates.length === 0) {
-        throw error;
-      }
+      const fallbackCandidates = availableModels.filter((model) => model !== principalModel);
+      if (fallbackCandidates.length === 0) throw error;
 
       let lastFallbackError: unknown = error;
       for (const fallbackModel of fallbackCandidates) {
-        this.database.recordTechnicalEvent({
-          botId: this.botId,
-          eventType: 'AI_MODEL_FALLBACK_ATTEMPTED',
-          result: fallbackModel,
-          errorCode,
-        });
-
+        this.recordModelEvent('AI_MODEL_FALLBACK_ATTEMPTED', fallbackModel, errorCode);
         const fallbackProvider = new GroqAIProvider(
           apiKey,
           fallbackModel,
           this.fetchImplementation,
+          false,
         );
 
         try {
           const fallbackResult = await fallbackProvider.generateGroundedResponse(request);
-          // Éxito en fallback: retorna respuesta con modelo usado SIN cambiar el persistido en DB
+          this.recordModelEvent('AI_MODEL_FALLBACK_SUCCEEDED', fallbackModel);
           return { ...fallbackResult, model: fallbackModel };
-        } catch (fbError) {
-          lastFallbackError = fbError;
-          const fbCode = this.classifyProviderError(fbError);
-
-          // Si el fallback devuelve 429 (rate limit), detener la cadena y no probar más modelos
-          if (fbCode === 'AI_PROVIDER_RATE_LIMITED') {
-            throw fbError;
-          }
-
-          // Solo errores explícitamente recuperables permiten probar el siguiente candidato
-          if (!isRecoverableForFallback(fbCode)) {
-            throw fbError;
-          }
+        } catch (fallbackError) {
+          lastFallbackError = fallbackError;
+          const fallbackCode = this.classifyProviderError(fallbackError);
+          if (!isRecoverableForFallback(fallbackCode)) throw fallbackError;
         }
       }
 
@@ -303,9 +352,7 @@ class ScopedBotAIProvider implements AIProvider {
   private resolveApiKey(): string | undefined {
     if (this.providerName === 'disabled') return undefined;
     const credential = this.database.getBotEncryptedCredential(this.botId);
-    if (credential.mode === 'global') {
-      return this.globalApiKey;
-    }
+    if (credential.mode === 'global') return this.globalApiKey;
     if (credential.encryptedApiKey === null || !this.vault.isConfigured()) return undefined;
     try {
       return this.vault.decrypt(credential.encryptedApiKey, `bot:${this.botId}:groq`);
@@ -316,9 +363,7 @@ class ScopedBotAIProvider implements AIProvider {
 
   private resolveEffectiveModel(): string {
     const customModel = this.database.getBotAIModel(this.botId);
-    if (customModel !== null && customModel.trim().length > 0) {
-      return customModel.trim();
-    }
+    if (customModel !== null && customModel.trim().length > 0) return customModel.trim();
     return this.defaultModel && this.defaultModel.trim().length > 0
       ? this.defaultModel.trim()
       : DEFAULT_CHAT_MODEL;
@@ -328,13 +373,27 @@ class ScopedBotAIProvider implements AIProvider {
     try {
       const profile = this.database.getBotProfile(this.botId);
       const settings = this.database.getAISettings(profile.id);
-      this.database.saveAISettings({
-        ...settings,
-        model: newModel,
-      });
+      this.database.saveAISettings({ ...settings, model: newModel });
       return true;
     } catch {
       return false;
+    }
+  }
+
+  private recordModelEvent(
+    eventType: string,
+    model: string,
+    errorCode?: AIProviderErrorCode,
+  ): void {
+    try {
+      this.database.recordTechnicalEvent({
+        botId: this.botId,
+        eventType,
+        result: model,
+        ...(errorCode === undefined ? {} : { errorCode }),
+      });
+    } catch {
+      // La telemetría nunca debe impedir una respuesta válida del asistente.
     }
   }
 }
