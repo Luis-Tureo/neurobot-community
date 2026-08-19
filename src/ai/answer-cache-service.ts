@@ -60,21 +60,26 @@ export class AnswerCacheService {
   ): CachedAnswer | null {
     if (!isSafeReusableAnswer(question, answer) || fragments.length === 0) return null;
     const normalized = normalizeQuestionForCache(question);
-    const saved = this.database.saveCachedAnswer({
-      botId: this.botId,
-      canonicalQuestion: question.trim(),
-      normalizedQuestionHash: hashNormalizedQuestion(normalized),
-      answer,
-      category: fragments[0]?.category ?? 'General',
-      knowledgeSourceIds: fragments.map((fragment) => fragment.entryId),
-      knowledgeVersion: knowledgeVersion(fragments),
-      promptVersion: ASSISTANT_CACHE_PROMPT_VERSION,
-      status: 'AUTO_VERIFIED',
-      sourceType: 'AI_GENERATED',
-      confidence: 1,
-    });
-    this.event('ANSWER_CACHE_CREATED', 'CREATED');
-    return saved;
+    try {
+      const saved = this.database.saveCachedAnswer({
+        botId: this.botId,
+        canonicalQuestion: question.trim(),
+        normalizedQuestionHash: hashNormalizedQuestion(normalized),
+        answer,
+        category: fragments[0]?.category ?? 'General',
+        knowledgeSourceIds: fragments.map((fragment) => fragment.entryId),
+        knowledgeVersion: knowledgeVersion(fragments),
+        promptVersion: ASSISTANT_CACHE_PROMPT_VERSION,
+        status: 'AUTO_VERIFIED',
+        sourceType: 'AI_GENERATED',
+        confidence: 1,
+      });
+      this.event('ANSWER_CACHE_CREATED', 'CREATED');
+      return saved;
+    } catch {
+      this.event('AI_CACHE_WRITE_FAILED', 'CACHE_ERROR');
+      return null;
+    }
   }
 
   public saveLocalAnswer(
@@ -86,23 +91,27 @@ export class AnswerCacheService {
     if (!isSafeQuestionToLog(question)) return null;
     const normalized = normalizeQuestionForCache(question);
     const hash = hashNormalizedQuestion(normalized);
-    const existing = this.database.getCachedAnswerByHash(this.botId, hash);
-    if (existing !== null) return existing;
-    const saved = this.database.saveCachedAnswer({
-      botId: this.botId,
-      canonicalQuestion: question.trim(),
-      normalizedQuestionHash: hash,
-      answer: responseMessage,
-      category,
-      knowledgeSourceIds: [],
-      knowledgeVersion: '',
-      promptVersion: ASSISTANT_CACHE_PROMPT_VERSION,
-      status: 'AUTO_VERIFIED',
-      sourceType: 'ADMIN_FAQ',
-      confidence: 1,
-    });
-    this.event('LOCAL_ANSWER_RECORDED', reason);
-    return saved;
+    try {
+      const existing = this.database.getCachedAnswerByHash(this.botId, hash);
+      if (existing !== null) return existing;
+      const saved = this.database.saveCachedAnswer({
+        botId: this.botId,
+        canonicalQuestion: question.trim(),
+        normalizedQuestionHash: hash,
+        answer: responseMessage,
+        category,
+        knowledgeSourceIds: [],
+        knowledgeVersion: '',
+        promptVersion: ASSISTANT_CACHE_PROMPT_VERSION,
+        status: 'AUTO_VERIFIED',
+        sourceType: 'ADMIN_FAQ',
+        confidence: 1,
+      });
+      this.event('LOCAL_ANSWER_RECORDED', reason);
+      return saved;
+    } catch {
+      return null;
+    }
   }
 
   public saveUnanswered(
@@ -114,30 +123,34 @@ export class AnswerCacheService {
     if (!isSafeQuestionToLog(question)) return null;
     const normalized = normalizeQuestionForCache(question);
     const hash = hashNormalizedQuestion(normalized);
-    const existing = this.database.getCachedAnswerByHash(this.botId, hash);
-    if (
-      existing !== null &&
-      ['ADMIN_APPROVED', 'ADMIN_EDITED', 'DISABLED'].includes(existing.status)
-    ) {
-      return existing;
+    try {
+      const existing = this.database.getCachedAnswerByHash(this.botId, hash);
+      if (
+        existing !== null &&
+        ['ADMIN_APPROVED', 'ADMIN_EDITED', 'DISABLED'].includes(existing.status)
+      ) {
+        return existing;
+      }
+      const saved = this.database.saveCachedAnswer({
+        botId: this.botId,
+        canonicalQuestion: question.trim(),
+        normalizedQuestionHash: hash,
+        answer: responseMessage,
+        category,
+        knowledgeSourceIds: [],
+        knowledgeVersion: '',
+        promptVersion: ASSISTANT_CACHE_PROMPT_VERSION,
+        status: 'INVALIDATED',
+        sourceType: 'AI_GENERATED',
+        confidence: 0,
+        invalidatedAt: new Date().toISOString(),
+        invalidationReason: reason,
+      });
+      this.event('UNANSWERED_QUESTION_RECORDED', reason);
+      return saved;
+    } catch {
+      return null;
     }
-    const saved = this.database.saveCachedAnswer({
-      botId: this.botId,
-      canonicalQuestion: question.trim(),
-      normalizedQuestionHash: hash,
-      answer: responseMessage,
-      category,
-      knowledgeSourceIds: [],
-      knowledgeVersion: '',
-      promptVersion: ASSISTANT_CACHE_PROMPT_VERSION,
-      status: 'INVALIDATED',
-      sourceType: 'AI_GENERATED',
-      confidence: 0,
-      invalidatedAt: new Date().toISOString(),
-      invalidationReason: reason,
-    });
-    this.event('UNANSWERED_QUESTION_RECORDED', reason);
-    return saved;
   }
 
   public async singleFlight<T>(
