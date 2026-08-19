@@ -1,5 +1,6 @@
 import type { Logger } from 'pino';
 import type {
+  AIQueueSettings,
   AISettings,
   AssistantProfile,
   IncomingMessage,
@@ -51,6 +52,7 @@ export type AssistantQueryResult = {
     | 'AI_QUEUE_EXPIRED'
     | 'AI_QUEUE_WAIT'
     | 'AI_CIRCUIT_OPEN'
+    | 'AI_QUEUE_CANCELLED'
     | 'AI_RESPONSE_REJECTED';
 };
 
@@ -277,6 +279,39 @@ export class AssistantQueryService {
           // =========================================================================
           // ETAPA A: PRE-PROVEEDOR (Reserva de cuota y validaciones internas)
           // =========================================================================
+          let queueSettings: AIQueueSettings;
+          try {
+            queueSettings = this.database.getAIQueueSettings(this.botId);
+          } catch (queueSettingsError) {
+            this.safeRecordTechnicalEvent({
+              botId: this.botId,
+              eventType: 'AI_INTERNAL_PROCESSING_FAILED',
+              result: 'FAILED',
+              errorCode: 'SQLITE_ERROR',
+              groupHash,
+              userHash,
+            });
+            this.log('AI_INTERNAL_PROCESSING_FAILED', 'QUEUE_SETTINGS_FAILED', groupHash, userHash);
+            this.safeLoggerError(
+              {
+                operation: 'AI_QUEUE_SETTINGS_FAILED',
+                botId: this.botId,
+                groupHash,
+                userHash,
+                error:
+                  queueSettingsError instanceof Error
+                    ? queueSettingsError.message
+                    : String(queueSettingsError),
+              },
+              'Fallo al consultar la configuración de cola de IA antes de consultar al proveedor',
+            );
+            return {
+              text: INTERNAL_ERROR_MESSAGE,
+              code: 'AI_INTERNAL_ERROR',
+            };
+          }
+          const providerTimeoutMs = queueSettings.providerTimeoutSeconds * 1000;
+
           const period = localPeriod(now, profile.timezone);
           let decision;
           try {
@@ -346,7 +381,7 @@ export class AssistantQueryService {
               context,
               maximumOutputTokens: settings.responseMaxTokens,
               temperature: settings.temperature,
-              timeoutMs: this.database.getAIQueueSettings(this.botId).providerTimeoutSeconds * 1000,
+              timeoutMs: providerTimeoutMs,
             });
           } catch (providerError) {
             const errorCode = this.provider.classifyProviderError(providerError);
@@ -589,6 +624,11 @@ export class AssistantQueryService {
           return {
             text: `La inteligencia artificial está temporalmente ocupada. Intenta nuevamente en ${retry} segundos.`,
             code: 'AI_CIRCUIT_OPEN',
+          };
+        if (error.code === 'AI_QUEUE_CANCELLED')
+          return {
+            text: 'La consulta fue interrumpida porque el asistente se está reiniciando. Intenta nuevamente en unos momentos.',
+            code: 'AI_QUEUE_CANCELLED',
           };
       }
       const providerCode = this.provider.classifyProviderError(error);
@@ -971,5 +1011,22 @@ function formatProviderErrorMessage(error: unknown, providerCode: AIProviderErro
     }
     return 'El servicio de inteligencia artificial está temporalmente limitado. Intenta nuevamente más tarde.';
   }
+
+  if (providerCode === 'AI_INVALID_KEY' || providerCode === 'AI_NOT_CONFIGURED') {
+    return 'El asistente no puede utilizar la inteligencia artificial debido a un problema de configuración. La administración debe revisar el servicio.';
+  }
+
+  if (providerCode === 'AI_PERMANENT_ERROR') {
+    return 'No fue posible utilizar el servicio de inteligencia artificial. La configuración requiere revisión.';
+  }
+
+  if (providerCode === 'AI_INVALID_RESPONSE' || providerCode === 'AI_EMPTY_RESPONSE') {
+    return 'La inteligencia artificial no pudo generar una respuesta válida. Intenta formular nuevamente tu consulta.';
+  }
+
+  if (providerCode === 'AI_MODEL_UNAVAILABLE') {
+    return 'El modelo de inteligencia artificial seleccionado no está disponible en este momento. Intenta nuevamente más tarde.';
+  }
+
   return 'El servicio de inteligencia artificial no está disponible temporalmente. Intenta nuevamente más tarde.';
 }

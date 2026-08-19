@@ -9,6 +9,7 @@ import {
 } from '../src/ai/ai-provider.js';
 import { AssistantQueryService } from '../src/ai/assistant-query-service.js';
 import { AIProviderFactory } from '../src/ai/ai-provider-factory.js';
+import { AIQueueError } from '../src/ai/ai-request-queue-service.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { createProfileFromPreset } from '../src/core/profile-presets.js';
@@ -628,8 +629,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     ctx.database.completeAIUsageReservation = originalComplete;
   });
 
-  // 20. Mensajes al usuario: verificación exhaustiva de strings
-  it('20. Mensajes de usuario no contienen "1 minuto" arbitrariamente y usan Retry-After real', async () => {
+  // 20. Mensajes al usuario: verificación exhaustiva de strings según causa real
+  it('20. Mensajes de usuario clasifican según causa real (temporal, rate limit, configuración, permanente, respuesta inválida, modelo no disponible)', async () => {
     // A. Error interno post-Groq
     const originalComplete = ctx.database.completeAIUsageReservation.bind(ctx.database);
     ctx.database.completeAIUsageReservation = () => {
@@ -641,22 +642,141 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     expect(internalResult.text).not.toContain('1 minuto');
     ctx.database.completeAIUsageReservation = originalComplete;
 
-    // B. Error temporal Groq
-    ctx.provider.failure = new AIProviderError('AI_TEMPORARY_ERROR', 'Temporary fail', true);
     ctx.database.saveAIQueueSettings('neurobot', { ...ctx.database.getAIQueueSettings('neurobot'), maxRetries: 0 });
+
+    const resetQueueHealth = () => {
+      ctx.service['queue']['consecutiveFailures'] = 0;
+      ctx.service['queue']['circuitState'] = 'CLOSED';
+      ctx.service['queue']['circuitOpenedAt'] = null;
+    };
+
+    // B. Error temporal Groq (AI_TEMPORARY_ERROR, AI_TIMEOUT, AI_NETWORK_ERROR)
+    resetQueueHealth();
+    ctx.provider.failure = new AIProviderError('AI_TEMPORARY_ERROR', 'Temporary fail', true);
     const tempResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
     expect(tempResult.text).toBe('El servicio de inteligencia artificial no está disponible temporalmente. Intenta nuevamente más tarde.');
     expect(tempResult.text).not.toContain('1 minuto');
 
+    resetQueueHealth();
+    ctx.provider.failure = new AIProviderError('AI_TIMEOUT', 'Timeout error', true);
+    const timeoutResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(timeoutResult.text).toBe('El servicio de inteligencia artificial no está disponible temporalmente. Intenta nuevamente más tarde.');
+
+    resetQueueHealth();
+    ctx.provider.failure = new AIProviderError('AI_NETWORK_ERROR', 'Network error', true);
+    const networkResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(networkResult.text).toBe('El servicio de inteligencia artificial no está disponible temporalmente. Intenta nuevamente más tarde.');
+
     // C. 429 con Retry-After 45s
+    resetQueueHealth();
     ctx.provider.failure = new AIProviderError('AI_PROVIDER_RATE_LIMITED', 'Rate limited', true, 45);
     const rateResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
     expect(rateResult.text).toBe('El servicio de inteligencia artificial está temporalmente limitado. Intenta nuevamente en 45 segundos.');
 
     // D. 429 con Retry-After 180s
+    resetQueueHealth();
     ctx.provider.failure = new AIProviderError('AI_PROVIDER_RATE_LIMITED', 'Rate limited', true, 180);
     const rateResultMinutes = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
     expect(rateResultMinutes.text).toBe('El servicio de inteligencia artificial está temporalmente limitado. Intenta nuevamente en aproximadamente 3 minutos.');
+
+    // E. 429 sin Retry-After
+    resetQueueHealth();
+    ctx.provider.failure = new AIProviderError('AI_PROVIDER_RATE_LIMITED', 'Rate limited', true, null);
+    const rateResultNoTime = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(rateResultNoTime.text).toBe('El servicio de inteligencia artificial está temporalmente limitado. Intenta nuevamente más tarde.');
+
+    // F. Problemas de configuración (AI_INVALID_KEY, AI_NOT_CONFIGURED)
+    resetQueueHealth();
+    ctx.provider.failure = new AIProviderError('AI_INVALID_KEY', 'Invalid API key', false);
+    const invalidKeyResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(invalidKeyResult.text).toBe('El asistente no puede utilizar la inteligencia artificial debido a un problema de configuración. La administración debe revisar el servicio.');
+    expect(invalidKeyResult.text).not.toContain('temporalmente');
+
+    resetQueueHealth();
+    ctx.provider.failure = new AIProviderError('AI_NOT_CONFIGURED', 'Not configured', false);
+    const notConfiguredResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(notConfiguredResult.text).toBe('El asistente no puede utilizar la inteligencia artificial debido a un problema de configuración. La administración debe revisar el servicio.');
+
+    // G. Error permanente (AI_PERMANENT_ERROR)
+    resetQueueHealth();
+    ctx.provider.failure = new AIProviderError('AI_PERMANENT_ERROR', 'Permanent failure', false);
+    const permanentResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(permanentResult.text).toBe('No fue posible utilizar el servicio de inteligencia artificial. La configuración requiere revisión.');
+
+    // H. Respuesta inválida o vacía (AI_INVALID_RESPONSE, AI_EMPTY_RESPONSE)
+    resetQueueHealth();
+    ctx.provider.failure = new AIProviderError('AI_INVALID_RESPONSE', 'Invalid payload', false);
+    const invalidResponseResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(invalidResponseResult.text).toBe('La inteligencia artificial no pudo generar una respuesta válida. Intenta formular nuevamente tu consulta.');
+
+    resetQueueHealth();
+    ctx.provider.failure = new AIProviderError('AI_EMPTY_RESPONSE', 'Empty response', false);
+    const emptyResponseResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(emptyResponseResult.text).toBe('La inteligencia artificial no pudo generar una respuesta válida. Intenta formular nuevamente tu consulta.');
+
+    // I. Modelo no disponible (AI_MODEL_UNAVAILABLE)
+    resetQueueHealth();
+    ctx.provider.failure = new AIProviderError('AI_MODEL_UNAVAILABLE', 'Model decommissioned', false);
+    const modelUnavailableResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(modelUnavailableResult.text).toBe('El modelo de inteligencia artificial seleccionado no está disponible en este momento. Intenta nuevamente más tarde.');
+    expect(modelUnavailableResult.text).not.toContain('API key');
+  });
+
+  // 21. getAIQueueSettings lanza SQLITE_BUSY al resolver timeout (PRE-PROVEEDOR)
+  it('21. getAIQueueSettings lanza SQLITE_BUSY en PRE-PROVEEDOR: Groq no es llamado y no degrada el proveedor', async () => {
+    const originalGet = ctx.database.getAIQueueSettings.bind(ctx.database);
+    let getAttempts = 0;
+    ctx.database.getAIQueueSettings = () => {
+      getAttempts += 1;
+      throw new Error('SQLITE_BUSY: database is locked during settings lookup');
+    };
+
+    const result = await ctx.service.answerQuestion(
+      TEST_QUESTION,
+      ctx.groupHash,
+      ctx.userHash,
+    );
+
+    // Groq NUNCA fue llamado
+    expect(getAttempts).toBeGreaterThanOrEqual(1);
+    expect(ctx.provider.calls).toBe(0);
+    expect(result.code).toBe('AI_INTERNAL_ERROR');
+    expect(result.text).toBe('Ocurrió un problema interno al procesar la respuesta. Intenta nuevamente más tarde.');
+
+    // No debe haber evento AI_CALL_FAILED de proveedor
+    const events = ctx.database.getTechnicalEvents();
+    expect(events.some((e) => e.event_type === 'AI_CALL_FAILED')).toBe(false);
+    expect(events.some((e) => e.event_type === 'AI_INTERNAL_PROCESSING_FAILED')).toBe(true);
+
+    ctx.database.getAIQueueSettings = originalGet;
+  });
+
+  // 22. AI_QUEUE_CANCELLED durante shutdown no clasifica como fallo Groq
+  it('22. AI_QUEUE_CANCELLED devuelve mensaje de reinicio sin clasificar como fallo Groq ni degradar salud', async () => {
+    // Simular que la cola lanza AI_QUEUE_CANCELLED (por ejemplo durante shutdown)
+    const queue = ctx.service['queue'];
+    const originalRun = queue.run.bind(queue);
+    queue.run = async () => {
+      throw new AIQueueError('AI_QUEUE_CANCELLED', 45);
+    };
+
+    try {
+      const result = await ctx.service.answerQuestion(
+        TEST_QUESTION,
+        ctx.groupHash,
+        ctx.userHash,
+      );
+
+      expect(ctx.provider.calls).toBe(0);
+      expect(result.code).toBe('AI_QUEUE_CANCELLED');
+      expect(result.text).toBe('La consulta fue interrumpida porque el asistente se está reiniciando. Intenta nuevamente en unos momentos.');
+
+      // No debe haber evento AI_CALL_FAILED de proveedor
+      const events = ctx.database.getTechnicalEvents();
+      expect(events.some((e) => e.event_type === 'AI_CALL_FAILED')).toBe(false);
+    } finally {
+      queue.run = originalRun;
+    }
   });
 
   // 21. Requerimiento #29: resolución de modelos y aislamiento multibot intactos
@@ -690,6 +810,77 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
 
     const secondProvider = factory.forBot('bot-secundario');
     expect(secondProvider.getModelInformation().model).toBe('openai/gpt-oss-20b');
+  });
+
+  // 23. Códigos individuales de proveedor y mensajes específicos
+  it('23a. AI_INVALID_KEY produce mensaje de configuración sin inventar tiempo ni decir temporalmente', async () => {
+    ctx.provider.failure = new AIProviderError('AI_INVALID_KEY', 'Invalid key', false);
+    ctx.database.saveAIQueueSettings('neurobot', { ...ctx.database.getAIQueueSettings('neurobot'), maxRetries: 0 });
+    const result = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(result.code).toBe('AI_ERROR');
+    expect(result.text).toBe('El asistente no puede utilizar la inteligencia artificial debido a un problema de configuración. La administración debe revisar el servicio.');
+    expect(result.text).not.toContain('temporalmente');
+    expect(result.text).not.toContain('minuto');
+  });
+
+  it('23b. AI_NOT_CONFIGURED produce mensaje de configuración', async () => {
+    ctx.provider.failure = new AIProviderError('AI_NOT_CONFIGURED', 'Not configured', false);
+    ctx.database.saveAIQueueSettings('neurobot', { ...ctx.database.getAIQueueSettings('neurobot'), maxRetries: 0 });
+    const result = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(result.code).toBe('AI_ERROR');
+    expect(result.text).toBe('El asistente no puede utilizar la inteligencia artificial debido a un problema de configuración. La administración debe revisar el servicio.');
+  });
+
+  it('23c. AI_PERMANENT_ERROR produce mensaje de error permanente y revisión requerida', async () => {
+    ctx.provider.failure = new AIProviderError('AI_PERMANENT_ERROR', 'Permanent error', false);
+    ctx.database.saveAIQueueSettings('neurobot', { ...ctx.database.getAIQueueSettings('neurobot'), maxRetries: 0 });
+    const result = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(result.code).toBe('AI_ERROR');
+    expect(result.text).toBe('No fue posible utilizar el servicio de inteligencia artificial. La configuración requiere revisión.');
+  });
+
+  it('23d. AI_INVALID_RESPONSE y AI_EMPTY_RESPONSE producen mensaje de reformular consulta', async () => {
+    ctx.database.saveAIQueueSettings('neurobot', { ...ctx.database.getAIQueueSettings('neurobot'), maxRetries: 0 });
+
+    ctx.provider.failure = new AIProviderError('AI_INVALID_RESPONSE', 'Invalid schema', false);
+    const invalidResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(invalidResult.code).toBe('AI_ERROR');
+    expect(invalidResult.text).toBe('La inteligencia artificial no pudo generar una respuesta válida. Intenta formular nuevamente tu consulta.');
+
+    ctx.service['queue']['consecutiveFailures'] = 0;
+    ctx.service['queue']['circuitState'] = 'CLOSED';
+
+    ctx.provider.failure = new AIProviderError('AI_EMPTY_RESPONSE', 'Empty response', false);
+    const emptyResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(emptyResult.code).toBe('AI_ERROR');
+    expect(emptyResult.text).toBe('La inteligencia artificial no pudo generar una respuesta válida. Intenta formular nuevamente tu consulta.');
+  });
+
+  it('23e. AI_TIMEOUT y AI_NETWORK_ERROR conservan mensaje de servicio no disponible temporalmente', async () => {
+    ctx.database.saveAIQueueSettings('neurobot', { ...ctx.database.getAIQueueSettings('neurobot'), maxRetries: 0 });
+
+    ctx.provider.failure = new AIProviderError('AI_TIMEOUT', 'Timeout occurred', true);
+    const timeoutResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(timeoutResult.code).toBe('AI_ERROR');
+    expect(timeoutResult.text).toBe('El servicio de inteligencia artificial no está disponible temporalmente. Intenta nuevamente más tarde.');
+
+    ctx.service['queue']['consecutiveFailures'] = 0;
+    ctx.service['queue']['circuitState'] = 'CLOSED';
+
+    ctx.provider.failure = new AIProviderError('AI_NETWORK_ERROR', 'Network failure', true);
+    const networkResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(networkResult.code).toBe('AI_ERROR');
+    expect(networkResult.text).toBe('El servicio de inteligencia artificial no está disponible temporalmente. Intenta nuevamente más tarde.');
+  });
+
+  it('23f. AI_MODEL_UNAVAILABLE produce mensaje de modelo no disponible sin culpar a API key', async () => {
+    ctx.provider.failure = new AIProviderError('AI_MODEL_UNAVAILABLE', 'Model not found', false);
+    ctx.database.saveAIQueueSettings('neurobot', { ...ctx.database.getAIQueueSettings('neurobot'), maxRetries: 0 });
+    const result = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
+    expect(result.code).toBe('AI_ERROR');
+    expect(result.text).toBe('El modelo de inteligencia artificial seleccionado no está disponible en este momento. Intenta nuevamente más tarde.');
+    expect(result.text).not.toContain('API key');
+    expect(result.text).not.toContain('configuración');
   });
 
   // 24-25. Verificación de seguridad en logs
