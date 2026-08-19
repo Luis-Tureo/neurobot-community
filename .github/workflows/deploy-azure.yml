@@ -96,11 +96,12 @@ jobs:
         run: |
           set -euo pipefail
 
+          AZ_RETRY=".github/scripts/az-retry.sh"
           APP_STOPPED=false
           restore_app_on_failure() {
             if [ "$APP_STOPPED" = "true" ]; then
               echo "El despliegue falló con la Web App detenida; intentando volver a iniciarla."
-              az webapp start \
+              bash "$AZ_RETRY" webapp start \
                 --resource-group "$AZURE_RESOURCE_GROUP" \
                 --name "$AZURE_WEBAPP_NAME" \
                 >/dev/null || true
@@ -109,14 +110,14 @@ jobs:
           trap restore_app_on_failure EXIT
 
           echo "Deteniendo Azure App Service antes de reemplazar la imagen..."
-          az webapp stop \
+          bash "$AZ_RETRY" webapp stop \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_WEBAPP_NAME" \
             >/dev/null
           APP_STOPPED=true
 
           for attempt in $(seq 1 18); do
-            STATE=$(az webapp show \
+            STATE=$(bash "$AZ_RETRY" webapp show \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --name "$AZURE_WEBAPP_NAME" \
               --query state \
@@ -133,13 +134,13 @@ jobs:
             sleep 5
           done
 
-          az webapp update \
+          bash "$AZ_RETRY" webapp update \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_WEBAPP_NAME" \
             --https-only true \
             >/dev/null
 
-          az webapp config appsettings set \
+          bash "$AZ_RETRY" webapp config appsettings set \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_WEBAPP_NAME" \
             --settings \
@@ -154,7 +155,7 @@ jobs:
               GROQ_MODEL=openai/gpt-oss-20b \
             >/dev/null
 
-          az webapp config container set \
+          bash "$AZ_RETRY" webapp config container set \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_WEBAPP_NAME" \
             --container-image-name "${IMAGE_NAME}:${GITHUB_SHA}" \
@@ -162,14 +163,14 @@ jobs:
             --enable-app-service-storage true \
             >/dev/null
 
-          az webapp config set \
+          bash "$AZ_RETRY" webapp config set \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_WEBAPP_NAME" \
             --always-on true \
             >/dev/null
 
           echo "Iniciando Azure App Service con la nueva imagen..."
-          az webapp start \
+          bash "$AZ_RETRY" webapp start \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_WEBAPP_NAME" \
             >/dev/null
@@ -181,7 +182,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          HOST_NAME=$(az webapp show \
+          HOST_NAME=$(bash .github/scripts/az-retry.sh webapp show \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_WEBAPP_NAME" \
             --query defaultHostName \
@@ -207,13 +208,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          HOST_NAME=$(az webapp show \
+          HOST_NAME=$(bash .github/scripts/az-retry.sh webapp show \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_WEBAPP_NAME" \
             --query defaultHostName \
             --output tsv)
 
-          PANEL_PASSWORD=$(az webapp config appsettings list \
+          PANEL_PASSWORD=$(bash .github/scripts/az-retry.sh webapp config appsettings list \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_WEBAPP_NAME" \
             --query "[?name=='PANEL_INITIAL_PASSWORD'].value | [0]" \
@@ -278,12 +279,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          HOST_NAME=$(az webapp show \
+          HOST_NAME=$(bash .github/scripts/az-retry.sh webapp show \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_WEBAPP_NAME" \
             --query defaultHostName \
             --output tsv)
-          PANEL_PASSWORD=$(az webapp config appsettings list \
+          PANEL_PASSWORD=$(bash .github/scripts/az-retry.sh webapp config appsettings list \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_WEBAPP_NAME" \
             --query "[?name=='PANEL_INITIAL_PASSWORD'].value | [0]" \

@@ -193,7 +193,11 @@ export class AIRequestQueueService {
         .then(
           (value) => {
             this.metric('completedCount');
-            this.onSuccess();
+            if (resolvedResultRepresentsProviderSuccess(value)) {
+              this.onSuccess();
+            } else {
+              this.onProviderOutcomeUnchanged();
+            }
             this.event('AI_QUEUE_REQUEST_COMPLETED', 'completed');
             item.resolve({ value, coalesced: false });
           },
@@ -224,7 +228,7 @@ export class AIRequestQueueService {
     for (let attempt = 0; attempt <= settings.maxRetries; attempt += 1) {
       try {
         const result = await operation();
-        if (attempt > 0) {
+        if (attempt > 0 && resolvedResultRepresentsProviderSuccess(result)) {
           this.event('AI_PROVIDER_RETRY_SUCCESS', 'recovered');
           notifySafely(onRetrySucceeded, { attempt, code: lastRetryCode });
         }
@@ -324,6 +328,13 @@ export class AIRequestQueueService {
     this.lastSuccessAt = new Date(this.now()).toISOString();
     if (recovered) this.event('AI_CIRCUIT_CLOSED', 'closed');
     this.persistHealth('AVAILABLE');
+  }
+
+  private onProviderOutcomeUnchanged(): void {
+    if (this.circuitState === 'HALF_OPEN') {
+      this.halfOpenProbeActive = false;
+    }
+    this.event('AI_PROVIDER_HEALTH_UNCHANGED', 'provider_not_confirmed');
   }
 
   private onFailure(code: string, temporary: boolean): void {
@@ -446,6 +457,17 @@ function notifySafely<T>(callback: ((value: T) => void) | undefined, value: T): 
   } catch {
     // El progreso es informativo y nunca debe alterar el resultado de la solicitud de IA.
   }
+}
+
+function resolvedResultRepresentsProviderSuccess(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || !('code' in value)) return true;
+  const code = (value as { code?: unknown }).code;
+  if (typeof code !== 'string') return true;
+
+  // Estos resultados se resuelven sin una confirmación fiable de éxito del proveedor:
+  // PRE-PROVEEDOR (SQLite/config/cuota), límites locales o fallos internos post-proveedor.
+  // En esos casos preservamos la salud previa de Groq en lugar de marcarlo falsamente AVAILABLE.
+  return code !== 'AI_INTERNAL_ERROR' && code !== 'LIMIT_REACHED';
 }
 
 function safeCode(error: unknown): string {
