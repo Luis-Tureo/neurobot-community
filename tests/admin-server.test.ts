@@ -11,7 +11,7 @@ import {
 import { CommunityDigestService } from '../src/core/community-digest-service.js';
 import { ConnectionManager } from '../src/core/connection-manager.js';
 import { GroupDiscoveryService } from '../src/core/group-discovery-service.js';
-import { createProfileFromPreset } from '../src/core/profile-presets.js';
+import { createDefaultAssistantProfile } from '../src/core/assistant-profile-defaults.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
@@ -726,12 +726,11 @@ describe('API administrativa', () => {
       mode: 'business',
       connectorType: 'WHATSAPP_CLOUD_API',
       sessionPath: 'data/sessions/negocio-aislado',
-      profile: createProfileFromPreset({
+      profile: createDefaultAssistantProfile({
         organizationName: 'Negocio aislado',
         botName: 'Bot negocio',
         organizationType: 'Tienda',
         timezone: 'America/Santiago',
-        preset: 'store',
       }),
     });
     const auth = await login(app);
@@ -816,98 +815,56 @@ describe('API administrativa', () => {
 
   it('mantiene inaccesibles las rutas del módulo retirado de moderación', async () => {
     const auth = await login(app);
-    const initial = await app.inject({
-      method: 'GET',
-      url: '/api/bots/neurobot/moderation',
-      headers: { cookie: auth.cookie },
-    });
-    expect(initial.statusCode).toBe(404);
+    for (const url of [
+      '/api/bots/neurobot/moderation',
+      '/api/bots/neurobot/ai-moderation',
+      '/api/bots/neurobot/ai-moderation/incidents',
+    ]) {
+      const response = await app.inject({ method: 'GET', url, headers: { cookie: auth.cookie } });
+      expect(response.statusCode).toBe(404);
+    }
+    for (const url of [
+      '/api/bots/neurobot/moderation/test',
+      '/api/bots/neurobot/ai-moderation/test',
+      '/api/bots/neurobot/ai-moderation/preview',
+    ]) {
+      const response = await injectAuthenticated(app, auth, { method: 'POST', url, payload: {} });
+      expect(response.statusCode).toBe(404);
+    }
   });
 
-  it('configura y previsualiza la moderación asistida sin exponer el número guardado', async () => {
+  it('no expone ni acepta configuración legacy de identidad en el contrato activo', async () => {
     const auth = await login(app);
-    const groupId = 'grupo-ai-moderation@g.us';
-    const anonymizer = new Anonymizer('x'.repeat(32));
-    const groupHash = anonymizer.identifier(groupId);
-    database.synchronizeBotGroup('neurobot', {
-      id: groupId,
-      name: 'Grupo moderado',
-      botIsMember: true,
-    });
-    const initial = await app.inject({
+    const detail = await app.inject({
       method: 'GET',
-      url: '/api/bots/neurobot/ai-moderation',
+      url: '/api/bots/neurobot',
       headers: { cookie: auth.cookie },
     });
-    expect(initial.statusCode).toBe(200);
-    expect(initial.json()).toMatchObject({
-      settings: { enabled: false, adminPhoneConfigured: false },
-      mediaSupport: { text: true, images: false, audio: false },
-    });
+    expect(detail.statusCode).toBe(200);
+    for (const field of [
+      'internalName',
+      'industry',
+      'objective',
+      'allowedTopics',
+      'excludedTopics',
+      'tone',
+      'outOfScopeMessage',
+      'communityGreetingMessage',
+    ]) {
+      expect(detail.json().profile[field]).toBeUndefined();
+    }
 
-    const saved = await injectAuthenticated(app, auth, {
-      method: 'PUT',
-      url: '/api/bots/neurobot/ai-moderation/settings',
-      payload: {
-        enabled: false,
-        adminPhone: '+56 9 0000 0000',
-        clearAdminPhone: false,
-        warningTemplate:
-          'Hola {nombre}. Posible incumplimiento en {grupo}: {regla}. Motivo: {motivo}.',
-        minSeverity: 'MEDIO',
-        dedupWindowMinutes: 5,
-        pendingExpiryHours: 24,
-        selectedGroups: [groupHash],
-      },
+    const editableProfile = Object.fromEntries(
+      Object.entries(detail.json().profile).filter(
+        ([field]) => !['id', 'active', 'createdAt', 'updatedAt'].includes(field),
+      ),
+    );
+    const rejected = await injectAuthenticated(app, auth, {
+      method: 'PATCH',
+      url: '/api/bots/neurobot/profile',
+      payload: { ...editableProfile, objective: 'No debe aceptarse.' },
     });
-    expect(saved.statusCode).toBe(200);
-    expect(saved.json()).toMatchObject({
-      settings: { enabled: false, adminPhoneConfigured: true, selectedGroups: [groupHash] },
-    });
-    expect(saved.body).not.toContain('+56 9 0000 0000');
-    expect(saved.body).not.toContain('56900000000@c.us');
-
-    database.createAIModerationIncident({
-      assistantId: 'neurobot',
-      groupHash,
-      groupName: 'Grupo moderado',
-      participantHash: anonymizer.identifier('participante-privado'),
-      participantDisplayName: 'Nombre privado',
-      messageHash: 'mensaje-privado-para-panel',
-      encryptedParticipantPhone: 'identificador-cifrado-de-prueba',
-      detectedAt: new Date().toISOString(),
-      messagePreview: 'Contenido privado que el panel no debe mostrar',
-      contextMessages: ['Contexto privado que el panel no debe mostrar'],
-      ruleViolated: 'Respeto',
-      category: 'insulto',
-      severity: 'MEDIO',
-      confidence: 'ALTA',
-      aiExplanation: 'Explicación privada que el panel no debe mostrar',
-      warningSnapshot: 'Advertencia privada que el panel no debe mostrar',
-      dedupWindowMinutes: 5,
-    });
-    const incidents = await app.inject({
-      method: 'GET',
-      url: '/api/bots/neurobot/ai-moderation/incidents',
-      headers: { cookie: auth.cookie },
-    });
-    expect(incidents.statusCode).toBe(200);
-    expect(incidents.body).not.toContain('Nombre privado');
-    expect(incidents.body).not.toContain('Contenido privado');
-    expect(incidents.body).not.toContain('Contexto privado');
-    expect(incidents.body).not.toContain('Explicación privada');
-    expect(incidents.body).not.toContain('Advertencia privada');
-
-    const preview = await injectAuthenticated(app, auth, {
-      method: 'POST',
-      url: '/api/bots/neurobot/ai-moderation/preview',
-      payload: {
-        template: 'Hola {nombre}. Revisión en {grupo}: {regla}. Motivo: {motivo}.',
-      },
-    });
-    expect(preview.statusCode).toBe(200);
-    expect(preview.json()).toMatchObject({ simulation: true });
-    expect(preview.json().warning).not.toMatch(/\{(?:nombre|grupo|regla|motivo)\}/u);
+    expect(rejected.statusCode).toBe(400);
   });
 
   it('gestiona la IA actual y conserva un historial de cambios sin exponer tokens', async () => {
@@ -1075,8 +1032,8 @@ describe('API administrativa', () => {
     });
 
     const list = database.listReusableCachedAnswers('neurobot');
-    expect(list.some(a => a.category === 'Error de IA')).toBe(false);
-    expect(list.some(a => a.category === 'General')).toBe(true);
+    expect(list.some((a) => a.category === 'Error de IA')).toBe(false);
+    expect(list.some((a) => a.category === 'General')).toBe(true);
   });
 });
 

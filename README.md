@@ -8,8 +8,9 @@ Documentación operativa:
 - [Exclusividad de números y sesiones](docs/NUMEROS_Y_SESIONES.md)
 - [Papelera y eliminación segura](docs/ELIMINAR_ASISTENTES.md)
 - [Módulos por tipo de asistente](docs/MODULOS_POR_TIPO_DE_ASISTENTE.md)
+- [Deprecación de identidad y Moderación con IA](docs/REQUERIMIENTO_30.md)
 
-Aplicación local para crear, vincular y administrar varios asistentes de WhatsApp independientes desde la pantalla **Mis asistentes**. La instalación conserva a **Neurobot** como primer asistente y permite agregar perfiles de comunidad, tienda, restaurante, distribuidora, servicio o un perfil vacío.
+Aplicación local para crear, vincular y administrar varios asistentes de WhatsApp independientes desde la pantalla **Mis asistentes**. La instalación conserva a **Neurobot** como primer asistente y permite agregar asistentes de comunidad, negocio o uso mixto.
 
 Cada asistente tiene una sesión de WhatsApp, perfil, canales, grupos, conocimiento, menús, catálogo, imágenes, horarios, solicitudes humanas, automatizaciones, encuestas, configuración de IA, límites y estadísticas separados por `botId`. El contenido oficial y la lógica local tienen prioridad; Groq es opcional y nunca se usa para inventar precios, stock, horarios, compras o reservas.
 
@@ -17,7 +18,7 @@ Cada asistente tiene una sesión de WhatsApp, perfil, canales, grupos, conocimie
 
 - Cada mensaje distinto recibido por WhatsApp puede generar su propia respuesta; solo se descarta la repetición del mismo ID de mensaje o evento.
 - Solo una llamada real a Groq cuya respuesta termina validada y lista para enviar aumenta los contadores de IA y tokens.
-- Saludos, preguntas frecuentes, respuestas guardadas, conocimiento directo, rechazos de alcance, consultas sin información, duplicados, errores, tiempos de espera y respuestas rechazadas no consumen cuota exitosa de IA.
+- Saludos, preguntas frecuentes, respuestas guardadas, conocimiento directo, consultas sin información interna suficiente, duplicados, errores, tiempos de espera y respuestas rechazadas no consumen cuota exitosa de IA.
 - Las reservas temporales evitan exceder el presupuesto durante solicitudes concurrentes. Una falla o respuesta inválida libera la reserva.
 - Los límites iniciales de IA son: 20 por usuario/hora, 50 por usuario/día, 150 por grupo/hora, 500 por grupo/día, 500 por bot/día y 10.000 por bot/mes.
 
@@ -42,7 +43,7 @@ El bot entrega información general. No diagnostica, no recomienda medicamentos,
 - Constructor de menús, submenús y acciones seguras, con estado anónimo y expiración.
 - Adaptador interactivo con alternativa numerada automática cuando WhatsApp no soporte botones o listas.
 - Catálogo, imágenes oficiales, horarios y solicitudes de atención humana separados por asistente.
-- Base de conocimiento independiente con búsqueda local FTS y Groq opcional, limitado al contexto oficial.
+- Base de conocimiento independiente con búsqueda local FTS y Groq opcional. Los datos internos siguen limitados al contexto oficial; las preguntas generales pueden usar conocimiento general del proveedor.
 - Clave global de Groq o credencial cifrada por asistente; las claves nunca vuelven al navegador.
 - Límites por usuario, grupo, asistente e instalación, contabilizando el uso real informado por el proveedor.
 - Automatizaciones y encuestas independientes por asistente y zona horaria.
@@ -64,7 +65,7 @@ El bot entrega información general. No diagnostica, no recomienda medicamentos,
 ## Crear y vincular un asistente
 
 1. Ingrese al panel y abra **Mis asistentes**.
-2. Seleccione **Crear nuevo asistente** y complete nombre, identificador interno, rubro, zona horaria, modo, conector y plantilla.
+2. Seleccione **Crear nuevo asistente** y complete nombre, identificador interno, rubro, zona horaria, modo y conector.
 3. Abra **Administrar** para ajustar perfil, canales y contenido antes de vincular el número.
 4. Para una comunidad con **WhatsApp Web**, seleccione **Vincular**, escanee el QR con el número exclusivo y espere el estado **Conectado**.
 5. En comunidad o mixto, actualice los grupos y active solo los destinos aprobados.
@@ -82,7 +83,9 @@ La versión instalada de `whatsapp-web.js` mantiene clases de botones y listas m
 
 ## Inteligencia artificial opcional
 
-La IA solo se consulta cuando hay una pregunta válida, conocimiento oficial relacionado, proveedor activo, credencial configurada y presupuesto disponible. Las preguntas fuera de tema, médicas o sin conocimiento se resuelven localmente sin consumir tokens. No se guarda la pregunta, la respuesta ni el historial; solo contadores de uso y códigos técnicos seguros.
+La IA se consulta como último recurso cuando hay una pregunta válida, proveedor activo, credencial configurada y presupuesto disponible. Puede responder preguntas generales con conocimiento del modelo; para datos internos de la comunidad o negocio exige una fuente oficial y nunca rellena información faltante. Las consultas médicas conservan sus límites de seguridad. No se guarda la pregunta, la respuesta ni el historial; solo contadores de uso y códigos técnicos seguros.
+
+Las respuestas piden concisión semántica —directas y completas, sin relleno— en vez de aplicar un corte posterior por caracteres, líneas o una estimación local de tokens. El valor inicial es de 1024 tokens de salida. Si el proveedor informa `finish_reason=length`, el texto parcial no se envía ni se guarda en caché; queda únicamente un código técnico seguro. Los textos que superan el límite operativo de WhatsApp se dividen en partes ordenadas sin perder contenido.
 
 La clave global se lee desde `GROQ_API_KEY`. Una clave por asistente se cifra con AES-256-GCM usando `APP_ENCRYPTION_KEY` y contexto asociado al `botId`; el servidor solo informa **Clave configurada**. Configure el panel detrás de HTTPS si deja de escuchar exclusivamente en localhost.
 
@@ -323,17 +326,13 @@ Las llamadas a IA usan una [cola independiente por asistente](docs/COLA_DE_INTEL
 
 La administración de plantillas predeterminadas está aislada por asistente. Consulte [Encuestas por asistente](docs/ENCUESTAS_POR_ASISTENTE.md) para ocultarlas, restaurarlas y entender el tratamiento de automatizaciones futuras.
 
-Los asistentes con canal grupal disponen de [moderación simplificada por grupo](docs/MODERACION_SIMPLIFICADA_POR_GRUPO.md): la IA prepara las reglas una sola vez cuando el administrador lo solicita y la revisión diaria es completamente local, sin expulsión ni eliminación automática.
-
-Como segunda capa opcional, la [moderación asistida por IA](docs/MODERACION_ASISTIDA_POR_IA.md) analiza en tiempo real solo texto que la moderación local dejó pasar. Cada advertencia requiere aprobación humana explícita; imágenes, stickers, audio y video no son compatibles con el proveedor actual.
-
 La [bienvenida de integrantes](docs/BIENVENIDA_DE_INTEGRANTES.md) usa localmente el nombre público configurado en WhatsApp, menciones reales cuando son compatibles y un texto genérico sin exponer números.
 
 - Dependencia no oficial de la interfaz de WhatsApp Web.
 - La prueba real necesita un teléfono, número exclusivo y escaneo QR.
-- No modifica automáticamente Comunidades, canales ni participantes; la moderación disponible se limita a advertencias locales y revisión humana.
-- Neurobot no atiende consultas privadas. En ese canal solo procesa los comandos exactos `ENVIAR`/`OMITIR` de la persona autorizada para moderación asistida y envía los avisos administrativos configurados.
-- La IA es opcional, acotada al conocimiento oficial y depende de una clave válida y de los límites configurados.
+- No modifica automáticamente Comunidades, canales, mensajes ni participantes. La Moderación con IA está deprecada y no existe en el runtime activo.
+- Neurobot comunitario no atiende consultas privadas; los perfiles comerciales conservan sus flujos privados según sus capacidades.
+- La IA es opcional, exige conocimiento oficial para hechos internos y depende de una clave válida y de los límites configurados.
 - Los botones y listas nativos dependen de funciones obsoletas de `whatsapp-web.js`; la alternativa numerada es el modo compatible garantizado.
 - El estado de sesiones activas del panel vive en memoria y se pierde al reiniciar, lo que obliga a iniciar sesión otra vez.
 - Los límites configurados desde el panel requieren reiniciar la aplicación para reconstruir los controles en memoria.

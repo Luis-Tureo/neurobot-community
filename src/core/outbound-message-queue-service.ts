@@ -1,5 +1,6 @@
 import type { Logger } from 'pino';
 import type { MessagingClient } from '../messaging/messaging-client.js';
+import { splitWhatsAppText } from '../messaging/whatsapp-text-segmentation.js';
 import type { AppDatabase } from '../persistence/database.js';
 
 export class OutboundMessageQueueService {
@@ -21,29 +22,40 @@ export class OutboundMessageQueueService {
     const current = previous
       .catch(() => undefined)
       .then(async () => {
-        const interval = this.database.getAIQueueSettings(this.botId).outboundMessageIntervalMs;
-        const wait = Math.max(0, interval - (Date.now() - (this.lastSentAt.get(chatId) ?? 0)));
-        if (wait > 0) await this.sleep(wait);
-        let lastError: unknown;
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          try {
-            await this.client.sendMessage(chatId, text);
-            this.lastSentAt.set(chatId, Date.now());
-            this.event('OUTBOUND_MESSAGE_SENT', 'sent');
-            return;
-          } catch (error) {
-            lastError = error;
-            if (attempt < 2) await this.sleep(250 * (attempt + 1));
-          }
+        const parts = splitWhatsAppText(text);
+        for (const part of parts) {
+          await this.waitForSendInterval(chatId);
+          await this.sendPartWithRetry(chatId, part);
         }
-        this.event('OUTBOUND_MESSAGE_FAILED', 'failed');
-        throw lastError;
+        this.event('OUTBOUND_MESSAGE_SENT', 'sent');
       })
       .finally(() => {
         if (this.tails.get(chatId) === current) this.tails.delete(chatId);
       });
     this.tails.set(chatId, current);
     return current;
+  }
+
+  private async waitForSendInterval(chatId: string): Promise<void> {
+    const interval = this.database.getAIQueueSettings(this.botId).outboundMessageIntervalMs;
+    const wait = Math.max(0, interval - (Date.now() - (this.lastSentAt.get(chatId) ?? 0)));
+    if (wait > 0) await this.sleep(wait);
+  }
+
+  private async sendPartWithRetry(chatId: string, text: string): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await this.client.sendMessage(chatId, text);
+        this.lastSentAt.set(chatId, Date.now());
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) await this.sleep(250 * (attempt + 1));
+      }
+    }
+    this.event('OUTBOUND_MESSAGE_FAILED', 'failed');
+    throw lastError;
   }
 
   public async getGroupAdministratorIds(chatId: string): Promise<string[]> {

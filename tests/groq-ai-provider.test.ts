@@ -190,4 +190,42 @@ describe('GroqAIProvider — prueba de conexión', () => {
       },
     });
   });
+
+  it('envía un presupuesto acotado, omite razonamiento visible y conserva finish_reason', async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    const provider = new GroqAIProvider('gsk_token-de-prueba', model, async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          choices: [
+            { message: { content: 'La capital de Japón es Tokio.' }, finish_reason: 'stop' },
+          ],
+          usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+
+    const result = await provider.generateGroundedResponse({
+      systemInstruction: 'Responde de forma completa y breve.',
+      question: '¿Cuál es la capital de Japón?',
+      context: 'Sin contexto interno.',
+      maximumOutputTokens: 1024,
+      temperature: 0.1,
+      timeoutMs: 1_000,
+    });
+
+    expect(requestBody).toMatchObject({
+      model,
+      max_completion_tokens: 1024,
+      stream: false,
+      include_reasoning: false,
+      reasoning_effort: 'low',
+    });
+    expect(result).toMatchObject({
+      text: 'La capital de Japón es Tokio.',
+      finishReason: 'stop',
+      usage: { outputTokens: 8 },
+    });
+  });
 });

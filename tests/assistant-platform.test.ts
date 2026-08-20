@@ -1,16 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AssistantModuleVisibilityService } from '../src/core/assistant-module-visibility-service.js';
-import { createProfileFromPreset } from '../src/core/profile-presets.js';
+import { createDefaultAssistantProfile } from '../src/core/assistant-profile-defaults.js';
 import { AppDatabase } from '../src/persistence/database.js';
 
 function businessProfile() {
-  return createProfileFromPreset({
+  return createDefaultAssistantProfile({
     organizationName: 'Negocio de prueba',
     botName: 'Asistente comercial',
     organizationType: 'Tienda',
     timezone: 'America/Santiago',
-    preset: 'store',
   });
 }
 
@@ -43,16 +42,15 @@ describe('plataforma de asistentes', () => {
     });
 
     expect(visibility.visibleModules(community)).toEqual(
-      expect.arrayContaining(['automatic-messages', 'polls', 'ai-moderation']),
+      expect.arrayContaining(['automatic-messages', 'polls']),
     );
     expect(visibility.visibleModules(community)).not.toContain('catalog');
     expect(visibility.visibleModules(business)).toEqual(
       expect.arrayContaining(['menus', 'catalog', 'hours', 'requests']),
     );
     expect(visibility.visibleModules(business)).not.toContain('polls');
-    expect(visibility.visibleModules(business)).not.toContain('ai-moderation');
     expect(visibility.visibleModules(mixed)).toEqual(
-      expect.arrayContaining(['polls', 'automatic-messages', 'ai-moderation', 'menus', 'catalog']),
+      expect.arrayContaining(['polls', 'automatic-messages', 'menus', 'catalog']),
     );
   });
 

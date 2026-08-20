@@ -179,12 +179,22 @@ describe('simulador conversacional del Centro de pruebas', () => {
     });
     const groupKey = automatic.json().authorizedGroups[0]?.key as string | undefined;
     expect(groupKey).toHaveLength(20);
-    database.saveGroupModerationDraft(
-      'neurobot',
-      groupKey as string,
-      'Finalidad confirmada de Grupo laboratorio: probar el asistente con contexto real.',
-      'laboratory-purpose',
-    );
+    const profile = database.getBotProfile('neurobot');
+    const category = database.listKnowledgeCategories(profile.id)[0];
+    expect(category).toBeDefined();
+    database.saveKnowledgeEntry({
+      id: 0,
+      profileId: profile.id,
+      categoryId: category?.id as number,
+      title: 'Propósito de Grupo laboratorio',
+      content:
+        'La finalidad confirmada de Grupo laboratorio es probar el asistente con contexto real.',
+      keywords: ['sirve', 'grupo', 'propósito'],
+      synonyms: [],
+      enabled: true,
+      priority: 100,
+      internalSource: 'approved:automation-lab-test',
+    });
 
     const purpose = await simulate(app, auth, groupKey as string, '¿Para qué sirve este grupo?');
     const education = await simulate(

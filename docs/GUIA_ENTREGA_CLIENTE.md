@@ -4,12 +4,12 @@
 
 1. El cliente proporciona un número exclusivo y completa la ficha de configuración.
 2. Se crea el asistente desde **Mis asistentes** con un `botId` único.
-3. Se revisan modo, canales, zona horaria y plantilla inicial.
+3. Se revisan modo, canales, zona horaria y conector.
 4. El cliente escanea el QR desde **Dispositivos vinculados** en su propio teléfono.
 
 ## Configuración
 
-5. Se configura el perfil, marca, tono, temas y textos de seguridad.
+5. Se configura el perfil operativo, marca, información descriptiva y textos de seguridad.
 6. Se carga el catálogo con precios y disponibilidad confirmados.
 7. Se cargan imágenes oficiales JPG, PNG o WebP y se revisa su vista previa.
 8. Se configuran horarios, dirección, pagos, despachos, cambios y garantías.
@@ -36,7 +36,7 @@
 - Los textos, precios, horarios e imágenes fueron aprobados.
 - No se realizan envíos automáticos hasta activarlos expresamente.
 - La alternativa numerada funciona aunque los controles nativos no estén disponibles.
-- La IA fuera de tema no consume tokens y nunca expone la clave.
+- La IA puede responder preguntas generales; los datos internos requieren fuentes oficiales y la clave nunca se expone.
 - El cliente conoce las limitaciones de `whatsapp-web.js` y conserva un número exclusivo.
 
 ## Respaldo y devolución

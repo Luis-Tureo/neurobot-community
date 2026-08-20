@@ -15,8 +15,6 @@ import {
 } from './bot-activation.js';
 import type { ConversationFlowService } from './conversation-flow-service.js';
 import type { OutboundMessageQueueService } from './outbound-message-queue-service.js';
-import type { ModerationService } from '../moderation/moderation-service.js';
-import type { AIModerationService } from '../moderation/ai-moderation-service.js';
 
 export type MessageProcessorOptions = {
   maxMessageLength: number;
@@ -48,8 +46,6 @@ export class MessageProcessor {
     private readonly botId = 'neurobot',
     private readonly conversationFlow?: ConversationFlowService,
     private readonly outboundQueue?: OutboundMessageQueueService,
-    private readonly moderationService?: ModerationService,
-    private readonly aiModerationService?: AIModerationService,
   ) {}
 
   public async process(message: IncomingMessage): Promise<ProcessResult> {
@@ -112,28 +108,6 @@ export class MessageProcessor {
     );
     if (!groupAuthorized) return 'unauthorized_group';
 
-    let localModerationMatched = false;
-    if (this.moderationService !== undefined) {
-      const moderation = await this.moderationService.process(
-        message,
-        groupHash,
-        userHash,
-        messageHash,
-      );
-      localModerationMatched = (moderation.result?.matchedRules.length ?? 0) > 0;
-      if (moderation.blockNormal) {
-        this.logger.info(
-          {
-            operation: 'MODERATION_NORMAL_RESPONSE_SUPPRESSED',
-            reason: 'CLEAR_LOCAL_MATCH',
-            ...context,
-          },
-          'La moderación local evitó una respuesta normal',
-        );
-        return moderation.warningSent ? 'responded' : 'ignored';
-      }
-    }
-
     if (!this.processedMessages.checkAndAdd(message.id)) {
       this.logger.info(
         {
@@ -145,20 +119,6 @@ export class MessageProcessor {
         'Se ignoró un mensaje duplicado',
       );
       return 'duplicate';
-    }
-
-    if (this.aiModerationService !== undefined && !localModerationMatched) {
-      void this.aiModerationService.analyze(message, groupHash, userHash, messageHash).catch(() => {
-        this.logger.error(
-          {
-            operation: 'AI_MODERATION_BACKGROUND_FAILED',
-            botId: this.botId,
-            groupHash,
-            errorCode: 'AI_MODERATION_BACKGROUND_FAILED',
-          },
-          'El análisis de moderación en segundo plano no pudo completarse',
-        );
-      });
     }
 
     if (this.botId === 'neurobot' && !this.database.getSetting('bot_enabled', true)) {

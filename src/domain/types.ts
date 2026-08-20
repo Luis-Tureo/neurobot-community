@@ -285,17 +285,24 @@ export type AssistantProfile = {
   activationAlias: string;
   description: string;
   organizationType: OrganizationType;
+  /** @deprecated Conservado solo para compatibilidad con bases anteriores a #30. */
   industry: string;
+  /** @deprecated No se lee ni se escribe como configuración activa desde #30. */
   objective: string;
+  /** @deprecated No se lee ni se escribe como configuración activa desde #30. */
   allowedTopics: string[];
+  /** @deprecated No se lee ni se escribe como configuración activa desde #30. */
   excludedTopics: string[];
+  /** @deprecated No se lee ni se escribe como configuración activa desde #30. */
   tone: string;
+  /** @deprecated No se lee ni se escribe como configuración activa desde #30. */
   outOfScopeMessage: string;
   noInformationMessage: string;
   limitMessage: string;
   aiErrorMessage: string;
   medicalMessage: string;
   mentionPromptMessage: string;
+  /** @deprecated El saludo configurable de identidad dejó de formar parte del runtime en #30. */
   communityGreetingMessage: string;
   contactInformation: string;
   businessHours: string;
@@ -312,6 +319,31 @@ export type AssistantProfile = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type ActiveAssistantProfileConfiguration = Pick<
+  AssistantProfile,
+  | 'organizationName'
+  | 'botName'
+  | 'activationAlias'
+  | 'description'
+  | 'organizationType'
+  | 'noInformationMessage'
+  | 'limitMessage'
+  | 'aiErrorMessage'
+  | 'medicalMessage'
+  | 'mentionPromptMessage'
+  | 'contactInformation'
+  | 'businessHours'
+  | 'address'
+  | 'logoPath'
+  | 'primaryColor'
+  | 'secondaryColor'
+  | 'timezone'
+  | 'applicationName'
+  | 'headerText'
+  | 'footerText'
+  | 'supportInformation'
+>;
 
 export type KnowledgeCategory = {
   id: number;
@@ -459,148 +491,6 @@ export type AIQueueMetrics = {
 
 export type AIProviderHealthState =
   'AVAILABLE' | 'BUSY' | 'RATE_LIMITED' | 'DEGRADED' | 'UNAVAILABLE' | 'NOT_CONFIGURED';
-
-export type ModerationSeverity = 'INFORMATIVA' | 'LEVE' | 'MEDIA' | 'ALTA' | 'CRITICA';
-export type ModerationAction = 'NO_ACTION' | 'ADMIN_REVIEW' | 'WARNING' | 'WARNING_AND_NOTIFY';
-export type ModerationGroupMode = 'INHERIT' | 'ENABLED' | 'DISABLED';
-
-export type ModerationSettings = {
-  enabled: boolean;
-  defaultGroupMode: ModerationGroupMode;
-  reviewThreshold: number;
-  warningThreshold: number;
-  adminNotificationThreshold: number;
-  recurrenceWindowDays: number;
-  warningCooldownMinutes: number;
-  publicWarningLimit: number;
-  publicWarningWindowMinutes: number;
-  temporaryEvidenceEnabled: boolean;
-  temporaryEvidenceHours: number;
-  warningMode: 'GROUP_GENERAL' | 'GROUP_MENTION' | 'ADMIN_ONLY';
-  automaticAIReviewEnabled: false;
-  manualAIReviewEnabled: false;
-  automaticBanEnabled: false;
-  automaticDeletionEnabled: false;
-  firstWarningMessage: string;
-  secondWarningMessage: string;
-  repeatedWarningMessage: string;
-};
-
-export type ModerationCondition = {
-  id: number;
-  conditionType: string;
-  operator: 'ALL' | 'ANY' | 'EXCLUDE';
-  normalizedValue: string;
-  configuration: Record<string, unknown>;
-  enabled: boolean;
-};
-
-export type ModerationException = {
-  id: number;
-  exceptionType: string;
-  normalizedValue: string;
-  enabled: boolean;
-};
-
-export type ModerationRule = {
-  id: number;
-  assistantId: string;
-  name: string;
-  description: string;
-  category: string;
-  severity: ModerationSeverity;
-  detectionType: string;
-  score: number;
-  reviewThreshold: number;
-  warningThreshold: number;
-  adminNotificationThreshold: number;
-  enabled: boolean;
-  appliesToAllGroups: boolean;
-  conditions: ModerationCondition[];
-  exceptions: ModerationException[];
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type ModerationResult = {
-  allowed: boolean;
-  matchedRules: Array<{
-    id: number;
-    name: string;
-    category: string;
-    severity: ModerationSeverity;
-    score: number;
-  }>;
-  categories: string[];
-  totalScore: number;
-  severity: ModerationSeverity;
-  action: ModerationAction;
-  exceptionsApplied: string[];
-  duplicate: boolean;
-};
-
-export type AIModerationCategory =
-  | 'insulto'
-  | 'hostigamiento'
-  | 'provocación'
-  | 'odio'
-  | 'amenaza'
-  | 'sexual'
-  | 'spam'
-  | 'regla_específica'
-  | 'otro';
-
-export type AIModerationSeverity = 'BAJO' | 'MEDIO' | 'ALTO' | 'CRITICO';
-export type AIModerationConfidence = 'BAJA' | 'MEDIA' | 'ALTA';
-
-export type AIModerationIncidentStatus =
-  'pending' | 'approved' | 'dismissed' | 'warning_sent' | 'warning_failed' | 'expired';
-
-export type AIModerationSettings = {
-  enabled: boolean;
-  adminPhoneHash: string | null;
-  warningTemplate: string;
-  minSeverity: AIModerationSeverity;
-  dedupWindowMinutes: number;
-  pendingExpiryHours: number;
-  selectedGroups: string[];
-};
-
-export type AIModerationIncident = {
-  id: number;
-  assistantId: string;
-  groupHash: string;
-  groupName: string | null;
-  participantHash: string;
-  participantDisplayName: string | null;
-  detectedAt: string;
-  messagePreview: string;
-  ruleViolated: string | null;
-  category: AIModerationCategory;
-  severity: AIModerationSeverity;
-  confidence: AIModerationConfidence;
-  aiExplanation: string;
-  warningSnapshot: string;
-  status: AIModerationIncidentStatus;
-  adminDecisionAt: string | null;
-  warningSentAt: string | null;
-  warningError: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type AIModerationMetrics = {
-  localDate: string;
-  messagesAnalyzed: number;
-  incidentsCreated: number;
-  incidentsApproved: number;
-  incidentsDismissed: number;
-  warningsSent: number;
-  warningsFailed: number;
-  aiErrors: number;
-  aiTokensUsed: number;
-  updatedAt: string | null;
-};
 
 export type AIProviderStatus = {
   configured: boolean;

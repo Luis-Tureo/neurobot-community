@@ -6,6 +6,7 @@ import type {
   MessagingClient,
   MessagingClientEvents,
 } from './messaging-client.js';
+import { splitWhatsAppText } from './whatsapp-text-segmentation.js';
 
 type FetchImplementation = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
@@ -32,7 +33,10 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
 
   public async initialize(): Promise<void> {
     if (this.ready) return;
-    if (!validCredential(this.options.accessToken) || !/^\d{6,30}$/u.test(this.options.phoneNumberId)) {
+    if (
+      !validCredential(this.options.accessToken) ||
+      !/^\d{6,30}$/u.test(this.options.phoneNumberId)
+    ) {
       this.events?.onStateChange('auth_failure', 'CLOUD_API_NOT_CONFIGURED');
       throw new Error('La configuración de WhatsApp Cloud API está incompleta.');
     }
@@ -48,13 +52,15 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
   }
 
   public async sendMessage(chatId: string, text: string): Promise<void> {
-    await this.sendPayload({
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to: recipientNumber(chatId),
-      type: 'text',
-      text: { preview_url: false, body: text.slice(0, 4096) },
-    });
+    for (const part of splitWhatsAppText(text)) {
+      await this.sendPayload({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: recipientNumber(chatId),
+        type: 'text',
+        text: { preview_url: false, body: part },
+      });
+    }
   }
 
   public async sendInteractiveMenu(
@@ -93,13 +99,15 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
           body: { text: payload.message.slice(0, 1024) },
           action: {
             button: 'Ver opciones',
-            sections: [{
-              title: payload.title.slice(0, 24),
-              rows: options.map((option) => ({
-                id: option.id.slice(0, 200),
-                title: option.label.slice(0, 24),
-              })),
-            }],
+            sections: [
+              {
+                title: payload.title.slice(0, 24),
+                rows: options.map((option) => ({
+                  id: option.id.slice(0, 200),
+                  title: option.label.slice(0, 24),
+                })),
+              },
+            ],
           },
         },
       });
@@ -216,7 +224,8 @@ function cloudMessages(payload: unknown, phoneNumberId: string): IncomingMessage
 }
 
 function adaptCloudMessage(value: unknown): IncomingMessage | null {
-  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.from !== 'string') return null;
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.from !== 'string')
+    return null;
   const body = cloudMessageBody(value);
   if (body === null) return null;
   const participantId = `${recipientNumber(value.from)}@c.us`;
@@ -256,8 +265,12 @@ function cloudMessageBody(value: Record<string, unknown>): string | null {
 }
 
 function recipientNumber(identifier: string): string {
-  const normalized = identifier.trim().replace(/@(c\.us|lid)$/iu, '').replace(/^\+/u, '');
-  if (!/^\d{8,15}$/u.test(normalized)) throw new Error('El destinatario de Cloud API no es válido.');
+  const normalized = identifier
+    .trim()
+    .replace(/@(c\.us|lid)$/iu, '')
+    .replace(/^\+/u, '');
+  if (!/^\d{8,15}$/u.test(normalized))
+    throw new Error('El destinatario de Cloud API no es válido.');
   return normalized;
 }
 

@@ -10,7 +10,7 @@ El módulo **Centro de pruebas > Resúmenes** permite activar un resumen diario,
 - Antes de consultar a la IA se omiten teléfonos, correos, controles invisibles e identificadores.
 - La descarga del historial produce un archivo de texto anonimizado.
 - La IA recibe únicamente el texto necesario y debe devolver un resumen sin nombres ni datos personales.
-- La moderación en tiempo real sigue funcionando en paralelo y mantiene los avisos privados agregados, sin expulsiones ni sanciones automáticas.
+- El resumen no inspecciona mensajes para moderarlos ni genera avisos o sanciones. La Moderación con IA está deprecada.
 
 ## Resiliencia y límites
 

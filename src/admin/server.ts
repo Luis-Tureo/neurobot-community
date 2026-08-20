@@ -2,7 +2,6 @@ import {
   buildAdminServer as buildBaseAdminServer,
   type AdminServerContext,
 } from './server-base.js';
-import { registerAIModerationPanelRoutes } from './ai-moderation-panel-routes.js';
 import { registerAutomationLabAIRoutes } from './automation-lab-ai-route.js';
 import { registerAutomationLabContextRoute } from './automation-lab-context-route.js';
 import { installAzureForwardedHttps } from './azure-forwarded-https.js';
@@ -19,7 +18,6 @@ export async function buildAdminServer(context: AdminServerContext) {
     installAIModelSelectionValidation(app, context);
     installAzureForwardedHttps(app);
     installAuthenticationResultLogging(app, context);
-    registerAIModerationPanelRoutes(app, context);
     registerAutomationLabContextRoute(app, context.sessionSecret);
     registerAutomationLabAIRoutes(app, context);
     registerCommunityDigestRoutes(app, context);
@@ -85,7 +83,8 @@ function installAIModelSelectionValidation(
     }
 
     return reply.code(503).send({
-      error: 'No fue posible validar el catálogo de modelos de Groq. Conserva la selección actual e intenta nuevamente.',
+      error:
+        'No fue posible validar el catálogo de modelos de Groq. Conserva la selección actual e intenta nuevamente.',
       code: 'AI_MODEL_CATALOG_UNAVAILABLE',
     });
   });
@@ -99,7 +98,10 @@ function modelValidationTarget(
   const scoped = /^\/api\/bots\/([^/]+)\/ai\/(provider|settings)$/u.exec(pathname);
   if (scoped !== null) {
     const routeKind = scoped[2];
-    if ((routeKind === 'provider' && method !== 'PUT') || (routeKind === 'settings' && method !== 'PATCH')) {
+    if (
+      (routeKind === 'provider' && method !== 'PUT') ||
+      (routeKind === 'settings' && method !== 'PATCH')
+    ) {
       return null;
     }
     try {

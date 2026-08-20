@@ -79,9 +79,6 @@
               <option value="status" data-bot-only>Inicio</option>
               <option value="state-metrics" data-bot-only>Estado y estadísticas</option>
               <option value="ai" data-bot-only>Inteligencia Artificial</option>
-              <option value="ai-moderation" data-bot-only data-module="ai-moderation">
-                Moderación asistida por IA
-              </option>
               <option value="menus" data-bot-only data-module="menus">Menú de respuestas</option>
               <option value="catalog" data-bot-only data-module="catalog">
                 Productos y servicios
@@ -145,13 +142,6 @@
               </button>
 
               <p class="nav-group-title bot-only hidden">Comunidad</p>
-              <button
-                data-section="ai-moderation"
-                data-module="ai-moderation"
-                class="bot-only hidden"
-              >
-                <span aria-hidden="true">◇</span> Moderación con IA
-              </button>
               <button
                 data-section="automatic-messages"
                 data-module="automatic-messages"
@@ -238,16 +228,6 @@
                     >Proveedor de IA<select name="provider">
                       <option value="groq">Groq</option>
                       <option value="disabled">Desactivado</option>
-                    </select></label
-                  >
-                  <label
-                    >Plantilla<select name="preset">
-                      <option value="community">Comunidad</option>
-                      <option value="store">Tienda</option>
-                      <option value="restaurant">Restaurante</option>
-                      <option value="distributor">Distribuidora</option>
-                      <option value="service">Servicio</option>
-                      <option value="empty">Perfil vacío</option>
                     </select></label
                   >
                   <label
@@ -354,22 +334,16 @@
 
             <section id="section-ai" class="panel-section hidden">
               <div class="section-heading"><h2>Inteligencia Artificial</h2></div>
-              <div class="card inset hidden">
-                <label>Plantilla inicial<select id="profile-template"></select></label>
-                <button id="apply-profile-template" class="secondary" type="button">
-                  Aplicar con respaldo
-                </button>
-              </div>
-              <form id="profile-form" class="card inset identity-primary-form">
+              <p class="info-callout">
+                El asistente responde preguntas generales y usa los datos confirmados de la
+                organización cuando son pertinentes. El nombre y los alias solo determinan cómo se
+                presenta y cómo se invoca; no limitan los temas que puede responder.
+              </p>
+              <form id="profile-form" class="card inset">
+                <label
+                  >Nombre de la organización<input name="organizationName" maxlength="160" required
+                /></label>
                 <div class="form-row">
-                  <label
-                    >Nombre interno<input name="internalName" maxlength="120" required
-                  /></label>
-                  <label
-                    >Nombre público<input name="organizationName" maxlength="160" required
-                  /></label>
-                </div>
-                <div class="form-row identity-primary-fields">
                   <label>Nombre del bot<input name="botName" maxlength="80" required /></label>
                   <label data-community-channel
                     >Alias visible<input
@@ -399,7 +373,7 @@
                 </div>
                 <div class="form-row">
                   <label
-                    >Tipo<select name="organizationType" required>
+                    >Tipo de organización<select name="organizationType" required>
                       <option>Comunidad</option>
                       <option>Tienda</option>
                       <option>Restaurante</option>
@@ -410,59 +384,24 @@
                       <option>Otro</option>
                     </select></label
                   >
-                  <label>Rubro<input name="industry" maxlength="160" required /></label>
+                  <label>Zona horaria<input name="timezone" maxlength="80" required /></label>
                 </div>
                 <label
-                  >Descripción<textarea
+                  >Información confirmada de la organización<textarea
                     name="description"
                     maxlength="1000"
                     rows="3"
                     required
                   ></textarea>
                 </label>
-                <label class="identity-behavior-prompt"
-                  >Prompt de comportamiento<textarea
-                    name="objective"
-                    rows="12"
-                    data-auto-grow
+                <label
+                  >Mensaje sin información interna<textarea
+                    name="noInformationMessage"
+                    maxlength="600"
+                    rows="3"
                     required
                   ></textarea>
                 </label>
-                <div class="form-row">
-                  <label
-                    >Temas permitidos (uno por línea)<textarea
-                      name="allowedTopics"
-                      rows="6"
-                      required
-                    ></textarea>
-                  </label>
-                  <label
-                    >Temas excluidos (uno por línea)<textarea
-                      name="excludedTopics"
-                      rows="6"
-                      required
-                    ></textarea>
-                  </label>
-                </div>
-                <label>Tono<input name="tone" maxlength="300" required /></label>
-                <div class="form-row">
-                  <label
-                    >Mensaje fuera de tema<textarea
-                      name="outOfScopeMessage"
-                      maxlength="600"
-                      rows="3"
-                      required
-                    ></textarea>
-                  </label>
-                  <label
-                    >Mensaje sin información<textarea
-                      name="noInformationMessage"
-                      maxlength="600"
-                      rows="3"
-                      required
-                    ></textarea>
-                  </label>
-                </div>
                 <div class="form-row">
                   <label
                     >Mensaje por límite<textarea
@@ -499,14 +438,6 @@
                     ></textarea>
                   </label>
                 </div>
-                <label
-                  >Saludo local de Neurobot<textarea
-                    name="communityGreetingMessage"
-                    maxlength="1200"
-                    rows="5"
-                    required
-                  ></textarea>
-                </label>
                 <div class="form-row">
                   <label
                     >Contacto<textarea
@@ -519,10 +450,7 @@
                     >Horarios<textarea name="businessHours" maxlength="1000" rows="3"></textarea>
                   </label>
                 </div>
-                <div class="form-row">
-                  <label>Dirección opcional<input name="address" maxlength="500" /></label>
-                  <label>Zona horaria<input name="timezone" maxlength="80" required /></label>
-                </div>
+                <label>Dirección opcional<input name="address" maxlength="500" /></label>
                 <input name="applicationName" type="hidden" />
                 <input name="headerText" type="hidden" />
                 <input name="footerText" type="hidden" />
@@ -530,240 +458,8 @@
                 <input name="primaryColor" type="hidden" />
                 <input name="secondaryColor" type="hidden" />
                 <input name="logoPath" type="hidden" />
-                <button type="submit">Guardar identidad</button>
+                <button type="submit">Guardar asistente</button>
               </form>
-            </section>
-
-            <section id="section-ai-moderation" class="panel-section hidden">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">Decisión humana obligatoria</p>
-                  <h2>Moderación asistida por IA</h2>
-                </div>
-                <div id="ai-moderation-status" class="status-badge" aria-live="polite">
-                  Cargando estado
-                </div>
-              </div>
-
-              <p class="info-callout ai-moderation-safety-notice">
-                La IA solo identifica posibles incumplimientos. Una persona administradora debe
-                aprobar cada advertencia antes de que se envíe por WhatsApp.
-              </p>
-              <div id="ai-moderation-metrics" class="status-grid compact"></div>
-
-              <div class="ai-moderation-grid">
-                <form id="ai-moderation-settings-form" class="card inset ai-moderation-card">
-                  <div class="section-heading compact-heading">
-                    <div>
-                      <h3>Configuración</h3>
-                      <p class="muted">El análisis se aplica únicamente a los grupos elegidos.</p>
-                    </div>
-                    <div id="ai-moderation-toggle-host"></div>
-                  </div>
-
-                  <label>
-                    Número de la persona administradora
-                    <input
-                      name="adminPhone"
-                      type="tel"
-                      autocomplete="tel"
-                      inputmode="tel"
-                      maxlength="40"
-                      placeholder="Ej.: +56 9 1234 5678"
-                      aria-describedby="ai-moderation-admin-help"
-                    />
-                  </label>
-                  <p id="ai-moderation-admin-help" class="muted">
-                    Incluye el código de país. Si ya hay un número guardado, dejar el campo vacío lo
-                    conserva.
-                  </p>
-                  <label class="inline-check ai-moderation-clear-phone">
-                    <input name="clearAdminPhone" type="checkbox" /> Quitar el número guardado
-                  </label>
-
-                  <div class="form-row">
-                    <label>
-                      Severidad mínima
-                      <select name="minSeverity" required>
-                        <option value="BAJO">Baja</option>
-                        <option value="MEDIO">Media</option>
-                        <option value="ALTO">Alta</option>
-                        <option value="CRITICO">Crítica</option>
-                      </select>
-                    </label>
-                    <label>
-                      Agrupar durante
-                      <select name="dedupWindowMinutes" required>
-                        <option value="1">1 minuto</option>
-                        <option value="5">5 minutos</option>
-                        <option value="10">10 minutos</option>
-                        <option value="30">30 minutos</option>
-                        <option value="60">1 hora</option>
-                      </select>
-                    </label>
-                    <label>
-                      Expirar decisiones en
-                      <select name="pendingExpiryHours" required>
-                        <option value="1">1 hora</option>
-                        <option value="6">6 horas</option>
-                        <option value="12">12 horas</option>
-                        <option value="24">24 horas</option>
-                        <option value="48">48 horas</option>
-                        <option value="72">72 horas</option>
-                      </select>
-                    </label>
-                  </div>
-
-                  <fieldset>
-                    <legend>Grupos que se analizarán</legend>
-                    <p class="muted">Selecciona uno o más grupos activos.</p>
-                    <div id="ai-moderation-group-options" class="lab-group-options"></div>
-                  </fieldset>
-
-                  <div class="actions">
-                    <button type="submit">Guardar configuración</button>
-                  </div>
-                </form>
-
-                <form id="ai-moderation-warning-form" class="card inset ai-moderation-card">
-                  <div class="section-heading compact-heading">
-                    <div>
-                      <h3>Mensaje de advertencia</h3>
-                      <p class="muted">
-                        Se guarda una copia por incidente para conservar lo aprobado.
-                      </p>
-                    </div>
-                  </div>
-                  <label>
-                    Plantilla
-                    <textarea
-                      name="warningTemplate"
-                      rows="9"
-                      minlength="20"
-                      maxlength="2000"
-                      required
-                    ></textarea>
-                  </label>
-                  <p class="muted ai-moderation-variables">
-                    Variables disponibles: <code>{nombre}</code>, <code>{grupo}</code>,
-                    <code>{regla}</code> y <code>{motivo}</code>.
-                  </p>
-                  <div class="actions">
-                    <button id="ai-moderation-preview-button" class="secondary" type="button">
-                      Ver vista previa
-                    </button>
-                    <button type="submit">Guardar mensaje</button>
-                  </div>
-                  <div
-                    id="ai-moderation-warning-preview"
-                    class="ai-moderation-preview hidden"
-                    role="status"
-                    aria-live="polite"
-                  ></div>
-                </form>
-              </div>
-
-              <form id="ai-moderation-test-form" class="card inset ai-moderation-card">
-                <div class="section-heading compact-heading">
-                  <div>
-                    <p class="eyebrow">SIMULACIÓN</p>
-                    <h3>Probar moderación</h3>
-                  </div>
-                </div>
-                <label>
-                  Reglas de un grupo (opcional)
-                  <select name="groupHash">
-                    <option value="">Usar reglas generales</option>
-                  </select>
-                </label>
-                <label>
-                  Texto ficticio
-                  <textarea
-                    name="text"
-                    rows="5"
-                    maxlength="4000"
-                    placeholder="Escribe un ejemplo que no contenga datos reales."
-                    required
-                  ></textarea>
-                </label>
-                <div class="actions">
-                  <button type="submit">Probar sin enviar</button>
-                </div>
-                <div
-                  id="ai-moderation-test-result"
-                  class="ai-moderation-simulation hidden"
-                  role="status"
-                  aria-live="polite"
-                ></div>
-              </form>
-
-              <article class="card inset ai-moderation-card">
-                <div class="section-heading compact-heading">
-                  <div>
-                    <h3>Historial de incidentes</h3>
-                    <p class="muted">
-                      No se muestran números telefónicos ni contenido de mensajes.
-                    </p>
-                  </div>
-                </div>
-                <form id="ai-moderation-filters" class="ai-moderation-filters">
-                  <label>
-                    Grupo
-                    <select name="group">
-                      <option value="">Todos</option>
-                    </select>
-                  </label>
-                  <label>
-                    Estado
-                    <select name="status">
-                      <option value="">Todos</option>
-                      <option value="pending">Pendiente</option>
-                      <option value="approved">Aprobado</option>
-                      <option value="dismissed">Omitido</option>
-                      <option value="warning_sent">Advertencia enviada</option>
-                      <option value="warning_failed">Envío fallido</option>
-                      <option value="expired">Expirado</option>
-                    </select>
-                  </label>
-                  <label>
-                    Severidad
-                    <select name="severity">
-                      <option value="">Todas</option>
-                      <option value="BAJO">Baja</option>
-                      <option value="MEDIO">Media</option>
-                      <option value="ALTO">Alta</option>
-                      <option value="CRITICO">Crítica</option>
-                    </select>
-                  </label>
-                  <label>Desde<input name="from" type="date" /></label>
-                  <label>Hasta<input name="to" type="date" /></label>
-                  <button class="secondary" type="submit">Aplicar filtros</button>
-                </form>
-                <div
-                  class="table-shell"
-                  role="region"
-                  aria-label="Historial de moderación asistida"
-                  tabindex="0"
-                >
-                  <table class="data-table ai-moderation-table">
-                    <thead>
-                      <tr>
-                        <th>Fecha</th>
-                        <th>Integrante</th>
-                        <th>Grupo</th>
-                        <th>Categoría</th>
-                        <th>Severidad</th>
-                        <th>Regla</th>
-                        <th>Estado</th>
-                        <th>Decisión</th>
-                      </tr>
-                    </thead>
-                    <tbody id="ai-moderation-incidents"></tbody>
-                  </table>
-                </div>
-              </article>
-
-              <p id="ai-moderation-media-notice" class="info-callout"></p>
             </section>
 
             <section id="section-menus" class="panel-section hidden">
@@ -1107,7 +803,11 @@
                   <p class="eyebrow">Inteligencia artificial actual</p>
                   <div class="ai-provider-current-line">
                     <strong id="ai-provider-current-name">Sin IA configurada</strong>
-                    <span id="ai-provider-current-model" class="muted" style="font-size: 0.88rem; margin-left: 0.5rem;"></span>
+                    <span
+                      id="ai-provider-current-model"
+                      class="muted"
+                      style="font-size: 0.88rem; margin-left: 0.5rem"
+                    ></span>
                   </div>
                 </div>
                 <div

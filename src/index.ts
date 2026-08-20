@@ -40,20 +40,6 @@ async function main(): Promise<void> {
   const database = new AppDatabase(environment.databasePath);
   database.migrate();
 
-  // Desactivación temporal: la revisión automática de mensajes por moderación IA queda apagada
-  // mientras se realizan mejoras. Se conserva toda su configuración para poder reactivarla después.
-  const aiModerationSettings = database.getAIModerationSettings('neurobot');
-  if (aiModerationSettings.enabled) {
-    database.saveAIModerationSettings('neurobot', {
-      enabled: false,
-      warningTemplate: aiModerationSettings.warningTemplate,
-      minSeverity: aiModerationSettings.minSeverity,
-      dedupWindowMinutes: aiModerationSettings.dedupWindowMinutes,
-      pendingExpiryHours: aiModerationSettings.pendingExpiryHours,
-      selectedGroups: aiModerationSettings.selectedGroups,
-    });
-  }
-
   // Política de producción: no recorrer periódicamente todos los chats de WhatsApp.
   // La detección de grupos sigue disponible al conectar, ante eventos de grupo y mediante
   // la actualización manual del panel. Esto evita llamadas repetitivas a getChats() y
@@ -93,7 +79,6 @@ async function main(): Promise<void> {
       maxReconnectAttempts: environment.maxReconnectAttempts,
       maxReconnectDelayMs: environment.maxReconnectDelayMs,
       developmentMode: environment.developmentMode,
-      secretVault: vault,
       mediaRoot: resolve(environment.dataRoot, 'data', 'media'),
       ...(environment.chromeExecutablePath === undefined
         ? {}

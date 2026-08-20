@@ -9,7 +9,8 @@ import type {
 import { AssistantQueryService } from '../src/ai/assistant-query-service.js';
 import { ConversationFlowService } from '../src/core/conversation-flow-service.js';
 import { containsActivationAlias, MessageProcessor } from '../src/core/message-processor.js';
-import { createProfileFromPreset } from '../src/core/profile-presets.js';
+import { createDefaultAssistantProfile } from '../src/core/assistant-profile-defaults.js';
+import { OutboundMessageQueueService } from '../src/core/outbound-message-queue-service.js';
 import type { IncomingMessage } from '../src/domain/types.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
@@ -32,7 +33,11 @@ class FakeAIProvider implements AIProvider {
   ): Promise<GroundedResponseResult> {
     this.calls += 1;
     this.requests.push(request);
-    return { text: this.response, usage: { inputTokens: 30, outputTokens: 10, totalTokens: 40 } };
+    return {
+      text: this.response,
+      usage: { inputTokens: 30, outputTokens: 10, totalTokens: 40 },
+      finishReason: 'stop',
+    };
   }
   public getModelInformation(): { provider: string; model: string } {
     return { provider: 'fake', model: 'fake-model' };
@@ -95,6 +100,7 @@ function createProcessor(input: {
   botId?: string;
   flow?: ConversationFlowService;
   queryService?: AssistantQueryService;
+  outboundQueue?: OutboundMessageQueueService;
 }): MessageProcessor {
   const botId = input.botId ?? 'neurobot';
   const anonymizer = new Anonymizer('x'.repeat(32));
@@ -116,6 +122,7 @@ function createProcessor(input: {
     { maxMessageLength: 2000 },
     botId,
     input.flow,
+    input.outboundQueue,
   );
 }
 
@@ -231,17 +238,29 @@ describe('procesamiento por mención real y por modo', () => {
     expect(client.sentMessages[0]?.text).toBe(provider.response);
   });
 
-  it('responde una consulta educativa general sin exigir un fragmento de Knowledge', async () => {
+  it('responde una pregunta general mediante el mismo pipeline de salida de WhatsApp', async () => {
+    provider.response = 'La capital de Japón es Tokio.';
+    const outboundQueue = new OutboundMessageQueueService(
+      client,
+      database,
+      createLogger('silent'),
+      'neurobot',
+      async () => undefined,
+    );
+    processor = createProcessor({ database, client, provider, outboundQueue });
+
     await expect(
       processor.process(
-        message({ id: 'general-education', body: '@Neurobot ¿qué es el masking autista?' }),
+        message({ id: 'general-education', body: '@Neurobot ¿cuál es la capital de Japón?' }),
       ),
     ).resolves.toBe('responded');
 
     expect(provider.requests).toHaveLength(1);
-    expect(provider.requests[0]?.question).toBe('¿qué es el masking autista?');
+    expect(provider.requests[0]?.question).toBe('¿cuál es la capital de Japón?');
     expect(provider.requests[0]?.context).toContain('GENERAL_EDUCATION');
-    expect(client.sentMessages[0]?.text).toBe(provider.response);
+    expect(client.sentMessages).toEqual([
+      expect.objectContaining({ chatId: 'group-1@g.us', text: 'La capital de Japón es Tokio.' }),
+    ]);
   });
 
   it('acepta @neurobot sin distinguir mayúsculas y evita coincidencias parciales', async () => {
@@ -441,16 +460,14 @@ describe('procesamiento por mención real y por modo', () => {
     expect(client.sentMessages).toHaveLength(3);
   });
 
-  it('rechaza una consulta claramente fuera de tema sin consumir IA', async () => {
+  it('acepta una consulta general que la identidad antigua habría rechazado', async () => {
     await expect(
       processor.process(
         message({ id: 'out-of-scope', body: '@neurobot recomiéndame un teléfono celular' }),
       ),
     ).resolves.toBe('responded');
-    expect(client.sentMessages[0]?.text).toBe(
-      'Solo puedo responder consultas relacionadas con esta comunidad.',
-    );
-    expect(provider.calls).toBe(0);
+    expect(client.sentMessages[0]?.text).toBe(provider.response);
+    expect(provider.calls).toBe(1);
   });
 
   it('bloquea consultas médicas localmente y no consume IA', async () => {
@@ -482,12 +499,11 @@ describe('procesamiento por mención real y por modo', () => {
   });
 
   it('un bot comercial inicia un menú privado y acepta una selección numérica', async () => {
-    const profile = createProfileFromPreset({
+    const profile = createDefaultAssistantProfile({
       organizationName: 'Tienda de prueba',
       botName: 'Asistente',
       organizationType: 'Tienda',
       timezone: 'America/Santiago',
-      preset: 'store',
     });
     database.createBot({
       id: 'tienda-prueba',

@@ -2,7 +2,7 @@
 
 ## Respuestas locales y consumo
 
-- Saludo de Neurobot editable desde el perfil.
+- Saludo operativo derivado del nombre y alias del asistente.
 - FAQ y respuestas guardadas administrables desde el panel.
 - Solo las respuestas reales, válidas y exitosas de Groq consumen cuota de IA.
 - Cuotas operativas de IA configurables por bot, independientes de la idempotencia de mensajes.
@@ -10,7 +10,7 @@
 
 Complete esta ficha antes de crear o vincular el asistente. No escriba contraseñas, códigos QR ni claves de API en este documento.
 
-## Identidad y responsabilidad
+## Organización y responsabilidad
 
 - Nombre del negocio, servicio o comunidad:
 - Nombre público del bot:
@@ -22,17 +22,16 @@ Complete esta ficha antes de crear o vincular el asistente. No escriba contrase�
 - Zona horaria:
 - Modo: comunidad, negocio o mixto:
 
-## Marca y perfil
+## Marca y perfil operativo
 
 - Logo:
 - Color principal:
 - Color secundario:
 - Descripción breve:
-- Objetivo del asistente:
-- Tono de comunicación:
-- Temas permitidos:
-- Temas excluidos:
-- Mensaje para preguntas fuera de tema:
+- Mensaje cuando falta información interna verificable:
+- Mensaje ante límites de uso:
+- Mensaje ante error temporal:
+- Advertencia para consultas médicas:
 - Datos de contacto autorizados:
 
 ## Oferta comercial

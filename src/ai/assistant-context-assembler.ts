@@ -50,7 +50,6 @@ export type AssistantContextBundle = {
 type CurrentGroupContext = {
   name: string;
   publicName: string | null;
-  configuredRules: string | null;
 };
 
 const INTERNAL_QUESTION_WORDS = new Set([
@@ -133,13 +132,7 @@ export class AssistantContextAssembler {
       plan.needsCurrentGroup || plan.needsGroupList
         ? this.database.listBotGroups(this.botId, this.anonymizeGroupId)
         : [];
-    const currentGroup = plan.needsCurrentGroup
-      ? this.currentGroup(
-          groups,
-          groupHash,
-          plan.intent === 'RULES' || plan.intent === 'GROUP_PURPOSE',
-        )
-      : null;
+    const currentGroup = plan.needsCurrentGroup ? this.currentGroup(groups, groupHash) : null;
     const availableGroupNames = plan.needsGroupList ? availableGroups(groups) : [];
     const knowledgeQuery =
       plan.intent === 'GROUP_PURPOSE' && currentGroup !== null
@@ -179,7 +172,6 @@ export class AssistantContextAssembler {
     const missingSpecificFact =
       plan.requiresSpecificInternalFact &&
       !hasSpecificInternalFact(question, {
-        groupRules: currentGroup?.configuredRules ?? null,
         globalRules,
         contactInformation,
         businessHours,
@@ -194,7 +186,7 @@ export class AssistantContextAssembler {
     const directAnswer =
       missingInternalEvidence || plan.generalEducation
         ? null
-        : directStructuredAnswer(plan, profile, currentGroup, globalRules, availableGroupNames);
+        : directStructuredAnswer(plan, profile, globalRules, availableGroupNames);
 
     return {
       plan,
@@ -224,11 +216,7 @@ export class AssistantContextAssembler {
     };
   }
 
-  private currentGroup(
-    groups: LinkedGroupRecord[],
-    groupHash: string,
-    includeConfiguredRules: boolean,
-  ): CurrentGroupContext | null {
+  private currentGroup(groups: LinkedGroupRecord[], groupHash: string): CurrentGroupContext | null {
     const linked = groups.find(
       (group) =>
         group.groupHash === groupHash &&
@@ -241,15 +229,9 @@ export class AssistantContextAssembler {
       this.botId === 'neurobot'
         ? this.database.listGroups().find((group) => this.anonymizeGroupId(group.id) === groupHash)
         : undefined;
-    const rules = includeConfiguredRules
-      ? this.database
-          .listGroupModerationProfiles(this.botId)
-          .find((profile) => profile.groupHash === groupHash)?.rulesText
-      : undefined;
     return {
       name: linked.name,
       publicName: confirmedText(legacy?.publicName) ?? null,
-      configuredRules: confirmedText(rules) ?? null,
     };
   }
 }
@@ -394,21 +376,13 @@ function internalEvidence(input: {
     case 'GROUP_LIST':
       return input.availableGroupNames.length > 0;
     case 'RULES':
-      return input.currentGroup?.configuredRules !== null || input.globalRules !== null;
+      return input.globalRules !== null;
     case 'GROUP_PURPOSE':
-      return (
-        input.currentGroup !== null &&
-        (input.currentGroup.configuredRules !== null || input.fragments.length > 0)
-      );
+      return input.currentGroup !== null && input.fragments.length > 0;
     case 'ACTIVITIES':
       return input.fragments.length > 0;
     case 'COMMUNITY_OPERATION':
-      return (
-        confirmedText(input.profile.description) !== null ||
-        confirmedText(input.profile.objective) !== null ||
-        confirmedText(input.profile.communityGreetingMessage) !== null ||
-        input.fragments.length > 0
-      );
+      return confirmedText(input.profile.description) !== null || input.fragments.length > 0;
     case 'INTERNAL_DETAIL':
       return (
         input.contactInformation !== null ||
@@ -424,7 +398,6 @@ function internalEvidence(input: {
 function hasSpecificInternalFact(
   question: string,
   sources: {
-    groupRules: string | null;
     globalRules: string | null;
     contactInformation: string | null;
     businessHours: string | null;
@@ -435,7 +408,6 @@ function hasSpecificInternalFact(
   const normalizedQuestion = normalizeForMeaning(question);
   const sourceText = normalizeForMeaning(
     [
-      sources.groupRules,
       sources.globalRules,
       sources.contactInformation,
       sources.businessHours,
@@ -465,7 +437,6 @@ function hasSpecificInternalFact(
 function directStructuredAnswer(
   plan: AssistantContextPlan,
   profile: AssistantProfile,
-  currentGroup: CurrentGroupContext | null,
   globalRules: string | null,
   availableGroupNames: string[],
 ): string | null {
@@ -474,11 +445,6 @@ function directStructuredAnswer(
   }
   if (plan.intent !== 'RULES') return null;
   const parts: string[] = [];
-  if (currentGroup?.configuredRules !== null && currentGroup?.configuredRules !== undefined) {
-    parts.push(
-      `Reglas específicas de ${currentGroup.publicName ?? currentGroup.name}:\n${currentGroup.configuredRules}`,
-    );
-  }
   if (globalRules !== null)
     parts.push(`Reglas generales de ${profile.organizationName}:\n${globalRules}`);
   return parts.length === 0 ? null : parts.join('\n\n');
@@ -538,17 +504,6 @@ function buildBoundedContext(
       dataSection('COMMUNITY_DATA', {
         organizationName: input.profile.organizationName,
         description: confirmedText(input.profile.description),
-        objective: confirmedText(input.profile.objective),
-        configuredTone:
-          input.plan.intent === 'COMMUNITY_OPERATION' ? confirmedText(input.profile.tone) : null,
-        allowedTopics:
-          input.plan.intent === 'COMMUNITY_OPERATION' ? input.profile.allowedTopics : [],
-        excludedTopics:
-          input.plan.intent === 'COMMUNITY_OPERATION' ? input.profile.excludedTopics : [],
-        communityGreeting:
-          input.plan.intent === 'COMMUNITY_OPERATION'
-            ? confirmedText(input.profile.communityGreetingMessage)
-            : null,
         globalRules: input.globalRules,
         contactInformation: input.contactInformation,
         businessHours: input.businessHours,

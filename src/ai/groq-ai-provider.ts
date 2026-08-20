@@ -78,6 +78,9 @@ export class GroqAIProvider implements AIProvider {
           temperature: request.temperature,
           max_completion_tokens: request.maximumOutputTokens,
           stream: false,
+          ...(this.model.startsWith('openai/gpt-oss-')
+            ? { include_reasoning: false, reasoning_effort: 'low' }
+            : {}),
         }),
       },
       request.timeoutMs,
@@ -99,7 +102,9 @@ export class GroqAIProvider implements AIProvider {
     const text = content.trim();
     if (text === '')
       throw new AIProviderError('AI_EMPTY_RESPONSE', 'El proveedor devolvió una respuesta vacía.');
-    return { text, usage: this.normalizeUsage(value.usage), model: this.model };
+    const finishReason =
+      typeof choices[0].finish_reason === 'string' ? choices[0].finish_reason : 'unknown';
+    return { text, usage: this.normalizeUsage(value.usage), model: this.model, finishReason };
   }
 
   public getModelInformation(): { provider: string; model: string } {

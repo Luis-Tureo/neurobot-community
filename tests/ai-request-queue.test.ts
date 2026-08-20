@@ -532,4 +532,42 @@ describe('cola de salida por chat', () => {
       database.close();
     }
   });
+
+  it('reintenta solamente el fragmento fallido de una respuesta larga', async () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    database.saveAIQueueSettings('neurobot', {
+      ...database.getAIQueueSettings('neurobot'),
+      outboundMessageIntervalMs: 0,
+    });
+    const attempts: string[] = [];
+    let secondPartFailed = false;
+    const client = new SimulatedMessagingClient();
+    const originalSend = client.sendMessage.bind(client);
+    client.sendMessage = async (chatId, text, replyToMessageId) => {
+      attempts.push(text);
+      if (text.startsWith('segundo') && !secondPartFailed) {
+        secondPartFailed = true;
+        throw new Error('fallo transitorio');
+      }
+      await originalSend(chatId, text, replyToMessageId);
+    };
+    const outbound = new OutboundMessageQueueService(
+      client,
+      database,
+      createLogger('silent'),
+      'neurobot',
+      async () => undefined,
+    );
+    try {
+      const firstPart = `primero ${'a'.repeat(4086)}`;
+      const secondPart = `segundo ${'b'.repeat(100)}`;
+      await outbound.send('grupo-a@g.us', `${firstPart}\n\n${secondPart}`);
+
+      expect(attempts).toEqual([firstPart, secondPart, secondPart]);
+      expect(client.sentMessages.map((item) => item.text)).toEqual([firstPart, secondPart]);
+    } finally {
+      database.close();
+    }
+  });
 });

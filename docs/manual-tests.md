@@ -87,4 +87,14 @@ Estas pruebas requieren WhatsApp real y no se consideran automatizadas. Realíce
 - [ ] Confirmar que no se guardaron fotografías, audios, documentos ni videos.
 - [ ] Confirmar que `.env`, `data`, sesiones, bases y registros no aparecen en `git status`.
 
+## Requerimiento 30: IA general y respuesta completa
+
+- [ ] Confirmar que el panel no muestra identidad, personalidad, tono, temas, plantillas de perfil ni ninguna sección de Moderación con IA.
+- [ ] En un grupo de prueba autorizado, activar al asistente por su mención real y hacer una pregunta general no cubierta por Knowledge; confirmar una respuesta útil y una sola invocación al proveedor.
+- [ ] Pedir una explicación con varios pasos y confirmar que termina la última frase, sin puntos suspensivos agregados ni cortes por líneas o caracteres.
+- [ ] Probar una respuesta completa mayor a 4096 caracteres en un destino controlado y confirmar que llega en partes ordenadas, sin pérdida ni duplicación de las partes ya enviadas.
+- [ ] Simular `finish_reason=length` y confirmar que el texto parcial no llega a WhatsApp ni a la caché, no consume cuota exitosa y deja solo telemetría técnica segura.
+- [ ] Preguntar por un hecho interno inexistente y confirmar el mensaje configurado de información insuficiente; agregar una fuente oficial y repetir para comprobar el uso de Knowledge.
+- [ ] Confirmar que alias, mención real, aislamiento multibot, cuotas, fallback dinámico, automatizaciones, bienvenida, encuestas, login, CSRF y deduplicación conservan su comportamiento.
+
 No habilite el grupo oficial hasta completar toda la lista y revisar cualquier incidente.

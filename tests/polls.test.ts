@@ -8,7 +8,7 @@ import { PollScheduler } from '../src/core/poll-scheduler.js';
 import { PollSender } from '../src/core/poll-sender.js';
 import { PollService } from '../src/core/poll-service.js';
 import { PollTemplateSelector } from '../src/core/poll-template-selector.js';
-import { createProfileFromPreset } from '../src/core/profile-presets.js';
+import { createDefaultAssistantProfile } from '../src/core/assistant-profile-defaults.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
@@ -76,12 +76,11 @@ describe('banco y selección de encuestas', () => {
         mode: 'mixed',
         connectorType: 'WHATSAPP_WEB',
         sessionPath: 'data/sessions/comunidad-alternativa',
-        profile: createProfileFromPreset({
+        profile: createDefaultAssistantProfile({
           organizationName: 'Comunidad alternativa',
           botName: 'Bot alternativo',
           organizationType: 'Comunidad',
           timezone: 'America/Santiago',
-          preset: 'community',
         }),
       });
       const otherRepository = new PollRepository(database, other.id);

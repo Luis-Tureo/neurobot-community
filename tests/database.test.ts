@@ -11,12 +11,17 @@ describe('persistencia SQLite', () => {
     database.migrate();
     expect(database.getMigrationVersions()).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-      27, 28, 29, 30, 31, 32,
+      27, 28, 29, 30, 31, 32, 33,
     ]);
     expect(database.getBotProfile('neurobot')).toMatchObject({
       botName: 'Neurobot',
       activationAlias: '@neurobot',
       communityGreetingMessage: expect.stringContaining('Soy Neurobot'),
+    });
+    expect(database.getAISettings(database.getBotProfile('neurobot').id)).toMatchObject({
+      responseMaxTokens: 1024,
+      responseMaxChars: 4096,
+      responseMaxLines: 50,
     });
     expect(database.getBot('neurobot')).toMatchObject({
       connectorType: 'WHATSAPP_WEB',
@@ -47,16 +52,38 @@ describe('persistencia SQLite', () => {
     database.close();
   });
 
-  it('guarda prompts de comportamiento extensos sin truncarlos', () => {
+  it('actualiza la configuración vigente sin reescribir los campos legacy de identidad', () => {
     const database = new AppDatabase(':memory:');
     database.migrate();
     const profile = database.getBotProfile('neurobot');
-    const objective = `INSTRUCCIONES\n${'Comportamiento detallado del asistente.\n'.repeat(8_000)}`;
+    const saved = database.saveActiveAssistantProfileConfiguration(profile.id, {
+      organizationName: 'Comunidad actualizada',
+      botName: profile.botName,
+      activationAlias: profile.activationAlias,
+      description: profile.description,
+      organizationType: profile.organizationType,
+      noInformationMessage: profile.noInformationMessage,
+      limitMessage: profile.limitMessage,
+      aiErrorMessage: profile.aiErrorMessage,
+      medicalMessage: profile.medicalMessage,
+      mentionPromptMessage: profile.mentionPromptMessage,
+      contactInformation: profile.contactInformation,
+      businessHours: profile.businessHours,
+      address: profile.address,
+      logoPath: profile.logoPath,
+      primaryColor: profile.primaryColor,
+      secondaryColor: profile.secondaryColor,
+      timezone: profile.timezone,
+      applicationName: profile.applicationName,
+      headerText: profile.headerText,
+      footerText: profile.footerText,
+      supportInformation: profile.supportInformation,
+    });
 
-    const saved = database.saveAssistantProfile({ ...profile, objective });
-
-    expect(saved.objective).toBe(objective.trim());
-    expect(database.getBotProfile('neurobot').objective).toBe(objective.trim());
+    expect(saved.organizationName).toBe('Comunidad actualizada');
+    expect(saved.objective).toBe(profile.objective);
+    expect(saved.allowedTopics).toEqual(profile.allowedTopics);
+    expect(saved.tone).toBe(profile.tone);
     database.close();
   });
 

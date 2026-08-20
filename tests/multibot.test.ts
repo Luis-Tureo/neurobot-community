@@ -1,4 +1,4 @@
-import { createProfileFromPreset } from '../src/core/profile-presets.js';
+import { createDefaultAssistantProfile } from '../src/core/assistant-profile-defaults.js';
 import { CatalogService } from '../src/core/catalog-service.js';
 import { ConversationFlowService, selectOption } from '../src/core/conversation-flow-service.js';
 import { createLogger } from '../src/infrastructure/logger.js';
@@ -8,12 +8,11 @@ import { SecretVault } from '../src/security/secret-vault.js';
 import { PollRepository } from '../src/core/poll-repository.js';
 
 function storeProfile(name: string) {
-  return createProfileFromPreset({
+  return createDefaultAssistantProfile({
     organizationName: name,
     botName: `Bot ${name}`,
     organizationType: 'Tienda',
     timezone: 'America/Santiago',
-    preset: 'store',
   });
 }
 

@@ -32,15 +32,11 @@ import type {
   AISettings,
   AIProviderStatus,
   AIProviderHealthState,
-  AIModerationIncident,
-  AIModerationIncidentStatus,
-  AIModerationMetrics,
-  AIModerationSettings,
-  AIModerationSeverity,
   AIQueueMetrics,
   AIQueueSettings,
   AIReservationDecision,
   AIUsageSummary,
+  ActiveAssistantProfileConfiguration,
   AssistantLifecycleStatus,
   AssistantProfile,
   CommandRecord,
@@ -62,10 +58,6 @@ import type {
   MenuDefinition,
   MenuOption,
   MenuType,
-  ModerationGroupMode,
-  ModerationRule,
-  ModerationSettings,
-  ModerationSeverity,
   OrganizationType,
   PollConfiguration,
   PollDateOverride,
@@ -77,7 +69,6 @@ import type {
   ScheduledDeliveryRecord,
   ScheduledDeliveryStatus,
 } from '../domain/types.js';
-import { DEFAULT_AI_MODERATION_WARNING_TEMPLATE } from '../moderation/ai-moderation-defaults.js';
 type CommandRow = {
   id: number;
   name: string;
@@ -107,69 +98,6 @@ type GroupRow = {
   last_failure_code: string | null;
   detected_at: string;
   updated_at: string;
-};
-
-export type GroupModerationProfile = {
-  assistantId: string;
-  groupHash: string;
-  enabled: boolean;
-  rulesText: string;
-  rulesHash: string;
-  analysisStatus:
-    'DRAFT' | 'ANALYZING' | 'ANALYSIS_FAILED' | 'PENDING_TESTS' | 'READY' | 'ACTIVE' | 'OUTDATED';
-  testStatus: 'PENDING' | 'FAILED' | 'APPROVED';
-  compiled: Record<string, unknown> | null;
-  summary: Record<string, unknown> | null;
-  provider: string | null;
-  model: string | null;
-  inputTokens: number;
-  outputTokens: number;
-  firstWarningMessage: string;
-  secondWarningMessage: string;
-  recurrenceWindowDays: number;
-  lastAnalyzedAt: string | null;
-  lastTestedAt: string | null;
-  activatedAt: string | null;
-  updatedAt: string;
-};
-
-export type SaveAIModerationSettingsInput = {
-  enabled: boolean;
-  warningTemplate: string;
-  minSeverity: AIModerationSeverity;
-  dedupWindowMinutes: number;
-  pendingExpiryHours: number;
-  selectedGroups: string[];
-  adminPhone?: { hash: string; encrypted: string } | null;
-};
-
-export type CreateAIModerationIncidentInput = {
-  assistantId: string;
-  groupHash: string;
-  groupName: string | null;
-  participantHash: string;
-  participantDisplayName: string | null;
-  messageHash: string;
-  encryptedParticipantPhone: string;
-  detectedAt: string;
-  messagePreview: string;
-  contextMessages: string[];
-  ruleViolated: string | null;
-  category: AIModerationIncident['category'];
-  severity: AIModerationSeverity;
-  confidence: AIModerationIncident['confidence'];
-  aiExplanation: string;
-  warningSnapshot: string;
-  dedupWindowMinutes: number;
-};
-
-export type AIModerationIncidentFilters = {
-  groupHash?: string;
-  status?: AIModerationIncidentStatus;
-  severity?: AIModerationSeverity;
-  from?: string;
-  to?: string;
-  limit?: number;
 };
 
 type KeywordRow = {
@@ -701,9 +629,9 @@ export class AppDatabase {
             question_max_chars INTEGER NOT NULL DEFAULT 300,
             context_max_tokens INTEGER NOT NULL DEFAULT 700,
             input_max_tokens INTEGER NOT NULL DEFAULT 1000,
-            response_max_tokens INTEGER NOT NULL DEFAULT 150,
-            response_max_chars INTEGER NOT NULL DEFAULT 600,
-            response_max_lines INTEGER NOT NULL DEFAULT 5,
+            response_max_tokens INTEGER NOT NULL DEFAULT 1024,
+            response_max_chars INTEGER NOT NULL DEFAULT 4096,
+            response_max_lines INTEGER NOT NULL DEFAULT 50,
             temperature REAL NOT NULL DEFAULT 0.6,
             user_hourly_limit INTEGER NOT NULL DEFAULT 5,
             user_daily_limit INTEGER NOT NULL DEFAULT 10,
@@ -2092,6 +2020,31 @@ export class AppDatabase {
           ALTER TABLE ai_settings ADD COLUMN model TEXT;
         `,
       },
+      {
+        version: 33,
+        sql: `
+          -- Requerimiento #30: las tablas se conservan solo como historial legacy.
+          UPDATE ai_moderation_settings SET enabled = 0, updated_at = datetime('now');
+          UPDATE ai_moderation_group_selection SET enabled = 0;
+          UPDATE assistant_moderation_settings
+          SET enabled = 0, default_group_mode = 'DISABLED', updated_at = datetime('now');
+          UPDATE assistant_group_moderation_settings
+          SET enabled = 0, mode = 'DISABLED', updated_at = datetime('now');
+          UPDATE group_moderation_profiles
+          SET enabled = 0,
+              analysis_status = CASE WHEN analysis_status = 'ACTIVE' THEN 'OUTDATED' ELSE analysis_status END,
+              updated_at = datetime('now');
+
+          -- El valor anterior (150) cortaba respuestas de modelos con razonamiento.
+          -- 1024 coincide con el valor predeterminado documentado por Groq; la concisión
+          -- se controla semánticamente en el prompt, no recortando texto ya generado.
+          UPDATE ai_settings
+          SET response_max_tokens = 1024,
+              response_max_chars = 4096,
+              response_max_lines = 50,
+              updated_at = datetime('now');
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -2193,38 +2146,16 @@ export class AppDatabase {
 
   private seedAssistantPlatform(): void {
     const now = new Date().toISOString();
-    const allowedTopics = [
-      'Comunidad Neurodivergente',
-      'Autismo y TDAH en términos generales y no clínicos',
-      'Normas del grupo',
-      'Grupos disponibles',
-      'Actividades',
-      'Encuestas',
-      'Horarios',
-      'Formas de contacto',
-      'Funcionamiento del chatbot',
-      'Información oficial agregada por la administración',
-    ];
-    const excludedTopics = [
-      'Diagnósticos',
-      'Tratamientos',
-      'Medicamentos',
-      'Cambios de dosis',
-      'Interpretación clínica de síntomas',
-      'Información personal de integrantes',
-      'Asuntos no relacionados con la comunidad',
-      'Acciones administrativas',
-      'Moderación automática',
-    ];
     this.db
       .prepare(
         `INSERT OR IGNORE INTO assistant_profiles(
            profile_key, internal_name, organization_name, bot_name, activation_alias,
            description, organization_type, industry, objective, allowed_topics, excluded_topics,
            tone, out_of_scope_message, no_information_message, limit_message, ai_error_message,
-           medical_message, mention_prompt_message, contact_information, business_hours, address,
+           medical_message, mention_prompt_message, community_greeting_message,
+           contact_information, business_hours, address,
            timezone, active, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?)`,
       )
       .run(
         'default-neurobot',
@@ -2234,17 +2165,18 @@ export class AppDatabase {
         '@neurobot',
         'Comunidad de apoyo e información administrada para personas neurodivergentes.',
         'Comunidad',
-        'Comunidad y apoyo informativo',
-        'Entregar información oficial sobre la comunidad, sus normas, grupos, actividades, horarios y formas de contacto.',
-        JSON.stringify(allowedTopics),
-        JSON.stringify(excludedTopics),
-        'Amable, claro, inclusivo y breve.',
-        'Solo puedo responder consultas relacionadas con esta comunidad.',
+        'LEGACY_DEPRECATED',
+        'LEGACY_DEPRECATED',
+        '[]',
+        '[]',
+        'LEGACY_DEPRECATED',
+        'LEGACY_DEPRECATED',
         'No tengo información confirmada sobre eso. Puedes consultar a la administración.',
         'Has alcanzado el límite de consultas por ahora. Intenta más tarde.',
         'El asistente inteligente no está disponible en este momento.',
         'Puedo entregar orientación general, pero no diagnósticos ni indicaciones de tratamiento.',
         'Escribe tu pregunta después de llamar a Neurobot.',
+        'LEGACY_DEPRECATED',
         'Consulta la información oficial de contacto administrada en este panel.',
         'Consulta los horarios oficiales administrados en este panel.',
         'America/Santiago',
@@ -2264,8 +2196,10 @@ export class AppDatabase {
       .run(profile.id, now);
     this.db
       .prepare(
-        `INSERT OR IGNORE INTO ai_settings(profile_id, enabled, provider, updated_at)
-         VALUES (?, 0, 'groq', ?)`,
+        `INSERT OR IGNORE INTO ai_settings(
+           profile_id, enabled, provider, response_max_tokens, response_max_chars,
+           response_max_lines, updated_at
+         ) VALUES (?, 0, 'groq', 1024, 4096, 50, ?)`,
       )
       .run(profile.id, now);
     this.db
@@ -5847,8 +5781,10 @@ export class AppDatabase {
       this.saveProfileBranding(profileId, values, now);
       this.db
         .prepare(
-          `INSERT INTO ai_settings(profile_id, enabled, provider, updated_at, bot_id)
-           VALUES (?, 0, 'groq', ?, ?)`,
+          `INSERT INTO ai_settings(
+             profile_id, enabled, provider, response_max_tokens, response_max_chars,
+             response_max_lines, updated_at, bot_id
+           ) VALUES (?, 0, 'groq', 1024, 4096, 50, ?, ?)`,
         )
         .run(profileId, now, botId);
       if (botId === 'neurobot') {
@@ -5919,6 +5855,59 @@ export class AppDatabase {
     });
     save();
     return this.getAssistantProfile(profile.id) as AssistantProfile;
+  }
+
+  public saveActiveAssistantProfileConfiguration(
+    profileId: number,
+    input: ActiveAssistantProfileConfiguration,
+  ): AssistantProfile {
+    const existing = this.getAssistantProfile(profileId);
+    if (existing === null) throw new Error('El perfil no existe.');
+    const values = validateActiveAssistantProfileConfiguration(input);
+    const now = new Date().toISOString();
+    const save = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `UPDATE assistant_profiles SET
+             organization_name = ?, bot_name = ?, activation_alias = ?, description = ?,
+             organization_type = ?, no_information_message = ?, limit_message = ?,
+             ai_error_message = ?, medical_message = ?, mention_prompt_message = ?,
+             contact_information = ?, business_hours = ?, address = ?, timezone = ?, updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(
+          values.organizationName,
+          values.botName,
+          values.activationAlias,
+          values.description,
+          values.organizationType,
+          values.noInformationMessage,
+          values.limitMessage,
+          values.aiErrorMessage,
+          values.medicalMessage,
+          values.mentionPromptMessage,
+          values.contactInformation,
+          values.businessHours,
+          values.address,
+          values.timezone,
+          now,
+          profileId,
+        );
+      this.saveProfileBranding(profileId, values, now);
+
+      const mapping = this.db
+        .prepare('SELECT bot_id FROM bot_profiles WHERE profile_id = ?')
+        .get(profileId) as { bot_id: string } | undefined;
+      if (mapping !== undefined && existing.activationAlias !== values.activationAlias) {
+        const aliases = this.listBotActivationAliases(mapping.bot_id).filter(
+          (alias) =>
+            alias.toLocaleLowerCase('es') !== existing.activationAlias.toLocaleLowerCase('es'),
+        );
+        this.replaceBotActivationAliases(mapping.bot_id, [values.activationAlias, ...aliases], now);
+      }
+    });
+    save();
+    return this.getAssistantProfile(profileId) as AssistantProfile;
   }
 
   private saveProfileBranding(
@@ -6494,9 +6483,9 @@ export class AppDatabase {
 
   public getBotAIModel(botId: string): string | null {
     const profile = this.getBotProfile(botId);
-    const row = this.db.prepare('SELECT model FROM ai_settings WHERE profile_id = ?').get(profile.id) as
-      | { model: string | null }
-      | undefined;
+    const row = this.db
+      .prepare('SELECT model FROM ai_settings WHERE profile_id = ?')
+      .get(profile.id) as { model: string | null } | undefined;
     return typeof row?.model === 'string' && row.model.trim().length > 0 ? row.model.trim() : null;
   }
 
@@ -8143,1279 +8132,6 @@ export class AppDatabase {
       )
       .run(username, passwordHash, now, now);
   }
-
-  public getAIModerationSettings(assistantId: string): AIModerationSettings {
-    this.ensureAIModerationSettings(assistantId);
-    const row = this.db
-      .prepare('SELECT * FROM ai_moderation_settings WHERE assistant_id=?')
-      .get(assistantId) as {
-      enabled: number;
-      admin_phone_hash: string | null;
-      warning_template: string;
-      min_severity: AIModerationSeverity;
-      dedup_window_minutes: number;
-      pending_expiry_hours: number;
-    };
-    return {
-      enabled: row.enabled === 1,
-      adminPhoneHash: row.admin_phone_hash,
-      warningTemplate: row.warning_template,
-      minSeverity: row.min_severity,
-      dedupWindowMinutes: row.dedup_window_minutes,
-      pendingExpiryHours: row.pending_expiry_hours,
-      selectedGroups: this.listAIModerationGroups(assistantId),
-    };
-  }
-
-  public saveAIModerationSettings(
-    assistantId: string,
-    input: SaveAIModerationSettingsInput,
-  ): AIModerationSettings {
-    this.ensureAIModerationSettings(assistantId);
-    const warningTemplate = input.warningTemplate.normalize('NFKC').trim();
-    if (
-      warningTemplate.length < 20 ||
-      warningTemplate.length > 2000 ||
-      warningTemplate.includes('\u0000')
-    )
-      throw new Error('AI_MODERATION_WARNING_TEMPLATE_INVALID');
-    if (
-      !Number.isInteger(input.dedupWindowMinutes) ||
-      input.dedupWindowMinutes < 1 ||
-      input.dedupWindowMinutes > 1440
-    )
-      throw new Error('AI_MODERATION_DEDUP_WINDOW_INVALID');
-    if (
-      !Number.isInteger(input.pendingExpiryHours) ||
-      input.pendingExpiryHours < 1 ||
-      input.pendingExpiryHours > 168
-    )
-      throw new Error('AI_MODERATION_EXPIRY_INVALID');
-    const selectedGroups = [...new Set(input.selectedGroups)];
-    if (
-      selectedGroups.length > 500 ||
-      selectedGroups.some((groupHash) => !/^[a-f0-9]{20}$/u.test(groupHash))
-    )
-      throw new Error('AI_MODERATION_GROUP_SELECTION_INVALID');
-    if (
-      input.adminPhone !== undefined &&
-      input.adminPhone !== null &&
-      (!/^[a-f0-9]{20}$/u.test(input.adminPhone.hash) || input.adminPhone.encrypted.length < 20)
-    )
-      throw new Error('AI_MODERATION_ADMIN_PHONE_INVALID');
-
-    const save = this.db.transaction(() => {
-      const now = new Date().toISOString();
-      const current = this.db
-        .prepare(
-          'SELECT admin_phone_hash,admin_encrypted_phone FROM ai_moderation_settings WHERE assistant_id=?',
-        )
-        .get(assistantId) as {
-        admin_phone_hash: string | null;
-        admin_encrypted_phone: string | null;
-      };
-      const phoneHash =
-        input.adminPhone === undefined
-          ? current.admin_phone_hash
-          : input.adminPhone === null
-            ? null
-            : input.adminPhone.hash;
-      const encryptedPhone =
-        input.adminPhone === undefined
-          ? current.admin_encrypted_phone
-          : input.adminPhone === null
-            ? null
-            : input.adminPhone.encrypted;
-      this.db
-        .prepare(
-          `UPDATE ai_moderation_settings SET enabled=?,admin_phone_hash=?,admin_encrypted_phone=?,
-           warning_template=?,min_severity=?,dedup_window_minutes=?,pending_expiry_hours=?,updated_at=?
-           WHERE assistant_id=?`,
-        )
-        .run(
-          input.enabled ? 1 : 0,
-          phoneHash,
-          encryptedPhone,
-          warningTemplate,
-          input.minSeverity,
-          input.dedupWindowMinutes,
-          input.pendingExpiryHours,
-          now,
-          assistantId,
-        );
-      this.db
-        .prepare('DELETE FROM ai_moderation_group_selection WHERE assistant_id=?')
-        .run(assistantId);
-      const insert = this.db.prepare(
-        `INSERT INTO ai_moderation_group_selection(assistant_id,group_hash,enabled,created_at)
-         VALUES(?,?,1,?)`,
-      );
-      for (const groupHash of selectedGroups) insert.run(assistantId, groupHash, now);
-    });
-    save();
-    return this.getAIModerationSettings(assistantId);
-  }
-
-  public listAIModerationGroups(assistantId: string): string[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT group_hash FROM ai_moderation_group_selection
-           WHERE assistant_id=? AND enabled=1 ORDER BY group_hash`,
-        )
-        .all(assistantId) as Array<{ group_hash: string }>
-    ).map((row) => row.group_hash);
-  }
-
-  public setAIModerationGroup(assistantId: string, groupHash: string, enabled: boolean): void {
-    this.ensureAIModerationSettings(assistantId);
-    if (!/^[a-f0-9]{20}$/u.test(groupHash)) throw new Error('AI_MODERATION_GROUP_INVALID');
-    if (!enabled) {
-      this.db
-        .prepare('DELETE FROM ai_moderation_group_selection WHERE assistant_id=? AND group_hash=?')
-        .run(assistantId, groupHash);
-      return;
-    }
-    this.db
-      .prepare(
-        `INSERT INTO ai_moderation_group_selection(assistant_id,group_hash,enabled,created_at)
-         VALUES(?,?,1,?) ON CONFLICT(assistant_id,group_hash) DO UPDATE SET enabled=1`,
-      )
-      .run(assistantId, groupHash, new Date().toISOString());
-  }
-
-  public hasRecentAIModerationIncident(
-    assistantId: string,
-    groupHash: string,
-    participantHash: string,
-    dedupWindowMinutes: number,
-    now = new Date(),
-  ): boolean {
-    const cutoff = new Date(now.getTime() - dedupWindowMinutes * 60_000).toISOString();
-    return (
-      this.db
-        .prepare(
-          `SELECT 1 FROM ai_moderation_incidents
-           WHERE assistant_id=? AND group_hash=? AND participant_hash=? AND created_at>=? LIMIT 1`,
-        )
-        .get(assistantId, groupHash, participantHash, cutoff) !== undefined
-    );
-  }
-
-  public createAIModerationIncident(
-    input: CreateAIModerationIncidentInput,
-  ): AIModerationIncident | null {
-    this.ensureAIModerationSettings(input.assistantId);
-    const create = this.db.transaction(() => {
-      const detectedAt = new Date(input.detectedAt);
-      if (Number.isNaN(detectedAt.getTime())) throw new Error('AI_MODERATION_DATE_INVALID');
-      if (
-        this.hasRecentAIModerationIncident(
-          input.assistantId,
-          input.groupHash,
-          input.participantHash,
-          input.dedupWindowMinutes,
-          detectedAt,
-        )
-      )
-        return null;
-      const timestamp = detectedAt.toISOString();
-      const result = this.db
-        .prepare(
-          `INSERT OR IGNORE INTO ai_moderation_incidents(
-             assistant_id,group_hash,group_name,participant_hash,participant_display_name,message_hash,
-             admin_encrypted_participant_phone,detected_at,message_preview,context_messages,rule_violated,
-             category,severity,confidence,ai_explanation,warning_snapshot,status,created_at,updated_at)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)`,
-        )
-        .run(
-          input.assistantId,
-          input.groupHash,
-          input.groupName,
-          input.participantHash,
-          input.participantDisplayName,
-          input.messageHash,
-          input.encryptedParticipantPhone,
-          timestamp,
-          input.messagePreview,
-          JSON.stringify(input.contextMessages),
-          input.ruleViolated,
-          input.category,
-          input.severity,
-          input.confidence,
-          input.aiExplanation,
-          input.warningSnapshot,
-          timestamp,
-          timestamp,
-        );
-      return result.changes === 1 ? Number(result.lastInsertRowid) : null;
-    });
-    const incidentId = create();
-    return incidentId === null ? null : this.getAIModerationIncident(input.assistantId, incidentId);
-  }
-
-  public getAIModerationIncident(
-    assistantId: string,
-    incidentId: number,
-  ): AIModerationIncident | null {
-    const row = this.db
-      .prepare('SELECT * FROM ai_moderation_incidents WHERE assistant_id=? AND id=?')
-      .get(assistantId, incidentId) as Record<string, unknown> | undefined;
-    return row === undefined ? null : mapAIModerationIncident(row);
-  }
-
-  public getPendingAIModerationIncidentForAdmin(
-    assistantId: string,
-    now = new Date(),
-  ): AIModerationIncident | null {
-    this.expireAIModerationIncidents(assistantId, now);
-    const row = this.db
-      .prepare(
-        `SELECT * FROM ai_moderation_incidents WHERE assistant_id=? AND status='pending'
-         ORDER BY created_at DESC,id DESC LIMIT 1`,
-      )
-      .get(assistantId) as Record<string, unknown> | undefined;
-    return row === undefined ? null : mapAIModerationIncident(row);
-  }
-
-  public listAIModerationIncidents(
-    assistantId: string,
-    filters: AIModerationIncidentFilters = {},
-  ): AIModerationIncident[] {
-    this.expireAIModerationIncidents(assistantId);
-    const conditions = ['assistant_id=?'];
-    const values: Array<string | number> = [assistantId];
-    if (filters.groupHash !== undefined) {
-      conditions.push('group_hash=?');
-      values.push(filters.groupHash);
-    }
-    if (filters.status !== undefined) {
-      conditions.push('status=?');
-      values.push(filters.status);
-    }
-    if (filters.severity !== undefined) {
-      conditions.push('severity=?');
-      values.push(filters.severity);
-    }
-    if (filters.from !== undefined) {
-      if (Number.isNaN(Date.parse(filters.from))) throw new Error('AI_MODERATION_DATE_INVALID');
-      conditions.push('detected_at>=?');
-      values.push(filters.from);
-    }
-    if (filters.to !== undefined) {
-      if (Number.isNaN(Date.parse(filters.to))) throw new Error('AI_MODERATION_DATE_INVALID');
-      conditions.push('detected_at<?');
-      values.push(filters.to);
-    }
-    const limit = Math.max(1, Math.min(500, Math.trunc(filters.limit ?? 200)));
-    return (
-      this.db
-        .prepare(
-          `SELECT * FROM ai_moderation_incidents WHERE ${conditions.join(' AND ')}
-           ORDER BY created_at DESC,id DESC LIMIT ${limit}`,
-        )
-        .all(...values) as Array<Record<string, unknown>>
-    ).map(mapAIModerationIncident);
-  }
-
-  public updateAIModerationIncidentStatus(
-    assistantId: string,
-    incidentId: number,
-    status: AIModerationIncidentStatus,
-    options: {
-      expectedStatus?: AIModerationIncidentStatus;
-      adminDecisionAt?: string;
-      warningSentAt?: string;
-      warningError?: string | null;
-    } = {},
-  ): boolean {
-    const updates = ['status=?', 'updated_at=?'];
-    const values: Array<string | number | null> = [status, new Date().toISOString()];
-    if (options.adminDecisionAt !== undefined) {
-      updates.push('admin_decision_at=?');
-      values.push(options.adminDecisionAt);
-    }
-    if (options.warningSentAt !== undefined) {
-      updates.push('warning_sent_at=?');
-      values.push(options.warningSentAt);
-    }
-    if (options.warningError !== undefined) {
-      updates.push('warning_error=?');
-      values.push(options.warningError);
-    }
-    values.push(assistantId, incidentId);
-    if (options.expectedStatus !== undefined) values.push(options.expectedStatus);
-    const result = this.db
-      .prepare(
-        `UPDATE ai_moderation_incidents SET ${updates.join(',')}
-         WHERE assistant_id=? AND id=?${options.expectedStatus === undefined ? '' : ' AND status=?'}`,
-      )
-      .run(...values);
-    return result.changes === 1;
-  }
-
-  public expireAIModerationIncidents(assistantId: string, now = new Date()): number {
-    const settings = this.getAIModerationSettings(assistantId);
-    const cutoff = new Date(now.getTime() - settings.pendingExpiryHours * 3_600_000).toISOString();
-    const timestamp = now.toISOString();
-    return this.db
-      .prepare(
-        `UPDATE ai_moderation_incidents SET status='expired',updated_at=?
-         WHERE assistant_id=? AND status='pending' AND created_at<=?`,
-      )
-      .run(timestamp, assistantId, cutoff).changes;
-  }
-
-  public incrementAIModerationMetric(
-    assistantId: string,
-    field: keyof Omit<AIModerationMetrics, 'localDate' | 'updatedAt'>,
-    amount = 1,
-    now = new Date(),
-  ): void {
-    const columns: Record<keyof Omit<AIModerationMetrics, 'localDate' | 'updatedAt'>, string> = {
-      messagesAnalyzed: 'messages_analyzed',
-      incidentsCreated: 'incidents_created',
-      incidentsApproved: 'incidents_approved',
-      incidentsDismissed: 'incidents_dismissed',
-      warningsSent: 'warnings_sent',
-      warningsFailed: 'warnings_failed',
-      aiErrors: 'ai_errors',
-      aiTokensUsed: 'ai_tokens_used',
-    };
-    if (!Number.isInteger(amount) || amount < 0) throw new Error('AI_MODERATION_METRIC_INVALID');
-    const column = columns[field];
-    const timestamp = now.toISOString();
-    const localDate = localDateInTimezone(now, this.getBot(assistantId)?.timezone ?? 'UTC');
-    this.db
-      .prepare(
-        `INSERT INTO ai_moderation_metrics(assistant_id,local_date,${column},created_at,updated_at)
-         VALUES(?,?,?, ?,?) ON CONFLICT(assistant_id,local_date) DO UPDATE SET
-         ${column}=${column}+excluded.${column},updated_at=excluded.updated_at`,
-      )
-      .run(assistantId, localDate, amount, timestamp, timestamp);
-  }
-
-  public getAIModerationMetrics(assistantId: string, now = new Date()): AIModerationMetrics {
-    const localDate = localDateInTimezone(now, this.getBot(assistantId)?.timezone ?? 'UTC');
-    const row = this.db
-      .prepare('SELECT * FROM ai_moderation_metrics WHERE assistant_id=? AND local_date=?')
-      .get(assistantId, localDate) as Record<string, unknown> | undefined;
-    return {
-      localDate,
-      messagesAnalyzed: Number(row?.messages_analyzed ?? 0),
-      incidentsCreated: Number(row?.incidents_created ?? 0),
-      incidentsApproved: Number(row?.incidents_approved ?? 0),
-      incidentsDismissed: Number(row?.incidents_dismissed ?? 0),
-      warningsSent: Number(row?.warnings_sent ?? 0),
-      warningsFailed: Number(row?.warnings_failed ?? 0),
-      aiErrors: Number(row?.ai_errors ?? 0),
-      aiTokensUsed: Number(row?.ai_tokens_used ?? 0),
-      updatedAt: row === undefined ? null : String(row.updated_at),
-    };
-  }
-
-  public getEncryptedAIModerationAdminPhone(assistantId: string): string | null {
-    this.ensureAIModerationSettings(assistantId);
-    const row = this.db
-      .prepare('SELECT admin_encrypted_phone FROM ai_moderation_settings WHERE assistant_id=?')
-      .get(assistantId) as { admin_encrypted_phone: string | null };
-    return row.admin_encrypted_phone;
-  }
-
-  public getAIModerationIncidentDelivery(
-    assistantId: string,
-    incidentId: number,
-  ): { encryptedParticipantPhone: string; messageHash: string } | null {
-    const row = this.db
-      .prepare(
-        `SELECT admin_encrypted_participant_phone AS encryptedParticipantPhone,message_hash AS messageHash
-         FROM ai_moderation_incidents WHERE assistant_id=? AND id=?`,
-      )
-      .get(assistantId, incidentId) as
-      { encryptedParticipantPhone: string; messageHash: string } | undefined;
-    return row ?? null;
-  }
-
-  private ensureAIModerationSettings(assistantId: string): void {
-    if (this.getBot(assistantId) === null) throw new Error('ASSISTANT_NOT_FOUND');
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO ai_moderation_settings(
-           assistant_id,warning_template,created_at,updated_at) VALUES(?,?,?,?)`,
-      )
-      .run(assistantId, DEFAULT_AI_MODERATION_WARNING_TEMPLATE, now, now);
-  }
-
-  public getGroupModerationProfile(assistantId: string, groupHash: string): GroupModerationProfile {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO group_moderation_profiles(assistant_id,group_hash,created_at,updated_at)
-      VALUES(?,?,?,?)`,
-      )
-      .run(assistantId, groupHash, now, now);
-    const row = this.db
-      .prepare('SELECT * FROM group_moderation_profiles WHERE assistant_id=? AND group_hash=?')
-      .get(assistantId, groupHash) as Record<string, unknown>;
-    return mapGroupModerationProfile(row);
-  }
-
-  public listGroupModerationProfiles(assistantId: string): GroupModerationProfile[] {
-    return (
-      this.db
-        .prepare(
-          'SELECT * FROM group_moderation_profiles WHERE assistant_id=? ORDER BY updated_at DESC',
-        )
-        .all(assistantId) as Array<Record<string, unknown>>
-    ).map(mapGroupModerationProfile);
-  }
-
-  public saveGroupModerationDraft(
-    assistantId: string,
-    groupHash: string,
-    rulesText: string,
-    rulesHash: string,
-  ): GroupModerationProfile {
-    const current = this.getGroupModerationProfile(assistantId, groupHash);
-    const changed = current.rulesHash !== rulesHash;
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `UPDATE group_moderation_profiles SET rules_text=?,rules_hash=?,enabled=CASE WHEN ? THEN 0 ELSE enabled END,
-      analysis_status=CASE WHEN ? THEN 'OUTDATED' ELSE analysis_status END,test_status=CASE WHEN ? THEN 'PENDING' ELSE test_status END,
-      activated_at=CASE WHEN ? THEN NULL ELSE activated_at END,updated_at=? WHERE assistant_id=? AND group_hash=?`,
-      )
-      .run(
-        rulesText,
-        rulesHash,
-        changed ? 1 : 0,
-        changed ? 1 : 0,
-        changed ? 1 : 0,
-        changed ? 1 : 0,
-        now,
-        assistantId,
-        groupHash,
-      );
-    return this.getGroupModerationProfile(assistantId, groupHash);
-  }
-
-  public markGroupModerationAnalyzing(assistantId: string, groupHash: string): void {
-    this.getGroupModerationProfile(assistantId, groupHash);
-    this.db
-      .prepare(
-        `UPDATE group_moderation_profiles SET enabled=0,analysis_status='ANALYZING',test_status='PENDING',updated_at=?
-      WHERE assistant_id=? AND group_hash=?`,
-      )
-      .run(new Date().toISOString(), assistantId, groupHash);
-  }
-
-  public failGroupModerationAnalysis(assistantId: string, groupHash: string): void {
-    this.db
-      .prepare(
-        `UPDATE group_moderation_profiles SET enabled=0,analysis_status='ANALYSIS_FAILED',test_status='FAILED',updated_at=?
-      WHERE assistant_id=? AND group_hash=?`,
-      )
-      .run(new Date().toISOString(), assistantId, groupHash);
-  }
-
-  public saveCompiledGroupModeration(input: {
-    assistantId: string;
-    groupHash: string;
-    rulesHash: string;
-    compiled: Record<string, unknown>;
-    summary: Record<string, unknown>;
-    provider: string;
-    model: string;
-    inputTokens: number;
-    outputTokens: number;
-  }): GroupModerationProfile {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `UPDATE group_moderation_profiles SET enabled=0,rules_hash=?,compiled_json=?,compiled_summary_json=?,provider=?,model=?,
-      input_tokens=?,output_tokens=?,analysis_status='PENDING_TESTS',test_status='PENDING',last_analyzed_at=?,last_tested_at=NULL,activated_at=NULL,updated_at=?
-      WHERE assistant_id=? AND group_hash=?`,
-      )
-      .run(
-        input.rulesHash,
-        JSON.stringify(input.compiled),
-        JSON.stringify(input.summary),
-        input.provider,
-        input.model,
-        input.inputTokens,
-        input.outputTokens,
-        now,
-        now,
-        input.assistantId,
-        input.groupHash,
-      );
-    this.db
-      .prepare('DELETE FROM group_moderation_tests WHERE assistant_id=? AND group_hash=?')
-      .run(input.assistantId, input.groupHash);
-    return this.getGroupModerationProfile(input.assistantId, input.groupHash);
-  }
-
-  public recordGroupModerationTest(input: {
-    assistantId: string;
-    groupHash: string;
-    rulesHash: string;
-    testType: 'AUTOMATIC' | 'MANUAL_ALLOWED' | 'MANUAL_WARNING';
-    expected: 'ALLOW' | 'WARNING';
-    actual: 'ALLOW' | 'WARNING' | 'ERROR';
-    category?: string | null;
-    passed: boolean;
-  }): void {
-    this.db
-      .prepare(
-        `INSERT INTO group_moderation_tests(assistant_id,group_hash,rules_hash,test_type,expected_result,actual_result,category,passed,created_at)
-      VALUES(?,?,?,?,?,?,?,?,?)`,
-      )
-      .run(
-        input.assistantId,
-        input.groupHash,
-        input.rulesHash,
-        input.testType,
-        input.expected,
-        input.actual,
-        input.category ?? null,
-        input.passed ? 1 : 0,
-        new Date().toISOString(),
-      );
-  }
-
-  public listGroupModerationTests(
-    assistantId: string,
-    groupHash: string,
-    rulesHash: string,
-  ): Array<Record<string, unknown>> {
-    return this.db
-      .prepare(
-        `SELECT test_type AS testType,expected_result AS expected,actual_result AS actual,category,passed,created_at AS createdAt
-      FROM group_moderation_tests WHERE assistant_id=? AND group_hash=? AND rules_hash=? ORDER BY id`,
-      )
-      .all(assistantId, groupHash, rulesHash) as Array<Record<string, unknown>>;
-  }
-
-  public updateGroupModerationTestStatus(
-    assistantId: string,
-    groupHash: string,
-    approved: boolean,
-  ): GroupModerationProfile {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `UPDATE group_moderation_profiles SET enabled=0,test_status=?,analysis_status=?,last_tested_at=?,updated_at=?
-      WHERE assistant_id=? AND group_hash=?`,
-      )
-      .run(
-        approved ? 'APPROVED' : 'FAILED',
-        approved ? 'READY' : 'PENDING_TESTS',
-        now,
-        now,
-        assistantId,
-        groupHash,
-      );
-    return this.getGroupModerationProfile(assistantId, groupHash);
-  }
-
-  public setGroupModerationEnabled(
-    assistantId: string,
-    groupHash: string,
-    enabled: boolean,
-  ): GroupModerationProfile {
-    const profile = this.getGroupModerationProfile(assistantId, groupHash);
-    if (
-      enabled &&
-      (profile.analysisStatus !== 'READY' ||
-        profile.testStatus !== 'APPROVED' ||
-        profile.compiled === null)
-    )
-      throw new Error('MODERATION_TESTS_REQUIRED');
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `UPDATE group_moderation_profiles SET enabled=?,analysis_status=?,activated_at=?,updated_at=? WHERE assistant_id=? AND group_hash=?`,
-      )
-      .run(
-        enabled ? 1 : 0,
-        enabled ? 'ACTIVE' : profile.compiled === null ? 'DRAFT' : 'READY',
-        enabled ? now : null,
-        now,
-        assistantId,
-        groupHash,
-      );
-    return this.getGroupModerationProfile(assistantId, groupHash);
-  }
-
-  public getModerationSettings(assistantId: string): ModerationSettings {
-    this.ensureModerationSettings(assistantId);
-    const row = this.db
-      .prepare('SELECT * FROM assistant_moderation_settings WHERE assistant_id=?')
-      .get(assistantId) as Record<string, unknown>;
-    return {
-      enabled: row.enabled === 1,
-      defaultGroupMode: String(row.default_group_mode) as ModerationGroupMode,
-      reviewThreshold: Number(row.review_threshold),
-      warningThreshold: Number(row.warning_threshold),
-      adminNotificationThreshold: Number(row.admin_notification_threshold),
-      recurrenceWindowDays: Number(row.recurrence_window_days),
-      warningCooldownMinutes: Number(row.warning_cooldown_minutes),
-      publicWarningLimit: Number(row.public_warning_limit),
-      publicWarningWindowMinutes: Number(row.public_warning_window_minutes),
-      temporaryEvidenceEnabled: row.temporary_evidence_enabled === 1,
-      temporaryEvidenceHours: Number(row.temporary_evidence_hours),
-      warningMode: String(row.warning_mode) as ModerationSettings['warningMode'],
-      automaticAIReviewEnabled: false,
-      manualAIReviewEnabled: false,
-      automaticBanEnabled: false,
-      automaticDeletionEnabled: false,
-      firstWarningMessage: String(row.first_warning_message),
-      secondWarningMessage: String(row.second_warning_message),
-      repeatedWarningMessage: String(row.repeated_warning_message),
-    };
-  }
-
-  public saveModerationSettings(
-    assistantId: string,
-    settings: ModerationSettings,
-  ): ModerationSettings {
-    this.ensureModerationSettings(assistantId);
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `UPDATE assistant_moderation_settings SET enabled=?,default_group_mode=?,review_threshold=?,warning_threshold=?,
-      admin_notification_threshold=?,recurrence_window_days=?,warning_cooldown_minutes=?,public_warning_limit=?,
-      public_warning_window_minutes=?,temporary_evidence_enabled=?,temporary_evidence_hours=?,warning_mode=?,
-      automatic_ai_review_enabled=0,manual_ai_review_enabled=0,automatic_ban_enabled=0,automatic_deletion_enabled=0,
-      first_warning_message=?,second_warning_message=?,repeated_warning_message=?,updated_at=? WHERE assistant_id=?`,
-      )
-      .run(
-        settings.enabled ? 1 : 0,
-        settings.defaultGroupMode,
-        settings.reviewThreshold,
-        settings.warningThreshold,
-        settings.adminNotificationThreshold,
-        settings.recurrenceWindowDays,
-        settings.warningCooldownMinutes,
-        settings.publicWarningLimit,
-        settings.publicWarningWindowMinutes,
-        settings.temporaryEvidenceEnabled ? 1 : 0,
-        settings.temporaryEvidenceHours,
-        settings.warningMode,
-        settings.firstWarningMessage,
-        settings.secondWarningMessage,
-        settings.repeatedWarningMessage,
-        now,
-        assistantId,
-      );
-    return this.getModerationSettings(assistantId);
-  }
-
-  public listModerationGroupSettings(
-    assistantId: string,
-  ): Array<{ groupHash: string; mode: ModerationGroupMode; enabled: boolean }> {
-    return (
-      this.db
-        .prepare(
-          'SELECT group_hash,mode,enabled FROM assistant_group_moderation_settings WHERE assistant_id=? ORDER BY group_hash',
-        )
-        .all(assistantId) as Array<Record<string, unknown>>
-    ).map((row) => ({
-      groupHash: String(row.group_hash),
-      mode: String(row.mode) as ModerationGroupMode,
-      enabled: row.enabled === 1,
-    }));
-  }
-
-  public saveModerationGroupSettings(
-    assistantId: string,
-    groupHash: string,
-    mode: ModerationGroupMode,
-  ): void {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO assistant_group_moderation_settings(assistant_id,group_hash,mode,enabled,created_at,updated_at)
-      VALUES(?,?,?,?,?,?) ON CONFLICT(assistant_id,group_hash) DO UPDATE SET mode=excluded.mode,enabled=excluded.enabled,updated_at=excluded.updated_at`,
-      )
-      .run(assistantId, groupHash, mode, mode === 'DISABLED' ? 0 : 1, now, now);
-  }
-
-  public listModerationRules(assistantId: string, includeDisabled = true): ModerationRule[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM moderation_rules WHERE assistant_id=? ${includeDisabled ? '' : 'AND enabled=1'} ORDER BY id`,
-      )
-      .all(assistantId) as Array<Record<string, unknown>>;
-    return rows.map((row) => this.mapModerationRule(row));
-  }
-
-  public getModerationRule(assistantId: string, ruleId: number): ModerationRule | null {
-    const row = this.db
-      .prepare('SELECT * FROM moderation_rules WHERE assistant_id=? AND id=?')
-      .get(assistantId, ruleId) as Record<string, unknown> | undefined;
-    return row === undefined ? null : this.mapModerationRule(row);
-  }
-
-  public createModerationRule(
-    assistantId: string,
-    input: Omit<ModerationRule, 'id' | 'assistantId' | 'createdAt' | 'updatedAt'>,
-  ): ModerationRule {
-    if (input.enabled && input.conditions.filter((condition) => condition.enabled).length === 0)
-      throw new Error('MODERATION_RULE_REQUIRES_CONDITION');
-    const create = this.db.transaction(() => {
-      const now = new Date().toISOString();
-      const result = this.db
-        .prepare(
-          `INSERT INTO moderation_rules(assistant_id,name,description,category,severity,detection_type,score,
-        review_threshold,warning_threshold,admin_notification_threshold,enabled,applies_to_all_groups,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        )
-        .run(
-          assistantId,
-          input.name,
-          input.description,
-          input.category,
-          input.severity,
-          input.detectionType,
-          input.score,
-          input.reviewThreshold,
-          input.warningThreshold,
-          input.adminNotificationThreshold,
-          input.enabled ? 1 : 0,
-          input.appliesToAllGroups ? 1 : 0,
-          now,
-          now,
-        );
-      const ruleId = Number(result.lastInsertRowid);
-      this.replaceModerationConditions(ruleId, input.conditions, input.exceptions, now);
-      return ruleId;
-    });
-    return this.getModerationRule(assistantId, create()) as ModerationRule;
-  }
-
-  public updateModerationRule(
-    assistantId: string,
-    ruleId: number,
-    input: Omit<ModerationRule, 'id' | 'assistantId' | 'createdAt' | 'updatedAt'>,
-  ): ModerationRule {
-    if (this.getModerationRule(assistantId, ruleId) === null)
-      throw new Error('MODERATION_RULE_NOT_FOUND');
-    if (input.enabled && input.conditions.filter((condition) => condition.enabled).length === 0)
-      throw new Error('MODERATION_RULE_REQUIRES_CONDITION');
-    const update = this.db.transaction(() => {
-      const now = new Date().toISOString();
-      this.db
-        .prepare(
-          `UPDATE moderation_rules SET name=?,description=?,category=?,severity=?,detection_type=?,score=?,review_threshold=?,
-        warning_threshold=?,admin_notification_threshold=?,enabled=?,applies_to_all_groups=?,updated_at=? WHERE assistant_id=? AND id=?`,
-        )
-        .run(
-          input.name,
-          input.description,
-          input.category,
-          input.severity,
-          input.detectionType,
-          input.score,
-          input.reviewThreshold,
-          input.warningThreshold,
-          input.adminNotificationThreshold,
-          input.enabled ? 1 : 0,
-          input.appliesToAllGroups ? 1 : 0,
-          now,
-          assistantId,
-          ruleId,
-        );
-      this.db.prepare('DELETE FROM moderation_rule_conditions WHERE rule_id=?').run(ruleId);
-      this.db.prepare('DELETE FROM moderation_rule_exceptions WHERE rule_id=?').run(ruleId);
-      this.replaceModerationConditions(ruleId, input.conditions, input.exceptions, now);
-    });
-    update();
-    return this.getModerationRule(assistantId, ruleId) as ModerationRule;
-  }
-
-  public deleteModerationRule(assistantId: string, ruleId: number): boolean {
-    return (
-      this.db
-        .prepare('DELETE FROM moderation_rules WHERE assistant_id=? AND id=?')
-        .run(assistantId, ruleId).changes === 1
-    );
-  }
-
-  public listModerationTerms(assistantId: string): Array<Record<string, unknown>> {
-    return this.db
-      .prepare(
-        `SELECT id,rule_id AS ruleId,term,normalized_term AS normalizedTerm,category,severity,match_mode AS matchMode,
-      score,enabled,created_at AS createdAt,updated_at AS updatedAt FROM moderation_terms WHERE assistant_id=? ORDER BY id`,
-      )
-      .all(assistantId) as Array<Record<string, unknown>>;
-  }
-
-  public createModerationTerm(
-    assistantId: string,
-    input: {
-      ruleId: number | null;
-      term: string;
-      normalizedTerm: string;
-      category: string;
-      severity: ModerationSeverity;
-      matchMode: string;
-      score: number;
-      enabled: boolean;
-    },
-  ): Record<string, unknown> {
-    const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        `INSERT INTO moderation_terms(assistant_id,rule_id,term,normalized_term,category,severity,match_mode,score,enabled,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-      )
-      .run(
-        assistantId,
-        input.ruleId,
-        input.term,
-        input.normalizedTerm,
-        input.category,
-        input.severity,
-        input.matchMode,
-        input.score,
-        input.enabled ? 1 : 0,
-        now,
-        now,
-      );
-    return this.db
-      .prepare(
-        'SELECT id,rule_id AS ruleId,term,normalized_term AS normalizedTerm,category,severity,match_mode AS matchMode,score,enabled FROM moderation_terms WHERE id=?',
-      )
-      .get(result.lastInsertRowid) as Record<string, unknown>;
-  }
-
-  public deleteModerationTerm(assistantId: string, termId: number): boolean {
-    return (
-      this.db
-        .prepare('DELETE FROM moderation_terms WHERE assistant_id=? AND id=?')
-        .run(assistantId, termId).changes === 1
-    );
-  }
-
-  public createModerationCase(input: {
-    assistantId: string;
-    groupHash: string;
-    participantHash: string;
-    messageHash: string;
-    category: string;
-    matchedRuleIds: number[];
-    score: number;
-    severity: ModerationSeverity;
-    warningNumber: number;
-    warningSentAt: string | null;
-    adminNotifiedAt: string | null;
-    encryptedEvidence: string | null;
-    evidenceExpiresAt: string | null;
-  }): number | null {
-    const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO moderation_cases(assistant_id,group_hash,participant_hash,message_hash,category,matched_rule_ids,
-      score,severity,warning_number,status,warning_sent_at,admin_notified_at,encrypted_temporary_evidence,evidence_expires_at,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,'PENDING',?,?,?,?,?,?)`,
-      )
-      .run(
-        input.assistantId,
-        input.groupHash,
-        input.participantHash,
-        input.messageHash,
-        input.category,
-        JSON.stringify(input.matchedRuleIds),
-        input.score,
-        input.severity,
-        input.warningNumber,
-        input.warningSentAt,
-        input.adminNotifiedAt,
-        input.encryptedEvidence,
-        input.evidenceExpiresAt,
-        now,
-        now,
-      );
-    return result.changes === 1 ? Number(result.lastInsertRowid) : null;
-  }
-
-  public listModerationCases(assistantId: string, status?: string): Array<Record<string, unknown>> {
-    this.expireModerationEvidence(assistantId);
-    this.anonymizeExpiredModerationCases(assistantId);
-    const rows = this.db
-      .prepare(
-        `SELECT id,group_hash AS groupHash,participant_hash AS participantHash,message_hash AS messageHash,category,
-      matched_rule_ids AS matchedRuleIds,score,severity,warning_number AS warningNumber,status,warning_sent_at AS warningSentAt,
-      admin_notified_at AS adminNotifiedAt,reviewed_at AS reviewedAt,decision,evidence_expires_at AS evidenceExpiresAt,created_at AS createdAt,
-      updated_at AS updatedAt FROM moderation_cases WHERE assistant_id=? ${status === undefined ? '' : 'AND status=?'} ORDER BY created_at DESC LIMIT 500`,
-      )
-      .all(...(status === undefined ? [assistantId] : [assistantId, status])) as Array<
-      Record<string, unknown>
-    >;
-    return rows.map((row) => ({
-      ...row,
-      matchedRuleIds: parseNumberArray(String(row.matchedRuleIds)),
-    }));
-  }
-
-  public reviewModerationCase(
-    assistantId: string,
-    caseId: number,
-    decision: 'CONFIRMED' | 'FALSE_POSITIVE' | 'DISMISSED' | 'RESOLVED',
-  ): boolean {
-    const now = new Date().toISOString();
-    return (
-      this.db
-        .prepare(
-          `UPDATE moderation_cases SET status=?,decision=?,reviewed_at=?,updated_at=? WHERE assistant_id=? AND id=?`,
-        )
-        .run(decision, decision, now, now, assistantId, caseId).changes === 1
-    );
-  }
-
-  public getModerationEvidence(
-    assistantId: string,
-    caseId: number,
-  ): { encrypted: string; messageHash: string; expiresAt: string } | null {
-    this.expireModerationEvidence(assistantId);
-    const row = this.db
-      .prepare(
-        `SELECT encrypted_temporary_evidence AS encrypted,message_hash AS messageHash,evidence_expires_at AS expiresAt
-      FROM moderation_cases WHERE assistant_id=? AND id=? AND encrypted_temporary_evidence IS NOT NULL`,
-      )
-      .get(assistantId, caseId) as
-      { encrypted: string; messageHash: string; expiresAt: string } | undefined;
-    return row ?? null;
-  }
-
-  public getModerationRecurrence(
-    assistantId: string,
-    groupHash: string,
-    participantHash: string,
-  ): { activeCount: number; lastWarningAt: string | null; expiresAt: string } | null {
-    const row = this.db
-      .prepare(
-        'SELECT active_count,last_warning_at,expires_at FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?',
-      )
-      .get(assistantId, groupHash, participantHash) as
-      { active_count: number; last_warning_at: string | null; expires_at: string } | undefined;
-    if (row === undefined) return null;
-    if (Date.parse(row.expires_at) <= Date.now()) {
-      this.db
-        .prepare(
-          'DELETE FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?',
-        )
-        .run(assistantId, groupHash, participantHash);
-      return null;
-    }
-    return {
-      activeCount: row.active_count,
-      lastWarningAt: row.last_warning_at,
-      expiresAt: row.expires_at,
-    };
-  }
-
-  public saveModerationRecurrence(
-    assistantId: string,
-    groupHash: string,
-    participantHash: string,
-    activeCount: number,
-    lastWarningAt: string | null,
-    expiresAt: string,
-  ): void {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO moderation_recurrence(assistant_id,group_hash,participant_hash,active_count,window_started_at,last_warning_at,expires_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(assistant_id,group_hash,participant_hash) DO UPDATE SET active_count=excluded.active_count,
-      last_warning_at=excluded.last_warning_at,expires_at=excluded.expires_at,updated_at=excluded.updated_at`,
-      )
-      .run(
-        assistantId,
-        groupHash,
-        participantHash,
-        activeCount,
-        now,
-        lastWarningAt,
-        expiresAt,
-        now,
-      );
-  }
-
-  public resetModerationRecurrence(
-    assistantId: string,
-    groupHash: string,
-    participantHash: string,
-  ): void {
-    this.db
-      .prepare(
-        'DELETE FROM moderation_recurrence WHERE assistant_id=? AND group_hash=? AND participant_hash=?',
-      )
-      .run(assistantId, groupHash, participantHash);
-  }
-
-  public decrementModerationRecurrence(
-    assistantId: string,
-    groupHash: string,
-    participantHash: string,
-  ): void {
-    const recurrence = this.getModerationRecurrence(assistantId, groupHash, participantHash);
-    if (recurrence === null || recurrence.activeCount <= 1) {
-      this.resetModerationRecurrence(assistantId, groupHash, participantHash);
-      return;
-    }
-    this.db
-      .prepare(
-        'UPDATE moderation_recurrence SET active_count=active_count-1,updated_at=? WHERE assistant_id=? AND group_hash=? AND participant_hash=?',
-      )
-      .run(new Date().toISOString(), assistantId, groupHash, participantHash);
-  }
-
-  public incrementModerationMetric(assistantId: string, field: string): void {
-    const columns: Record<string, string> = {
-      reviewed: 'messages_reviewed',
-      allowed: 'messages_allowed',
-      matches: 'matches_detected',
-      warnings: 'warnings_sent',
-      recurrences: 'recurrences_detected',
-      cases: 'admin_cases_created',
-      falsePositives: 'false_positives',
-      confirmed: 'confirmed_cases',
-      errors: 'local_errors',
-    };
-    const column = columns[field];
-    if (column === undefined) throw new Error('MODERATION_METRIC_INVALID');
-    const date = new Date().toISOString().slice(0, 10);
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO moderation_metrics(assistant_id,local_date,${column},created_at,updated_at) VALUES(?,?,1,?,?)
-      ON CONFLICT(assistant_id,local_date) DO UPDATE SET ${column}=${column}+1,updated_at=excluded.updated_at`,
-      )
-      .run(assistantId, date, now, now);
-  }
-
-  public getModerationMetrics(assistantId: string): Record<string, unknown> {
-    const date = new Date().toISOString().slice(0, 10);
-    return (
-      (this.db
-        .prepare(
-          `SELECT messages_reviewed AS messagesReviewed,messages_allowed AS messagesAllowed,matches_detected AS matchesDetected,
-      warnings_sent AS warningsSent,recurrences_detected AS recurrencesDetected,admin_cases_created AS adminCasesCreated,
-      false_positives AS falsePositives,confirmed_cases AS confirmedCases,local_errors AS localErrors,ai_reviews AS aiReviews,ai_tokens AS aiTokens,
-      updated_at AS updatedAt FROM moderation_metrics WHERE assistant_id=? AND local_date=?`,
-        )
-        .get(assistantId, date) as Record<string, unknown> | undefined) ?? {
-        messagesReviewed: 0,
-        messagesAllowed: 0,
-        matchesDetected: 0,
-        warningsSent: 0,
-        recurrencesDetected: 0,
-        adminCasesCreated: 0,
-        falsePositives: 0,
-        confirmedCases: 0,
-        localErrors: 0,
-        aiReviews: 0,
-        aiTokens: 0,
-        updatedAt: null,
-      }
-    );
-  }
-
-  public expireModerationEvidence(assistantId: string): number {
-    const now = new Date().toISOString();
-    return this.db
-      .prepare(
-        `UPDATE moderation_cases SET encrypted_temporary_evidence=NULL,evidence_expires_at=NULL,updated_at=?
-      WHERE assistant_id=? AND encrypted_temporary_evidence IS NOT NULL AND evidence_expires_at<=?`,
-      )
-      .run(now, assistantId, now).changes;
-  }
-
-  public anonymizeExpiredModerationCases(assistantId: string): number {
-    const settings = this.getModerationSettings(assistantId);
-    const cutoff = new Date(Date.now() - settings.recurrenceWindowDays * 86_400_000).toISOString();
-    return this.db
-      .prepare(
-        `UPDATE moderation_cases SET participant_hash='expired:'||id,message_hash='expired:'||id,updated_at=?
-      WHERE assistant_id=? AND created_at<=? AND participant_hash NOT LIKE 'expired:%'`,
-      )
-      .run(new Date().toISOString(), assistantId, cutoff).changes;
-  }
-
-  private ensureModerationSettings(assistantId: string): void {
-    if (this.getBot(assistantId) === null) throw new Error('ASSISTANT_NOT_FOUND');
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        'INSERT OR IGNORE INTO assistant_moderation_settings(assistant_id,created_at,updated_at) VALUES(?,?,?)',
-      )
-      .run(assistantId, now, now);
-  }
-
-  private mapModerationRule(row: Record<string, unknown>): ModerationRule {
-    const ruleId = Number(row.id);
-    const conditions = (
-      this.db
-        .prepare('SELECT * FROM moderation_rule_conditions WHERE rule_id=? ORDER BY id')
-        .all(ruleId) as Array<Record<string, unknown>>
-    ).map((item) => ({
-      id: Number(item.id),
-      conditionType: String(item.condition_type),
-      operator: String(item.operator) as 'ALL' | 'ANY' | 'EXCLUDE',
-      normalizedValue: String(item.normalized_value),
-      configuration: parseSafeJsonObject(String(item.configuration_json)),
-      enabled: item.enabled === 1,
-    }));
-    const exceptions = (
-      this.db
-        .prepare('SELECT * FROM moderation_rule_exceptions WHERE rule_id=? ORDER BY id')
-        .all(ruleId) as Array<Record<string, unknown>>
-    ).map((item) => ({
-      id: Number(item.id),
-      exceptionType: String(item.exception_type),
-      normalizedValue: String(item.normalized_value),
-      enabled: item.enabled === 1,
-    }));
-    return {
-      id: ruleId,
-      assistantId: String(row.assistant_id),
-      name: String(row.name),
-      description: String(row.description),
-      category: String(row.category),
-      severity: String(row.severity) as ModerationSeverity,
-      detectionType: String(row.detection_type),
-      score: Number(row.score),
-      reviewThreshold: Number(row.review_threshold),
-      warningThreshold: Number(row.warning_threshold),
-      adminNotificationThreshold: Number(row.admin_notification_threshold),
-      enabled: row.enabled === 1,
-      appliesToAllGroups: row.applies_to_all_groups === 1,
-      conditions,
-      exceptions,
-      createdAt: String(row.created_at),
-      updatedAt: String(row.updated_at),
-    };
-  }
-
-  private replaceModerationConditions(
-    ruleId: number,
-    conditions: ModerationRule['conditions'],
-    exceptions: ModerationRule['exceptions'],
-    now: string,
-  ): void {
-    const conditionStatement = this.db
-      .prepare(`INSERT INTO moderation_rule_conditions(rule_id,condition_type,operator,normalized_value,configuration_json,enabled,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?)`);
-    for (const condition of conditions)
-      conditionStatement.run(
-        ruleId,
-        condition.conditionType,
-        condition.operator,
-        condition.normalizedValue,
-        JSON.stringify(condition.configuration),
-        condition.enabled ? 1 : 0,
-        now,
-        now,
-      );
-    const exceptionStatement = this.db.prepare(
-      `INSERT INTO moderation_rule_exceptions(rule_id,exception_type,normalized_value,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
-    );
-    for (const exception of exceptions)
-      exceptionStatement.run(
-        ruleId,
-        exception.exceptionType,
-        exception.normalizedValue,
-        exception.enabled ? 1 : 0,
-        now,
-        now,
-      );
-  }
-}
-
-function mapAIModerationIncident(row: Record<string, unknown>): AIModerationIncident {
-  return {
-    id: Number(row.id),
-    assistantId: String(row.assistant_id),
-    groupHash: String(row.group_hash),
-    groupName: row.group_name === null ? null : String(row.group_name),
-    participantHash: String(row.participant_hash),
-    participantDisplayName:
-      row.participant_display_name === null ? null : String(row.participant_display_name),
-    detectedAt: String(row.detected_at),
-    messagePreview: String(row.message_preview),
-    ruleViolated: row.rule_violated === null ? null : String(row.rule_violated),
-    category: String(row.category) as AIModerationIncident['category'],
-    severity: String(row.severity) as AIModerationSeverity,
-    confidence: String(row.confidence) as AIModerationIncident['confidence'],
-    aiExplanation: String(row.ai_explanation),
-    warningSnapshot: String(row.warning_snapshot),
-    status: String(row.status) as AIModerationIncidentStatus,
-    adminDecisionAt: row.admin_decision_at === null ? null : String(row.admin_decision_at),
-    warningSentAt: row.warning_sent_at === null ? null : String(row.warning_sent_at),
-    warningError: row.warning_error === null ? null : String(row.warning_error),
-    createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at),
-  };
-}
-
-function localDateInTimezone(value: Date, timezone: string): string {
-  try {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(value);
-    const year = parts.find((part) => part.type === 'year')?.value;
-    const month = parts.find((part) => part.type === 'month')?.value;
-    const day = parts.find((part) => part.type === 'day')?.value;
-    if (year !== undefined && month !== undefined && day !== undefined)
-      return `${year}-${month}-${day}`;
-  } catch {
-    // Una zona inválida no debe impedir que se registren métricas seguras.
-  }
-  return value.toISOString().slice(0, 10);
-}
-
-function mapGroupModerationProfile(row: Record<string, unknown>): GroupModerationProfile {
-  return {
-    assistantId: String(row.assistant_id),
-    groupHash: String(row.group_hash),
-    enabled: row.enabled === 1,
-    rulesText: String(row.rules_text ?? ''),
-    rulesHash: String(row.rules_hash ?? ''),
-    analysisStatus: String(row.analysis_status) as GroupModerationProfile['analysisStatus'],
-    testStatus: String(row.test_status) as GroupModerationProfile['testStatus'],
-    compiled:
-      row.compiled_json === null || row.compiled_json === undefined
-        ? null
-        : parseSafeJsonObject(String(row.compiled_json)),
-    summary:
-      row.compiled_summary_json === null || row.compiled_summary_json === undefined
-        ? null
-        : parseSafeJsonObject(String(row.compiled_summary_json)),
-    provider: row.provider === null || row.provider === undefined ? null : String(row.provider),
-    model: row.model === null || row.model === undefined ? null : String(row.model),
-    inputTokens: Number(row.input_tokens ?? 0),
-    outputTokens: Number(row.output_tokens ?? 0),
-    firstWarningMessage: String(row.first_warning_message),
-    secondWarningMessage: String(row.second_warning_message),
-    recurrenceWindowDays: Number(row.recurrence_window_days),
-    lastAnalyzedAt:
-      row.last_analyzed_at === null || row.last_analyzed_at === undefined
-        ? null
-        : String(row.last_analyzed_at),
-    lastTestedAt:
-      row.last_tested_at === null || row.last_tested_at === undefined
-        ? null
-        : String(row.last_tested_at),
-    activatedAt:
-      row.activated_at === null || row.activated_at === undefined ? null : String(row.activated_at),
-    updatedAt: String(row.updated_at),
-  };
 }
 
 function mapCommand(row: CommandRow): CommandRecord {
@@ -9616,10 +8332,7 @@ function mapAISettings(row: Record<string, number | string | null>): AISettings 
     profileId: Number(row.profile_id),
     enabled: row.enabled === 1,
     provider: row.provider === 'disabled' ? 'disabled' : 'groq',
-    model:
-      typeof row.model === 'string' && row.model.trim().length > 0
-        ? row.model.trim()
-        : null,
+    model: typeof row.model === 'string' && row.model.trim().length > 0 ? row.model.trim() : null,
     questionMaxChars: Number(row.question_max_chars),
     contextMaxTokens: Number(row.context_max_tokens),
     inputMaxTokens: Number(row.input_max_tokens),
@@ -9661,17 +8374,6 @@ function parseSafeObject(value: string): Record<string, string | number | boolea
           entry[1] === null || ['string', 'number', 'boolean'].includes(typeof entry[1]),
       ),
     );
-  } catch {
-    return {};
-  }
-}
-
-function parseSafeJsonObject(value: string): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
   } catch {
     return {};
   }
@@ -9731,6 +8433,53 @@ function validateAssistantProfile<
     primaryColor: validateColor(input.primaryColor),
     secondaryColor: validateColor(input.secondaryColor),
     timezone,
+    applicationName: validatePlainText(input.applicationName, 'nombre de aplicación', 120),
+    headerText: validatePlainText(input.headerText, 'encabezado', 160),
+    footerText: validatePlainText(input.footerText, 'pie', 300, true),
+    supportInformation: validatePlainText(input.supportInformation, 'soporte', 500, true),
+  };
+}
+
+function validateActiveAssistantProfileConfiguration(
+  input: ActiveAssistantProfileConfiguration,
+): ActiveAssistantProfileConfiguration {
+  const organizationTypes: OrganizationType[] = [
+    'Comunidad',
+    'Tienda',
+    'Restaurante',
+    'Distribuidora',
+    'Servicio profesional',
+    'Organización social',
+    'Institución educativa',
+    'Otro',
+  ];
+  if (!organizationTypes.includes(input.organizationType))
+    throw new Error('El tipo de organización no es válido.');
+  const activationAlias = validatePlainText(input.activationAlias, 'alias', 80);
+  if (!activationAlias.startsWith('@')) throw new Error('El alias visible debe comenzar con @.');
+  return {
+    organizationName: validatePlainText(input.organizationName, 'nombre público', 160),
+    botName: validatePlainText(input.botName, 'nombre del bot', 80),
+    activationAlias,
+    description: validatePlainText(input.description, 'descripción', 1000),
+    organizationType: input.organizationType,
+    noInformationMessage: validatePlainText(
+      input.noInformationMessage,
+      'mensaje sin información',
+      600,
+    ),
+    limitMessage: validatePlainText(input.limitMessage, 'mensaje de límite', 600),
+    aiErrorMessage: validatePlainText(input.aiErrorMessage, 'mensaje de error', 600),
+    medicalMessage: validatePlainText(input.medicalMessage, 'mensaje médico', 600),
+    mentionPromptMessage: validatePlainText(input.mentionPromptMessage, 'mensaje de mención', 600),
+    contactInformation: validatePlainText(input.contactInformation, 'contacto', 1000, true),
+    businessHours: validatePlainText(input.businessHours, 'horarios', 1000, true),
+    address:
+      input.address === null ? null : validatePlainText(input.address, 'dirección', 500, true),
+    logoPath: input.logoPath === null ? null : validateLogoPath(input.logoPath),
+    primaryColor: validateColor(input.primaryColor),
+    secondaryColor: validateColor(input.secondaryColor),
+    timezone: validateTimezone(input.timezone),
     applicationName: validatePlainText(input.applicationName, 'nombre de aplicación', 120),
     headerText: validatePlainText(input.headerText, 'encabezado', 160),
     footerText: validatePlainText(input.footerText, 'pie', 300, true),

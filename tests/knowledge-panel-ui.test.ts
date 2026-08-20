@@ -31,10 +31,12 @@ describe('panel sin módulo administrativo de información', () => {
     }
   });
 
-  it('integra identidad dentro de inteligencia artificial', () => {
+  it('mantiene la configuración operativa dentro de inteligencia artificial', () => {
     expect(html).toContain('>Inteligencia Artificial</option>');
     expect(html).toContain('<span aria-hidden="true">✦</span> Inteligencia Artificial');
-    expect(html).toContain('<button type="submit">Guardar identidad</button>');
+    expect(html).toContain('<button type="submit">Guardar asistente</button>');
+    expect(html).not.toContain('name="objective"');
+    expect(html).not.toContain('name="tone"');
     expect(html).not.toContain('value="profile"');
     expect(html).not.toContain('data-section="profile"');
     expect(html).not.toContain('<h2>Nombre y perfil</h2>');

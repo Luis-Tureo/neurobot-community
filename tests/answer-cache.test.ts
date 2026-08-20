@@ -213,6 +213,29 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     database.close();
   });
 
+  it('conserva exactamente una respuesta completa cercana al límite al guardar y recuperar caché', async () => {
+    const { database, provider, service, profileId } = setup();
+    addKnowledge(database, profileId, {
+      title: 'Proceso técnico documentado',
+      content: 'El proceso técnico tiene una explicación oficial revisada.',
+      keywords: ['proceso', 'técnico'],
+    });
+    const completeAnswer = `${'Dato técnico útil. '.repeat(285)}FIN COMPLETO.`;
+    expect(completeAnswer.length).toBeGreaterThan(4096);
+    provider.response = completeAnswer;
+    const question = '¿Cómo funciona el proceso técnico documentado?';
+
+    const generated = await service.answerQuestion(question, 'group-a', 'user-a');
+    const cached = await service.answerQuestion(question, 'group-b', 'user-b');
+
+    expect(generated).toMatchObject({ code: 'AI_RESPONSE', text: completeAnswer });
+    expect(cached).toMatchObject({ code: 'ANSWER_CACHE', text: completeAnswer });
+    expect(cached.text.endsWith('FIN COMPLETO.')).toBe(true);
+    expect(database.listCachedAnswers('neurobot')[0]?.answer).toBe(completeAnswer);
+    expect(provider.calls).toBe(1);
+    database.close();
+  });
+
   it('convierte automáticamente una respuesta reutilizada en pregunta frecuente', async () => {
     const { database, provider, service, profileId } = setup();
     addKnowledge(database, profileId, {

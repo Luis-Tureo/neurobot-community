@@ -9,10 +9,20 @@ describe('módulo mínimo de inteligencia artificial', () => {
     expect(html).toContain('<h2>Inteligencia Artificial</h2>');
     expect(html).toContain('name="botName"');
     expect(html).toContain('name="activationAlias"');
-    expect(html).toContain('Prompt de comportamiento');
-    expect(html).not.toMatch(/name="objective"[^>]*maxlength=/u);
-    expect(html).toContain('data-auto-grow');
-    expect(script).toContain('resizeAutoGrowTextarea');
+    expect(html).toContain('preguntas generales');
+    for (const removed of [
+      'Prompt de comportamiento',
+      'name="objective"',
+      'name="allowedTopics"',
+      'name="excludedTopics"',
+      'name="tone"',
+      'name="outOfScopeMessage"',
+      'name="communityGreetingMessage"',
+      'name="preset"',
+      'Guardar identidad',
+    ]) {
+      expect(html).not.toContain(removed);
+    }
     expect(html).toContain('id="ai-provider-form"');
     expect(html).toContain('ai-provider-form hidden');
     expect(html).toContain('id="ai-provider-current-name"');
@@ -55,6 +65,12 @@ describe('módulo mínimo de inteligencia artificial', () => {
       'panelState.aiCredentialConfigured',
     ]) {
       expect(`${html}\n${script}`).not.toContain(removed);
+    }
+  });
+
+  it('retira completamente la navegación, controles y runtime de moderación', () => {
+    for (const source of [html, script, css]) {
+      expect(source).not.toMatch(/ai-moderation|section-moderation|\/moderation/iu);
     }
   });
 

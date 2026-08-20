@@ -1075,115 +1075,6 @@ h3 {
   font-size: 1.05rem;
 }
 
-.moderation-tabs {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.55rem;
-  margin: 1rem 0;
-}
-
-#moderation-summary-cards {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-#moderation-summary-cards .status-card {
-  min-width: 0;
-}
-
-#moderation-state-notice {
-  margin-top: 1rem;
-  margin-bottom: 0;
-}
-
-#moderation-settings-form {
-  margin-bottom: 1.5rem;
-}
-
-#moderation-settings-form + h3 {
-  margin: 0 0 0.85rem;
-}
-
-#moderation-groups-list {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.moderation-tabs button {
-  min-height: 2.75rem;
-  white-space: normal;
-}
-
-.moderation-tabs button.active {
-  background: var(--primary);
-  color: #fff;
-}
-
-[data-moderation-pane] {
-  margin-top: 1rem;
-}
-.moderation-workspace {
-  display: grid;
-  gap: 1rem;
-  margin-top: 1rem;
-}
-
-.moderation-statistics-card {
-  display: grid;
-  gap: 1.25rem;
-  margin-top: 1rem;
-}
-
-.moderation-statistics-card .section-heading,
-.moderation-statistics-card .status-grid {
-  margin: 0;
-}
-
-.moderation-progress {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.65rem;
-}
-.progress-step {
-  min-height: 3.25rem;
-  padding: 0.75rem;
-  border: 1px solid var(--line);
-  border-radius: 0.75rem;
-  background: var(--surface-soft);
-  color: var(--muted);
-}
-.progress-step.complete {
-  border-color: var(--primary);
-  color: var(--primary-dark);
-  background: var(--primary-soft);
-  font-weight: 700;
-}
-.checkbox-stack {
-  display: grid;
-  gap: 0.6rem;
-  margin: 0.75rem 0 1rem;
-}
-.spacious-actions {
-  margin-top: 1rem;
-}
-#moderation-allowed-test + #moderation-warning-test {
-  margin-top: 1.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--line);
-}
-.advanced-settings {
-  padding: 0;
-  overflow: hidden;
-}
-.advanced-settings > summary {
-  cursor: pointer;
-  padding: 1rem 1.15rem;
-  color: var(--primary-dark);
-  font-weight: 750;
-}
-.advanced-settings > p,
-.advanced-settings > form {
-  margin: 0 1.15rem 1.15rem;
-}
 .info-callout {
   margin: 0;
   padding: 0.85rem 1rem;
@@ -2015,10 +1906,6 @@ legend {
   background: #e5f1ee;
 }
 @media (max-width: 900px) {
-  .moderation-tabs,
-  #moderation-summary-cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .panel-layout {
     display: block;
   }
@@ -2030,10 +1917,6 @@ legend {
   }
 }
 @media (max-width: 640px) {
-  .moderation-tabs,
-  #moderation-summary-cards {
-    grid-template-columns: 1fr;
-  }
   .shell {
     width: min(100% - 1rem, 1380px);
     padding-top: 0.5rem;
@@ -2164,28 +2047,6 @@ legend {
 .ai-provider-history-card .section-heading {
   align-items: center;
   margin: 0;
-}
-
-.identity-primary-form {
-  display: grid;
-  gap: 1.25rem;
-  margin: 0 0 1rem;
-}
-
-.identity-primary-form > :not(.identity-primary-fields, .identity-behavior-prompt, button) {
-  display: none;
-}
-
-.identity-primary-fields,
-.identity-behavior-prompt {
-  display: grid;
-}
-
-.identity-behavior-prompt textarea {
-  min-height: 17.5rem;
-  max-height: 28rem;
-  overflow-y: auto;
-  resize: vertical;
 }
 
 .state-metrics-card {
@@ -2876,135 +2737,7 @@ body.login-mode {
   transition: opacity 0.15s ease-in-out;
 }
 
-#section-ai-moderation {
-  display: grid;
-  gap: 1.25rem;
-}
-
-#section-ai-moderation.hidden {
-  display: none;
-}
-
-.ai-moderation-safety-notice,
-#ai-moderation-media-notice {
-  margin: 0;
-}
-
-.ai-moderation-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-}
-
-.ai-moderation-card {
-  display: grid;
-  gap: 1rem;
-  margin: 0;
-  padding: 1.25rem;
-}
-
-.ai-moderation-card .compact-heading {
-  margin-bottom: 0;
-}
-
-#ai-moderation-settings-form > .form-row {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.ai-moderation-clear-phone {
-  display: flex;
-  min-height: 2.75rem;
-  align-items: center;
-  gap: 0.65rem;
-  width: fit-content;
-}
-
-#section-ai-moderation input[type='checkbox'] {
-  width: 1.25rem;
-  min-width: 1.25rem;
-  height: 1.25rem;
-  margin: 0;
-  padding: 0;
-  accent-color: #4f46e5;
-}
-
-#ai-moderation-group-options .lab-group-option {
-  display: grid;
-  grid-template-columns: 1.25rem minmax(0, 1fr);
-  align-items: center;
-}
-
-.ai-moderation-variables code {
-  padding: 0.1rem 0.35rem;
-  border-radius: 0.35rem;
-  color: #3730a3;
-  background: #eef2ff;
-  font-weight: 700;
-}
-
-.ai-moderation-preview,
-.ai-moderation-simulation {
-  padding: 1rem;
-  border: 1px solid #c7d2fe;
-  border-radius: 0.75rem;
-  color: #1e1b4b;
-  background: #eef2ff;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.ai-moderation-simulation {
-  border-color: #67e8f9;
-  background: #ecfeff;
-}
-
-.ai-moderation-filters {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(8rem, 1fr)) auto;
-  gap: 0.75rem;
-  align-items: end;
-}
-
-.ai-moderation-filters button {
-  min-height: 2.75rem;
-}
-
-.ai-moderation-table {
-  min-width: 72rem;
-}
-
-.ai-moderation-decision {
-  display: grid;
-  gap: 0.5rem;
-  min-width: 9.5rem;
-}
-
-.ai-moderation-decision button {
-  width: 100%;
-  min-height: 2.75rem;
-  padding: 0.55rem 0.75rem;
-  font-size: 0.78rem;
-}
-
-@media (max-width: 1100px) {
-  .ai-moderation-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .ai-moderation-filters {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 700px) {
-  #ai-moderation-settings-form > .form-row,
-  .ai-moderation-filters {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-/* Control de estado compartido para automatizaciones, asistentes, IA y moderación. */
+/* Control de estado compartido para automatizaciones, asistentes e IA. */
 button.status-switch {
   position: relative;
   display: grid;

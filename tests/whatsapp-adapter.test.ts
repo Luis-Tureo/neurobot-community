@@ -63,7 +63,6 @@ function createSubject(
     onMessage?: (message: IncomingMessage) => Promise<void>;
     messageDeduplicationTtlMs?: number;
     communityPollVotesNoAction?: boolean;
-    acceptPrivateModerationCommands?: boolean;
     groupAdministratorCacheTtlMs?: number;
     groupAdministratorStaleTtlMs?: number;
     groupAdministratorTimeoutMs?: number;
@@ -81,9 +80,6 @@ function createSubject(
       sessionPath: 'sesion-de-prueba',
       maxMessageLength: 2000,
       developmentMode: true,
-      ...(options.acceptPrivateModerationCommands === undefined
-        ? {}
-        : { acceptPrivateModerationCommands: options.acceptPrivateModerationCommands }),
       ...(options.communityPollVotesNoAction === undefined
         ? {}
         : { communityPollVotesNoAction: options.communityPollVotesNoAction }),
@@ -179,10 +175,8 @@ describe('adaptador de WhatsApp', () => {
     expect(nativePoll.options.allowMultipleAnswers).toBe(true);
   });
 
-  it('adapta solo comandos privados de moderación cuando el chat privado general está desactivado', async () => {
-    const { adapter, fake, received } = createSubject({
-      acceptPrivateModerationCommands: true,
-    });
+  it('ignora mensajes privados cuando el canal privado general está desactivado', async () => {
+    const { adapter, fake, received } = createSubject();
     await adapter.initialize();
     fake.emit('ready');
 
@@ -195,13 +189,8 @@ describe('adaptador de WhatsApp', () => {
         body: 'ENVIAR 42',
       }),
     );
-    await vi.waitFor(() => expect(received).toHaveLength(1));
-    expect(received[0]).toMatchObject({
-      chatId: '56912345678@c.us',
-      participantId: '56912345678@c.us',
-      body: 'ENVIAR 42',
-      isGroup: false,
-    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(received).toHaveLength(0);
 
     fake.emit(
       'message',
@@ -213,13 +202,11 @@ describe('adaptador de WhatsApp', () => {
       }),
     );
     await new Promise((resolve) => setImmediate(resolve));
-    expect(received).toHaveLength(1);
+    expect(received).toHaveLength(0);
   });
 
-  it('resuelve la identidad telefónica de un administrador LID que responde moderación', async () => {
-    const { adapter, fake, received } = createSubject({
-      acceptPrivateModerationCommands: true,
-    });
+  it('no crea una excepción privada para antiguos comandos recibidos mediante LID', async () => {
+    const { adapter, fake, received } = createSubject();
     fake.lidMappings = [{ lid: 'administrador@lid', pn: '56912345678@c.us' }];
     await adapter.initialize();
     fake.emit('ready');
@@ -234,13 +221,8 @@ describe('adaptador de WhatsApp', () => {
       }),
     );
 
-    await vi.waitFor(() => expect(received).toHaveLength(1));
-    expect(received[0]).toMatchObject({
-      participantId: 'administrador@lid',
-      administratorId: '56912345678@c.us',
-      participantIdentityStatus: 'lid_resolved',
-      isGroup: false,
-    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(received).toHaveLength(0);
   });
 
   it('convierte una selección nativa del menú en una respuesta conversacional segura', async () => {
