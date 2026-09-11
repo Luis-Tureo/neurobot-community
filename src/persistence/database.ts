@@ -626,7 +626,7 @@ export class AppDatabase {
           CREATE TABLE ai_settings (
             profile_id INTEGER PRIMARY KEY REFERENCES assistant_profiles(id) ON DELETE CASCADE,
             enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
-            provider TEXT NOT NULL DEFAULT 'gemini' CHECK (provider IN ('gemini', 'disabled')),
+            provider TEXT NOT NULL DEFAULT 'groq' CHECK (provider IN ('groq', 'disabled')),
             question_max_chars INTEGER NOT NULL DEFAULT 300,
             context_max_tokens INTEGER NOT NULL DEFAULT 700,
             input_max_tokens INTEGER NOT NULL DEFAULT 1000,
@@ -1527,7 +1527,7 @@ export class AppDatabase {
           INSERT INTO assistant_ai_queue_settings(assistant_id, created_at, updated_at)
             SELECT id, datetime('now'), datetime('now') FROM bots;
           INSERT INTO assistant_ai_provider_health(assistant_id, provider, state, updated_at)
-            SELECT id, 'gemini', 'AVAILABLE', datetime('now') FROM bots;
+            SELECT id, 'groq', 'AVAILABLE', datetime('now') FROM bots;
         `,
       },
       {
@@ -1821,7 +1821,7 @@ export class AppDatabase {
           CREATE TABLE bot_ai_provider_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-            provider TEXT NOT NULL CHECK (provider IN ('gemini')),
+            provider TEXT NOT NULL CHECK (provider IN ('groq')),
             action TEXT NOT NULL CHECK (action IN (
               'PROVIDER_ADDED', 'PROVIDER_REPLACED', 'TOKEN_CHANGED', 'ACTIVATED', 'DEACTIVATED'
             )),
@@ -1835,9 +1835,9 @@ export class AppDatabase {
         version: 23,
         sql: `
           ALTER TABLE bot_ai_credentials
-            ADD COLUMN display_name TEXT NOT NULL DEFAULT 'Gemini';
+            ADD COLUMN display_name TEXT NOT NULL DEFAULT 'Groq';
           ALTER TABLE bot_ai_provider_history
-            ADD COLUMN display_name TEXT NOT NULL DEFAULT 'Gemini';
+            ADD COLUMN display_name TEXT NOT NULL DEFAULT 'Groq';
         `,
       },
       {
@@ -1858,7 +1858,7 @@ export class AppDatabase {
       {
         version: 26,
         sql: `
-          -- Actualiza los valores por defecto de IA para usar el modelo fijo de Gemini.
+          -- Actualiza los valores por defecto de IA para usar openai/gpt-oss-20b.
           -- max_tokens: 150 (respuestas breves), temperature: 0.6.
           -- Límites internos de seguridad: 800 solicitudes/día, 160 000 tokens/día,
           -- 30 000 solicitudes/mes, 1 600 000 tokens/mes.
@@ -2037,7 +2037,7 @@ export class AppDatabase {
               updated_at = datetime('now');
 
           -- El valor anterior (150) cortaba respuestas de modelos con razonamiento.
-          -- 1024 coincide con el valor predeterminado documentado para Gemini; la concisión
+          -- 1024 coincide con el valor predeterminado documentado por Groq; la concisión
           -- se controla semánticamente en el prompt, no recortando texto ya generado.
           UPDATE ai_settings
           SET response_max_tokens = 1024,
@@ -2126,6 +2126,9 @@ export class AppDatabase {
           SET credential_mode = 'global', encrypted_api_key = NULL,
               key_fingerprint = NULL, updated_at = datetime('now')
           WHERE credential_mode = 'per_bot';
+          UPDATE bot_ai_credentials
+          SET display_name = 'Gemini', updated_at = datetime('now')
+          WHERE display_name = 'Groq';
 
           ALTER TABLE bot_ai_provider_history RENAME TO bot_ai_provider_history_legacy;
           CREATE TABLE bot_ai_provider_history (
@@ -2515,8 +2518,8 @@ export class AppDatabase {
     this.db
       .prepare(
         `INSERT OR IGNORE INTO bot_ai_credentials(
-           bot_id, credential_mode, encrypted_api_key, key_fingerprint, updated_at
-         ) VALUES ('neurobot', 'global', NULL, NULL, ?)`,
+           bot_id, credential_mode, encrypted_api_key, key_fingerprint, updated_at, display_name
+         ) VALUES ('neurobot', 'global', NULL, NULL, ?, 'Gemini')`,
       )
       .run(now);
     const initialMenu = this.db
@@ -4631,8 +4634,8 @@ export class AppDatabase {
       this.db
         .prepare(
           `INSERT INTO bot_ai_credentials(
-             bot_id, credential_mode, encrypted_api_key, key_fingerprint, updated_at
-           ) VALUES (?, 'global', NULL, NULL, ?)`,
+             bot_id, credential_mode, encrypted_api_key, key_fingerprint, updated_at, display_name
+           ) VALUES (?, 'global', NULL, NULL, ?, 'Gemini')`,
         )
         .run(botId, now);
       this.seedBotKnowledgeCategories(botId, profile.id, input.mode, now);
