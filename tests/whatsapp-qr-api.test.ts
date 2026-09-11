@@ -29,13 +29,7 @@ describe('API de generaciones QR', () => {
     const logger = createLogger('silent');
     const anonymizer = new Anonymizer('x'.repeat(32));
     const vault = new SecretVault('clave-de-cifrado-para-pruebas');
-    const providers = new AIProviderFactory(
-      database,
-      vault,
-      undefined,
-      'modelo-prueba',
-      'disabled',
-    );
+    const providers = new AIProviderFactory(database, vault, undefined, 'disabled');
     const sessions = new WhatsAppSessionManager(
       join(root, 'active'),
       join(root, 'backups', 'sessions'),

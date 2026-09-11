@@ -60,8 +60,7 @@ async function main(): Promise<void> {
   const aiProviders = new AIProviderFactory(
     database,
     vault,
-    environment.groqApiKey,
-    environment.groqModel,
+    environment.geminiApiKey,
     environment.aiProvider,
   );
   const sessionManager = new WhatsAppSessionManager(

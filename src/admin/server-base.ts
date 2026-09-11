@@ -12,6 +12,12 @@ import { z } from 'zod';
 import type { AIProvider } from '../ai/ai-provider.js';
 import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
 import { hashNormalizedQuestion, normalizeQuestionForCache } from '../ai/answer-cache-service.js';
+import {
+  GEMINI_MODEL,
+  GEMINI_PROVIDER_ID,
+  GEMINI_PROVIDER_LABEL,
+  GEMINI_PROVIDER_NAME,
+} from '../ai/gemini-constants.js';
 import type { AutomaticMessageService } from '../core/automatic-message-service.js';
 import { CatalogService } from '../core/catalog-service.js';
 import {
@@ -110,15 +116,8 @@ const knowledgeEntrySchema = z
 const aiSettingsSchema = z
   .object({
     enabled: z.boolean(),
-    provider: z.enum(['groq', 'disabled']),
-    model: z
-      .string()
-      .trim()
-      .min(1)
-      .max(120)
-      .regex(/^[a-zA-Z0-9_.:/-]+$/u, 'El identificador del modelo no es válido.')
-      .nullable()
-      .optional(),
+    provider: z.enum(['gemini', 'disabled']),
+    model: z.literal(GEMINI_MODEL).nullable().optional(),
     questionMaxChars: z.number().int().min(1).max(3000),
     contextMaxTokens: z.number().int().min(1).max(7000),
     inputMaxTokens: z.number().int().min(1).max(10_000),
@@ -233,7 +232,7 @@ const botCreateSchema = z
     timezone: z.string().trim().min(1).max(80),
     mode: z.enum(['community', 'business', 'mixed']),
     connectorType: z.enum(['WHATSAPP_WEB', 'WHATSAPP_CLOUD_API']),
-    provider: z.enum(['groq', 'disabled']),
+    provider: z.enum(['gemini', 'disabled']),
     menuType: z
       .enum(['automatic', 'native_buttons', 'native_list', 'numbered'])
       .default('automatic'),
@@ -1294,21 +1293,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       providerHealth: context.database.getAIProviderQueueHealth(botId),
     };
     if (!configured) queue.providerHealth = { ...queue.providerHealth, state: 'NOT_CONFIGURED' };
-    let maskedToken: string | null = null;
-    if (credential.mode === 'global' && process.env.GROQ_API_KEY) {
-      maskedToken = maskApiKey(process.env.GROQ_API_KEY);
-    } else if (
-      credential.mode === 'per_bot' &&
-      credential.encryptedApiKey &&
-      context.secretVault?.isConfigured()
-    ) {
-      try {
-        const rawKey = context.secretVault.decrypt(credential.encryptedApiKey, `bot:${botId}:groq`);
-        maskedToken = maskApiKey(rawKey);
-      } catch {
-        maskedToken = null;
-      }
-    }
+    const maskedToken = context.aiProviderFactory?.getMaskedApiKey(botId) ?? null;
 
     return {
       developmentMode: context.developmentMode,
@@ -1328,10 +1313,13 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         encryptionAvailable: context.secretVault?.isConfigured() ?? false,
       },
       currentProvider: {
-        id: 'groq',
+        id: GEMINI_PROVIDER_ID,
         name: credential.displayName,
+        providerName: GEMINI_PROVIDER_NAME,
+        providerLabel: GEMINI_PROVIDER_LABEL,
+        model: GEMINI_MODEL,
         configured,
-        enabled: configured && settings.enabled && settings.provider === 'groq',
+        enabled: configured && settings.enabled && settings.provider === GEMINI_PROVIDER_ID,
         maskedToken,
       },
       providerHistory: context.database.listAIProviderChanges(botId),
@@ -1347,8 +1335,8 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         ? context.aiProviderFactory.listAvailableModels(botId)
         : Promise.resolve({
             models: [],
-            currentModel: 'openai/gpt-oss-20b',
-            defaultModel: 'openai/gpt-oss-20b',
+            currentModel: GEMINI_MODEL,
+            defaultModel: GEMINI_MODEL,
             catalogStatus: 'unavailable' as const,
           }));
       return result;
@@ -1377,14 +1365,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           displayName: z.string().trim().min(1).max(80),
           apiKey: z.string().trim().min(16).max(500).optional(),
           enabled: z.boolean(),
-          model: z
-            .string()
-            .trim()
-            .min(1)
-            .max(120)
-            .regex(/^[a-zA-Z0-9_.:/-]+$/u, 'El identificador del modelo no es válido.')
-            .nullable()
-            .optional(),
+          model: z.literal(GEMINI_MODEL).nullable().optional(),
         })
         .strict()
         .parse(body);
@@ -1411,14 +1392,14 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
             error: 'APP_ENCRYPTION_KEY debe estar configurada para guardar una clave por bot.',
           });
         }
-        const encrypted = secretVault.encrypt(input.apiKey, `bot:${botId}:groq`);
+        const encrypted = secretVault.encrypt(input.apiKey, `bot:${botId}:gemini`);
         context.database.saveBotAIProviderConfiguration(botId, input.displayName, {
           encryptedApiKey: encrypted.encrypted,
           fingerprint: encrypted.fingerprint,
         });
         context.database.recordAIProviderChange(
           botId,
-          'groq',
+          GEMINI_PROVIDER_ID,
           !wasConfigured
             ? 'PROVIDER_ADDED'
             : previousCredential.displayName !== input.displayName
@@ -1430,7 +1411,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       if (input.apiKey === undefined && previousCredential.displayName !== input.displayName) {
         context.database.recordAIProviderChange(
           botId,
-          'groq',
+          GEMINI_PROVIDER_ID,
           'PROVIDER_REPLACED',
           input.displayName,
         );
@@ -1440,45 +1421,29 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         ...previousSettings,
         ...(input.model !== undefined ? { model: input.model ? input.model.trim() : null } : {}),
         enabled: input.enabled,
-        provider: input.enabled ? 'groq' : 'disabled',
+        provider: input.enabled ? GEMINI_PROVIDER_ID : 'disabled',
         updatedAt: new Date().toISOString(),
       });
       if (previousSettings.enabled !== settings.enabled) {
         context.database.recordAIProviderChange(
           botId,
-          'groq',
+          GEMINI_PROVIDER_ID,
           settings.enabled ? 'ACTIVATED' : 'DEACTIVATED',
           input.displayName,
         );
       }
       audit(context, 'bot_ai_provider_save', botId, 'ok', botId);
-      let maskedToken: string | null = null;
-      if (input.apiKey) {
-        maskedToken = maskApiKey(input.apiKey);
-      } else {
-        const currentCred = context.database.getBotEncryptedCredential(botId);
-        if (currentCred.mode === 'global' && process.env.GROQ_API_KEY) {
-          maskedToken = maskApiKey(process.env.GROQ_API_KEY);
-        } else if (
-          currentCred.mode === 'per_bot' &&
-          currentCred.encryptedApiKey &&
-          context.secretVault?.isConfigured()
-        ) {
-          try {
-            const rawKey = context.secretVault.decrypt(
-              currentCred.encryptedApiKey,
-              `bot:${botId}:groq`,
-            );
-            maskedToken = maskApiKey(rawKey);
-          } catch {
-            maskedToken = null;
-          }
-        }
-      }
+      const maskedToken =
+        input.apiKey === undefined
+          ? (context.aiProviderFactory?.getMaskedApiKey(botId) ?? null)
+          : maskApiKey(input.apiKey);
       return {
         provider: {
-          id: 'groq',
+          id: GEMINI_PROVIDER_ID,
           name: input.displayName,
+          providerName: GEMINI_PROVIDER_NAME,
+          providerLabel: GEMINI_PROVIDER_LABEL,
+          model: GEMINI_MODEL,
           configured: input.apiKey !== undefined || wasConfigured,
           enabled: settings.enabled,
           maskedToken,
@@ -1607,7 +1572,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         const displayName = context.database.getBotEncryptedCredential(botId).displayName;
         context.database.recordAIProviderChange(
           botId,
-          'groq',
+          GEMINI_PROVIDER_ID,
           settings.enabled ? 'ACTIVATED' : 'DEACTIVATED',
           displayName,
         );
@@ -1639,6 +1604,8 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         configured: provider.isConfigured(),
         connection: result.successful ? 'successful' : 'failed',
         errorCode: result.successful ? null : result.errorCode,
+        provider: GEMINI_PROVIDER_ID,
+        model: GEMINI_MODEL,
       };
     },
   );
@@ -1818,7 +1785,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const input = z
         .object({
           mode: z.enum(['global', 'per_bot']),
-          provider: z.literal('groq').default('groq'),
+          provider: z.literal(GEMINI_PROVIDER_ID).default(GEMINI_PROVIDER_ID),
           operation: z.enum(['add', 'replace_provider', 'replace_token']).default('replace_token'),
           apiKey: z.string().min(16).max(500).optional(),
         })
@@ -1847,7 +1814,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       }
       const wasConfigured = context.aiProviderFactory?.forBot(botId).isConfigured() ?? false;
       const displayName = context.database.getBotEncryptedCredential(botId).displayName;
-      const encrypted = context.secretVault.encrypt(input.apiKey, `bot:${botId}:groq`);
+      const encrypted = context.secretVault.encrypt(input.apiKey, `bot:${botId}:gemini`);
       context.database.setBotEncryptedCredential(
         botId,
         'per_bot',
@@ -2474,6 +2441,8 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         configured: context.aiProvider.isConfigured(),
         connection: result.successful ? 'successful' : 'failed',
         errorCode: result.successful ? null : result.errorCode,
+        provider: GEMINI_PROVIDER_ID,
+        model: GEMINI_MODEL,
       };
     },
   );
@@ -3702,13 +3671,7 @@ function isSecureCredentialRequest(request: FastifyRequest): boolean {
 function maskApiKey(apiKey: string | null | undefined): string | null {
   if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length === 0) return null;
   const trimmed = apiKey.trim();
-  if (trimmed.length <= 8) {
-    return '••••••••' + trimmed.slice(-2);
-  }
-  if (trimmed.startsWith('gsk_')) {
-    return 'gsk_••••••••' + trimmed.slice(-4);
-  }
-  return '••••••••••••' + trimmed.slice(-4);
+  return `••••••••${trimmed.slice(-4)}`;
 }
 
 function recordGroupTechnical(

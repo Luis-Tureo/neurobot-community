@@ -6,6 +6,7 @@ import {
   type AIProviderErrorCode,
   type AIRateLimitDiagnostic,
 } from './ai-provider.js';
+import { GEMINI_PROVIDER_ID } from './gemini-constants.js';
 
 const MAX_PROVIDER_RETRY_AFTER_MS = 5 * 60_000;
 
@@ -360,7 +361,7 @@ export class AIRequestQueueService {
     try {
       this.database.saveAIProviderQueueHealth({
         botId: this.botId,
-        provider: 'groq',
+        provider: GEMINI_PROVIDER_ID,
         state,
         consecutiveFailures: this.consecutiveFailures,
         circuitState: this.circuitState,
@@ -466,7 +467,7 @@ function resolvedResultRepresentsProviderSuccess(value: unknown): boolean {
 
   // Estos resultados se resuelven sin una confirmación fiable de éxito del proveedor:
   // PRE-PROVEEDOR (SQLite/config/cuota), límites locales o fallos internos post-proveedor.
-  // En esos casos preservamos la salud previa de Groq en lugar de marcarlo falsamente AVAILABLE.
+  // En esos casos preservamos la salud previa de Gemini en lugar de marcarlo falsamente AVAILABLE.
   return code !== 'AI_INTERNAL_ERROR' && code !== 'LIMIT_REACHED';
 }
 

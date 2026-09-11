@@ -6,17 +6,17 @@ La configuración recomendada es: concurrencia 3, cola 20, espera 60 segundos, t
 
 El panel muestra solicitudes procesándose y esperando, tiempos de espera, resultados, timeouts, errores 429, reintentos, rechazos, consultas agrupadas, estado del proveedor y circuit breaker. `AVAILABLE` indica operación normal; `BUSY`, carga local; `RATE_LIMITED`, límite temporal del proveedor; `DEGRADED`, fallos recientes; `UNAVAILABLE`, circuito abierto; y `NOT_CONFIGURED`, ausencia de credenciales.
 
-Los resúmenes comunitarios comparten esta misma cola. Los diagnósticos de Groq registran únicamente la categoría informada o inferible de forma segura (`RPM`, `RPD`, `TPM`, `TPD`, `ITPM` u `OTPM`), los contadores numéricos publicados y los tiempos de reinicio; nunca se copian cuerpos de solicitud, credenciales ni headers privados. Si Groq no identifica el límite, se conserva la categoría `unknown` sin inventarla.
+Los resúmenes comunitarios comparten esta misma cola. Los diagnósticos de Gemini registran únicamente la categoría informada o inferible de forma segura (`RPM`, `RPD`, `TPM`, `TPD`, `ITPM` u `OTPM`), los contadores numéricos publicados y los tiempos de reinicio; nunca se copian cuerpos de solicitud, credenciales ni headers privados. Si Gemini no identifica el límite, se conserva la categoría `unknown` sin inventarla.
 
-La herramienta **Probar cola de IA** solo aparece en desarrollo y nunca llama a Groq ni envía WhatsApp. Consulte [Cola de inteligencia artificial](COLA_DE_INTELIGENCIA_ARTIFICIAL.md) para los mensajes visibles y la separación entre saturación, timeout y cuota real.
+La herramienta **Probar cola de IA** solo aparece en desarrollo y nunca llama a Gemini ni envía WhatsApp. Consulte [Cola de inteligencia artificial](COLA_DE_INTELIGENCIA_ARTIFICIAL.md) para los mensajes visibles y la separación entre saturación, timeout y cuota real.
 
-La IA es el último recurso del flujo. Antes de Groq se procesan el saludo local, respuestas fijas, FAQ administrativas, caché exacta, equivalencias de alta confianza, conocimiento directo y rechazos de seguridad. Una pregunta general válida puede llegar al proveedor aunque no exista una entrada de conocimiento; cualquier hecho interno sobre la comunidad, sus grupos o el negocio exige contexto oficial y usa el mensaje de información insuficiente cuando falta.
+La IA es el último recurso del flujo. Antes de Gemini se procesan el saludo local, respuestas fijas, FAQ administrativas, caché exacta, equivalencias de alta confianza, conocimiento directo y rechazos de seguridad. Una pregunta general válida puede llegar al proveedor aunque no exista una entrada de conocimiento; cualquier hecho interno sobre la comunidad, sus grupos o el negocio exige contexto oficial y usa el mensaje de información insuficiente cuando falta.
 
 ## Respuestas completas y concisas
 
 La configuración inicial permite 1024 tokens de salida. Las instrucciones solicitan una respuesta directa, con párrafos breves y solo el detalle necesario; una petición explícita de explicación o pasos puede ampliar la respuesta. No se recorta una respuesta válida por cantidad de líneas, caracteres ni una estimación local de tokens.
 
-Groq se consulta sin streaming. El adaptador conserva `finish_reason`: `stop` indica una finalización normal y `length` una salida incompleta. Una salida incompleta no se envía, no consume cuota exitosa y no entra en caché; se registra únicamente la categoría segura `FINISH_REASON_LENGTH`, el modelo, el motivo de finalización y el total de tokens de salida, sin contenido. Los mensajes completos mayores al límite operativo de WhatsApp se segmentan y envían en orden.
+Gemini se consulta sin streaming porque el flujo actual usa respuestas completas. El adaptador conserva el motivo de finalización: `stop` indica una finalización normal y `length` una salida incompleta. Una salida incompleta no se envía, no consume cuota exitosa y no entra en caché; se registra únicamente la categoría segura `FINISH_REASON_LENGTH`, el modelo, el motivo de finalización y el total de tokens de salida, sin contenido. Los mensajes completos mayores al límite operativo de WhatsApp se segmentan y envían en orden.
 
 ## Cuotas iniciales
 
@@ -26,7 +26,7 @@ Groq se consulta sin streaming. El adaptador conserva `finish_reason`: `stop` in
 - Interacciones: 60 activaciones por usuario y hora.
 - No existe enfriamiento antispam: mensajes distintos, incluso con el mismo texto, se atienden por separado. El mismo ID de mensaje se procesa una sola vez por idempotencia.
 
-Solo una respuesta válida, completa y exitosa de Groq descuenta cuota. Las fallas, reintentos fallidos, tiempos de espera, salidas incompletas y respuestas rechazadas liberan la reserva sin incrementar el contador exitoso.
+Solo una respuesta válida, completa y exitosa de Gemini descuenta cuota. Las fallas, reintentos fallidos, tiempos de espera, salidas incompletas y respuestas rechazadas liberan la reserva sin incrementar el contador exitoso.
 
 ## Privacidad y seguridad
 

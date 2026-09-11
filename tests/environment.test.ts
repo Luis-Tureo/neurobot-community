@@ -12,7 +12,8 @@ describe('configuración de entorno', () => {
     expect(environment.panelPort).toBe(3000);
     expect(environment.databasePath).toContain('data');
     expect(environment.developmentMode).toBe(false);
-    expect(environment.groqModel).toBe('openai/gpt-oss-20b');
+    expect(environment.aiProvider).toBe('gemini');
+    expect(environment.geminiApiKey).toBeUndefined();
   });
 
   it('convierte y valida opciones de ejecución', () => {
@@ -50,5 +51,10 @@ describe('configuración de entorno', () => {
     });
     expect(environment.panelInitialPassword).toBeUndefined();
     expect(environment.chromeExecutablePath).toBeUndefined();
+  });
+
+  it('acepta la clave oficial de Gemini sin incorporarla a la configuración del navegador', () => {
+    const environment = loadEnvironment({ ...valid, GEMINI_API_KEY: 'AIza_test_key_123456789' });
+    expect(environment.geminiApiKey).toBe('AIza_test_key_123456789');
   });
 });

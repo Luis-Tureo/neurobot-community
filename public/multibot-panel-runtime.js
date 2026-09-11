@@ -1035,11 +1035,13 @@ async function loadAI() {
   panelState.aiCurrentProvider = currentProvider;
   document.querySelector('#ai-provider-current-name').textContent =
     currentProvider.name || 'Sin IA configurada';
+  const currentProviderLabel = document.querySelector('#ai-provider-current-provider');
+  if (currentProviderLabel) {
+    currentProviderLabel.textContent = `${currentProvider.providerName || 'Gemini'} · Proveedor: ${currentProvider.providerLabel || 'Google'}`;
+  }
   const currentModelSpan = document.querySelector('#ai-provider-current-model');
   if (currentModelSpan) {
-    currentModelSpan.textContent = panelState.aiSettings?.model
-      ? `(${panelState.aiSettings.model})`
-      : '(Sin override / Predeterminado)';
+    currentModelSpan.textContent = currentProvider.model ? '(Gemini 3.8 Flash)' : '';
   }
   const toggleButton = document.querySelector('#toggle-ai-enabled');
   setStatusSwitchState(toggleButton, {
@@ -1047,43 +1049,10 @@ async function loadAI() {
     ariaLabel: 'inteligencia artificial',
   });
   const providerForm = document.querySelector('#ai-provider-form');
-  providerForm.elements.displayName.value = currentProvider.name || 'Groq';
+  providerForm.elements.displayName.value = currentProvider.name || 'Gemini';
   providerForm.elements.apiKey.value = '';
-
-  const modelSelect = providerForm.elements.model || document.querySelector('#ai-provider-model');
-  const currentModel = panelState.aiSettings?.model || '';
-  try {
-    const modelsResult = await panelApi(
-      `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai/models`,
-    );
-    const modelsList = Array.isArray(modelsResult?.models) ? modelsResult.models : [];
-    if (modelSelect) {
-      modelSelect.replaceChildren();
-      const defaultOption = document.createElement('option');
-      defaultOption.value = '';
-      defaultOption.textContent = '(Sin override / Predeterminado global)';
-      modelSelect.append(defaultOption);
-
-      const allModels = [...new Set([currentModel, ...modelsList].filter(Boolean))];
-      allModels.forEach((m) => {
-        const option = document.createElement('option');
-        option.value = m;
-        option.textContent = m === 'openai/gpt-oss-20b' ? `${m} (Predeterminado)` : m;
-        modelSelect.append(option);
-      });
-      modelSelect.value = currentModel;
-    }
-  } catch {
-    if (modelSelect) {
-      if (currentModel && ![...modelSelect.options].some((opt) => opt.value === currentModel)) {
-        const option = document.createElement('option');
-        option.value = currentModel;
-        option.textContent = currentModel;
-        modelSelect.append(option);
-      }
-      modelSelect.value = currentModel;
-    }
-  }
+  const fixedModel = document.querySelector('#ai-provider-form-model');
+  if (fixedModel) fixedModel.textContent = 'Gemini 3.8 Flash (gemini-3.8-flash)';
 
   document.querySelector('#ai-token-help').textContent = currentProvider.configured
     ? 'El token está configurado. Déjalo vacío para conservarlo o escribe uno nuevo para cambiarlo.'
@@ -1145,46 +1114,15 @@ function setAIProviderEditorOpen(open) {
 function resetAIProviderEditor() {
   const currentProvider = panelState.aiCurrentProvider;
   const form = document.querySelector('#ai-provider-form');
-  form.elements.displayName.value = currentProvider?.name || 'Groq';
+  form.elements.displayName.value = currentProvider?.name || 'Gemini';
   form.elements.apiKey.value = '';
 }
 
-async function saveAIProviderWithCompatibility(payload) {
+async function saveAIProvider(payload) {
   const botId = encodeURIComponent(panelState.selectedBotId);
-  try {
-    await panelApi(`/api/bots/${botId}/ai/provider`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
-    return;
-  } catch (error) {
-    if (error.status !== 404) throw error;
-  }
-
-  if (payload.apiKey) {
-    await panelApi(`/api/bots/${botId}/ai-key`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        mode: 'per_bot',
-        provider: 'groq',
-        operation: panelState.aiCurrentProvider?.configured ? 'replace_token' : 'add',
-        apiKey: payload.apiKey,
-      }),
-    });
-  }
-  if (!panelState.aiSettings) throw new Error('No fue posible cargar la configuración de IA.');
-  const { profileId, updatedAt, ...editableSettings } = panelState.aiSettings;
-  void profileId;
-  void updatedAt;
-  await panelApi(`/api/bots/${botId}/ai/settings`, {
-    method: 'PATCH',
-    body: JSON.stringify({
-      ...editableSettings,
-      model: payload.model !== undefined ? payload.model : editableSettings.model,
-      enabled: payload.enabled,
-      provider: payload.enabled ? 'groq' : 'disabled',
-      confirmIncreasedLimits: true,
-    }),
+  await panelApi(`/api/bots/${botId}/ai/provider`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
   });
 }
 
@@ -1427,20 +1365,19 @@ function configureForms() {
         { method: 'POST', body: '{}' },
       );
       if (result.connection === 'successful') {
-        notify('Conexión con la API de Groq exitosa.');
+        notify('Conexión con Gemini establecida correctamente.');
       } else {
-        let errorMsg = 'No se pudo conectar con la API de Groq. Verifica el token.';
+        let errorMsg = 'No se pudo conectar con Gemini. Verifica la clave.';
         if (result.errorCode === 'AI_INVALID_KEY') {
-          errorMsg = 'El token de Groq no es válido o fue revocado.';
+          errorMsg = 'La clave de Gemini no es válida o fue revocada.';
         } else if (result.errorCode === 'AI_MODEL_UNAVAILABLE') {
-          errorMsg =
-            'El token es válido, pero el modelo seleccionado no está habilitado para este proyecto de Groq o no está disponible.';
+          errorMsg = 'La clave es válida, pero el modelo de Gemini no está disponible.';
         } else if (result.errorCode === 'AI_PROVIDER_RATE_LIMITED') {
-          errorMsg = 'Groq alcanzó temporalmente su límite de uso. Intenta nuevamente más tarde.';
+          errorMsg = 'Gemini alcanzó temporalmente su límite de uso. Intenta nuevamente más tarde.';
         } else if (result.errorCode === 'AI_TIMEOUT') {
-          errorMsg = 'Groq está temporalmente no disponible (timeout).';
+          errorMsg = 'Gemini está temporalmente no disponible (timeout).';
         } else if (result.errorCode === 'AI_TEMPORARY_ERROR') {
-          errorMsg = 'Groq está temporalmente no disponible (5xx).';
+          errorMsg = 'Gemini está temporalmente no disponible (5xx).';
         }
         notify(errorMsg, true);
       }
@@ -1460,8 +1397,8 @@ function configureForms() {
       ariaLabel: 'inteligencia artificial',
     });
     try {
-      await saveAIProviderWithCompatibility({
-        displayName: panelState.aiCurrentProvider?.name || 'Groq',
+      await saveAIProvider({
+        displayName: panelState.aiCurrentProvider?.name || 'Gemini',
         enabled,
       });
       await Promise.all([loadAI(), loadBotSummary(false), loadBots()]);
@@ -1764,15 +1701,13 @@ function configureForms() {
     event.preventDefault();
     const form = event.currentTarget;
     const apiKey = form.elements.apiKey.value.trim();
-    const model = form.elements.model?.value?.trim() || null;
     const payload = {
       displayName: form.elements.displayName.value.trim(),
       enabled: Boolean(panelState.aiCurrentProvider?.enabled),
-      model,
       ...(apiKey ? { apiKey } : {}),
     };
     try {
-      await saveAIProviderWithCompatibility(payload);
+      await saveAIProvider(payload);
       form.elements.apiKey.value = '';
       await Promise.all([loadAI(), loadBotSummary(false), loadBots()]);
       notify('Configuración actualizada.');

@@ -95,6 +95,6 @@ Estas pruebas requieren WhatsApp real y no se consideran automatizadas. Realíce
 - [ ] Probar una respuesta completa mayor a 4096 caracteres en un destino controlado y confirmar que llega en partes ordenadas, sin pérdida ni duplicación de las partes ya enviadas.
 - [ ] Simular `finish_reason=length` y confirmar que el texto parcial no llega a WhatsApp ni a la caché, no consume cuota exitosa y deja solo telemetría técnica segura.
 - [ ] Preguntar por un hecho interno inexistente y confirmar el mensaje configurado de información insuficiente; agregar una fuente oficial y repetir para comprobar el uso de Knowledge.
-- [ ] Confirmar que alias, mención real, aislamiento multibot, cuotas, fallback dinámico, automatizaciones, bienvenida, encuestas, login, CSRF y deduplicación conservan su comportamiento.
+- [ ] Confirmar que alias, mención real, aislamiento multibot, cuotas, modelo fijo de Gemini, automatizaciones, bienvenida, encuestas, login, CSRF y deduplicación conservan su comportamiento.
 
 No habilite el grupo oficial hasta completar toda la lista y revisar cualquier incidente.

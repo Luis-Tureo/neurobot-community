@@ -12,12 +12,12 @@ Documentación operativa:
 
 Aplicación local para crear, vincular y administrar varios asistentes de WhatsApp independientes desde la pantalla **Mis asistentes**. La instalación conserva a **Neurobot** como primer asistente y permite agregar asistentes de comunidad, negocio o uso mixto.
 
-Cada asistente tiene una sesión de WhatsApp, perfil, canales, grupos, conocimiento, menús, catálogo, imágenes, horarios, solicitudes humanas, automatizaciones, encuestas, configuración de IA, límites y estadísticas separados por `botId`. El contenido oficial y la lógica local tienen prioridad; Groq es opcional y nunca se usa para inventar precios, stock, horarios, compras o reservas.
+Cada asistente tiene una sesión de WhatsApp, perfil, canales, grupos, conocimiento, menús, catálogo, imágenes, horarios, solicitudes humanas, automatizaciones, encuestas, configuración de IA, límites y estadísticas separados por `botId`. El contenido oficial y la lógica local tienen prioridad; Gemini es opcional y nunca se usa para inventar precios, stock, horarios, compras o reservas.
 
 ## Cómo se contabilizan las consultas
 
 - Cada mensaje distinto recibido por WhatsApp puede generar su propia respuesta; solo se descarta la repetición del mismo ID de mensaje o evento.
-- Solo una llamada real a Groq cuya respuesta termina validada y lista para enviar aumenta los contadores de IA y tokens.
+- Solo una llamada real a Gemini cuya respuesta termina validada y lista para enviar aumenta los contadores de IA y tokens.
 - Saludos, preguntas frecuentes, respuestas guardadas, conocimiento directo, consultas sin información interna suficiente, duplicados, errores, tiempos de espera y respuestas rechazadas no consumen cuota exitosa de IA.
 - Las reservas temporales evitan exceder el presupuesto durante solicitudes concurrentes. Una falla o respuesta inválida libera la reserva.
 - Los límites iniciales de IA son: 20 por usuario/hora, 50 por usuario/día, 150 por grupo/hora, 500 por grupo/día, 500 por bot/día y 10.000 por bot/mes.
@@ -43,8 +43,8 @@ El bot entrega información general. No diagnostica, no recomienda medicamentos,
 - Constructor de menús, submenús y acciones seguras, con estado anónimo y expiración.
 - Adaptador interactivo con alternativa numerada automática cuando WhatsApp no soporte botones o listas.
 - Catálogo, imágenes oficiales, horarios y solicitudes de atención humana separados por asistente.
-- Base de conocimiento independiente con búsqueda local FTS y Groq opcional. Los datos internos siguen limitados al contexto oficial; las preguntas generales pueden usar conocimiento general del proveedor.
-- Clave global de Groq o credencial cifrada por asistente; las claves nunca vuelven al navegador.
+- Base de conocimiento independiente con búsqueda local FTS y Gemini opcional. Los datos internos siguen limitados al contexto oficial; las preguntas generales pueden usar conocimiento general del proveedor.
+- Clave global de Gemini o credencial cifrada por asistente; las claves nunca vuelven al navegador.
 - Límites por usuario, grupo, asistente e instalación, contabilizando el uso real informado por el proveedor.
 - Automatizaciones y encuestas independientes por asistente y zona horaria.
 - Sesión persistente con `LocalAuth`, QR protegido en el panel y reconexión exponencial limitada.
@@ -87,9 +87,9 @@ La IA se consulta como último recurso cuando hay una pregunta válida, proveedo
 
 Las respuestas piden concisión semántica —directas y completas, sin relleno— en vez de aplicar un corte posterior por caracteres, líneas o una estimación local de tokens. El valor inicial es de 1024 tokens de salida. Si el proveedor informa `finish_reason=length`, el texto parcial no se envía ni se guarda en caché; queda únicamente un código técnico seguro. Los textos que superan el límite operativo de WhatsApp se dividen en partes ordenadas sin perder contenido.
 
-La clave global se lee desde `GROQ_API_KEY`. Una clave por asistente se cifra con AES-256-GCM usando `APP_ENCRYPTION_KEY` y contexto asociado al `botId`; el servidor solo informa **Clave configurada**. Configure el panel detrás de HTTPS si deja de escuchar exclusivamente en localhost.
+La clave global se lee desde `GEMINI_API_KEY`. Una clave por asistente se cifra con AES-256-GCM usando `APP_ENCRYPTION_KEY` y contexto asociado al `botId`; el servidor solo informa una máscara segura. Configure el panel detrás de HTTPS si deja de escuchar exclusivamente en localhost.
 
-`GROQ_MODEL=openai/gpt-oss-20b` es el modelo predeterminado y configurable recomendado por Groq tras el retiro de `llama-3.1-8b-instant`. Consulte la [tabla oficial de deprecaciones](https://console.groq.com/docs/deprecations).
+La integración usa el modelo fijo `gemini-3.8-flash`, centralizado en `src/ai/gemini-constants.ts`. No se permite seleccionar modelos arbitrarios desde el panel.
 
 ## Requisitos
 
@@ -127,7 +127,7 @@ npm run db:init
 - `PANEL_INITIAL_PASSWORD`: opcional. Si está vacío en la primera ejecución se genera una contraseña temporal y se muestra una sola vez.
 - `MAX_MESSAGE_LENGTH`: tamaño máximo aceptado para un mensaje entrante.
 - `CHROME_EXECUTABLE_PATH`: opcional; normalmente debe quedar vacío para usar el navegador administrado por Puppeteer.
-- `AI_PROVIDER`, `GROQ_API_KEY` y `GROQ_MODEL`: proveedor, clave global opcional y modelo.
+- `AI_PROVIDER` y `GEMINI_API_KEY`: proveedor (`gemini` o `disabled`) y clave global opcional. El modelo es fijo: `gemini-3.8-flash`.
 - `APP_ENCRYPTION_KEY`: secreto obligatorio para cifrar claves configuradas por asistente.
 
 Nunca copie secretos reales a `.env.example` ni confirme `.env` en Git.

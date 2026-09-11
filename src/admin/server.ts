@@ -84,7 +84,7 @@ function installAIModelSelectionValidation(
 
     return reply.code(503).send({
       error:
-        'No fue posible validar el catálogo de modelos de Groq. Conserva la selección actual e intenta nuevamente.',
+        'No fue posible validar el modelo fijo de Gemini. Conserva la configuración actual e intenta nuevamente.',
       code: 'AI_MODEL_CATALOG_UNAVAILABLE',
     });
   });

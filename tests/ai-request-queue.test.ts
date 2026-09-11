@@ -315,7 +315,7 @@ describe('cola de solicitudes de IA por asistente', () => {
         operation: async () => {
           throw new AIProviderError(
             'AI_PROVIDER_RATE_LIMITED',
-            'Authorization: Bearer gsk_secreto-no-registrar',
+            'Authorization: Bearer AIza_secreto-no-registrar',
             true,
             9,
             {
@@ -342,7 +342,7 @@ describe('cola de solicitudes de IA por asistente', () => {
         }),
       ]),
     );
-    expect(JSON.stringify(entries)).not.toContain('gsk_secreto');
+    expect(JSON.stringify(entries)).not.toContain('AIza_secreto');
     expect(JSON.stringify(entries)).not.toContain('Authorization');
   });
 

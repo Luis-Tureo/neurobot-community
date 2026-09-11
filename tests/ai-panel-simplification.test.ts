@@ -32,7 +32,10 @@ describe('módulo mínimo de inteligencia artificial', () => {
     expect(html).toContain('id="toggle-ai-enabled"');
     expect(html).toContain('class="status-switch"');
     expect(html).toContain('role="switch"');
-    expect(html).toContain('Cambiar IA');
+    expect(html).toContain('Cambiar configuración de Gemini');
+    expect(html).toContain('Gemini 3.8 Flash');
+    expect(html).toContain('Proveedor: Google');
+    expect(html).not.toContain('id="ai-provider-model"');
     expect(html).toContain('id="cancel-ai-provider-form"');
     expect(html).toContain('name="displayName"');
     expect(html).toContain('name="apiKey"');
@@ -48,13 +51,13 @@ describe('módulo mínimo de inteligencia artificial', () => {
     expect(html).toContain('id="ai-provider-history"');
     expect(html).toContain('class="card inset ai-provider-history-card" data-collapsible');
     expect(script).toContain('/ai/provider');
-    expect(script).toContain('saveAIProviderWithCompatibility');
+    expect(script).toContain('saveAIProvider');
     expect(script).toContain('setAIProviderEditorOpen(true)');
     expect(script).toContain('setStatusSwitchState(toggleButton, {');
     expect(script).toContain('checked: currentProvider.enabled');
-    expect(script).toContain('if (error.status !== 404) throw error;');
-    expect(script).toContain('/ai-key');
-    expect(script).toContain('/ai/settings');
+    expect(script).not.toContain('saveAIProviderWithCompatibility');
+    expect(script).not.toContain('/ai-key');
+    expect(script).not.toContain('/ai/models');
     for (const removed of [
       'id="ai-current-provider"',
       'id="toggle-ai-provider"',

@@ -48,13 +48,7 @@ describe('API administrativa', () => {
     const anonymizer = new Anonymizer('x'.repeat(32));
     const secretVault = new SecretVault('clave-de-cifrado-para-pruebas');
     testSecretVault = secretVault;
-    const aiProviderFactory = new AIProviderFactory(
-      database,
-      secretVault,
-      undefined,
-      'llama-test',
-      'groq',
-    );
+    const aiProviderFactory = new AIProviderFactory(database, secretVault, undefined, 'gemini');
     const automaticMessages = new AutomaticMessageService(database, client, logger, anonymizer, {
       retryDelayMs: 0,
       sleep: async () => undefined,
@@ -877,8 +871,8 @@ describe('API administrativa', () => {
     expect(initialResponse.statusCode).toBe(200);
     const initial = initialResponse.json();
     expect(initial.currentProvider).toMatchObject({
-      id: 'groq',
-      name: 'Groq',
+      id: 'gemini',
+      name: 'Gemini',
       configured: false,
       enabled: false,
     });
@@ -972,7 +966,7 @@ describe('API administrativa', () => {
     const cred = database.getBotEncryptedCredential('neurobot');
     expect(cred.displayName).toBe('Asistente IA Editado');
     // Al desencriptar debe retornar la clave original
-    const rawKey = testSecretVault.decrypt(cred.encryptedApiKey!, 'bot:neurobot:groq');
+    const rawKey = testSecretVault.decrypt(cred.encryptedApiKey!, 'bot:neurobot:gemini');
     expect(rawKey).toBe('token-de-prueba-original-super-largo');
 
     // Enviar API key vacía
@@ -988,7 +982,7 @@ describe('API administrativa', () => {
     expect(responseEmpty.statusCode).toBe(200);
     const cred2 = database.getBotEncryptedCredential('neurobot');
     expect(cred2.displayName).toBe('Asistente IA Vacío');
-    const rawKey2 = testSecretVault.decrypt(cred2.encryptedApiKey!, 'bot:neurobot:groq');
+    const rawKey2 = testSecretVault.decrypt(cred2.encryptedApiKey!, 'bot:neurobot:gemini');
     expect(rawKey2).toBe('token-de-prueba-original-super-largo');
   });
 

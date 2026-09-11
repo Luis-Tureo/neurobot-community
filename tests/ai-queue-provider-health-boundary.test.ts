@@ -24,7 +24,7 @@ describe('salud del proveedor separada de resultados internos de la cola', () =>
     database.close();
   });
 
-  it('un AI_INTERNAL_ERROR resuelto no marca Groq como recuperado ni borra fallos previos', async () => {
+  it('un AI_INTERNAL_ERROR resuelto no marca Gemini como recuperado ni borra fallos previos', async () => {
     const queue = new AIRequestQueueService(database, createLogger('silent'), 'neurobot');
 
     await expect(
@@ -100,7 +100,9 @@ describe('salud del proveedor separada de resultados internos de la cola', () =>
       consecutiveFailures: 1,
     });
     expect(
-      database.getTechnicalEvents().some((event) => event.event_type === 'AI_PROVIDER_RETRY_SUCCESS'),
+      database
+        .getTechnicalEvents()
+        .some((event) => event.event_type === 'AI_PROVIDER_RETRY_SUCCESS'),
     ).toBe(false);
   });
 

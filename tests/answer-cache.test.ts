@@ -117,7 +117,7 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     'para qué sirves',
     'qué puedes hacer',
     'cómo funcionas',
-  ])('responde el saludo local %s sin consumir Groq', async (question) => {
+  ])('responde el saludo local %s sin consumir Gemini', async (question) => {
     const { database, provider, service, profileId } = setup();
     const result = await service.answerQuestion(question, 'group', 'user');
     expect(result.code).toBe('COMMUNITY_GREETING');
@@ -170,7 +170,7 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     },
   );
 
-  it('prioriza una FAQ administrativa y no llama a Groq', async () => {
+  it('prioriza una FAQ administrativa y no llama a Gemini', async () => {
     const { database, provider, service } = setup();
     addFaq(
       database,
@@ -190,7 +190,7 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     database.close();
   });
 
-  it('guarda una respuesta válida de Groq y la segunda consulta reutiliza caché', async () => {
+  it('guarda una respuesta válida de Gemini y la segunda consulta reutiliza caché', async () => {
     const { database, provider, service, profileId } = setup();
     addKnowledge(database, profileId, {
       title: 'Convivencia general',
@@ -304,7 +304,7 @@ describe('respuestas locales, caché y consumo real de IA', () => {
     database.close();
   });
 
-  it('libera la reserva y no descuenta cuota cuando Groq falla', async () => {
+  it('libera la reserva y no descuenta cuota cuando Gemini falla', async () => {
     const { database, provider, service, profileId } = setup();
     addKnowledge(database, profileId, {
       title: 'Convivencia general',

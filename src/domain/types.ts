@@ -413,7 +413,7 @@ export type CachedAnswer = {
 export type AISettings = {
   profileId: number;
   enabled: boolean;
-  provider: 'groq' | 'disabled';
+  provider: 'gemini' | 'disabled';
   model: string | null;
   questionMaxChars: number;
   contextMaxTokens: number;
@@ -440,7 +440,7 @@ export type AIProviderChangeAction =
 export type AIProviderChange = {
   id: number;
   botId: string;
-  provider: 'groq';
+  provider: 'gemini';
   displayName: string;
   action: AIProviderChangeAction;
   createdAt: string;

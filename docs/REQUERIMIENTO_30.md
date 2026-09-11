@@ -16,7 +16,7 @@
 - El perfil administra datos operativos: nombre público, alias de activación y adicionales, organización, descripción factual, contacto, horarios, dirección, zona horaria, marca y mensajes de seguridad o fallback.
 - No expone ni acepta nombre interno de persona, objetivo, tono, temas permitidos o excluidos, saludo de personaje ni presets de identidad.
 - El asistente es de propósito general. Puede usar conocimiento general del proveedor, pero trata el contexto recuperado como datos no confiables y solo afirma hechos internos respaldados por Knowledge u otra fuente oficial del producto.
-- La activación por nombre, alias o mención real, el aislamiento por `botId`, la caché, las cuotas, el fallback dinámico de modelos y los flujos no relacionados se conservan.
+- La activación por nombre, alias o mención real, el aislamiento por `botId`, la caché, las cuotas, el modelo fijo de Gemini y los flujos no relacionados se conservan.
 - Ninguna ruta, pantalla, comando privado ni procesador activo ofrece Moderación con IA. Las tablas y columnas históricas permanecen únicamente para compatibilidad, auditoría y migraciones no destructivas; la migración las deja desactivadas.
 
 ## Causa de las respuestas cortadas
@@ -27,7 +27,7 @@ Había tres límites independientes:
 2. Después de recibir una respuesta válida, el backend volvía a recortarla por caracteres, líneas y una estimación local de tokens, agregando puntos suspensivos.
 3. El adaptador de WhatsApp Cloud aplicaba `slice(0, 4096)`, descartando silenciosamente el resto.
 
-La consulta a Groq ya era no streaming, la caché guarda `TEXT` completo y SQLite no imponía un límite equivalente; por tanto no eran la causa del corte observado.
+La consulta a Gemini usa respuestas completas, la caché guarda `TEXT` completo y SQLite no impone un límite equivalente; por tanto no eran la causa del corte observado.
 
 ## Política de respuesta
 

@@ -28,18 +28,10 @@ describe('ciclo de vida de una vinculación WhatsApp nueva', () => {
     creationModes = [];
     manager = new MultiBotManager(
       database,
-      new AIProviderFactory(
-        database,
-        new SecretVault(undefined),
-        undefined,
-        'modelo-prueba',
-        'disabled',
-      ),
-      new WhatsAppSessionManager(
-        join(root, 'active'),
-        join(root, 'backups', 'sessions'),
-        { chromiumLockGraceMs: 0 },
-      ),
+      new AIProviderFactory(database, new SecretVault(undefined), undefined, 'disabled'),
+      new WhatsAppSessionManager(join(root, 'active'), join(root, 'backups', 'sessions'), {
+        chromiumLockGraceMs: 0,
+      }),
       new Anonymizer('x'.repeat(32)),
       createLogger('silent'),
       {

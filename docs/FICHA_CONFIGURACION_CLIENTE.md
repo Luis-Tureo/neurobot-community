@@ -4,7 +4,7 @@
 
 - Saludo operativo derivado del nombre y alias del asistente.
 - FAQ y respuestas guardadas administrables desde el panel.
-- Solo las respuestas reales, válidas y exitosas de Groq consumen cuota de IA.
+- Solo las respuestas reales, válidas y exitosas de Gemini consumen cuota de IA.
 - Cuotas operativas de IA configurables por bot, independientes de la idempotencia de mensajes.
 - Restablecimiento de contadores protegido por contraseña y confirmación.
 
@@ -81,8 +81,8 @@ Complete esta ficha antes de crear o vincular el asistente. No escriba contrase�
 
 ## Inteligencia artificial y límites
 
-- Proveedor:
-- Modelo:
+- Proveedor: Gemini (Google)
+- Modelo: `gemini-3.8-flash` (Gemini 3.8 Flash, fijo)
 - ¿Usará clave global o cuenta propia?:
 - Responsable de ingresar la API key directamente en el panel:
 - Límite diario y mensual de consultas:

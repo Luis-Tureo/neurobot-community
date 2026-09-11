@@ -40,9 +40,8 @@ const environmentSchema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
   CHROME_EXECUTABLE_PATH: optionalTrimmedString,
-  AI_PROVIDER: z.enum(['groq', 'disabled']).default('groq'),
-  GROQ_API_KEY: optionalTrimmedString,
-  GROQ_MODEL: z.string().trim().min(1).max(120).default('openai/gpt-oss-20b'),
+  AI_PROVIDER: z.enum(['gemini', 'disabled']).default('gemini'),
+  GEMINI_API_KEY: optionalTrimmedString,
   APP_ENCRYPTION_KEY: optionalTrimmedString,
 });
 
@@ -61,9 +60,8 @@ export type Environment = {
   maxReconnectDelayMs: number;
   developmentMode: boolean;
   chromeExecutablePath?: string;
-  aiProvider: 'groq' | 'disabled';
-  groqApiKey?: string;
-  groqModel: string;
+  aiProvider: 'gemini' | 'disabled';
+  geminiApiKey?: string;
   appEncryptionKey?: string;
 };
 
@@ -111,8 +109,7 @@ export function loadEnvironment(
     maxReconnectDelayMs: value.MAX_RECONNECT_DELAY_SECONDS * 1000,
     developmentMode: value.DEVELOPMENT_MODE,
     aiProvider: value.AI_PROVIDER,
-    ...(value.GROQ_API_KEY === undefined ? {} : { groqApiKey: value.GROQ_API_KEY }),
-    groqModel: value.GROQ_MODEL,
+    ...(value.GEMINI_API_KEY === undefined ? {} : { geminiApiKey: value.GEMINI_API_KEY }),
     ...(value.APP_ENCRYPTION_KEY === undefined
       ? {}
       : { appEncryptionKey: value.APP_ENCRYPTION_KEY }),
