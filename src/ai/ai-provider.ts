@@ -12,8 +12,35 @@ export type AIProviderErrorCode =
   | 'AI_TEMPORARY_ERROR'
   | 'AI_PERMANENT_ERROR';
 
+export type AIModelInformation = {
+  provider: string;
+  model: string;
+  preferredModel?: string;
+  effectiveModel?: string | null;
+  alternativeModelActive?: boolean;
+  resolutionStatus?: 'resolved' | 'unresolved';
+  backend?: string;
+  apiVersion?: string;
+};
+
+export type AIProviderConnectionDiagnostic = {
+  preferredModel: string;
+  effectiveModel: string | null;
+  alternativeModelActive: boolean;
+  visibleModels: string[];
+  backend: string;
+  apiVersion: string;
+  preferredModelGetFound: boolean | null;
+  preferredModelListFound: boolean | null;
+  failoverOccurred: boolean;
+};
+
 export type AIProviderConnectionResult =
-  { successful: true } | { successful: false; errorCode: AIProviderErrorCode };
+  | ({ successful: true } & Partial<AIProviderConnectionDiagnostic>)
+  | ({
+      successful: false;
+      errorCode: AIProviderErrorCode;
+    } & Partial<AIProviderConnectionDiagnostic>);
 
 export type AIRateLimitType =
   | 'requests_per_minute'
@@ -66,7 +93,7 @@ export interface AIProvider {
   isConfigured(): boolean;
   testConnection(timeoutMs?: number): Promise<AIProviderConnectionResult>;
   generateGroundedResponse(request: GroundedResponseRequest): Promise<GroundedResponseResult>;
-  getModelInformation(): { provider: string; model: string };
+  getModelInformation(): AIModelInformation;
   normalizeUsage(value: unknown): AIUsage;
   classifyProviderError(error: unknown): AIProviderErrorCode;
 }

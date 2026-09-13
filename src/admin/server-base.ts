@@ -13,6 +13,8 @@ import type { AIProvider } from '../ai/ai-provider.js';
 import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
 import { hashNormalizedQuestion, normalizeQuestionForCache } from '../ai/answer-cache-service.js';
 import {
+  GEMINI_API_BACKEND,
+  GEMINI_API_VERSION,
   GEMINI_MODEL,
   GEMINI_PROVIDER_ID,
   GEMINI_PROVIDER_LABEL,
@@ -1317,6 +1319,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     const settings = context.database.getAISettings(profile.id);
     const credential = context.database.getBotEncryptedCredential(botId);
     const configured = provider?.isConfigured() ?? false;
+    const modelInformation = provider?.getModelInformation();
     const period = localPeriod(new Date(), profile.timezone);
     const queue = context.multiBotManager?.aiQueue(botId)?.snapshot() ?? {
       processing: 0,
@@ -1334,7 +1337,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       status: context.database.getAIProviderStatus(
         profile.id,
         configured,
-        provider?.getModelInformation().model ?? 'disabled',
+        modelInformation?.model ?? 'disabled',
       ),
       usage: context.database.getAIUsageSummary(profile.id, period.date, period.month),
       operationalMetrics: context.database.getBotOperationalMetrics(botId),
@@ -1350,7 +1353,13 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         name: credential.displayName,
         providerName: GEMINI_PROVIDER_NAME,
         providerLabel: GEMINI_PROVIDER_LABEL,
-        model: GEMINI_MODEL,
+        model: modelInformation?.model ?? GEMINI_MODEL,
+        preferredModel: modelInformation?.preferredModel ?? GEMINI_MODEL,
+        effectiveModel: modelInformation?.effectiveModel ?? null,
+        alternativeModelActive: modelInformation?.alternativeModelActive ?? false,
+        modelResolutionStatus: modelInformation?.resolutionStatus ?? 'unresolved',
+        backend: modelInformation?.backend ?? GEMINI_API_BACKEND,
+        apiVersion: modelInformation?.apiVersion ?? GEMINI_API_VERSION,
         configured,
         enabled: configured && settings.enabled && settings.provider === GEMINI_PROVIDER_ID,
         maskedToken,
@@ -1638,7 +1647,16 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         connection: result.successful ? 'successful' : 'failed',
         errorCode: result.successful ? null : result.errorCode,
         provider: GEMINI_PROVIDER_ID,
-        model: GEMINI_MODEL,
+        model: result.effectiveModel ?? provider.getModelInformation().model,
+        preferredModel: result.preferredModel ?? GEMINI_MODEL,
+        effectiveModel: result.effectiveModel ?? null,
+        alternativeModelActive: result.alternativeModelActive ?? false,
+        visibleModels: result.visibleModels ?? [],
+        backend: result.backend ?? GEMINI_API_BACKEND,
+        apiVersion: result.apiVersion ?? GEMINI_API_VERSION,
+        preferredModelGetFound: result.preferredModelGetFound ?? null,
+        preferredModelListFound: result.preferredModelListFound ?? null,
+        failoverOccurred: result.failoverOccurred ?? false,
       };
     },
   );
@@ -2475,7 +2493,16 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         connection: result.successful ? 'successful' : 'failed',
         errorCode: result.successful ? null : result.errorCode,
         provider: GEMINI_PROVIDER_ID,
-        model: GEMINI_MODEL,
+        model: result.effectiveModel ?? context.aiProvider.getModelInformation().model,
+        preferredModel: result.preferredModel ?? GEMINI_MODEL,
+        effectiveModel: result.effectiveModel ?? null,
+        alternativeModelActive: result.alternativeModelActive ?? false,
+        visibleModels: result.visibleModels ?? [],
+        backend: result.backend ?? GEMINI_API_BACKEND,
+        apiVersion: result.apiVersion ?? GEMINI_API_VERSION,
+        preferredModelGetFound: result.preferredModelGetFound ?? null,
+        preferredModelListFound: result.preferredModelListFound ?? null,
+        failoverOccurred: result.failoverOccurred ?? false,
       };
     },
   );

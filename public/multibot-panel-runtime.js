@@ -1038,6 +1038,11 @@ async function loadRequests() {
   });
 }
 
+function geminiModelLabel(model) {
+  const match = /^gemini-(\d+(?:\.\d+)?)-flash$/u.exec(String(model || ''));
+  return match ? `Gemini ${match[1]} Flash` : String(model || 'Modelo no resuelto');
+}
+
 async function loadAI() {
   if (!panelState.selectedBotId) return;
   const result = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/ai`);
@@ -1052,7 +1057,10 @@ async function loadAI() {
   }
   const currentModelSpan = document.querySelector('#ai-provider-current-model');
   if (currentModelSpan) {
-    currentModelSpan.textContent = currentProvider.model ? '(Gemini 3.8 Flash)' : '';
+    const effectiveModel = currentProvider.effectiveModel || currentProvider.model;
+    currentModelSpan.textContent = effectiveModel
+      ? `(${geminiModelLabel(effectiveModel)}${currentProvider.alternativeModelActive ? ' · Modelo alternativo activo' : ''})`
+      : '(Modelo pendiente de diagnóstico)';
   }
   const toggleButton = document.querySelector('#toggle-ai-enabled');
   setStatusSwitchState(toggleButton, {
@@ -1063,7 +1071,9 @@ async function loadAI() {
   providerForm.elements.displayName.value = currentProvider.name || 'Gemini';
   providerForm.elements.apiKey.value = '';
   const fixedModel = document.querySelector('#ai-provider-form-model');
-  if (fixedModel) fixedModel.textContent = 'Gemini 3.8 Flash (gemini-3.8-flash)';
+  if (fixedModel) {
+    fixedModel.textContent = 'Gemini 3.8 Flash preferido · fallback Flash estable automático';
+  }
 
   document.querySelector('#ai-token-help').textContent = currentProvider.configured
     ? 'El token está configurado. Déjalo vacío para conservarlo o escribe uno nuevo para cambiarlo.'
@@ -1376,13 +1386,20 @@ function configureForms() {
         { method: 'POST', body: '{}' },
       );
       if (result.connection === 'successful') {
-        notify('Conexión con Gemini establecida correctamente.');
+        const effectiveModel = result.effectiveModel || result.model;
+        if (result.alternativeModelActive) {
+          notify(
+            `Conexión correcta. El modelo preferido no está disponible. Modelo efectivo: ${effectiveModel}.`,
+          );
+        } else {
+          notify(`Conexión correcta. Modelo efectivo: ${effectiveModel}.`);
+        }
       } else {
         let errorMsg = 'No se pudo conectar con Gemini. Verifica la clave.';
         if (result.errorCode === 'AI_INVALID_KEY') {
           errorMsg = 'La clave de Gemini no es válida o fue revocada.';
         } else if (result.errorCode === 'AI_MODEL_UNAVAILABLE') {
-          errorMsg = 'La clave es válida, pero el modelo de Gemini no está disponible.';
+          errorMsg = 'No hay un modelo Gemini Flash compatible disponible para esta credencial.';
         } else if (result.errorCode === 'AI_PROVIDER_RATE_LIMITED') {
           errorMsg = 'Gemini alcanzó temporalmente su límite de uso. Intenta nuevamente más tarde.';
         } else if (result.errorCode === 'AI_TIMEOUT') {

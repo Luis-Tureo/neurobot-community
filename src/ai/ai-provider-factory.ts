@@ -1,14 +1,22 @@
+import { createHash } from 'node:crypto';
+import type { Logger } from 'pino';
 import type { AppDatabase } from '../persistence/database.js';
 import type { SecretVault } from '../security/secret-vault.js';
 import {
+  type AIModelInformation,
   type AIProvider,
+  type AIProviderConnectionDiagnostic,
   type AIProviderConnectionResult,
   type AIProviderErrorCode,
   type GroundedResponseRequest,
   type GroundedResponseResult,
 } from './ai-provider.js';
 import { DisabledAIProvider } from './disabled-ai-provider.js';
-import { GeminiAIProvider, type GeminiClientFactory } from './gemini-ai-provider.js';
+import {
+  GeminiAIProvider,
+  type GeminiClientFactory,
+  type GeminiSafeDiagnostic,
+} from './gemini-ai-provider.js';
 import { GEMINI_MODEL, GEMINI_PROVIDER_ID } from './gemini-constants.js';
 
 export type AIModelSelectionValidation = {
@@ -18,23 +26,32 @@ export type AIModelSelectionValidation = {
 };
 
 export class AIProviderFactory {
+  private readonly scopedProviders = new Map<string, ScopedBotAIProvider>();
+
   public constructor(
     private readonly database: AppDatabase,
     private readonly vault: SecretVault,
     private readonly globalApiKey: string | undefined,
     private readonly providerName: 'gemini' | 'disabled' = GEMINI_PROVIDER_ID,
     private readonly clientFactory?: GeminiClientFactory,
+    private readonly logger?: Logger,
   ) {}
 
   public forBot(botId: string): AIProvider {
     if (this.providerName === 'disabled') return new DisabledAIProvider();
-    return new ScopedBotAIProvider(
-      botId,
-      this.database,
-      this.vault,
-      this.globalApiKey,
-      this.clientFactory,
-    );
+    let provider = this.scopedProviders.get(botId);
+    if (provider === undefined) {
+      provider = new ScopedBotAIProvider(
+        botId,
+        this.database,
+        this.vault,
+        this.globalApiKey,
+        this.clientFactory,
+        this.logger,
+      );
+      this.scopedProviders.set(botId, provider);
+    }
+    return provider;
   }
 
   public async listAvailableModels(botId: string): Promise<{
@@ -45,11 +62,16 @@ export class AIProviderFactory {
   }> {
     const provider = this.forBot(botId);
     const configured = provider.isConfigured();
+    const diagnostic =
+      provider instanceof ScopedBotAIProvider && configured
+        ? await provider.listCompatibleModels()
+        : null;
+    const modelInformation = provider.getModelInformation();
     return {
-      models: configured ? [GEMINI_MODEL] : [],
-      currentModel: provider.getModelInformation().model,
+      models: diagnostic?.visibleModels ?? [],
+      currentModel: diagnostic?.effectiveModel ?? modelInformation.model,
       defaultModel: GEMINI_MODEL,
-      catalogStatus: configured ? 'live' : 'unavailable',
+      catalogStatus: diagnostic?.effectiveModel ? 'live' : 'unavailable',
     };
   }
 
@@ -81,12 +103,16 @@ export class AIProviderFactory {
 }
 
 class ScopedBotAIProvider implements AIProvider {
+  private provider: GeminiAIProvider | null = null;
+  private apiKeySignature: string | null = null;
+
   public constructor(
     private readonly botId: string,
     private readonly database: AppDatabase,
     private readonly vault: SecretVault,
     private readonly globalApiKey: string | undefined,
     private readonly clientFactory: GeminiClientFactory | undefined,
+    private readonly logger: Logger | undefined,
   ) {}
 
   public isConfigured(): boolean {
@@ -99,17 +125,21 @@ class ScopedBotAIProvider implements AIProvider {
     return provider.testConnection(timeoutMs);
   }
 
+  public async listCompatibleModels(timeoutMs?: number): Promise<AIProviderConnectionDiagnostic> {
+    return this.createProvider().listCompatibleModels(timeoutMs);
+  }
+
   public async generateGroundedResponse(
     request: GroundedResponseRequest,
   ): Promise<GroundedResponseResult> {
     const provider = this.createProvider();
     const result = await provider.generateGroundedResponse(request);
-    this.recordModelEvent('AI_MODEL_RESPONSE_SUCCEEDED');
+    this.recordModelEvent('AI_MODEL_RESPONSE_SUCCEEDED', result.model);
     return result;
   }
 
-  public getModelInformation(): { provider: string; model: string } {
-    return { provider: GEMINI_PROVIDER_ID, model: GEMINI_MODEL };
+  public getModelInformation(): AIModelInformation {
+    return this.createProvider().getModelInformation();
   }
 
   public normalizeUsage(value: unknown) {
@@ -121,7 +151,15 @@ class ScopedBotAIProvider implements AIProvider {
   }
 
   private createProvider(): GeminiAIProvider {
-    return new GeminiAIProvider(this.resolveApiKey(), this.clientFactory);
+    const apiKey = this.resolveApiKey();
+    const signature = credentialSignature(apiKey);
+    if (this.provider === null || this.apiKeySignature !== signature) {
+      this.provider = new GeminiAIProvider(apiKey, this.clientFactory, {
+        onDiagnostic: (diagnostic) => this.recordDiagnostic(diagnostic),
+      });
+      this.apiKeySignature = signature;
+    }
+    return this.provider;
   }
 
   private resolveApiKey(): string | undefined {
@@ -135,17 +173,58 @@ class ScopedBotAIProvider implements AIProvider {
     }
   }
 
-  private recordModelEvent(eventType: string): void {
+  private recordModelEvent(eventType: string, model: string | undefined): void {
     try {
       this.database.recordTechnicalEvent({
         botId: this.botId,
         eventType,
-        result: GEMINI_MODEL,
+        result: model ?? this.createProvider().getModelInformation().model,
       });
     } catch {
       // La telemetría nunca debe impedir una respuesta válida del asistente.
     }
   }
+
+  private recordDiagnostic(diagnostic: GeminiSafeDiagnostic): void {
+    const fields = {
+      module: 'IA',
+      botId: this.botId,
+      operation: diagnostic.operation,
+      httpStatus: diagnostic.status,
+      requestedModel: diagnostic.requestedModel,
+      preferredModel: diagnostic.preferredModel,
+      effectiveModel: diagnostic.effectiveModel,
+      backend: diagnostic.backend,
+      apiVersion: diagnostic.apiVersion,
+      preferredModelGetFound: diagnostic.preferredModelGetFound,
+      preferredModelListFound: diagnostic.preferredModelListFound,
+      visibleModels: diagnostic.visibleModels,
+      failoverOccurred: diagnostic.failoverOccurred,
+      errorCode: diagnostic.errorCode,
+      providerMessage: diagnostic.providerMessage,
+    };
+    if (diagnostic.errorCode === null) {
+      this.logger?.info(fields, 'Diagnóstico seguro de modelo Gemini');
+    } else {
+      this.logger?.warn(fields, 'Diagnóstico seguro de modelo Gemini');
+    }
+    try {
+      this.database.recordTechnicalEvent({
+        botId: this.botId,
+        eventType: 'GEMINI_MODEL_DIAGNOSTIC',
+        result: JSON.stringify(fields),
+        ...(diagnostic.errorCode === null ? {} : { errorCode: diagnostic.errorCode }),
+      });
+    } catch {
+      // La telemetría nunca debe impedir una respuesta válida del asistente.
+    }
+  }
+}
+
+function credentialSignature(value: string | undefined): string {
+  return createHash('sha256')
+    .update(value?.trim() ?? '')
+    .digest('hex');
 }
 
 function maskApiKey(value: string | undefined): string | null {

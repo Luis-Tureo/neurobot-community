@@ -978,6 +978,13 @@ describe('API administrativa', () => {
     expect(initial.currentProvider).toMatchObject({
       id: 'gemini',
       name: 'Gemini',
+      model: 'gemini-3.8-flash',
+      preferredModel: 'gemini-3.8-flash',
+      effectiveModel: null,
+      alternativeModelActive: false,
+      modelResolutionStatus: 'unresolved',
+      backend: 'gemini-developer-api',
+      apiVersion: 'v1beta',
       configured: false,
       enabled: false,
     });
@@ -1099,7 +1106,17 @@ describe('API administrativa', () => {
     });
     expect(response.statusCode).toBe(200);
     // Dado que no está configurado inicialmente o fallará
-    expect(response.json()).toHaveProperty('errorCode');
+    expect(response.json()).toMatchObject({
+      connection: 'failed',
+      errorCode: 'AI_NOT_CONFIGURED',
+      preferredModel: 'gemini-3.8-flash',
+      effectiveModel: null,
+      alternativeModelActive: false,
+      visibleModels: [],
+      backend: 'gemini-developer-api',
+      apiVersion: 'v1beta',
+      failoverOccurred: false,
+    });
   });
 
   it('filtra respuestas en caché que tienen la categoría "Error de IA"', async () => {

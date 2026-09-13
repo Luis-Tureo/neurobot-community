@@ -1,5 +1,11 @@
+import type { GenerateContentParameters, Model } from '@google/genai';
 import { AIProviderFactory } from '../src/ai/ai-provider-factory.js';
-import { GEMINI_MODEL, GEMINI_PROVIDER_ID } from '../src/ai/gemini-constants.js';
+import {
+  GEMINI_MODEL,
+  GEMINI_MODEL_CANDIDATES,
+  GEMINI_PROVIDER_ID,
+} from '../src/ai/gemini-constants.js';
+import type { GeminiClientFactory } from '../src/ai/gemini-ai-provider.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { SecretVault } from '../src/security/secret-vault.js';
 
@@ -19,17 +25,26 @@ describe('configuración fija de Gemini', () => {
     const factory = new AIProviderFactory(database, vault, 'AIza_test_key_123456789');
     const provider = factory.forBot('neurobot');
 
-    expect(provider.getModelInformation()).toEqual({
+    expect(provider.getModelInformation()).toMatchObject({
       provider: GEMINI_PROVIDER_ID,
       model: GEMINI_MODEL,
+      preferredModel: GEMINI_MODEL,
+      effectiveModel: null,
     });
+    expect(factory.forBot('neurobot')).toBe(provider);
     expect(provider.isConfigured()).toBe(true);
   });
 
-  it('ofrece únicamente el modelo fijo y valida cualquier override contra esa constante', async () => {
-    const factory = new AIProviderFactory(database, vault, 'AIza_test_key_123456789');
+  it('muestra candidatos compatibles pero mantiene fijo el modelo preferido en la configuración', async () => {
+    const factory = new AIProviderFactory(
+      database,
+      vault,
+      'AIza_test_key_123456789',
+      'gemini',
+      compatibleClientFactory,
+    );
     await expect(factory.listAvailableModels('neurobot')).resolves.toMatchObject({
-      models: [GEMINI_MODEL],
+      models: GEMINI_MODEL_CANDIDATES,
       currentModel: GEMINI_MODEL,
       defaultModel: GEMINI_MODEL,
       catalogStatus: 'live',
@@ -38,6 +53,10 @@ describe('configuración fija de Gemini', () => {
       allowed: true,
     });
     expect(factory.validateModelSelection('neurobot', 'otro-modelo')).toMatchObject({
+      allowed: false,
+      reason: 'MODEL_NOT_AVAILABLE',
+    });
+    expect(factory.validateModelSelection('neurobot', 'gemini-3.7-flash')).toMatchObject({
       allowed: false,
       reason: 'MODEL_NOT_AVAILABLE',
     });
@@ -65,3 +84,27 @@ describe('configuración fija de Gemini', () => {
     });
   });
 });
+
+const compatibleClientFactory: GeminiClientFactory = () => ({
+  get: async ({ model }) => ({
+    name: `models/${model}`,
+    supportedActions: ['generateContent'],
+  }),
+  list: async () => modelPager(GEMINI_MODEL_CANDIDATES.map(modelMetadata)),
+  generateContent: async (input: GenerateContentParameters) => {
+    const isProbe = input.config?.responseMimeType === 'application/json';
+    return { text: isProbe ? '{"ok":true}' : 'OK' } as never;
+  },
+});
+
+function modelMetadata(model: string): Model {
+  return { name: `models/${model}`, supportedActions: ['generateContent'] };
+}
+
+function modelPager(models: Model[]) {
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (const model of models) yield model;
+    },
+  } as never;
+}

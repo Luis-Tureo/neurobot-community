@@ -62,6 +62,8 @@ async function main(): Promise<void> {
     vault,
     environment.geminiApiKey,
     environment.aiProvider,
+    undefined,
+    logger,
   );
   const sessionManager = new WhatsAppSessionManager(
     resolve(environment.dataRoot, 'data', 'whatsapp-sessions'),

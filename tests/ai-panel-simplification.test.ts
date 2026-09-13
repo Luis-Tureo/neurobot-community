@@ -55,6 +55,9 @@ describe('módulo mínimo de inteligencia artificial', () => {
     expect(script).toContain('setAIProviderEditorOpen(true)');
     expect(script).toContain('setStatusSwitchState(toggleButton, {');
     expect(script).toContain('checked: currentProvider.enabled');
+    expect(script).toContain('Modelo alternativo activo');
+    expect(script).toContain('Modelo efectivo:');
+    expect(script).toContain('currentProvider.effectiveModel || currentProvider.model');
     expect(script).not.toContain('saveAIProviderWithCompatibility');
     expect(script).not.toContain('/ai-key');
     expect(script).not.toContain('/ai/models');
