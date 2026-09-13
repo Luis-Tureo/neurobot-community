@@ -103,6 +103,9 @@ try {
     },
     { timeout: 60_000 },
   );
+  await page.waitForFunction(() => window.__neurobotPanelRuntimeLoaded === true, {
+    timeout: 60_000,
+  });
   await page.waitForFunction(
     () => {
       const target = document.querySelector('#bots-list');
@@ -114,12 +117,31 @@ try {
   const finalState = await page.evaluate(async () => {
     const sessionResponse = await fetch('/api/auth/session', { cache: 'no-store' });
     const botsResponse = await fetch('/api/bots', { cache: 'no-store' });
+    const automationForm = document.querySelector('#automatic-messages-form');
+    const requiredAutomationFields = [
+      'greeting_monday',
+      'greeting_weekday',
+      'greeting_friday',
+      'greeting_weekend',
+      'rules_template',
+    ];
+    const automaticMessagesReady =
+      automationForm instanceof HTMLFormElement &&
+      requiredAutomationFields.every((name) => automationForm.elements.namedItem(name) !== null);
+    const pollPanel = document.querySelector('#poll-automation-form');
+    const pollAutomationReady = Boolean(
+      pollPanel?.querySelector('[name="poll_start_time"]') &&
+        pollPanel?.querySelector('[name="poll_interval_hours"]') &&
+        pollPanel?.querySelector('#save-poll-automation'),
+    );
     return {
       href: window.location.href,
       readyState: document.readyState,
       loginBootstrap: window.__neurobotLoginBootstrap === true,
       authenticated: window.__neurobotAuthenticated === true,
       panelRuntimeLoaded: window.__neurobotPanelRuntimeLoaded === true,
+      automaticMessagesReady,
+      pollAutomationReady,
       loginHidden: document.querySelector('#login-view')?.classList.contains('hidden') ?? null,
       panelHidden: document.querySelector('#panel-view')?.classList.contains('hidden') ?? null,
       botCards: document.querySelector('#bots-list')?.childElementCount ?? -1,
@@ -127,6 +149,19 @@ try {
       botsStatus: botsResponse.status,
     };
   });
+
+  if (finalState.panelRuntimeLoaded !== true) {
+    throw new Error('ADMIN_PANEL_RUNTIME_NOT_LOADED');
+  }
+  if (finalState.automaticMessagesReady !== true) {
+    throw new Error('AUTOMATIC_MESSAGES_FORM_NOT_REPAIRED');
+  }
+  if (finalState.pollAutomationReady !== true) {
+    throw new Error('POLL_AUTOMATION_PANEL_NOT_READY');
+  }
+  if (diagnostics.some((entry) => entry.includes('ADMIN_PANEL_RUNTIME_LOAD_FAILED'))) {
+    throw new Error('ADMIN_PANEL_RUNTIME_LOAD_FAILED_RECORDED');
+  }
 
   console.log(`BROWSER_AUTH_DIAGNOSTIC=OK ${JSON.stringify(finalState)}`);
   if (diagnostics.length > 0) {
