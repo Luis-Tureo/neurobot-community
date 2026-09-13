@@ -13,7 +13,7 @@ describe('persistencia SQLite', () => {
     database.migrate();
     expect(database.getMigrationVersions()).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-      27, 28, 29, 30, 31, 32, 33, 34, 35, 36,
+      27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
     ]);
     expect(database.getBotProfile('neurobot')).toMatchObject({
       botName: 'Neurobot',
@@ -42,14 +42,15 @@ describe('persistencia SQLite', () => {
     });
     expect(database.listCommands().map((item) => item.name)).toContain('ayuda');
     expect(database.listCommands()).toHaveLength(8);
-    expect(database.listPollTemplates()).toHaveLength(36);
-    expect(database.getPollConfiguration()).toEqual({
+    expect(database.listLegacyPollTemplates()).toHaveLength(36);
+    expect(database.getPollAutomationConfiguration()).toEqual({
       enabled: false,
-      sendTime: '13:00',
+      startTime: '09:00',
+      intervalHours: 3,
       timezone: 'America/Santiago',
-      toleranceMinutes: 30,
-      selectionMode: 'SAME_FOR_ALL',
-      weeklySchedule: [],
+      anchorLocalDate: null,
+      activatedAt: null,
+      updatedAt: expect.any(String),
     });
     database.close();
   });
@@ -459,109 +460,215 @@ describe('persistencia SQLite', () => {
     database.close();
   });
 
-  it('guarda, ordena y recupera múltiples horarios por día para encuestas programadas', () => {
-    const database = new AppDatabase(':memory:');
-    database.migrate();
-    const templates = database.listPollTemplates('neurobot');
-    const [t1, t2, t3, t4] = templates as [
-      (typeof templates)[0],
-      (typeof templates)[0],
-      (typeof templates)[0],
-      (typeof templates)[0],
-    ];
+  it('la migración 37 conserva el banco antiguo, desactiva la automatización y crea las tablas nuevas', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'neurobot-poll-migration-'));
+    const path = join(directory, 'test.db');
+    const handles: Array<{ close(): void }> = [];
+    try {
+      const seeded = new AppDatabase(path);
+      seeded.migrate();
+      seeded.close();
+      // Reconstruye el estado anterior a la migración 37 (esquema de las migraciones 8 y 25).
+      const raw = new BetterSqlite3(path);
+      raw.exec(`
+        DELETE FROM migrations WHERE version = 37;
+        DROP TABLE bot_poll_vote_events;
+        DROP TABLE bot_poll_votes;
+        DROP TABLE bot_poll_deliveries;
+        DROP TABLE bot_poll_answer_options;
+        DROP TABLE bot_polls;
+        CREATE TABLE bot_poll_configurations_legacy (
+          bot_id TEXT PRIMARY KEY REFERENCES bots(id) ON DELETE CASCADE,
+          enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+          send_time TEXT NOT NULL DEFAULT '13:00',
+          timezone TEXT NOT NULL,
+          tolerance_minutes INTEGER NOT NULL DEFAULT 30,
+          selection_mode TEXT NOT NULL DEFAULT 'SAME_FOR_ALL',
+          updated_at TEXT NOT NULL,
+          weekly_schedule TEXT NOT NULL DEFAULT '[]'
+        );
+        INSERT INTO bot_poll_configurations_legacy
+          SELECT bot_id, 1, '13:00', timezone, tolerance_minutes, selection_mode, updated_at,
+            '[{"weekday":1,"sendTime":"13:00","templateIds":[1]}]'
+          FROM bot_poll_configurations;
+        DROP TABLE bot_poll_configurations;
+        ALTER TABLE bot_poll_configurations_legacy RENAME TO bot_poll_configurations;
+      `);
+      raw
+        .prepare(
+          `INSERT INTO bot_poll_send_history(bot_id, deduplication_key, group_id, local_date, template_id,
+           source, counts_as_daily, status, attempts, scheduled_at, sent_at)
+         VALUES ('neurobot', 'daily-poll:g@g.us:2026-01-01', 'g@g.us', '2026-01-01', 1, 'scheduled', 1,
+           'SENT', 1, '2026-01-01T16:00:00.000Z', '2026-01-01T16:00:05.000Z')`,
+        )
+        .run();
+      raw.close();
 
-    database.savePollConfiguration(
-      {
-        enabled: true,
-        sendTime: '13:00',
-        timezone: 'America/Santiago',
-        toleranceMinutes: 30,
-        selectionMode: 'SAME_FOR_ALL',
-        weeklySchedule: [
-          { weekday: 1, sendTime: '20:00', templateIds: [t4.id] },
-          { weekday: 1, sendTime: '10:00', templateIds: [t1.id] },
-          { weekday: 1, sendTime: '14:30', templateIds: [t2.id, t3.id] },
-          { weekday: 2, sendTime: '11:30', templateIds: [t1.id] },
-        ],
-      },
-      'neurobot',
-    );
-
-    const config = database.getPollConfiguration('neurobot');
-    expect(config.enabled).toBe(true);
-    expect(config.weeklySchedule).toEqual([
-      { weekday: 1, sendTime: '10:00', templateIds: [t1.id] },
-      { weekday: 1, sendTime: '14:30', templateIds: [t2.id, t3.id] },
-      { weekday: 1, sendTime: '20:00', templateIds: [t4.id] },
-      { weekday: 2, sendTime: '11:30', templateIds: [t1.id] },
-    ]);
-
-    // Rechaza horarios duplicados en el mismo día y hora
-    expect(() =>
-      database.savePollConfiguration(
-        {
-          ...config,
-          weeklySchedule: [
-            { weekday: 1, sendTime: '10:00', templateIds: [t1.id] },
-            { weekday: 1, sendTime: '10:00', templateIds: [t2.id] },
-          ],
-        },
-        'neurobot',
-      ),
-    ).toThrow('No se permiten horarios duplicados para el mismo día y hora.');
-
-    // Rechaza horarios sin encuestas
-    expect(() =>
-      database.savePollConfiguration(
-        {
-          ...config,
-          weeklySchedule: [{ weekday: 1, sendTime: '10:00', templateIds: [] }],
-        },
-        'neurobot',
-      ),
-    ).toThrow('Cada programación requiere una hora y al menos una encuesta.');
-
-    database.close();
+      const migrated = new AppDatabase(path);
+      handles.push(migrated);
+      migrated.migrate();
+      const configuration = migrated.getPollAutomationConfiguration('neurobot');
+      // La semántica cambió: queda desactivada hasta que el administrador la active de nuevo,
+      // pero la hora y la zona horaria anteriores se conservan como punto de partida.
+      expect(configuration).toMatchObject({ enabled: false, startTime: '13:00', intervalHours: 3 });
+      expect(migrated.listLegacyPollTemplates('neurobot')).toHaveLength(36);
+      migrated.close();
+      const verify = new BetterSqlite3(path);
+      handles.push(verify);
+      const history = verify
+        .prepare('SELECT COUNT(*) AS total FROM bot_poll_send_history')
+        .get() as {
+        total: number;
+      };
+      expect(history.total).toBe(1);
+      const tables = verify
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'bot_poll%' ORDER BY name",
+        )
+        .all()
+        .map((row) => (row as { name: string }).name);
+      expect(tables).toEqual([
+        'bot_poll_answer_options',
+        'bot_poll_configurations',
+        'bot_poll_date_overrides',
+        'bot_poll_deliveries',
+        'bot_poll_options',
+        'bot_poll_send_history',
+        'bot_poll_templates',
+        'bot_poll_vote_events',
+        'bot_poll_votes',
+        'bot_polls',
+      ]);
+      const indexes = verify
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('bot_polls', 'bot_poll_deliveries', 'bot_poll_votes', 'bot_poll_vote_events') AND name LIKE 'idx_%' ORDER BY name",
+        )
+        .all()
+        .map((row) => (row as { name: string }).name);
+      expect(indexes).toEqual(
+        expect.arrayContaining([
+          'idx_bot_polls_slot',
+          'idx_bot_polls_status',
+          'idx_bot_poll_deliveries_message',
+          'idx_bot_poll_votes_period',
+          'idx_bot_poll_votes_voter',
+          'idx_bot_poll_vote_events_voter',
+        ]),
+      );
+      verify.close();
+    } finally {
+      for (const handle of handles) {
+        try {
+          handle.close();
+        } catch {
+          // ya cerrado
+        }
+      }
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
   });
 
-  it('desactivar y reactivar la programación semanal conserva todos los múltiples horarios y encuestas', () => {
+  it('impone unicidad por horario y por mensaje de WhatsApp, y aplica los votos como reemplazo', () => {
     const database = new AppDatabase(':memory:');
     database.migrate();
-    const templates = database.listPollTemplates('neurobot');
-    const schedule = [
-      { weekday: 1, sendTime: '09:00', templateIds: [templates[0]!.id] },
-      { weekday: 1, sendTime: '15:00', templateIds: [templates[1]!.id, templates[2]!.id] },
-      { weekday: 5, sendTime: '18:30', templateIds: [templates[3]!.id] },
-    ];
+    try {
+      const first = database.insertPoll({
+        question: '¿Primera?',
+        normalizedQuestion: 'primera',
+        options: ['A', 'B'],
+        category: 'humor',
+        origin: 'ai',
+        status: 'generated',
+      });
+      const second = database.insertPoll({
+        question: '¿Segunda?',
+        normalizedQuestion: 'segunda',
+        options: ['A', 'B', 'C'],
+        category: 'humor',
+        origin: 'reused',
+        sourcePollId: first.id,
+        status: 'generated',
+      });
+      expect(
+        database.assignPollSlot(first.id, '2026-01-05T09:00', '2026-01-05T12:00:00.000Z'),
+      ).toBe(true);
+      expect(
+        database.assignPollSlot(second.id, '2026-01-05T09:00', '2026-01-05T12:00:00.000Z'),
+      ).toBe(false);
+      expect(database.getPoll(second.id)?.status).toBe('generated');
+      expect(database.claimPollForSending(first.id, new Date())).not.toBeNull();
+      expect(database.claimPollForSending(first.id, new Date())).toBeNull();
+      const delivery = database.claimPollDelivery(first.id, 'g@g.us', new Date(), 2);
+      expect(delivery).toMatchObject({ status: 'sending', attempts: 1 });
+      database.completePollDelivery(delivery!.id, 'sent', new Date(), {
+        whatsappMessageId: 'msg-1',
+      });
+      expect(database.claimPollDelivery(first.id, 'g@g.us', new Date(), 2)).toBeNull();
+      expect(database.getPollDeliveryByMessageId('msg-1')?.poll.id).toBe(first.id);
+      expect(database.getPollDeliveryByMessageId('msg-x')).toBeNull();
 
-    // 1. Configurar y activar
-    database.savePollConfiguration(
-      {
-        enabled: true,
-        sendTime: '13:00',
-        timezone: 'America/Santiago',
-        toleranceMinutes: 30,
-        selectionMode: 'SAME_FOR_ALL',
-        weeklySchedule: schedule,
-      },
-      'neurobot',
-    );
+      const vote = (voter: string, indexes: number[], votedAt: string, key: string) =>
+        database.recordPollVote(
+          {
+            pollId: first.id,
+            deliveryId: delivery!.id,
+            voterHash: voter,
+            selectedOptionIndexes: indexes,
+            votedAt,
+            localDate: votedAt.slice(0, 10),
+            eventKey: key,
+          },
+          new Date(),
+        );
+      expect(vote('v1', [0], '2026-01-05T12:10:00.000Z', 'e1')).toBe('recorded');
+      expect(vote('v1', [0], '2026-01-05T12:10:00.000Z', 'e1')).toBe('duplicate_ignored');
+      expect(vote('v1', [1], '2026-01-05T12:11:00.000Z', 'e2')).toBe('updated');
+      expect(vote('v1', [1], '2026-01-05T12:12:00.000Z', 'e3')).toBe('unchanged');
+      expect(vote('v1', [0], '2026-01-05T12:09:00.000Z', 'e0')).toBe('stale_ignored');
+      const counts = database.listPollOptionVotes([first.id]).get(first.id);
+      expect(counts?.options.get(0)).toBeUndefined();
+      expect(counts?.options.get(1)).toBe(1);
+      expect(counts?.participants).toBe(1);
+      expect(vote('v1', [], '2026-01-05T12:13:00.000Z', 'e4')).toBe('updated');
+      expect(database.listPollOptionVotes([first.id]).get(first.id)).toBeUndefined();
+    } finally {
+      database.close();
+    }
+  });
 
-    // 2. Desactivar programación semanal
-    const activeConfig = database.getPollConfiguration('neurobot');
-    database.savePollConfiguration({ ...activeConfig, enabled: false }, 'neurobot');
-
-    const disabledConfig = database.getPollConfiguration('neurobot');
-    expect(disabledConfig.enabled).toBe(false);
-    expect(disabledConfig.weeklySchedule).toEqual(schedule);
-
-    // 3. Reactivar programación semanal
-    database.savePollConfiguration({ ...disabledConfig, enabled: true }, 'neurobot');
-
-    const reactivatedConfig = database.getPollConfiguration('neurobot');
-    expect(reactivatedConfig.enabled).toBe(true);
-    expect(reactivatedConfig.weeklySchedule).toEqual(schedule);
-
+  it('desactivar y reactivar la automatización conserva hora inicial y recurrencia', () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    const base = {
+      startTime: '10:30',
+      intervalHours: 4,
+      timezone: 'America/Santiago',
+      anchorLocalDate: '2026-01-05',
+      activatedAt: '2026-01-05T13:00:00.000Z',
+    };
+    database.savePollAutomationConfiguration({ ...base, enabled: true }, 'neurobot');
+    database.savePollAutomationConfiguration({ ...base, enabled: false }, 'neurobot');
+    expect(database.getPollAutomationConfiguration('neurobot')).toMatchObject({
+      ...base,
+      enabled: false,
+    });
+    database.savePollAutomationConfiguration({ ...base, enabled: true }, 'neurobot');
+    expect(database.getPollAutomationConfiguration('neurobot')).toMatchObject({
+      ...base,
+      enabled: true,
+    });
+    expect(() =>
+      database.savePollAutomationConfiguration(
+        { ...base, intervalHours: 0, enabled: true },
+        'neurobot',
+      ),
+    ).toThrow('La recurrencia de las encuestas debe estar entre 1 y 24 horas.');
+    expect(() =>
+      database.savePollAutomationConfiguration(
+        { ...base, startTime: '25:00', enabled: true },
+        'neurobot',
+      ),
+    ).toThrow('La hora de inicio de las encuestas no es válida.');
     database.close();
   });
 });

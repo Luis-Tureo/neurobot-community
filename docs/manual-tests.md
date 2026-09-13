@@ -32,7 +32,7 @@ Estas pruebas requieren WhatsApp real y no se consideran automatizadas. Realíce
 - [ ] Mencionar realmente al bot con una pregunta y confirmar una sola respuesta breve.
 - [ ] Enviar solo `@neurobot` y confirmar exactamente el aviso para escribir la pregunta.
 - [ ] Después de una respuesta, enviar `1`, una frase o responder al mensaje del bot; confirmar que no hay continuación.
-- [ ] Votar una encuesta comunitaria y confirmar que no se abre un menú ni se envía respuesta.
+- [ ] Votar una encuesta comunitaria y confirmar que no se abre un menú ni se envía respuesta, pero el voto aparece en **Encuestas**.
 - [ ] Enviar un comando desde un grupo no autorizado y confirmar que se ignora.
 - [ ] Enviar un mensaje privado y confirmar que se ignora.
 - [ ] Enviar un archivo o medio y confirmar que no se descarga ni procesa.
@@ -62,23 +62,18 @@ Estas pruebas requieren WhatsApp real y no se consideran automatizadas. Realíce
 - [ ] Si se retira al bot del grupo, confirmar `BOT_NOT_MEMBER`, autorización revocada y ausencia de nuevos envíos. Volver a agregarlo manualmente antes de continuar.
 - [ ] Durante una desconexión, pulsar **Actualizar lista** y confirmar que un error temporal no archiva ni desautoriza masivamente los grupos previos.
 
-## Encuestas nativas
+## Encuestas automáticas
 
-- [ ] Abrir **Encuestas** y confirmar que la función comienza desactivada, con 13:00, `America/Santiago`, tolerancia de 30 minutos y modo **Misma encuesta para todos**.
-- [ ] Confirmar que el banco muestra 36 preguntas y las 12 categorías.
-- [ ] Activar encuestas, cambiar temporalmente la hora y guardar; comprobar que aparece la próxima ejecución sin duplicar el programador.
-- [ ] Crear una encuesta personalizada con dos opciones, editarla, cambiar el orden de las líneas, marcarla favorita, desactivarla y volver a activarla.
-- [ ] Intentar guardar una sola opción, trece opciones, opciones duplicadas y HTML; todos los casos deben rechazarse.
-- [ ] Elegir el grupo normal autorizado y una plantilla en **Enviar encuesta de prueba**. Revisar la vista previa y confirmar el diálogo.
-- [ ] Confirmar en WhatsApp que se recibió una encuesta nativa en el grupo, no un mensaje privado ni una simulación de texto.
-- [ ] Repetir con una plantilla de respuesta múltiple y verificar esa modalidad en WhatsApp.
-- [ ] Probar sin marcar **Contar como encuesta del día** y confirmar que el historial la identifica como manual.
-- [ ] Marcar **Contar como encuesta del día** solamente en una fecha controlada y confirmar que una segunda ejecución queda bloqueada.
-- [ ] Programar una plantilla para una fecha futura; intentar reemplazarla sin confirmación y luego con confirmación.
+- [ ] Abrir **Automatizaciones → Programación semanal de encuestas** y confirmar que comienza desactivada con 09:00 y "cada 3 horas"; el botón +/− pliega la tarjeta.
+- [ ] Guardar una hora de inicio y una recurrencia y comprobar que **Próximo envío** y **Después** muestran los horarios derivados de la configuración (p. ej. 12:00 · 15:00 · 18:00), no de la hora actual.
+- [ ] Activar con el interruptor y confirmar que la reserva de encuestas se llena progresivamente (eventos `POLL_GENERATED`/`POLL_SCHEDULED`) sin llamar a Groq en el instante del envío.
+- [ ] En **Centro de pruebas → Encuesta automática**, elegir el grupo de prueba y confirmar que llega una encuesta nativa (no texto) con alternativas únicas y respuesta única.
+- [ ] Votar, cambiar el voto y retirarlo desde un teléfono; en **Encuestas** el total debe reflejar un solo voto por persona y luego cero, nunca sumas duplicadas.
+- [ ] Reiniciar la aplicación y confirmar que no se reenvía el horario ya enviado y que el siguiente se envía una sola vez.
+- [ ] Cambiar la recurrencia y verificar que solo cambian los horarios futuros; los resultados anteriores permanecen.
 - [ ] Silenciar, archivar o desautorizar el grupo de prueba y confirmar que desaparece de los destinos disponibles.
-- [ ] Reiniciar la aplicación y confirmar que el historial permanece y no se duplica el envío diario.
 - [ ] No activar el horario automático en el grupo oficial hasta terminar esta prueba manual.
-- [ ] Revisar SQLite y los registros: no debe existir ningún nombre, número, identificador de votante ni opción elegida por una persona.
+- [ ] Revisar SQLite y los registros: los votos solo deben guardar un hash del votante; no debe existir ningún nombre ni número de teléfono.
 
 ## Privacidad
 

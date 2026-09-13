@@ -3,11 +3,18 @@ import type { Response as InjectResponse } from 'light-my-request';
 import { buildAdminServer } from '../src/admin/server.js';
 import { ConnectionManager } from '../src/core/connection-manager.js';
 import { GroupDiscoveryService } from '../src/core/group-discovery-service.js';
+import { PollAnalyticsService } from '../src/core/poll-analytics-service.js';
+import {
+  type PollContentGenerator,
+  type PollGenerationRequest,
+  type PollGenerationResult,
+} from '../src/core/poll-generator.js';
+import { PollPlanner } from '../src/core/poll-planner.js';
 import { PollRepository } from '../src/core/poll-repository.js';
 import { PollScheduler } from '../src/core/poll-scheduler.js';
 import { PollSender } from '../src/core/poll-sender.js';
-import { PollTemplateSelector } from '../src/core/poll-template-selector.js';
 import { PollService } from '../src/core/poll-service.js';
+import { PollVoteService } from '../src/core/poll-vote-service.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
@@ -16,20 +23,44 @@ import { hashPassword } from '../src/security/password.js';
 
 type Authentication = { cookie: string; csrf: string };
 
+const GROUP_ID = 'grupo-secreto@g.us';
+
+class StaticGenerator implements PollContentGenerator {
+  private counter = 0;
+  public isAvailable(): boolean {
+    return true;
+  }
+  public async generate(request: PollGenerationRequest): Promise<PollGenerationResult> {
+    this.counter += 1;
+    return {
+      question: `¿Prefieres k${this.counter}z o w${this.counter}q para ${request.category}?`,
+      options: ['Opción A', 'Opción B', 'Opción C'],
+      category: request.category,
+      attempts: 1,
+      model: 'openai/gpt-oss-120b',
+      totalTokens: 12,
+    };
+  }
+}
+
 describe('API administrativa de encuestas', () => {
   let app: FastifyInstance;
   let database: AppDatabase;
   let client: SimulatedMessagingClient;
+  let service: PollService;
+  let votes: PollVoteService;
+  let currentNow = new Date('2026-01-05T11:00:00.000Z');
+  const anonymizer = new Anonymizer('x'.repeat(32));
 
   beforeEach(async () => {
+    currentNow = new Date('2026-01-05T11:00:00.000Z');
     database = new AppDatabase(':memory:');
     database.migrate();
     database.setPanelPasswordHash(await hashPassword('contraseña-de-prueba'));
-    database.upsertDetectedGroup('grupo-secreto@g.us', 'Grupo de prueba');
-    database.setGroupAuthorized('grupo-secreto@g.us', true);
+    database.upsertDetectedGroup(GROUP_ID, 'Grupo de prueba');
+    database.setGroupAuthorized(GROUP_ID, true);
     client = new SimulatedMessagingClient();
     const logger = createLogger('silent');
-    const anonymizer = new Anonymizer('x'.repeat(32));
     const manager = new ConnectionManager(client, logger, { maxAttempts: 3, maxDelayMs: 100 });
     const discovery = new GroupDiscoveryService(
       client,
@@ -42,21 +73,19 @@ describe('API administrativa de encuestas', () => {
       },
       { developmentMode: false, manualRetryDelaysMs: [0] },
     );
+    const now = () => currentNow;
     const repository = new PollRepository(database);
-    const selector = new PollTemplateSelector(repository);
+    const planner = new PollPlanner(repository, new StaticGenerator(), database, logger, {
+      now,
+      random: () => 0.5,
+    });
     const sender = new PollSender(repository, database, client, logger, anonymizer, {
       retryDelayMs: 0,
       sleep: async () => undefined,
+      now,
     });
-    const service = new PollService(
-      repository,
-      selector,
-      sender,
-      database,
-      client,
-      logger,
-      anonymizer,
-    );
+    service = new PollService(repository, planner, sender, database, client, logger, { now });
+    votes = new PollVoteService(repository, database, logger, anonymizer, { now });
     const scheduler = new PollScheduler(service, logger);
     app = await buildAdminServer({
       database,
@@ -70,6 +99,7 @@ describe('API administrativa de encuestas', () => {
       pollRepository: repository,
       pollService: service,
       pollScheduler: scheduler,
+      pollAnalytics: new PollAnalyticsService(database, 'neurobot', { now }),
     });
   });
 
@@ -78,8 +108,9 @@ describe('API administrativa de encuestas', () => {
     database.close();
   });
 
-  it('exige autenticación y CSRF para modificar la configuración', async () => {
+  it('exige autenticación y CSRF y expone solo la configuración mínima', async () => {
     expect((await app.inject({ method: 'GET', url: '/api/polls' })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'GET', url: '/api/polls/analytics' })).statusCode).toBe(401);
     const auth = await login(app);
     const view = await app.inject({
       method: 'GET',
@@ -88,300 +119,225 @@ describe('API administrativa de encuestas', () => {
     });
     expect(view.statusCode).toBe(200);
     expect(view.json()).toMatchObject({
-      configuration: { enabled: false, sendTime: '13:00', timezone: 'America/Santiago' },
+      configuration: {
+        enabled: false,
+        startTime: '09:00',
+        intervalHours: 3,
+        timezone: 'America/Santiago',
+      },
+      intervalOptions: [1, 2, 3, 4, 5, 6, 8, 12, 24],
+      nativePollsSupported: true,
+      nextScheduledAt: null,
+      nextSlots: [],
     });
-    expect(view.json().templates).toHaveLength(36);
-    expect(view.body).not.toContain('grupo-secreto@g.us');
-    const templateId = Number(view.json().templates[0].id);
-    const configuration = {
-      enabled: true,
-      sendTime: '14:10',
-      timezone: 'America/Santiago',
-      toleranceMinutes: 20,
-      selectionMode: 'PER_GROUP',
-      weeklySchedule: [{ weekday: 1, sendTime: '14:10', templateIds: [templateId] }],
-    };
-    expect(
-      (
-        await app.inject({
-          method: 'PATCH',
-          url: '/api/polls/configuration',
-          headers: { cookie: auth.cookie },
-          payload: configuration,
-        })
-      ).statusCode,
-    ).toBe(403);
-    expect(
-      (
-        await injectAuthenticated(app, auth, {
-          method: 'PATCH',
-          url: '/api/polls/configuration',
-          payload: configuration,
-        })
-      ).statusCode,
-    ).toBe(200);
-    expect(database.getPollConfiguration()).toMatchObject(configuration);
-  });
-
-  it('crea, edita, desactiva y elimina una plantilla personalizada', async () => {
-    const auth = await login(app);
-    const payload = {
-      question: '¿Qué actividad prefieres hoy?',
-      category: 'Actividades',
-      options: ['Leer', 'Jugar'],
-      allowMultipleAnswers: false,
-      enabled: true,
-      favorite: false,
-      disabledUntil: null,
-    };
-    const created = await injectAuthenticated(app, auth, {
-      method: 'POST',
-      url: '/api/polls/templates',
-      payload,
-    });
-    expect(created.statusCode).toBe(201);
-    const id = created.json().template.id;
-    const updated = await injectAuthenticated(app, auth, {
-      method: 'POST',
-      url: '/api/polls/templates',
-      payload: { ...payload, id, enabled: false, allowMultipleAnswers: true },
-    });
-    expect(updated.statusCode).toBe(200);
-    expect(database.getPollTemplate(id)).toMatchObject({
-      enabled: false,
-      allowMultipleAnswers: true,
-    });
-    expect(
-      (
-        await injectAuthenticated(app, auth, {
-          method: 'DELETE',
-          url: `/api/polls/templates/${id}`,
-        })
-      ).statusCode,
-    ).toBe(200);
-    expect(database.getPollTemplate(id)).toBeNull();
-  });
-
-  it('oculta y restaura una encuesta predeterminada para el assistantId validado', async () => {
-    const auth = await login(app);
-    const initial = await app.inject({
-      method: 'GET',
-      url: '/api/polls',
-      headers: { cookie: auth.cookie },
-    });
-    const template = initial
-      .json()
-      .templates.find((item: { isDefault: boolean }) => item.isDefault);
-    const hidden = await injectAuthenticated(app, auth, {
-      method: 'DELETE',
-      url: `/api/polls/templates/${template.id}`,
-    });
-    expect(hidden.statusCode).toBe(200);
-    const afterHide = await app.inject({
-      method: 'GET',
-      url: '/api/polls',
-      headers: { cookie: auth.cookie },
-    });
-    expect(afterHide.json().templates.some((item: { id: number }) => item.id === template.id)).toBe(
-      false,
-    );
-    expect(afterHide.json().hiddenTemplates).toMatchObject([{ id: template.id }]);
-    const restored = await injectAuthenticated(app, auth, {
-      method: 'POST',
-      url: `/api/polls/templates/${template.id}/restore`,
-    });
-    expect(restored.statusCode).toBe(200);
-    expect(database.getPollTemplate(template.id)).not.toBeNull();
-    expect(database.listHiddenPollTemplates()).toHaveLength(0);
-  });
-
-  it('restaura y persiste todas las encuestas predeterminadas en una sola acción', async () => {
-    const auth = await login(app);
-    const initial = await app.inject({
-      method: 'GET',
-      url: '/api/polls',
-      headers: { cookie: auth.cookie },
-    });
-    const defaults = initial
-      .json()
-      .templates.filter((item: { isDefault: boolean }) => item.isDefault)
-      .slice(0, 2);
-    for (const template of defaults) {
-      expect(
-        (
-          await injectAuthenticated(app, auth, {
-            method: 'DELETE',
-            url: `/api/polls/templates/${template.id}`,
-          })
-        ).statusCode,
-      ).toBe(200);
-    }
-
-    const restored = await injectAuthenticated(app, auth, {
-      method: 'POST',
-      url: '/api/polls/templates/restore-defaults',
-    });
-    expect(restored.statusCode).toBe(200);
-    expect(restored.json()).toEqual({ restored: defaults.length });
-
-    const persisted = await app.inject({
-      method: 'GET',
-      url: '/api/polls',
-      headers: { cookie: auth.cookie },
-    });
-    expect(persisted.json().hiddenTemplates).toEqual([]);
-    expect(
-      defaults.every((template: { id: number }) =>
-        persisted.json().templates.some((item: { id: number }) => item.id === template.id),
-      ),
-    ).toBe(true);
-  });
-
-  it('rechaza HTML, opciones duplicadas y plantillas incompletas', async () => {
-    const auth = await login(app);
-    const base = {
-      question: 'Pregunta',
-      category: 'Actividades',
-      options: ['Una', 'Dos'],
-      allowMultipleAnswers: false,
-      enabled: true,
-      favorite: false,
-      disabledUntil: null,
-    };
-    for (const payload of [
-      { ...base, question: '<b>Pregunta</b>' },
-      { ...base, options: ['Una', ' una '] },
-      { ...base, options: ['Una'] },
-    ]) {
-      expect(
-        (
-          await injectAuthenticated(app, auth, {
-            method: 'POST',
-            url: '/api/polls/templates',
-            payload,
-          })
-        ).statusCode,
-      ).toBe(400);
-    }
-  });
-
-  it('programa una fecha y exige confirmación para reemplazarla', async () => {
-    const auth = await login(app);
-    const templates = database.listPollTemplates();
-    const first = templates[0];
-    const second = templates[1];
-    if (first === undefined || second === undefined) throw new Error('Faltan plantillas.');
-    const original = await injectAuthenticated(app, auth, {
-      method: 'PUT',
-      url: '/api/polls/overrides',
-      payload: { localDate: '2099-08-10', templateId: first.id, replaceConfirmed: false },
-    });
-    expect(original.statusCode).toBe(200);
-    const denied = await injectAuthenticated(app, auth, {
-      method: 'PUT',
-      url: '/api/polls/overrides',
-      payload: { localDate: '2099-08-10', templateId: second.id, replaceConfirmed: false },
-    });
-    expect(denied.statusCode).toBe(409);
-    const replaced = await injectAuthenticated(app, auth, {
-      method: 'PUT',
-      url: '/api/polls/overrides',
-      payload: { localDate: '2099-08-10', templateId: second.id, replaceConfirmed: true },
-    });
-    expect(replaced.statusCode).toBe(200);
-    expect(database.getPollDateOverride('2099-08-10')?.templateId).toBe(second.id);
-  });
-
-  it('envía una prueba nativa solo tras habilitar, confirmar y elegir un grupo autorizado', async () => {
-    const auth = await login(app);
-    const view = await app.inject({
-      method: 'GET',
-      url: '/api/polls',
-      headers: { cookie: auth.cookie },
-    });
-    const groupKey = view.json().authorizedGroups[0].key;
-    const templateId = view.json().templates[0].id;
-    const configuration = view.json().configuration;
-    configuration.enabled = true;
-    await injectAuthenticated(app, auth, {
+    expect(view.json()).not.toHaveProperty('templates');
+    expect(view.body).not.toContain(GROUP_ID);
+    const withoutCsrf = await app.inject({
       method: 'PATCH',
       url: '/api/polls/configuration',
-      payload: configuration,
+      headers: { cookie: auth.cookie },
+      payload: { enabled: true },
     });
-    expect(
-      (
-        await injectAuthenticated(app, auth, {
-          method: 'POST',
-          url: '/api/polls/send-test',
-          payload: { groupKey, templateId, countsAsDaily: false, confirmed: false },
-        })
-      ).statusCode,
-    ).toBe(400);
-    const sent = await injectAuthenticated(app, auth, {
-      method: 'POST',
-      url: '/api/polls/send-test',
-      payload: { groupKey, templateId, countsAsDaily: false, confirmed: true },
+    expect(withoutCsrf.statusCode).toBe(403);
+    const rejected = await injectAuthenticated(app, auth, {
+      method: 'PATCH',
+      url: '/api/polls/configuration',
+      payload: { intervalHours: 7 },
     });
-    expect(sent.statusCode).toBe(200);
-    expect(client.sentPolls).toMatchObject([{ chatId: 'grupo-secreto@g.us' }]);
-    expect(sent.body).not.toContain('grupo-secreto@g.us');
+    expect(rejected.statusCode).toBe(400);
+    const legacy = await injectAuthenticated(app, auth, {
+      method: 'PATCH',
+      url: '/api/polls/configuration',
+      payload: { enabled: true, weeklySchedule: [] },
+    });
+    expect(legacy.statusCode).toBe(400);
   });
 
-  it('guarda múltiples horarios por día mediante la API y valida duplicados y plantillas vacías', async () => {
+  it('guarda hora inicial y recurrencia, activa y calcula los próximos envíos', async () => {
     const auth = await login(app);
-    const view = await app.inject({
-      method: 'GET',
-      url: '/api/polls',
-      headers: { cookie: auth.cookie },
-    });
-    const templates = view.json().templates;
-    const [t1, t2, t3] = [Number(templates[0].id), Number(templates[1].id), Number(templates[2].id)];
-
-    const multiScheduleConfig = {
-      enabled: true,
-      sendTime: '13:00',
-      timezone: 'America/Santiago',
-      toleranceMinutes: 30,
-      selectionMode: 'SAME_FOR_ALL',
-      weeklySchedule: [
-        { weekday: 1, sendTime: '10:00', templateIds: [t1] },
-        { weekday: 1, sendTime: '15:30', templateIds: [t2, t3] },
-        { weekday: 2, sendTime: '11:00', templateIds: [t1] },
-      ],
-    };
-
     const saved = await injectAuthenticated(app, auth, {
       method: 'PATCH',
       url: '/api/polls/configuration',
-      payload: multiScheduleConfig,
+      payload: { startTime: '09:00', intervalHours: 3, enabled: true },
     });
     expect(saved.statusCode).toBe(200);
-    expect(database.getPollConfiguration().weeklySchedule).toHaveLength(3);
-
-    // Rechaza horarios duplicados en el mismo día y hora
-    const duplicateRes = await injectAuthenticated(app, auth, {
+    expect(saved.json()).toMatchObject({
+      updated: true,
+      configuration: { enabled: true, startTime: '09:00', intervalHours: 3 },
+      nextScheduledAt: 'Hoy · 09:00',
+    });
+    expect(saved.json().nextSlots.map((slot: { localTime: string }) => slot.localTime)).toEqual([
+      '09:00',
+      '12:00',
+      '15:00',
+      '18:00',
+      '21:00',
+    ]);
+    const next = await app.inject({
+      method: 'GET',
+      url: '/api/polls/next-send',
+      headers: { cookie: auth.cookie },
+    });
+    expect(next.json()).toMatchObject({ enabled: true, nextScheduledAt: 'Hoy · 09:00' });
+    const toggled = await injectAuthenticated(app, auth, {
       method: 'PATCH',
       url: '/api/polls/configuration',
-      payload: {
-        ...multiScheduleConfig,
-        weeklySchedule: [
-          { weekday: 1, sendTime: '10:00', templateIds: [t1] },
-          { weekday: 1, sendTime: '10:00', templateIds: [t2] },
-        ],
-      },
+      payload: { enabled: false },
     });
-    expect(duplicateRes.statusCode).toBe(400);
+    expect(toggled.json().configuration).toMatchObject({
+      enabled: false,
+      startTime: '09:00',
+      intervalHours: 3,
+    });
+    expect(toggled.json().nextScheduledAt).toBeNull();
+  });
 
-    // Rechaza horario sin encuestas
-    const emptyRes = await injectAuthenticated(app, auth, {
+  it('rechaza activar sin grupos de automatización disponibles', async () => {
+    const auth = await login(app);
+    database.setBotGroupBlocked('neurobot', GROUP_ID, true);
+    const response = await injectAuthenticated(app, auth, {
       method: 'PATCH',
       url: '/api/polls/configuration',
-      payload: {
-        ...multiScheduleConfig,
-        weeklySchedule: [{ weekday: 1, sendTime: '10:00', templateIds: [] }],
-      },
+      payload: { enabled: true },
     });
-    expect(emptyRes.statusCode).toBe(400);
+    expect(response.statusCode).toBe(400);
+    expect(response.json().code).toBe('AUTOMATION_GROUP_REQUIRED');
+  });
+
+  it('envía una prueba nativa solo con confirmación y grupo autorizado, y la limita por frecuencia', async () => {
+    const auth = await login(app);
+    const groupKey = anonymizer.identifier(GROUP_ID);
+    const unconfirmed = await injectAuthenticated(app, auth, {
+      method: 'POST',
+      url: '/api/polls/send-test',
+      payload: { groupKey },
+    });
+    expect(unconfirmed.statusCode).toBe(400);
+    const unknownGroup = await injectAuthenticated(app, auth, {
+      method: 'POST',
+      url: '/api/polls/send-test',
+      payload: { groupKey: 'a'.repeat(20), confirmed: true },
+    });
+    expect(unknownGroup.statusCode).toBe(404);
+    const sent = await injectAuthenticated(app, auth, {
+      method: 'POST',
+      url: '/api/polls/send-test',
+      payload: { groupKey, confirmed: true },
+    });
+    expect(sent.statusCode).toBe(200);
+    expect(sent.json()).toMatchObject({ status: 'sent', origin: 'ai' });
+    expect(client.sentPolls).toHaveLength(1);
+    expect(client.sentPolls[0]?.allowMultipleAnswers).toBe(false);
+    const limited = await injectAuthenticated(app, auth, {
+      method: 'POST',
+      url: '/api/polls/send-test',
+      payload: { groupKey, confirmed: true },
+    });
+    expect(limited.statusCode).toBe(429);
+  });
+
+  it('entrega KPIs y resultados reales a partir de los votos recibidos, con paginación y detalle', async () => {
+    const auth = await login(app);
+    const emptySummary = await app.inject({
+      method: 'GET',
+      url: '/api/polls/analytics?period=7d',
+      headers: { cookie: auth.cookie },
+    });
+    expect(emptySummary.statusCode).toBe(200);
+    expect(emptySummary.json().totals).toMatchObject({
+      votes: 0,
+      participants: 0,
+      pollsWithVotes: 0,
+    });
+    expect(emptySummary.json().recent).toEqual([]);
+
+    const manual = await service.sendManual(GROUP_ID);
+    const messageId = client.sentPolls[0]?.messageId ?? '';
+    const votedAtMs = currentNow.getTime() + 60_000;
+    for (const [voter, index] of [
+      ['56911111111@c.us', 0],
+      ['56922222222@c.us', 0],
+      ['56933333333@c.us', 1],
+    ] as const) {
+      await votes.handle({
+        pollMessageId: messageId,
+        voterId: voter,
+        selectedOptions: [{ index, name: null }],
+        votedAtMs,
+        eventKey: `evt:${voter}`,
+      });
+    }
+    const summary = await app.inject({
+      method: 'GET',
+      url: '/api/polls/analytics?period=today',
+      headers: { cookie: auth.cookie },
+    });
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json().totals).toMatchObject({
+      votes: 3,
+      participants: 3,
+      pollsWithVotes: 1,
+      pollsSent: 1,
+      averageVotesPerPoll: 3,
+    });
+    expect(summary.json().recent[0]).toMatchObject({ id: manual.pollId, totalVotes: 3 });
+    expect(summary.json().recent[0].options[0]).toMatchObject({
+      votes: 2,
+      percentage: 67,
+      winner: true,
+    });
+    expect(summary.body).not.toContain('56911111111');
+    expect(summary.body).not.toContain(GROUP_ID);
+
+    const page = await app.inject({
+      method: 'GET',
+      url: '/api/polls/analytics/polls?period=today&limit=1&offset=0',
+      headers: { cookie: auth.cookie },
+    });
+    expect(page.json()).toMatchObject({ total: 1, limit: 1, offset: 0 });
+    expect(page.json().polls[0].id).toBe(manual.pollId);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/polls/analytics/polls/${manual.pollId}`,
+      headers: { cookie: auth.cookie },
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json()).toMatchObject({
+      id: manual.pollId,
+      totalVotes: 3,
+      participants: 3,
+      origin: 'ai',
+    });
+    expect(detail.json().deliveries).toEqual([
+      expect.objectContaining({ status: 'sent', attempts: 1 }),
+    ]);
+    expect(detail.body).not.toContain('56911111111');
+    const missing = await app.inject({
+      method: 'GET',
+      url: '/api/polls/analytics/polls/9999',
+      headers: { cookie: auth.cookie },
+    });
+    expect(missing.statusCode).toBe(404);
+    const badPeriod = await app.inject({
+      method: 'GET',
+      url: '/api/polls/analytics?period=custom',
+      headers: { cookie: auth.cookie },
+    });
+    expect(badPeriod.statusCode).toBe(400);
+  });
+
+  it('no expone las rutas antiguas del banco de encuestas', async () => {
+    const auth = await login(app);
+    for (const route of [
+      { method: 'POST' as const, url: '/api/polls/templates' },
+      { method: 'POST' as const, url: '/api/polls/templates/restore-defaults' },
+      { method: 'DELETE' as const, url: '/api/polls/templates/1' },
+      { method: 'POST' as const, url: '/api/polls/overrides' },
+    ]) {
+      const response = await injectAuthenticated(app, auth, { ...route, payload: {} });
+      expect(response.statusCode).toBe(404);
+    }
   });
 });
 

@@ -1,7 +1,12 @@
 import { EventEmitter } from 'node:events';
 import type { Logger } from 'pino';
 import type { Client as WhatsAppClient } from 'whatsapp-web.js';
-import type { GroupChangeEvent, GroupJoinEvent, IncomingMessage } from '../src/domain/types.js';
+import type {
+  GroupChangeEvent,
+  GroupJoinEvent,
+  IncomingMessage,
+  PollVoteEvent,
+} from '../src/domain/types.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import {
   buildWhatsAppClientOptions,
@@ -78,6 +83,7 @@ function createSubject(
   const states: string[] = [];
   const groupJoins: GroupJoinEvent[] = [];
   const groupChanges: GroupChangeEvent[] = [];
+  const pollVotes: PollVoteEvent[] = [];
   const ready = vi.fn();
   const adapter = new WhatsAppWebAdapter(
     {
@@ -131,8 +137,11 @@ function createSubject(
     onGroupChanged: async (event) => {
       groupChanges.push(event);
     },
+    onPollVote: async (event) => {
+      pollVotes.push(event);
+    },
   });
-  return { adapter, fake, received, states, ready, groupJoins, groupChanges };
+  return { adapter, fake, received, states, ready, groupJoins, groupChanges, pollVotes };
 }
 
 function rawMessage(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -166,13 +175,19 @@ describe('adaptador de WhatsApp', () => {
 
   it('construye y envía una encuesta nativa con respuesta única o múltiple', async () => {
     const { adapter, fake } = createSubject();
+    fake.sendMessage.mockResolvedValueOnce({
+      id: { _serialized: 'true_grupo-normal@g.us_ABC123' },
+    });
     await adapter.initialize();
     fake.emit('ready');
-    await adapter.sendPoll('grupo-normal@g.us', {
+    expect(adapter.supportsNativePolls()).toBe(true);
+    const receipt = await adapter.sendPoll('grupo-normal@g.us', {
       question: '¿Qué prefieres?',
       options: ['Una', 'Dos'],
       allowMultipleAnswers: true,
     });
+    // El id serializado del mensaje de creación es la clave para asociar votos posteriores.
+    expect(receipt).toEqual({ messageId: 'true_grupo-normal@g.us_abc123' });
     expect(fake.sendMessage).toHaveBeenCalledTimes(1);
     const [destination, nativePoll] = fake.sendMessage.mock.calls[0] as unknown as [
       string,
@@ -278,7 +293,7 @@ describe('adaptador de WhatsApp', () => {
 
   it('registra votos comunitarios sin convertirlos en mensajes ni leer su identidad', async () => {
     const captured = createCapturedLogger();
-    const { adapter, fake, received } = createSubject({
+    const { adapter, fake, received, pollVotes } = createSubject({
       logger: captured.logger,
       communityPollVotesNoAction: true,
     });
@@ -286,14 +301,58 @@ describe('adaptador de WhatsApp', () => {
     fake.emit('ready');
     fake.emit('vote_update', {
       voter: '56912345678@c.us',
-      selectedOptions: [{ name: 'Una respuesta privada' }],
+      selectedOptions: [{ name: 'Una respuesta privada', localId: 1 }],
+      interractedAtTs: 1_700_000_000_000,
+      parentMessage: { id: { _serialized: 'true_grupo-normal@g.us_POLL1' } },
     });
 
+    await vi.waitFor(() => expect(pollVotes).toHaveLength(1));
     expect(received).toHaveLength(0);
+    // Aunque no abra conversaciones, el voto sí se entrega al módulo de resultados.
+    expect(pollVotes[0]).toMatchObject({
+      pollMessageId: 'true_grupo-normal@g.us_poll1',
+      voterId: '56912345678@c.us',
+      selectedOptions: [{ index: 1, name: 'Una respuesta privada' }],
+      votedAtMs: 1_700_000_000_000,
+    });
+    expect(pollVotes[0]?.eventKey).toMatch(/^poll-vote:[0-9a-f]{20}$/u);
     const logs = JSON.stringify(captured.entries);
     expect(logs).toContain('COMMUNITY_POLL_VOTE_NO_ACTION');
+    expect(logs).toContain('POLL_VOTE_EVENT_RECEIVED');
     expect(logs).not.toContain('56912345678');
     expect(logs).not.toContain('Una respuesta privada');
+  });
+
+  it('normaliza votos con selección vacía, ids repetidos, parentMsgKey y msgKey estable', async () => {
+    const { adapter, fake, pollVotes } = createSubject();
+    await adapter.initialize();
+    fake.emit('ready');
+    fake.emit('vote_update', {
+      voter: { _serialized: '56912345678@c.us' },
+      selectedOptions: [],
+      interractedAtTs: 1_700_000_000,
+      parentMsgKey: { _serialized: 'true_grupo-normal@g.us_POLL2' },
+      msgKey: { _serialized: 'false_grupo-normal@g.us_VOTE9' },
+    });
+    fake.emit('vote_update', {
+      voter: '56912345678@c.us',
+      selectedOptions: [{ localId: 2 }, { localId: 2 }, { localId: 0, name: 'Cero' }],
+      parentMessage: { id: { _serialized: 'true_grupo-normal@g.us_POLL2' } },
+    });
+    // Sin votante válido o sin mensaje padre se descarta.
+    fake.emit('vote_update', { voter: 'status@broadcast', selectedOptions: [], parentMsgKey: 'x' });
+    fake.emit('vote_update', { voter: '56912345678@c.us', selectedOptions: [{ localId: 0 }] });
+    await vi.waitFor(() => expect(pollVotes).toHaveLength(2));
+    expect(pollVotes[0]).toMatchObject({
+      pollMessageId: 'true_grupo-normal@g.us_poll2',
+      selectedOptions: [],
+      votedAtMs: 1_700_000_000_000,
+    });
+    expect(pollVotes[0]?.eventKey).toMatch(/^poll-vote-id:/u);
+    expect(pollVotes[1]?.selectedOptions).toEqual([
+      { index: 0, name: 'Cero' },
+      { index: 2, name: null },
+    ]);
   });
 
   it('inicializa una vez y registra cada listener una sola vez', async () => {

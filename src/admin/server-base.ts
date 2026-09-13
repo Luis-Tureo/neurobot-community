@@ -38,10 +38,10 @@ import { InteractiveMessageAdapter } from '../core/interactive-message-adapter.j
 import type { PollRepository } from '../core/poll-repository.js';
 import type { PollScheduler } from '../core/poll-scheduler.js';
 import type { PollService } from '../core/poll-service.js';
+import type { PollAnalyticsService } from '../core/poll-analytics-service.js';
 import type { MultiBotManager } from '../core/multi-bot-manager.js';
 import { createDefaultAssistantProfile } from '../core/assistant-profile-defaults.js';
 import type { WhatsAppSessionManager } from '../core/whatsapp-session-manager.js';
-import { toLocalDateTime } from '../core/automatic-message-service.js';
 import {
   sanitizeWhatsAppDisplayName,
   validateWelcomeTemplate,
@@ -512,77 +512,6 @@ const welcomePreviewSchema = z
   })
   .strict();
 
-const pollConfigurationSchema = z
-  .object({
-    enabled: z.boolean(),
-    sendTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u),
-    timezone: z.string().trim().min(1).max(80),
-    toleranceMinutes: z.number().int().min(0).max(180),
-    selectionMode: z.enum(['SAME_FOR_ALL', 'PER_GROUP']),
-    weeklySchedule: z
-      .array(
-        z
-          .object({
-            weekday: z.number().int().min(0).max(6),
-            sendTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u),
-            templateIds: z.array(z.number().int().positive()).min(1),
-          })
-          .strict(),
-      )
-      .max(70)
-      .refine(
-        (schedules) => {
-          const seen = new Set<string>();
-          const counts = new Map<number, number>();
-          for (const s of schedules) {
-            const key = `${s.weekday}:${s.sendTime}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            const count = (counts.get(s.weekday) ?? 0) + 1;
-            if (count > 10) return false;
-            counts.set(s.weekday, count);
-            if (new Set(s.templateIds).size !== s.templateIds.length) return false;
-          }
-          return true;
-        },
-        {
-          message:
-            'La programación semanal contiene horarios duplicados, inválidos o excede el límite de 10 por día.',
-        },
-      ),
-  })
-  .strict();
-
-const pollTemplateSchema = z
-  .object({
-    id: z.number().int().positive().optional(),
-    question: z.string().trim().min(1).max(200),
-    category: z.string().trim().min(1).max(80),
-    options: z.array(z.string().trim().min(1).max(100)).min(2).max(12),
-    allowMultipleAnswers: z.boolean(),
-    enabled: z.boolean(),
-    favorite: z.boolean(),
-    disabledUntil: z.string().datetime().nullable(),
-  })
-  .strict();
-
-const pollOverrideSchema = z
-  .object({
-    localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
-    templateId: z.number().int().positive(),
-    replaceConfirmed: z.boolean().default(false),
-  })
-  .strict();
-
-const pollManualSendSchema = z
-  .object({
-    groupKey: z.string().length(20),
-    templateId: z.number().int().positive(),
-    countsAsDaily: z.boolean(),
-    confirmed: z.literal(true),
-  })
-  .strict();
-
 const aiQueueSettingsSchema = z
   .object({
     maxConcurrent: z.number().int().min(1).max(10),
@@ -619,6 +548,7 @@ export type AdminServerContext = {
   pollRepository?: PollRepository;
   pollService?: PollService;
   pollScheduler?: PollScheduler;
+  pollAnalytics?: PollAnalyticsService;
   aiProvider?: AIProvider;
   brandingDirectory?: string;
   multiBotManager?: MultiBotManager;
@@ -633,7 +563,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
   const sessions = new SessionStore(context.sessionSecret);
   const loginGate = new LoginAttemptGate();
   const manualAutomaticSendGate = new Map<string, number>();
-  const manualPollSendGate = new Map<string, number>();
   const moduleVisibility = new AssistantModuleVisibilityService();
 
   await app.register(cookie);
@@ -3119,363 +3048,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     },
   );
 
-  app.get('/api/polls', { preHandler: requireSession(sessions) }, async (request, reply) => {
-    const botId = parseBotIdQuery(request.query, context);
-    const services = pollServicesFor(context, botId);
-    if (services === null) return pollServiceUnavailable(reply);
-    const { repository, service, scheduler } = services;
-    const groups = context.database.listBotGroups(botId, (identifier) =>
-      context.anonymizer.identifier(identifier),
-    );
-    const groupNames = new Map(groups.map((group) => [group.groupHash, group.name]));
-    const templates = repository.templates();
-    const templateQuestions = new Map(
-      templates.map((template) => [template.id, template.question]),
-    );
-    return {
-      configuration: repository.configuration(),
-      schedulerStarted: scheduler.isStarted(),
-      nextScheduledAt: service.nextScheduledDescription(),
-      templates,
-      hiddenTemplates: repository.hiddenTemplates(),
-      overrides: repository.overrides(),
-      authorizedGroups: groups
-        .filter((group) => group.active && !group.blocked && group.botIsMember === true)
-        .map((group) => ({ key: group.groupHash, name: group.name })),
-      history: repository.history(100).map((entry) => ({
-        id: entry.id,
-        groupKey: context.anonymizer.identifier(entry.groupId),
-        groupName:
-          groupNames.get(context.anonymizer.identifier(entry.groupId)) ?? 'Grupo no disponible',
-        localDate: entry.localDate,
-        templateId: entry.templateId,
-        question: templateQuestions.get(entry.templateId) ?? 'Plantilla eliminada',
-        source: entry.source,
-        status: entry.status,
-        attempts: entry.attempts,
-        scheduledAt: entry.scheduledAt,
-        sentAt: entry.sentAt,
-        failureCode: entry.failureCode,
-      })),
-    };
-  });
-
-  app.patch(
-    '/api/polls/configuration',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const configuration = pollConfigurationSchema.parse(request.body);
-      if (context.database.listAutomationGroupIds(botId).length === 0) {
-        return reply.code(400).send({
-          error: 'Debes seleccionar al menos un grupo para guardar las automatizaciones.',
-          code: 'AUTOMATION_GROUP_REQUIRED',
-        });
-      }
-      services.repository.saveConfiguration(configuration);
-      services.scheduler.reconfigure();
-      audit(context, 'poll_configuration_update', 'daily-poll', 'ok', botId);
-      return {
-        updated: true,
-        configuration,
-        nextScheduledAt: services.service.nextScheduledDescription(),
-      };
-    },
-  );
-
-  app.post(
-    '/api/polls/templates',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const repository = services.repository;
-      const input = pollTemplateSchema.parse(request.body);
-      const existed = input.id === undefined ? null : repository.template(input.id);
-      if (input.id !== undefined && existed === null) {
-        return reply
-          .code(404)
-          .send({ error: 'Plantilla no encontrada.', code: 'POLL_TEMPLATE_NOT_FOUND' });
-      }
-      const template = repository.saveTemplate({
-        ...(input.id === undefined ? {} : { id: input.id }),
-        question: assertPlainText(input.question),
-        category: assertPlainText(input.category),
-        options: input.options.map((option) => assertPlainText(option)),
-        allowMultipleAnswers: input.allowMultipleAnswers,
-        enabled: input.enabled,
-        favorite: input.favorite,
-        disabledUntil: input.disabledUntil,
-      });
-      const eventType = !template.enabled
-        ? 'POLL_TEMPLATE_DISABLED'
-        : existed === null
-          ? 'POLL_TEMPLATE_CREATED'
-          : 'POLL_TEMPLATE_UPDATED';
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType,
-        source: 'poll',
-        templateId: template.id,
-        category: template.category,
-        result: 'ok',
-      });
-      audit(
-        context,
-        existed === null ? 'poll_template_create' : 'poll_template_update',
-        String(template.id),
-        'ok',
-        botId,
-      );
-      return reply.code(existed === null ? 201 : 200).send({ template });
-    },
-  );
-
-  app.delete(
-    '/api/polls/templates/:id',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
-      const template = services.repository.template(id);
-      if (template === null) {
-        if (services.repository.hiddenTemplates().some((item) => item.id === id)) {
-          return reply.code(409).send({
-            error: 'Esta encuesta ya fue eliminada de este asistente.',
-            code: 'POLL_TEMPLATE_ALREADY_HIDDEN',
-          });
-        }
-        context.database.recordTechnicalEvent({
-          botId,
-          eventType: 'POLL_ASSISTANT_MISMATCH_REJECTED',
-          source: 'poll',
-          templateId: id,
-          result: 'rejected',
-        });
-        return reply.code(404).send({
-          error: 'No se pudo modificar la encuesta seleccionada.',
-          code: 'POLL_TEMPLATE_NOT_FOUND',
-        });
-      }
-      if (template.isDefault) {
-        const session = getSession(request, sessions) as PanelSession;
-        const outcome = services.repository.hideDefaultTemplate(
-          id,
-          context.anonymizer.identifier(session.username),
-        );
-        if (!outcome.hidden) {
-          return reply.code(409).send({
-            error: 'Esta encuesta ya fue eliminada de este asistente.',
-            code: 'POLL_TEMPLATE_ALREADY_HIDDEN',
-          });
-        }
-        context.database.recordTechnicalEvent({
-          botId,
-          eventType: 'POLL_TEMPLATE_HIDDEN_FOR_ASSISTANT',
-          source: 'poll',
-          templateId: id,
-          result: 'hidden',
-        });
-        if (outcome.cancelledOverrides > 0)
-          context.database.recordTechnicalEvent({
-            botId,
-            eventType: 'FUTURE_POLL_SCHEDULE_CANCELLED',
-            source: 'poll',
-            templateId: id,
-            result: 'cancelled',
-          });
-        audit(context, 'poll_template_hidden_for_assistant', String(id), 'ok', botId);
-        return outcome;
-      }
-      if (!services.repository.deleteTemplate(id)) {
-        return reply.code(404).send({
-          error: 'No se pudo modificar la encuesta seleccionada.',
-          code: 'POLL_TEMPLATE_NOT_FOUND',
-        });
-      }
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'CUSTOM_POLL_DELETED',
-        source: 'poll',
-        templateId: id,
-        result: 'deleted',
-      });
-      audit(context, 'poll_template_delete', String(id), 'ok', botId);
-      return { deleted: true };
-    },
-  );
-
-  app.post(
-    '/api/polls/templates/:id/restore',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
-      const session = getSession(request, sessions) as PanelSession;
-      const restored = services.repository.restoreDefaultTemplate(
-        id,
-        context.anonymizer.identifier(session.username),
-      );
-      if (!restored)
-        return reply.code(409).send({
-          error: 'Esta encuesta ya se encuentra disponible.',
-          code: 'POLL_TEMPLATE_ALREADY_ACTIVE',
-        });
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'POLL_TEMPLATE_RESTORED_FOR_ASSISTANT',
-        source: 'poll',
-        templateId: id,
-        result: 'restored',
-      });
-      audit(context, 'poll_template_restored_for_assistant', String(id), 'ok', botId);
-      return { restored: true };
-    },
-  );
-
-  app.post(
-    '/api/polls/templates/restore-defaults',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const session = getSession(request, sessions) as PanelSession;
-      const restored = services.repository.restoreDefaults(
-        context.anonymizer.identifier(session.username),
-      );
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'ALL_DEFAULT_POLLS_RESTORED_FOR_ASSISTANT',
-        source: 'poll',
-        result: restored > 0 ? 'restored' : 'unchanged',
-      });
-      audit(context, 'poll_templates_restore_defaults', 'default-polls', 'ok', botId);
-      return { restored };
-    },
-  );
-
-  app.put(
-    '/api/polls/overrides',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const repository = services.repository;
-      const input = pollOverrideSchema.parse(request.body);
-      if (
-        input.localDate <= toLocalDateTime(new Date(), repository.configuration().timezone).date
-      ) {
-        return reply
-          .code(400)
-          .send({ error: 'Selecciona una fecha futura.', code: 'POLL_DATE_NOT_FUTURE' });
-      }
-      const existing = repository.override(input.localDate);
-      if (
-        existing !== null &&
-        existing.templateId !== input.templateId &&
-        !input.replaceConfirmed
-      ) {
-        return reply.code(409).send({
-          error: 'La fecha ya tiene una encuesta. Confirma su reemplazo.',
-          code: 'POLL_OVERRIDE_REPLACEMENT_CONFIRMATION_REQUIRED',
-        });
-      }
-      const override = repository.saveOverride(input.localDate, input.templateId);
-      audit(context, 'poll_override_save', input.localDate, 'ok', botId);
-      return { override };
-    },
-  );
-
-  app.delete(
-    '/api/polls/overrides/:localDate',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const { localDate } = z
-        .object({ localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u) })
-        .parse(request.params);
-      if (!services.repository.deleteOverride(localDate)) {
-        return reply
-          .code(404)
-          .send({ error: 'Programación no encontrada.', code: 'POLL_OVERRIDE_NOT_FOUND' });
-      }
-      audit(context, 'poll_override_delete', localDate, 'ok', botId);
-      return { deleted: true };
-    },
-  );
-
-  app.post(
-    '/api/polls/send-test',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotIdQuery(request.query, context);
-      const services = pollServicesFor(context, botId);
-      if (services === null) return pollServiceUnavailable(reply);
-      const input = pollManualSendSchema.parse(request.body);
-      const groupId = context.database.resolveBotGroupKey(botId, input.groupKey, (identifier) =>
-        context.anonymizer.identifier(identifier),
-      );
-      if (groupId === null || !context.database.canBotSendToGroup(botId, groupId)) {
-        return reply.code(404).send({
-          error: 'El grupo autorizado no está disponible.',
-          code: 'POLL_GROUP_NOT_AVAILABLE',
-        });
-      }
-      const now = Date.now();
-      for (const [key, expiresAt] of manualPollSendGate) {
-        if (expiresAt <= now) manualPollSendGate.delete(key);
-      }
-      const gateKey = `${request.ip}:${botId}:poll-test:${input.groupKey}`;
-      if ((manualPollSendGate.get(gateKey) ?? 0) > now) {
-        return reply.code(429).send({
-          error: 'Espera unos segundos antes de repetir la prueba.',
-          code: 'POLL_TEST_RATE_LIMITED',
-        });
-      }
-      manualPollSendGate.set(gateKey, now + 10_000);
-      try {
-        const result = await services.service.sendManual(
-          input.templateId,
-          groupId,
-          input.countsAsDaily,
-        );
-        audit(
-          context,
-          'poll_manual_send',
-          `${input.templateId}:${input.groupKey}`,
-          result.status,
-          botId,
-        );
-        return reply.code(result.status === 'SENT' ? 200 : 502).send(result);
-      } catch (error) {
-        const code = error instanceof Error ? error.message : 'POLL_TEST_FAILED';
-        const known = new Set([
-          'POLL_TEMPLATE_UNAVAILABLE',
-          'DUPLICATE_DAILY_POLL',
-          'GROUP_NOT_AVAILABLE',
-          'GROUP_SILENCED',
-          'BOT_DISABLED',
-          'WHATSAPP_NOT_CONNECTED',
-        ]);
-        if (!known.has(code)) throw error;
-        return reply
-          .code(code === 'WHATSAPP_NOT_CONNECTED' ? 503 : 409)
-          .send({ error: 'No fue posible enviar la encuesta de prueba.', code });
-      }
-    },
-  );
-
   app.post(
     '/api/connection/restart',
     { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
@@ -3540,7 +3112,7 @@ function cookieOptions(request: FastifyRequest) {
   };
 }
 
-function audit(
+export function audit(
   context: AdminServerContext,
   actionType: string,
   resource: string,
@@ -3560,7 +3132,7 @@ function parseBotId(params: unknown): string {
   return z.object({ botId: z.string().regex(/^[a-z][a-z0-9-]{2,39}$/u) }).parse(params).botId;
 }
 
-function parseBotIdQuery(query: unknown, context: AdminServerContext): string {
+export function parseBotIdQuery(query: unknown, context: AdminServerContext): string {
   const botId = z
     .object({
       botId: z
@@ -3607,7 +3179,7 @@ function automaticMessagesFor(context: AdminServerContext, botId: string) {
   );
 }
 
-function pollServicesFor(context: AdminServerContext, botId: string) {
+export function pollServicesFor(context: AdminServerContext, botId: string) {
   const repository =
     context.multiBotManager?.pollRepository(botId) ??
     (botId === 'neurobot' ? (context.pollRepository ?? null) : null);
@@ -3617,9 +3189,12 @@ function pollServicesFor(context: AdminServerContext, botId: string) {
   const scheduler =
     context.multiBotManager?.pollScheduler(botId) ??
     (botId === 'neurobot' ? (context.pollScheduler ?? null) : null);
-  return repository === null || service === null || scheduler === null
+  const analytics =
+    context.multiBotManager?.pollAnalytics(botId) ??
+    (botId === 'neurobot' ? (context.pollAnalytics ?? null) : null);
+  return repository === null || service === null || scheduler === null || analytics === null
     ? null
-    : { repository, service, scheduler };
+    : { repository, service, scheduler, analytics };
 }
 
 function safeBotResponse(bot: NonNullable<ReturnType<AppDatabase['getBot']>>) {
@@ -3812,7 +3387,7 @@ function exceedsSafeDefaults(settings: z.infer<typeof aiSettingsSchema>): boolea
   );
 }
 
-function pollServiceUnavailable(reply: FastifyReply): FastifyReply {
+export function pollServiceUnavailable(reply: FastifyReply): FastifyReply {
   return reply.code(503).send({
     error: 'El servicio de encuestas no está disponible.',
     code: 'POLL_SERVICE_UNAVAILABLE',

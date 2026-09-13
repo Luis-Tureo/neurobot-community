@@ -45,28 +45,33 @@ describe('interfaz de mensajes automáticos', () => {
     expect(script).toContain('/api/automatic-messages/templates/restore-all');
   });
 
-  it('programa una o varias encuestas por cada día de la semana y hora', () => {
+  it('configura la automatización de encuestas solo con hora inicial y recurrencia', () => {
     const automaticSection = html.slice(
       html.indexOf('id="section-automatic-messages"'),
       html.indexOf('id="section-polls"'),
     );
     expect(automaticSection).toContain('Programación semanal de encuestas');
-    expect(automaticSection).toContain('id="poll-weekly-schedule"');
+    expect(automaticSection).toContain('id="poll-automation-form"');
+    expect(automaticSection).toContain('name="poll_start_time"');
+    expect(automaticSection).toContain('name="poll_interval_hours"');
+    expect(automaticSection).toContain('Guardar configuración');
+    expect(automaticSection).toContain('id="poll-next-send"');
+    for (const hours of [1, 2, 3, 4, 5, 6, 8, 12, 24]) {
+      expect(automaticSection).toContain(`<option value="${hours}"`);
+    }
+    expect(automaticSection).not.toContain('id="poll-weekly-schedule"');
     expect(automaticSection).not.toContain('Fecha futura');
     expect(automaticSection).not.toContain('Encuestas por fecha');
     expect(automaticSection.indexOf('Programación semanal de encuestas')).toBeGreaterThan(
       automaticSection.indexOf('id="automatic-messages-form"'),
     );
-    expect(script).toContain('renderWeeklyPollSchedule');
-    expect(script).toContain('collectWeeklyPollSchedule');
-    expect(script).toContain('templateIds');
-    expect(script).toContain("document.querySelectorAll('.poll-weekly-choices[open]')");
-    const menuStyles = styles.slice(
-      styles.indexOf('.poll-weekly-choices summary'),
-      styles.indexOf('.actions {', styles.indexOf('.poll-weekly-choices summary')),
-    );
-    expect(menuStyles).toContain('position: absolute;');
-    expect(menuStyles).toContain('.poll-weekly-options label:has(input:checked)');
+    expect(script).not.toContain('renderWeeklyPollSchedule');
+    expect(script).not.toContain('collectWeeklyPollSchedule');
+    expect(script).not.toContain('templateIds');
+    expect(script).toContain("api(botScopedPath('/api/polls/configuration')");
+    expect(script).toContain('intervalHours: Number(form.elements.poll_interval_hours.value)');
+    expect(styles).toContain('.poll-automation-form');
+    expect(styles).not.toContain('.poll-weekly-choices');
   });
 
   it('selecciona grupos reutilizables antes de la programación semanal', () => {

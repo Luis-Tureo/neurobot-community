@@ -1,616 +1,792 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { toSantiagoDateTime } from '../src/core/automatic-message-service.js';
-import { DEFAULT_POLL_TEMPLATES, POLL_CATEGORIES } from '../src/core/poll-defaults.js';
+import {
+  PollGenerationError,
+  type PollContentGenerator,
+  type PollGenerationRequest,
+  type PollGenerationResult,
+} from '../src/core/poll-generator.js';
+import { PollPlanner } from '../src/core/poll-planner.js';
 import { PollRepository } from '../src/core/poll-repository.js';
 import { PollScheduler } from '../src/core/poll-scheduler.js';
 import { PollSender } from '../src/core/poll-sender.js';
 import { PollService } from '../src/core/poll-service.js';
-import { PollTemplateSelector } from '../src/core/poll-template-selector.js';
-import { createDefaultAssistantProfile } from '../src/core/assistant-profile-defaults.js';
+import { PollVoteService } from '../src/core/poll-vote-service.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { Anonymizer } from '../src/security/anonymizer.js';
 
 const GROUP_ID = 'encuestas@g.us';
+const SECOND_GROUP_ID = 'segundo@g.us';
+const TZ_OFFSET = '-03:00';
 
-function createSubject(path = ':memory:', initialNow = new Date('2026-01-05T16:00:00.000Z')) {
-  const database = new AppDatabase(path);
+function at(localDate: string, localTime: string, offset = TZ_OFFSET): Date {
+  return new Date(`${localDate}T${localTime}:00${offset}`);
+}
+
+class FakeGenerator implements PollContentGenerator {
+  public available = true;
+  public failures = 0;
+  public calls: PollGenerationRequest[] = [];
+  private counter = 0;
+  public scripted: Array<PollGenerationResult | Error> = [];
+
+  public isAvailable(): boolean {
+    return this.available;
+  }
+
+  public async generate(request: PollGenerationRequest): Promise<PollGenerationResult> {
+    this.calls.push(request);
+    const scripted = this.scripted.shift();
+    if (scripted instanceof Error) throw scripted;
+    if (scripted !== undefined) return { ...scripted, category: request.category };
+    if (this.failures > 0) {
+      this.failures -= 1;
+      throw new PollGenerationError('AI_UNAVAILABLE', 'AI_TIMEOUT', true);
+    }
+    this.counter += 1;
+    return {
+      // Palabras sintéticas distintas por encuesta para no activar la detección de similitud.
+      question: `¿Prefieres k${this.counter}z o w${this.counter}q para ${request.category}?`,
+      options: ['Opción A', 'Opción B', 'Opción C'],
+      category: request.category,
+      attempts: 1,
+      model: 'openai/gpt-oss-120b',
+      totalTokens: 30,
+    };
+  }
+}
+
+function createSubject(options: { path?: string; initialNow?: Date; groups?: string[] } = {}) {
+  const database = new AppDatabase(options.path ?? ':memory:');
   database.migrate();
-  database.upsertDetectedGroup(GROUP_ID, 'Grupo encuestas');
-  database.setGroupAuthorized(GROUP_ID, true);
+  for (const groupId of options.groups ?? [GROUP_ID]) {
+    database.upsertDetectedGroup(groupId, `Grupo ${groupId}`);
+    database.setGroupAuthorized(groupId, true);
+  }
   const client = new SimulatedMessagingClient();
+  const logger = createLogger('silent');
+  const anonymizer = new Anonymizer('x'.repeat(32));
   const repository = new PollRepository(database);
-  const selector = new PollTemplateSelector(repository);
-  let currentNow = initialNow;
+  let currentNow = options.initialNow ?? at('2026-01-05', '08:00');
   const now = () => currentNow;
-  const sender = new PollSender(
-    repository,
-    database,
-    client,
-    createLogger('silent'),
-    new Anonymizer('x'.repeat(32)),
-    { retryDelayMs: 0, sleep: async () => undefined, now },
-  );
-  const service = new PollService(
-    repository,
-    selector,
-    sender,
-    database,
-    client,
-    createLogger('silent'),
-    new Anonymizer('x'.repeat(32)),
-    { now },
-  );
+  const generator = new FakeGenerator();
+  const planner = new PollPlanner(repository, generator, database, logger, {
+    now,
+    random: () => 0.5,
+    generationBackoffMs: 5 * 60_000,
+  });
+  const sender = new PollSender(repository, database, client, logger, anonymizer, {
+    retryDelayMs: 0,
+    sleep: async () => undefined,
+    now,
+  });
+  const service = new PollService(repository, planner, sender, database, client, logger, {
+    now,
+    interruptedAfterMs: 60_000,
+  });
+  const votes = new PollVoteService(repository, database, logger, anonymizer, { now });
+  client.setEvents({
+    onMessage: async () => undefined,
+    onStateChange: () => undefined,
+    onReady: () => undefined,
+    onQr: () => undefined,
+    onPollVote: async (event) => {
+      await votes.handle(event);
+    },
+  });
   return {
     database,
     client,
     repository,
-    selector,
+    generator,
+    planner,
     service,
+    votes,
+    anonymizer,
+    now,
     setNow(value: Date) {
       currentNow = value;
     },
   };
 }
 
-function enablePolls(repository: PollRepository): void {
-  repository.saveConfiguration({
+function enable(
+  service: PollService,
+  overrides: { startTime?: string; intervalHours?: number } = {},
+) {
+  return service.updateConfiguration({
     enabled: true,
-    sendTime: '13:00',
+    startTime: overrides.startTime ?? '09:00',
+    intervalHours: overrides.intervalHours ?? 3,
     timezone: 'America/Santiago',
-    toleranceMinutes: 30,
-    selectionMode: 'SAME_FOR_ALL',
-    weeklySchedule: [],
   });
 }
 
-describe('banco y selección de encuestas', () => {
-  it('oculta y restaura una predeterminada solamente para el asistente seleccionado', () => {
-    const { database, repository, selector } = createSubject();
+describe('configuración de la automatización de encuestas', () => {
+  it('guarda hora inicial y recurrencia y calcula el próximo envío desde la configuración', () => {
+    const subject = createSubject();
     try {
-      const other = database.createBot({
-        id: 'comunidad-alternativa',
-        mode: 'mixed',
-        connectorType: 'WHATSAPP_WEB',
-        sessionPath: 'data/sessions/comunidad-alternativa',
-        profile: createDefaultAssistantProfile({
-          organizationName: 'Comunidad alternativa',
-          botName: 'Bot alternativo',
-          organizationType: 'Comunidad',
-          timezone: 'America/Santiago',
-        }),
-      });
-      const otherRepository = new PollRepository(database, other.id);
-      const target = repository.templates().find((template) => template.isDefault);
-      if (target === undefined || target.defaultKey === null)
-        throw new Error('Falta plantilla predeterminada.');
-      expect(otherRepository.templates()).toContainEqual(
-        expect.objectContaining({ defaultKey: target.defaultKey }),
-      );
-      repository.saveOverride('2099-10-10', target.id);
-      const outcome = repository.hideDefaultTemplate(target.id, 'actor-seguro');
-      expect(outcome).toMatchObject({ hidden: true, cancelledOverrides: 1 });
-      expect(repository.template(target.id)).toBeNull();
-      expect(repository.hiddenTemplates()).toMatchObject([{ id: target.id }]);
-      expect(otherRepository.templates()).toContainEqual(
-        expect.objectContaining({ defaultKey: target.defaultKey }),
-      );
-      expect(selector.select('2099-10-10', null, new Date('2099-10-10T16:00:00Z'))?.id).not.toBe(
-        target.id,
-      );
-      expect(DEFAULT_POLL_TEMPLATES.some((template) => template.key === target.defaultKey)).toBe(
-        true,
-      );
-      expect(repository.restoreDefaultTemplate(target.id, 'actor-seguro')).toBe(true);
-      expect(repository.restoreDefaultTemplate(target.id, 'actor-seguro')).toBe(false);
-      expect(repository.templates().filter((template) => template.id === target.id)).toHaveLength(
-        1,
-      );
-    } finally {
-      database.close();
-    }
-  });
-
-  it('restaura todas sin afectar encuestas personalizadas', () => {
-    const { database, repository } = createSubject();
-    try {
-      const defaults = repository
-        .templates()
-        .filter((template) => template.isDefault)
-        .slice(0, 2);
-      const custom = repository.saveTemplate({
-        question: 'Encuesta personalizada segura',
-        category: 'Actividades',
-        options: ['Una', 'Dos'],
-        allowMultipleAnswers: false,
+      const saved = enable(subject.service, { startTime: '09:00', intervalHours: 3 });
+      expect(saved).toMatchObject({
         enabled: true,
-        favorite: false,
-        disabledUntil: null,
+        startTime: '09:00',
+        intervalHours: 3,
+        timezone: 'America/Santiago',
+        anchorLocalDate: '2026-01-05',
       });
-      defaults.forEach((template) => repository.hideDefaultTemplate(template.id, 'actor-seguro'));
-      expect(repository.restoreDefaults('actor-seguro')).toBe(2);
-      expect(repository.template(custom.id)).not.toBeNull();
-      expect(repository.restoreDefaults('actor-seguro')).toBe(0);
-    } finally {
-      database.close();
-    }
-  });
-  it('incluye 36 encuestas en las 12 categorías requeridas', () => {
-    expect(DEFAULT_POLL_TEMPLATES).toHaveLength(36);
-    expect(POLL_CATEGORIES).toHaveLength(12);
-    for (const template of DEFAULT_POLL_TEMPLATES) {
-      expect(template.options.length).toBeGreaterThanOrEqual(2);
-      expect(template.options.length).toBeLessThanOrEqual(12);
-    }
-  });
-
-  it('evita preguntas médicas o invasivas y ofrece salida en ánimo o energía', () => {
-    const serialized = DEFAULT_POLL_TEMPLATES.map((template) => template.question).join(' ');
-    expect(serialized).not.toMatch(
-      /medicamento|diagn[oó]stico personal|traum[aá]tic|crisis personal/iu,
-    );
-    for (const template of DEFAULT_POLL_TEMPLATES.filter((item) =>
-      ['Estado de ánimo general', 'Energía'].includes(item.category),
-    )) {
-      expect(template.options).toContain('Prefiero no responder.');
-    }
-  });
-
-  it('valida cantidad, duplicados, longitud, HTML y código', () => {
-    const { database, repository } = createSubject();
-    const base = {
-      question: 'Pregunta segura',
-      category: 'Actividades',
-      allowMultipleAnswers: false,
-      enabled: true,
-      favorite: false,
-      disabledUntil: null,
-    };
-    try {
-      expect(() => repository.saveTemplate({ ...base, options: ['Una'] })).toThrow();
-      expect(() =>
-        repository.saveTemplate({
-          ...base,
-          options: Array.from({ length: 13 }, (_, index) => `Opción ${index}`),
-        }),
-      ).toThrow();
-      expect(() => repository.saveTemplate({ ...base, options: ['Una', ' una '] })).toThrow();
-      expect(() =>
-        repository.saveTemplate({ ...base, question: 'x'.repeat(201), options: ['Una', 'Dos'] }),
-      ).toThrow();
-      expect(() =>
-        repository.saveTemplate({ ...base, question: '<b>texto</b>', options: ['Una', 'Dos'] }),
-      ).toThrow();
-      expect(() =>
-        repository.saveTemplate({ ...base, question: '```texto```', options: ['Una', 'Dos'] }),
-      ).toThrow();
-    } finally {
-      database.close();
-    }
-  });
-
-  it('selecciona de forma determinista, excluye desactivadas y respeta una fecha fijada', () => {
-    const { database, repository, selector } = createSubject();
-    try {
-      const first = selector.select('2026-01-05', null, new Date('2026-01-05T16:00:00Z'));
-      const repeated = selector.select('2026-01-05', null, new Date('2026-01-05T16:00:00Z'));
-      expect(repeated?.id).toBe(first?.id);
-      if (first === null) throw new Error('No se seleccionó plantilla.');
-      repository.saveTemplate({ ...first, enabled: false });
-      expect(selector.select('2026-01-05', null, new Date('2026-01-05T16:00:00Z'))?.id).not.toBe(
-        first.id,
-      );
-      const fixed = repository.templates().find((template) => template.enabled);
-      if (fixed === undefined) throw new Error('No existe plantilla activa.');
-      repository.saveOverride('2026-01-06', fixed.id);
-      expect(selector.select('2026-01-06', null, new Date('2026-01-06T16:00:00Z'))?.id).toBe(
-        fixed.id,
+      expect(saved.activatedAt).toBe(subject.now().toISOString());
+      expect(subject.service.nextScheduledDescription()).toBe('Hoy · 09:00');
+      subject.setNow(at('2026-01-05', '10:00'));
+      expect(subject.service.nextScheduledDescription()).toBe('Hoy · 12:00');
+      expect(subject.service.nextSlots(4).map((slot) => slot.localTime)).toEqual([
+        '12:00',
+        '15:00',
+        '18:00',
+        '21:00',
+      ]);
+      subject.service.updateConfiguration({ intervalHours: 4 });
+      expect(subject.repository.configuration().intervalHours).toBe(4);
+      expect(subject.service.nextSlots(3).map((slot) => slot.localTime)).toEqual([
+        '13:00',
+        '17:00',
+        '21:00',
+      ]);
+      expect(() => subject.service.updateConfiguration({ intervalHours: 7 })).toThrow(
+        'POLL_INTERVAL_NOT_SUPPORTED',
       );
     } finally {
-      database.close();
+      subject.database.close();
     }
   });
 
-  it('no repite plantilla en 30 días y evita una tercera categoría consecutiva', () => {
-    const { database, repository, selector } = createSubject();
+  it('al activar solo considera horarios futuros y al desactivar no envía ni borra datos', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '10:30') });
     try {
-      const first = selector.select('2026-01-01', GROUP_ID, new Date('2026-01-01T16:00:00Z'));
-      if (first === null) throw new Error('No se seleccionó plantilla.');
-      markSent(repository, GROUP_ID, '2026-01-01', first.id);
-      const next = selector.select('2026-01-02', GROUP_ID, new Date('2026-01-02T16:00:00Z'));
-      expect(next?.id).not.toBe(first.id);
+      enable(subject.service);
+      await subject.service.runDueTasks();
+      const scheduled = subject.repository.list({
+        statuses: ['scheduled'],
+        orderBy: 'scheduled_asc',
+      });
+      expect(scheduled[0]?.slotKey).toBe('2026-01-05T12:00');
+      expect(scheduled.some((poll) => poll.slotKey === '2026-01-05T09:00')).toBe(false);
 
-      const categoryTemplates = repository
-        .templates()
-        .filter((item) => item.category === 'Descanso');
-      markSent(repository, GROUP_ID, '2026-01-03', categoryTemplates[0]?.id as number);
-      markSent(repository, GROUP_ID, '2026-01-04', categoryTemplates[1]?.id as number);
+      subject.setNow(at('2026-01-05', '12:00'));
+      await subject.service.runDueTasks();
+      expect(subject.client.sentPolls).toHaveLength(1);
+
+      subject.service.updateConfiguration({ enabled: false });
+      expect(subject.repository.list({ statuses: ['scheduled'] })).toHaveLength(0);
+      expect(subject.repository.list({ statuses: ['sent'] })).toHaveLength(1);
+      subject.setNow(at('2026-01-05', '15:00'));
+      await subject.service.runDueTasks();
+      expect(subject.client.sentPolls).toHaveLength(1);
+      expect(subject.service.nextScheduledDescription()).toBeNull();
+
+      // Reactivar mucho después: no envía los horarios acumulados, continúa desde el siguiente.
+      subject.setNow(at('2026-01-06', '16:30'));
+      enable(subject.service);
+      await subject.service.runDueTasks();
+      expect(subject.client.sentPolls).toHaveLength(1);
+      const next = subject.repository.list({ statuses: ['scheduled'], orderBy: 'scheduled_asc' });
+      expect(next[0]?.slotKey).toBe('2026-01-06T18:00');
+      expect(subject.repository.list({ statuses: ['sent'] })).toHaveLength(1);
+    } finally {
+      subject.database.close();
+    }
+  });
+
+  it('al cambiar la recurrencia recalcula solo los horarios futuros y conserva lo enviado', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '11:00') });
+    try {
+      enable(subject.service, { intervalHours: 3 });
+      await subject.service.runDueTasks();
+      subject.setNow(at('2026-01-05', '12:00'));
+      await subject.service.runDueTasks();
+      const sent = subject.repository.list({ statuses: ['sent'] });
+      expect(sent).toHaveLength(1);
+      const before = subject.repository.list({ statuses: ['scheduled'] }).length;
+      expect(before).toBeGreaterThan(0);
+
+      subject.service.updateConfiguration({ intervalHours: 4 });
+      expect(subject.repository.list({ statuses: ['scheduled'] })).toHaveLength(0);
+      const pooled = subject.repository.list({ statuses: ['generated'] });
+      expect(pooled.length).toBe(before);
+      await subject.service.runDueTasks();
+      const rescheduled = subject.repository.list({
+        statuses: ['scheduled'],
+        orderBy: 'scheduled_asc',
+      });
+      expect(rescheduled[0]?.slotKey).toBe('2026-01-05T13:00');
+      expect(rescheduled[1]?.slotKey).toBe('2026-01-05T17:00');
+      // El contenido preparado se reutilizó en vez de volver a generarse.
       expect(
-        selector.select('2026-01-05', GROUP_ID, new Date('2026-01-05T16:00:00Z'))?.category,
-      ).not.toBe('Descanso');
+        rescheduled
+          .slice(0, before)
+          .map((poll) => poll.id)
+          .sort(),
+      ).toEqual(pooled.map((poll) => poll.id).sort());
+      expect(subject.repository.list({ statuses: ['sent'] })).toEqual(sent);
+      expect(subject.repository.list({ statuses: ['sent'] })[0]?.slotKey).toBe('2026-01-05T12:00');
     } finally {
-      database.close();
+      subject.database.close();
+    }
+  });
+
+  it('descarta horarios vencidos sin enviarlos y continúa con el siguiente válido', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:00') });
+    try {
+      enable(subject.service);
+      await subject.service.runDueTasks();
+      const first = subject.repository.list({
+        statuses: ['scheduled'],
+        orderBy: 'scheduled_asc',
+      })[0];
+      expect(first?.slotKey).toBe('2026-01-05T09:00');
+      // El backend estuvo detenido: reaparece dos horarios después.
+      subject.setNow(at('2026-01-05', '15:10'));
+      const result = await subject.service.runDueTasks();
+      expect(result.released).toBe(2);
+      expect(subject.client.sentPolls).toHaveLength(1);
+      const sent = subject.repository.list({ statuses: ['sent'] })[0];
+      expect(sent?.slotKey).toBe('2026-01-05T15:00');
+      // El contenido preparado para el horario vencido no se pierde: vuelve a la reserva y se
+      // reasigna al siguiente horario válido en vez de enviarse atrasado.
+      expect(subject.repository.poll(first?.id ?? 0)).toMatchObject({
+        status: 'sent',
+        slotKey: '2026-01-05T15:00',
+      });
+      const skipped = subject.database
+        .getTechnicalEvents()
+        .filter((event) => event.event_type === 'POLL_SLOT_SKIPPED');
+      expect(skipped).toHaveLength(2);
+    } finally {
+      subject.database.close();
+    }
+  });
+
+  it('usa la zona horaria configurada para calcular los instantes', async () => {
+    const subject = createSubject({ initialNow: new Date('2026-01-05T07:30:00Z') });
+    try {
+      subject.service.updateConfiguration({
+        enabled: true,
+        startTime: '09:00',
+        intervalHours: 24,
+        timezone: 'Europe/Madrid',
+      });
+      await subject.service.runDueTasks();
+      const scheduled = subject.repository.list({
+        statuses: ['scheduled'],
+        orderBy: 'scheduled_asc',
+      });
+      expect(scheduled[0]?.scheduledFor).toBe('2026-01-05T08:00:00.000Z');
+      expect(subject.service.nextScheduledDescription()).toBe('Hoy · 09:00');
+    } finally {
+      subject.database.close();
     }
   });
 });
 
-describe('servicio y programador de encuestas', () => {
-  afterEach(() => vi.useRealTimers());
-
-  it('interpreta 13:00 de Santiago en verano e invierno', () => {
-    expect(toSantiagoDateTime(new Date('2026-01-05T16:00:00Z')).time).toBe('13:00');
-    expect(toSantiagoDateTime(new Date('2026-07-06T17:00:00Z')).time).toBe('13:00');
+describe('generación y planificación anticipada', () => {
+  it('prepara aproximadamente una semana de encuestas sin repetir preguntas', async () => {
+    const subject = createSubject();
+    try {
+      subject.planner = new PollPlanner(
+        subject.repository,
+        subject.generator,
+        subject.database,
+        createLogger('silent'),
+        {
+          now: subject.now,
+          random: () => 0.5,
+          maxGenerationsPerRun: 100,
+        },
+      );
+      enable(subject.service, { intervalHours: 4 });
+      const plan = await subject.planner.ensureCoverage();
+      expect(plan.slots).toBeGreaterThanOrEqual(42);
+      expect(plan.assigned).toBe(plan.slots);
+      expect(plan.generated).toBe(plan.slots);
+      const scheduled = subject.repository.list({ statuses: ['scheduled'] });
+      expect(new Set(scheduled.map((poll) => poll.normalizedQuestion)).size).toBe(scheduled.length);
+      expect(new Set(scheduled.map((poll) => poll.slotKey)).size).toBe(scheduled.length);
+      // Una segunda pasada no crea duplicados.
+      const again = await subject.planner.ensureCoverage();
+      expect(again.assigned).toBe(0);
+      expect(subject.repository.list({ statuses: ['scheduled'] })).toHaveLength(scheduled.length);
+      // Las categorías rotan entre temas distintos.
+      expect(new Set(scheduled.map((poll) => poll.category)).size).toBeGreaterThan(10);
+      // Las preguntas recientes se pasan a Groq para evitar repeticiones.
+      const lastCall = subject.generator.calls.at(-1);
+      expect(lastCall?.avoidQuestions.length).toBeGreaterThan(0);
+    } finally {
+      subject.database.close();
+    }
   });
 
-  it('envía encuestas solo a los grupos seleccionados y una sola vez al día', async () => {
-    const { database, repository, client, service } = createSubject();
+  it('descarta encuestas parecidas a las recientes e intenta otra categoría', async () => {
+    const subject = createSubject();
     try {
-      enablePolls(repository);
-      database.upsertDetectedGroup('segundo@g.us', 'Segundo grupo');
-      database.setGroupAuthorized('segundo@g.us', true);
-      database.replaceAutomationGroupIds('neurobot', ['segundo@g.us']);
-      await service.runDueTasks();
-      await service.runDueTasks();
-      expect(client.sentPolls).toHaveLength(1);
-      expect(client.sentPolls[0]).toMatchObject({
-        chatId: 'segundo@g.us',
+      enable(subject.service);
+      subject.repository.insert({
+        question: '¿Qué ambiente te ayuda más a concentrarte?',
+        normalizedQuestion: 'que ambiente te ayuda mas a concentrarte',
+        options: ['Silencio', 'Música'],
+        category: 'concentración',
+        origin: 'ai',
+        status: 'generated',
+      });
+      const similar = {
+        question: '¿Qué ambiente te ayuda mas a concentrarte? 🧠',
+        options: ['Silencio', 'Música', 'Ruido'],
+        category: 'concentración',
+        attempts: 1,
+        model: null,
+        totalTokens: 1,
+      };
+      subject.generator.scripted = [similar, similar];
+      const generated = await subject.planner.ensureCoverage();
+      expect(generated.assigned).toBe(1);
+      expect(subject.generator.calls).toHaveLength(2);
+      expect(subject.generator.calls[0]?.category).not.toBe(subject.generator.calls[1]?.category);
+      expect(subject.repository.list({ statuses: ['scheduled'] })).toHaveLength(1);
+      const discarded = subject.database
+        .getTechnicalEvents()
+        .filter((event) => event.event_type === 'POLL_GENERATION_DISCARDED');
+      expect(discarded.length).toBe(2);
+    } finally {
+      subject.database.close();
+    }
+  });
+
+  it('con Groq caído cubre solo el horario inminente reutilizando historial con cooldown', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '11:40') });
+    try {
+      enable(subject.service);
+      const old = subject.repository.insert({
+        question: '¿Cómo prefieres empezar tu mañana?',
+        normalizedQuestion: 'como prefieres empezar tu manana',
+        options: ['Con calma', 'Con música'],
+        category: 'rutinas',
+        origin: 'ai',
+        status: 'generated',
+      });
+      subject.repository.assignSlot(old.id, '2025-12-01T09:00', '2025-12-01T12:00:00.000Z');
+      subject.repository.claimForSending(old.id, at('2025-12-01', '09:00'));
+      subject.repository.complete(old.id, 'sent', at('2025-12-01', '09:00'), null);
+      const recent = subject.repository.insert({
+        question: '¿Qué música te acompaña al trabajar?',
+        normalizedQuestion: 'que musica te acompana al trabajar',
+        options: ['Ninguna', 'Instrumental'],
+        category: 'música',
+        origin: 'ai',
+        status: 'generated',
+      });
+      subject.repository.assignSlot(recent.id, '2026-01-04T09:00', '2026-01-04T12:00:00.000Z');
+      subject.repository.claimForSending(recent.id, at('2026-01-04', '09:00'));
+      subject.repository.complete(recent.id, 'sent', at('2026-01-04', '09:00'), null);
+
+      subject.generator.failures = 10;
+      const plan = await subject.planner.ensureCoverage();
+      expect(plan.assigned).toBe(1);
+      expect(plan.reused).toBe(1);
+      expect(plan.pending).toBeGreaterThan(0);
+      const scheduled = subject.repository.list({ statuses: ['scheduled'] });
+      expect(scheduled[0]).toMatchObject({
+        origin: 'reused',
+        sourcePollId: old.id,
+        slotKey: '2026-01-05T12:00',
+      });
+      // Dentro de la pausa no vuelve a llamar a Groq.
+      const calls = subject.generator.calls.length;
+      await subject.planner.ensureCoverage();
+      expect(subject.generator.calls).toHaveLength(calls);
+      // Pasada la pausa vuelve a intentar generar.
+      subject.setNow(at('2026-01-05', '11:46'));
+      subject.generator.failures = 0;
+      const recovered = await subject.planner.ensureCoverage();
+      expect(recovered.generated).toBeGreaterThan(0);
+    } finally {
+      subject.database.close();
+    }
+  });
+
+  it('sin historial recurre al banco heredado como último recurso', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '11:50') });
+    try {
+      enable(subject.service);
+      subject.generator.available = false;
+      const plan = await subject.planner.ensureCoverage();
+      expect(plan.bank).toBe(1);
+      const scheduled = subject.repository.list({ statuses: ['scheduled'] })[0];
+      expect(scheduled?.origin).toBe('legacy_bank');
+      expect(scheduled?.sourceTemplateId).not.toBeNull();
+      expect(scheduled?.options.length).toBeGreaterThanOrEqual(2);
+      // El siguiente slot inminente toma otra plantilla distinta.
+      subject.setNow(at('2026-01-05', '14:50'));
+      await subject.service.runDueTasks();
+      subject.setNow(at('2026-01-05', '14:51'));
+      await subject.planner.ensureCoverage();
+      const all = subject.repository.list({ statuses: ['scheduled', 'sent', 'sending'] });
+      expect(new Set(all.map((poll) => poll.sourceTemplateId)).size).toBe(all.length);
+    } finally {
+      subject.database.close();
+    }
+  });
+
+  it('cuando no hay cooldown disponible reutiliza primero la menos reciente', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-20', '11:50') });
+    try {
+      enable(subject.service);
+      subject.generator.available = false;
+      const insertSent = (question: string, sentAt: Date) => {
+        const poll = subject.repository.insert({
+          question,
+          normalizedQuestion: question.toLowerCase(),
+          options: ['Sí', 'No'],
+          category: 'comunidad',
+          origin: 'ai',
+          status: 'generated',
+        });
+        subject.repository.assignSlot(poll.id, `slot-${poll.id}`, sentAt.toISOString());
+        subject.repository.claimForSending(poll.id, sentAt);
+        subject.repository.complete(poll.id, 'sent', sentAt, null);
+        return poll;
+      };
+      const older = insertSent('¿Prefieres reuniones cortas o largas?', at('2026-01-10', '09:00'));
+      insertSent('¿Te gusta planificar la semana?', at('2026-01-12', '09:00'));
+      const plan = await subject.planner.ensureCoverage();
+      expect(plan.reused).toBe(1);
+      expect(subject.repository.list({ statuses: ['scheduled'] })[0]?.sourcePollId).toBe(older.id);
+    } finally {
+      subject.database.close();
+    }
+  });
+});
+
+describe('envío de encuestas nativas', () => {
+  it('envía una sola vez por horario aunque el tick se repita y guarda el id del mensaje', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:00') });
+    try {
+      enable(subject.service);
+      await subject.service.runDueTasks();
+      subject.setNow(at('2026-01-05', '09:00'));
+      const scheduler = new PollScheduler(subject.service, createLogger('silent'), 10);
+      await Promise.all([subject.service.runDueTasks(), subject.service.runDueTasks()]);
+      await scheduler.tick();
+      await subject.service.runDueTasks();
+      expect(subject.client.sentPolls).toHaveLength(1);
+      expect(subject.client.sentPolls[0]).toMatchObject({
+        chatId: GROUP_ID,
         allowMultipleAnswers: false,
       });
-      expect(database.listPollSendHistory()).toMatchObject([{ status: 'SENT', attempts: 1 }]);
+      const sent = subject.repository.list({ statuses: ['sent'] });
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.slotKey).toBe('2026-01-05T09:00');
+      const deliveries = subject.repository.deliveries(sent[0]?.id ?? 0);
+      expect(deliveries).toHaveLength(1);
+      expect(deliveries[0]?.whatsappMessageId).toBe(subject.client.sentPolls[0]?.messageId);
+      expect(deliveries[0]?.status).toBe('sent');
+      // Un reinicio no reenvía el horario: la restricción única lo bloquea.
+      expect(
+        subject.repository.assignSlot(
+          subject.repository.insert({
+            question: '¿Otra?',
+            normalizedQuestion: 'otra',
+            options: ['A', 'B'],
+            category: 'x',
+            origin: 'ai',
+            status: 'generated',
+          }).id,
+          '2026-01-05T09:00',
+          sent[0]?.scheduledFor ?? '',
+        ),
+      ).toBe(false);
     } finally {
-      database.close();
+      subject.database.close();
     }
   });
 
-  it('envía varias encuestas configuradas para el mismo día semanal sin duplicarlas', async () => {
-    const { database, repository, client, service } = createSubject();
+  it('reintenta ante fallos de WhatsApp y registra intentos y error', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:59') });
     try {
-      const templates = repository.templates().slice(0, 2);
-      expect(templates).toHaveLength(2);
-      repository.saveConfiguration({
-        enabled: true,
-        sendTime: '13:00',
-        timezone: 'America/Santiago',
-        toleranceMinutes: 30,
-        selectionMode: 'SAME_FOR_ALL',
-        weeklySchedule: [
-          { weekday: 1, sendTime: '13:00', templateIds: templates.map((template) => template.id) },
-        ],
+      enable(subject.service);
+      await subject.service.runDueTasks();
+      subject.setNow(at('2026-01-05', '09:00'));
+      subject.client.failSending = true;
+      const result = await subject.service.runDueTasks();
+      expect(result.failed).toBe(1);
+      const failed = subject.repository.list({ statuses: ['failed'] });
+      expect(failed).toHaveLength(1);
+      expect(failed[0]?.lastError).not.toBeNull();
+      const delivery = subject.repository.deliveries(failed[0]?.id ?? 0)[0];
+      expect(delivery).toMatchObject({ status: 'failed', attempts: 2 });
+      expect(delivery?.lastAttemptAt).not.toBeNull();
+      expect(delivery?.lastError).not.toBeNull();
+      // No entra en bucle: el siguiente tick no vuelve a intentar ese horario.
+      subject.client.failSending = false;
+      await subject.service.runDueTasks();
+      expect(subject.client.sentPolls).toHaveLength(0);
+    } finally {
+      subject.database.close();
+    }
+  });
+
+  it('envía a todos los grupos de la automatización y omite los no disponibles', async () => {
+    const subject = createSubject({
+      initialNow: at('2026-01-05', '08:59'),
+      groups: [GROUP_ID, SECOND_GROUP_ID],
+    });
+    try {
+      enable(subject.service);
+      await subject.service.runDueTasks();
+      subject.database.setSilence(SECOND_GROUP_ID, at('2026-01-05', '10:00'));
+      subject.setNow(at('2026-01-05', '09:00'));
+      await subject.service.runDueTasks();
+      const sent = subject.repository.list({ statuses: ['sent'] })[0];
+      const deliveries = subject.repository.deliveries(sent?.id ?? 0);
+      expect(deliveries.filter((delivery) => delivery.status === 'sent')).toHaveLength(
+        subject.client.sentPolls.length,
+      );
+      expect(subject.client.sentPolls.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      subject.database.close();
+    }
+  });
+
+  it('con WhatsApp desconectado no envía y no consume el contenido; tras reconectar envía si sigue vigente', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:59') });
+    try {
+      enable(subject.service);
+      await subject.service.runDueTasks();
+      subject.setNow(at('2026-01-05', '09:00'));
+      subject.client.connectionState = 'DISCONNECTED';
+      await subject.service.runDueTasks();
+      expect(subject.client.sentPolls).toHaveLength(0);
+      expect(subject.repository.list({ statuses: ['scheduled'] })[0]?.slotKey).toBe(
+        '2026-01-05T09:00',
+      );
+      subject.setNow(at('2026-01-05', '09:10'));
+      subject.client.connectionState = 'CONNECTED';
+      await subject.service.runDueTasks();
+      expect(subject.client.sentPolls).toHaveLength(1);
+    } finally {
+      subject.database.close();
+    }
+  });
+
+  it('cierra envíos interrumpidos por un reinicio según sus entregas', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:59') });
+    try {
+      enable(subject.service);
+      await subject.service.runDueTasks();
+      const poll = subject.repository.list({
+        statuses: ['scheduled'],
+        orderBy: 'scheduled_asc',
+      })[0];
+      subject.repository.claimForSending(poll?.id ?? 0, at('2026-01-05', '09:00'));
+      subject.setNow(at('2026-01-05', '09:05'));
+      await subject.service.runDueTasks();
+      expect(subject.repository.poll(poll?.id ?? 0)).toMatchObject({
+        status: 'failed',
+        lastError: 'SEND_INTERRUPTED',
       });
-      await service.runDueTasks();
-      await service.runDueTasks();
-      expect(client.sentPolls).toHaveLength(2);
-      expect(database.listPollSendHistory()).toHaveLength(2);
     } finally {
-      database.close();
+      subject.database.close();
     }
   });
 
-  it('bloquea dos tareas simultáneas', async () => {
-    const { database, repository, client, service } = createSubject();
+  it('no envía encuestas cuando el conector no soporta Poll y lo deja registrado', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:59') });
     try {
-      enablePolls(repository);
-      await Promise.all([service.runDueTasks(), service.runDueTasks()]);
-      expect(client.sentPolls).toHaveLength(1);
+      subject.client.nativePollsSupported = false;
+      enable(subject.service);
+      await subject.service.runDueTasks();
+      subject.setNow(at('2026-01-05', '09:00'));
+      const result = await subject.service.runDueTasks();
+      expect(result.skipped).toBe(1);
+      expect(subject.client.sentPolls).toHaveLength(0);
+      expect(subject.repository.list({ statuses: ['skipped'] })[0]?.lastError).toBe(
+        'POLL_NOT_SUPPORTED_BY_CONNECTOR',
+      );
+      await expect(subject.service.sendManual(GROUP_ID)).rejects.toThrow(
+        'POLL_NOT_SUPPORTED_BY_CONNECTOR',
+      );
+      expect(subject.service.nativePollsSupported()).toBe(false);
     } finally {
-      database.close();
+      subject.database.close();
     }
   });
 
-  it('persiste el bloqueo diario después de reiniciar', async () => {
-    const directory = mkdtempSync(join(tmpdir(), 'poll-restart-'));
-    const path = join(directory, 'bot.db');
-    const first = createSubject(path);
-    enablePolls(first.repository);
-    await first.service.runDueTasks();
-    first.database.close();
-    const second = createSubject(path);
+  it('el envío manual usa contenido preparado sin tocar los horarios programados', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '10:00') });
+    try {
+      enable(subject.service);
+      await subject.service.runDueTasks();
+      const scheduledBefore = subject.repository.list({ statuses: ['scheduled'] }).length;
+      const manual = await subject.service.sendManual(GROUP_ID);
+      expect(manual.status).toBe('sent');
+      expect(subject.client.sentPolls).toHaveLength(1);
+      expect(subject.repository.poll(manual.pollId)).toMatchObject({
+        status: 'sent',
+        source: 'manual',
+        slotKey: null,
+      });
+      expect(subject.repository.list({ statuses: ['scheduled'] })).toHaveLength(scheduledBefore);
+    } finally {
+      subject.database.close();
+    }
+  });
+
+  it('sobrevive reinicios: el estado persistido evita reenviar y continúa con el siguiente', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'neurobot-polls-'));
+    const path = join(directory, 'polls.db');
+    const first = createSubject({ path, initialNow: at('2026-01-05', '08:59') });
+    try {
+      enable(first.service);
+      await first.service.runDueTasks();
+      first.setNow(at('2026-01-05', '09:00'));
+      await first.service.runDueTasks();
+      expect(first.client.sentPolls).toHaveLength(1);
+    } finally {
+      first.database.close();
+    }
+    const second = createSubject({ path, initialNow: at('2026-01-05', '09:03') });
     try {
       await second.service.runDueTasks();
       expect(second.client.sentPolls).toHaveLength(0);
-      expect(second.database.listPollSendHistory()).toHaveLength(1);
+      expect(second.repository.list({ statuses: ['sent'] })).toHaveLength(1);
+      second.setNow(at('2026-01-05', '12:00'));
+      await second.service.runDueTasks();
+      expect(second.client.sentPolls).toHaveLength(1);
+      expect(second.repository.list({ statuses: ['sent'] }).map((poll) => poll.slotKey)).toEqual([
+        '2026-01-05T09:00',
+        '2026-01-05T12:00',
+      ]);
     } finally {
       second.database.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });
+});
 
-  it('reintenta como máximo dos veces y conserva el código seguro', async () => {
-    const { database, repository, client, service } = createSubject();
-    try {
-      enablePolls(repository);
-      client.failSending = true;
-      const result = await service.runDueTasks();
-      expect(result.failed).toBe(1);
-      expect(database.listPollSendHistory()[0]).toMatchObject({ status: 'FAILED', attempts: 2 });
-      expect(JSON.stringify(database.getTechnicalEvents())).not.toContain(GROUP_ID);
-    } finally {
-      database.close();
-    }
-  });
+describe('recepción de votos', () => {
+  async function sendOne(subject: ReturnType<typeof createSubject>) {
+    enable(subject.service);
+    await subject.service.runDueTasks();
+    subject.setNow(at('2026-01-05', '09:00'));
+    await subject.service.runDueTasks();
+    const poll = subject.repository.list({ statuses: ['sent'] })[0];
+    if (poll === undefined) throw new Error('sin encuesta enviada');
+    const messageId = subject.client.sentPolls[0]?.messageId ?? '';
+    return { poll, messageId };
+  }
 
-  it('espera conexión dentro de tolerancia y no recupera fuera del horario', async () => {
-    const { database, repository, client, service, setNow } = createSubject();
-    try {
-      enablePolls(repository);
-      client.ready = false;
-      client.connectionState = null;
-      await service.runDueTasks();
-      expect(client.sentPolls).toHaveLength(0);
-      client.ready = true;
-      client.connectionState = 'CONNECTED';
-      setNow(new Date('2026-01-05T16:20:00Z'));
-      await service.runDueTasks();
-      expect(client.sentPolls).toHaveLength(1);
-      setNow(new Date('2026-01-06T16:31:00Z'));
-      await service.runDueTasks();
-      expect(client.sentPolls).toHaveLength(1);
-    } finally {
-      database.close();
-    }
-  });
+  function vote(
+    messageId: string,
+    voterId: string,
+    indexes: number[],
+    votedAtMs: number,
+    names: Array<string | null> = [],
+  ) {
+    return {
+      pollMessageId: messageId,
+      voterId,
+      selectedOptions: indexes.map((index, position) => ({
+        index,
+        name: names[position] ?? null,
+      })),
+      votedAtMs,
+      eventKey: `poll-vote:${messageId}:${voterId}:${votedAtMs}:${indexes.join(',')}`,
+    };
+  }
 
-  it('respeta función desactivada, bot apagado, silencio, archivo y ausencia del bot', async () => {
-    const { database, repository, client, service } = createSubject();
+  it('registra votos, ignora duplicados y trata cambios como reemplazo', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:59') });
     try {
-      await service.runDueTasks();
-      enablePolls(repository);
-      database.setSetting('bot_enabled', false);
-      await service.runDueTasks();
-      database.setSetting('bot_enabled', true);
-      database.setSilence(GROUP_ID, new Date('2026-01-05T17:00:00Z'));
-      await service.runDueTasks();
-      database.archiveGroup(GROUP_ID);
-      await service.runDueTasks();
-      expect(client.sentPolls).toHaveLength(0);
-      expect(database.listPollSendHistory()).toHaveLength(0);
-    } finally {
-      database.close();
-    }
-  });
-
-  it('permite respuestas múltiples y nunca envía a privado', async () => {
-    const { database, repository, client, service } = createSubject();
-    try {
-      enablePolls(repository);
-      const template = repository.saveTemplate({
-        question: 'Elige una o más actividades',
-        category: 'Actividades',
-        options: ['Leer', 'Jugar'],
-        allowMultipleAnswers: true,
-        enabled: true,
-        favorite: false,
-        disabledUntil: null,
+      const { poll, messageId } = await sendOne(subject);
+      const t0 = at('2026-01-05', '09:05').getTime();
+      expect(await subject.votes.handle(vote(messageId, '56911111111@c.us', [0], t0))).toBe(
+        'recorded',
+      );
+      expect(await subject.votes.handle(vote(messageId, '56911111111@c.us', [0], t0))).toBe(
+        'duplicate_ignored',
+      );
+      expect(await subject.votes.handle(vote(messageId, '56911111111@c.us', [1], t0 + 1000))).toBe(
+        'updated',
+      );
+      const results = subject.database.listPollOptionVotes([poll.id]).get(poll.id);
+      expect(results?.options.get(0) ?? 0).toBe(0);
+      expect(results?.options.get(1)).toBe(1);
+      expect(results?.participants).toBe(1);
+      // Un evento más antiguo que el último procesado no revierte el estado.
+      expect(await subject.votes.handle(vote(messageId, '56911111111@c.us', [0], t0 - 5000))).toBe(
+        'stale_ignored',
+      );
+      expect(subject.database.listPollOptionVotes([poll.id]).get(poll.id)?.options.get(1)).toBe(1);
+      // Retirar el voto (selección vacía) deja de contar.
+      expect(await subject.votes.handle(vote(messageId, '56911111111@c.us', [], t0 + 2000))).toBe(
+        'updated',
+      );
+      expect(
+        subject.database.countPollVotes('2026-01-01T00:00:00.000Z', '2026-12-31T00:00:00.000Z'),
+      ).toMatchObject({
+        votes: 0,
+        participants: 0,
       });
-      const sent = await service.sendManual(template.id, GROUP_ID, false);
-      expect(sent.status).toBe('SENT');
-      expect(client.sentPolls[0]).toMatchObject({ allowMultipleAnswers: true, chatId: GROUP_ID });
-      await expect(service.sendManual(template.id, '56912345678@c.us', false)).rejects.toThrow(
-        'PRIVATE_CHAT',
-      );
-      expect(client.sentPolls).toHaveLength(1);
     } finally {
-      database.close();
+      subject.database.close();
     }
   });
 
-  it('permite una prueba manual aunque la programación diaria esté desactivada', async () => {
-    const { database, repository, client, service } = createSubject();
+  it('cuenta varios votantes y varias opciones sin exponer identificadores', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:59') });
     try {
-      expect(repository.configuration().enabled).toBe(false);
-      const template = repository.templates()[0];
-      if (template === undefined) throw new Error('Falta plantilla.');
-      const result = await service.sendManual(template.id, GROUP_ID, false);
-      expect(result.status).toBe('SENT');
-      expect(client.sentPolls).toHaveLength(1);
-      await service.runDueTasks();
-      expect(client.sentPolls).toHaveLength(1);
+      const { poll, messageId } = await sendOne(subject);
+      const t0 = at('2026-01-05', '09:05').getTime();
+      await subject.votes.handle(vote(messageId, '56911111111@c.us', [0], t0));
+      await subject.votes.handle(vote(messageId, '56922222222@c.us', [0], t0 + 1));
+      await subject.votes.handle(vote(messageId, '56933333333@c.us', [2], t0 + 2));
+      await subject.client.emitPollVote(vote(messageId, '111222333@lid', [1], t0 + 3));
+      const results = subject.database.listPollOptionVotes([poll.id]).get(poll.id);
+      expect(results?.participants).toBe(4);
+      expect([0, 1, 2].map((index) => results?.options.get(index) ?? 0)).toEqual([2, 1, 1]);
+      const raw = subject.database
+        .getTechnicalEvents()
+        .filter((event) => event.event_type === 'POLL_VOTE_RECEIVED');
+      expect(raw).toHaveLength(4);
+      expect(raw.every((row) => /^[0-9a-f]{20}$/u.test(String(row.user_hash)))).toBe(true);
+      expect(JSON.stringify(raw)).not.toContain('56911111111');
     } finally {
-      database.close();
+      subject.database.close();
     }
   });
 
-  it('el envío manual solo bloquea el día cuando se solicita expresamente', async () => {
-    const { database, repository, client, service } = createSubject();
+  it('valida las opciones por localId y nombre exacto e ignora encuestas desconocidas', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:59') });
     try {
-      enablePolls(repository);
-      const template = repository.templates()[0];
-      if (template === undefined) throw new Error('Falta plantilla.');
-      await service.sendManual(template.id, GROUP_ID, false);
-      await service.runDueTasks();
-      expect(client.sentPolls).toHaveLength(2);
-    } finally {
-      database.close();
-    }
-  });
-
-  it('registra un solo temporizador al iniciar y reconfigurar', () => {
-    vi.useFakeTimers();
-    const { database, service } = createSubject();
-    const scheduler = new PollScheduler(service, createLogger('silent'), 30_000);
-    try {
-      scheduler.start();
-      scheduler.start();
-      expect(vi.getTimerCount()).toBe(1);
-      scheduler.reconfigure();
-      expect(vi.getTimerCount()).toBe(1);
-      scheduler.stop();
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      database.close();
-    }
-  });
-
-  it('ejecuta múltiples horarios independientes en el mismo día y envía las encuestas correspondientes', async () => {
-    const subject = createSubject(undefined, new Date('2026-01-05T13:00:00Z')); // Lunes 10:00 America/Santiago (UTC-3)
-    const { database, repository, client, service, setNow } = subject;
-    try {
-      const templates = repository.templates().slice(0, 4);
-      expect(templates.length).toBeGreaterThanOrEqual(4);
-      const [t1, t2, t3, t4] = templates as [
-        (typeof templates)[0],
-        (typeof templates)[0],
-        (typeof templates)[0],
-        (typeof templates)[0],
-      ];
-
-      repository.saveConfiguration({
-        enabled: true,
-        sendTime: '13:00',
-        timezone: 'America/Santiago',
-        toleranceMinutes: 15,
-        selectionMode: 'SAME_FOR_ALL',
-        weeklySchedule: [
-          { weekday: 1, sendTime: '10:00', templateIds: [t1.id] },
-          { weekday: 1, sendTime: '14:30', templateIds: [t2.id, t3.id] },
-          { weekday: 1, sendTime: '20:00', templateIds: [t4.id] },
-        ],
-      });
-
-      // 1. Ejecución a las 10:00
-      setNow(new Date('2026-01-05T13:00:00Z')); // 10:00 local
-      const res1 = await service.runDueTasks();
-      expect(res1.sent).toBe(1);
-      expect(client.sentPolls).toHaveLength(1);
-      expect(client.sentPolls[0]?.question).toBe(t1.question);
-
-      // Repetición dentro de tolerancia no duplica
-      const res1Dup = await service.runDueTasks();
-      expect(res1Dup.sent).toBe(0);
-      expect(client.sentPolls).toHaveLength(1);
-
-      // 2. Ejecución a las 14:30 (UTC: 17:30)
-      setNow(new Date('2026-01-05T17:30:00Z')); // 14:30 local
-      const res2 = await service.runDueTasks();
-      expect(res2.sent).toBe(2);
-      expect(client.sentPolls).toHaveLength(3);
-      expect(client.sentPolls[1]?.question).toBe(t2.question);
-      expect(client.sentPolls[2]?.question).toBe(t3.question);
-
-      // Repetición no duplica
-      const res2Dup = await service.runDueTasks();
-      expect(res2Dup.sent).toBe(0);
-      expect(client.sentPolls).toHaveLength(3);
-
-      // 3. Ejecución a las 20:00 (UTC: 23:00)
-      setNow(new Date('2026-01-05T23:00:00Z')); // 20:00 local
-      const res3 = await service.runDueTasks();
-      expect(res3.sent).toBe(1);
-      expect(client.sentPolls).toHaveLength(4);
-      expect(client.sentPolls[3]?.question).toBe(t4.question);
-
-      // Historial completo
-      expect(database.listPollSendHistory()).toHaveLength(4);
-    } finally {
-      database.close();
-    }
-  });
-
-  it('calcula la próxima programación considerando múltiples horarios por día', () => {
-    const { database, repository, service } = createSubject();
-    try {
-      const templates = repository.templates();
-      repository.saveConfiguration({
-        enabled: true,
-        sendTime: '13:00',
-        timezone: 'America/Santiago',
-        toleranceMinutes: 15,
-        selectionMode: 'SAME_FOR_ALL',
-        weeklySchedule: [
-          { weekday: 1, sendTime: '10:00', templateIds: [templates[0]!.id] },
-          { weekday: 1, sendTime: '14:30', templateIds: [templates[1]!.id] },
-          { weekday: 1, sendTime: '20:00', templateIds: [templates[2]!.id] },
-          { weekday: 2, sendTime: '11:00', templateIds: [templates[0]!.id] },
-        ],
-      });
-
-      // Lunes 09:00 -> próxima 10:00 Lunes
-      expect(service.nextScheduledDescription(new Date('2026-01-05T12:00:00Z'))).toBe(
-        '2026-01-05 10:00 America/Santiago',
+      const { poll, messageId } = await sendOne(subject);
+      const t0 = at('2026-01-05', '09:05').getTime();
+      expect(
+        await subject.votes.handle(vote('true_otro@g.us_xyz', '56911111111@c.us', [0], t0)),
+      ).toBe('unknown_poll');
+      expect(await subject.votes.handle(vote(messageId, '56911111111@c.us', [9], t0))).toBe(
+        'invalid_option',
       );
-
-      // Lunes 11:00 -> próxima 14:30 Lunes
-      expect(service.nextScheduledDescription(new Date('2026-01-05T14:00:00Z'))).toBe(
-        '2026-01-05 14:30 America/Santiago',
-      );
-
-      // Lunes 16:00 -> próxima 20:00 Lunes
-      expect(service.nextScheduledDescription(new Date('2026-01-05T19:00:00Z'))).toBe(
-        '2026-01-05 20:00 America/Santiago',
-      );
-
-      // Lunes 21:00 -> próxima Martes 11:00
-      expect(service.nextScheduledDescription(new Date('2026-01-06T00:00:00Z'))).toBe(
-        '2026-01-06 11:00 America/Santiago',
-      );
+      expect(
+        await subject.votes.handle(vote(messageId, '56911111111@c.us', [0], t0, ['Otra cosa'])),
+      ).toBe('invalid_option');
+      expect(
+        await subject.votes.handle(
+          vote(messageId, '56911111111@c.us', [0], t0 + 1, [poll.options[0] ?? null]),
+        ),
+      ).toBe('recorded');
+      expect(subject.database.listPollOptionVotes([poll.id]).get(poll.id)?.options.get(0)).toBe(1);
     } finally {
-      database.close();
-    }
-  });
-
-  it('omite de forma segura una encuesta eliminada o deshabilitada sin romper el scheduler', async () => {
-    const subject = createSubject(undefined, new Date('2026-01-05T13:00:00Z')); // Lunes 10:00 local
-    const { database, repository, client, service } = subject;
-    try {
-      const templates = repository.templates();
-      const t1 = templates[0]!;
-      const t2 = templates[1]!;
-
-      // 1. Guardar con t1 y t2
-      repository.saveConfiguration({
-        enabled: true,
-        sendTime: '13:00',
-        timezone: 'America/Santiago',
-        toleranceMinutes: 30,
-        selectionMode: 'SAME_FOR_ALL',
-        weeklySchedule: [{ weekday: 1, sendTime: '10:00', templateIds: [t1.id, t2.id] }],
-      });
-
-      // 2. Posteriormente deshabilitar t1
-      database.savePollTemplate(
-        {
-          id: t1.id,
-          question: t1.question,
-          category: t1.category,
-          options: [...t1.options],
-          allowMultipleAnswers: t1.allowMultipleAnswers,
-          enabled: false,
-          favorite: t1.favorite,
-          disabledUntil: null,
-        },
-        'neurobot',
-      );
-
-      // 3. Ejecución: omite t1 de forma segura y envía t2
-      const res = await service.runDueTasks();
-      expect(res.sent).toBe(1);
-      expect(client.sentPolls).toHaveLength(1);
-      expect(client.sentPolls[0]?.question).toBe(t2.question);
-    } finally {
-      database.close();
+      subject.database.close();
     }
   });
 });
-
-function markSent(
-  repository: PollRepository,
-  groupId: string,
-  localDate: string,
-  templateId: number,
-): void {
-  const history = repository.claim({
-    deduplicationKey: `test:${groupId}:${localDate}`,
-    groupId,
-    localDate,
-    templateId,
-    source: 'scheduled',
-    countsAsDaily: true,
-    scheduledAt: new Date(`${localDate}T16:00:00Z`),
-  });
-  if (history === null) throw new Error('No se pudo registrar el historial de prueba.');
-  repository.beginAttempt(history.id, new Date(`${localDate}T16:00:00Z`));
-  repository.completeAttempt(history.id, 'SENT', new Date(`${localDate}T16:00:00Z`), null);
-}

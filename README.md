@@ -62,7 +62,7 @@ El bot entrega información general. No diagnostica, no recomienda medicamentos,
 - Panel en español con contraseña, hash `scrypt`, cookies HttpOnly, SameSite estricto, protección CSRF, fuerza bruta básica, CSP y validación del servidor.
 - Cierre limpio de WhatsApp, servidor y SQLite.
 - Cliente simulado para pruebas sin conexión real a WhatsApp.
-- Encuestas nativas diarias con banco SQLite editable, selección determinista e historial sin datos de votantes.
+- Encuestas nativas generadas por IA con recurrencia configurable, resultados reales de WhatsApp y votantes solo como hash.
 
 ## Crear y vincular un asistente
 
@@ -276,20 +276,23 @@ Los botones de prueba requieren sesión, CSRF, confirmación explícita y un gru
 
 Las pruebas automatizadas usan el cliente simulado y fechas controladas; no contactan WhatsApp ni envían mensajes reales.
 
-## Encuestas diarias
+## Encuestas automáticas
 
-La sección **Encuestas** usa la clase `Poll` de la versión instalada de `whatsapp-web.js`; no simula alternativas mediante texto. La migración 5 crea el banco de 36 encuestas en 12 categorías y deja la función desactivada para evitar publicaciones accidentales. Al activarla, la configuración inicial es 13:00, `America/Santiago`, 30 minutos de tolerancia y una misma pregunta diaria para todos los grupos.
+La sección **Encuestas** ya no administra un banco manual: en **Automatizaciones → Programación
+semanal de encuestas** solo se configura _Activo_, _Hora de inicio_ y _Enviar una nueva encuesta
+cada N horas_ (1, 2, 3, 4, 5, 6, 8, 12 o 24). Groq genera automáticamente encuestas distintas
+sobre experiencias cotidianas de personas neurodivergentes (concentración, descanso, rutinas,
+sensorialidad, hobbies…), con 2 a 6 alternativas y tono amigable; nunca preguntas diagnósticas.
+El contenido se prepara con una semana de anticipación y se envía como `Poll` nativo de
+`whatsapp-web.js` en los horarios calculados desde la configuración (09:00 cada 3 horas → 09:00,
+12:00, 15:00… 00:00, 03:00), sin drift y con una restricción única por horario.
 
-La selección es determinista: excluye plantillas desactivadas o suspendidas, respeta una encuesta fijada por fecha, evita repetir una plantilla durante 30 días y una categoría por más de dos días consecutivos. Si el banco activo no alcanza, reduce progresivamente la ventana de repetición sin permitir más de una encuesta diaria por grupo. SQLite reclama primero una clave única de grupo y fecha; esto bloquea duplicados ante reinicios, reconexiones, tareas concurrentes y pruebas contadas como envío del día. Cada envío tiene como máximo dos intentos.
-
-El panel permite activar la tarea, cambiar hora y tolerancia, elegir modo global o por grupo, crear y editar plantillas, ordenar opciones por líneas, habilitar respuestas múltiples, marcar favoritas, excluirlas temporalmente, restaurar predeterminadas, fijar una fecha y revisar historial. Para probar:
-
-1. Autorice un grupo normal y confirme que aparece activo y con el bot presente.
-2. Active **Encuestas** y guarde la programación.
-3. En **Enviar encuesta de prueba**, elija grupo y plantilla, revise la vista previa y pulse el botón.
-4. Confirme el diálogo. Marque **Contar como encuesta del día** solo si desea bloquear el envío automático de esa fecha.
-
-No existe listener de votos. El bot no guarda nombres, números, identificadores de votantes, alternativas elegidas ni resultados individuales; tampoco interpreta respuestas o inicia mensajes privados por un voto. Los registros técnicos contienen solo hashes de grupo, ID y categoría de plantilla, fecha, hora, resultado, intento y código seguro.
+Los votos (`vote_update`) se asocian a la encuesta por el id del mensaje de WhatsApp, se aplican
+como reemplazo de la selección anterior y se deduplican de forma persistente. El dashboard
+**Encuestas** muestra total de votos, participantes únicos, encuestas con participación, promedio
+por encuesta, votos por día, encuestas más votadas, resultados por opción, categorías y tendencias,
+todo calculado con datos reales. Solo se almacena un hash del votante; el panel nunca muestra
+números. Detalles en [Encuestas automáticas](docs/ENCUESTAS_AUTOMATICAS.md).
 
 ## Restablecimiento manual de sesión
 
@@ -326,7 +329,7 @@ No actualice directamente en el grupo oficial.
 
 Las llamadas a IA usan una [cola independiente por asistente](docs/COLA_DE_INTELIGENCIA_ARTIFICIAL.md) con concurrencia, reintentos, single-flight, circuit breaker y salida ordenada por chat.
 
-La administración de plantillas predeterminadas está aislada por asistente. Consulte [Encuestas por asistente](docs/ENCUESTAS_POR_ASISTENTE.md) para ocultarlas, restaurarlas y entender el tratamiento de automatizaciones futuras.
+La automatización y los resultados de encuestas se describen en [Encuestas automáticas](docs/ENCUESTAS_AUTOMATICAS.md); el banco antiguo se conserva de solo lectura como último recurso.
 
 La [bienvenida de integrantes](docs/BIENVENIDA_DE_INTEGRANTES.md) usa localmente el nombre público configurado en WhatsApp, menciones reales cuando son compatibles y un texto genérico sin exponer números.
 

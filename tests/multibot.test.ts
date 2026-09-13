@@ -212,16 +212,21 @@ describe('aislamiento multibot', () => {
 
     const firstPolls = new PollRepository(database, first.id);
     const secondPolls = new PollRepository(database, second.id);
-    const originalFirst = firstPolls.templates()[0]!;
-    firstPolls.saveTemplate({
-      id: originalFirst.id,
+    firstPolls.saveConfiguration({
+      enabled: true,
+      startTime: '11:00',
+      intervalHours: 6,
+      timezone: 'America/Santiago',
+      anchorLocalDate: '2026-01-05',
+      activatedAt: '2026-01-05T14:00:00.000Z',
+    });
+    firstPolls.insert({
       question: 'Pregunta exclusiva del primer asistente',
-      category: originalFirst.category,
-      options: originalFirst.options,
-      allowMultipleAnswers: originalFirst.allowMultipleAnswers,
-      enabled: originalFirst.enabled,
-      favorite: originalFirst.favorite,
-      disabledUntil: originalFirst.disabledUntil,
+      normalizedQuestion: 'pregunta exclusiva del primer asistente',
+      options: ['Sí', 'No'],
+      category: 'comunidad',
+      origin: 'ai',
+      status: 'generated',
     });
 
     expect(database.getAutomaticMessageConfiguration(first.id).welcome.template).toContain(
@@ -230,10 +235,12 @@ describe('aislamiento multibot', () => {
     expect(database.getAutomaticMessageConfiguration(second.id).welcome.template).not.toContain(
       'primer asistente',
     );
-    expect(firstPolls.templates()[0]?.question).toContain('primer asistente');
-    expect(
-      secondPolls.templates().some((template) => template.question.includes('primer asistente')),
-    ).toBe(false);
+    expect(firstPolls.configuration()).toMatchObject({ enabled: true, intervalHours: 6 });
+    expect(secondPolls.configuration()).toMatchObject({ enabled: false, intervalHours: 3 });
+    expect(firstPolls.list({})[0]?.question).toContain('primer asistente');
+    expect(secondPolls.list({})).toHaveLength(0);
+    expect(firstPolls.legacyTemplates()).toHaveLength(36);
+    expect(secondPolls.legacyTemplates()).toHaveLength(36);
   });
 
   it('no bloquea bots por un presupuesto global interno', () => {

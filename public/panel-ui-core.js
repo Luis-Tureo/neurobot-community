@@ -44,18 +44,7 @@ async function fetchPollConfiguration(botId) {
   return response.json();
 }
 
-function pollConfigurationPayload(configuration, enabled) {
-  return {
-    enabled,
-    sendTime: configuration.sendTime || '13:00',
-    timezone: configuration.timezone || 'America/Santiago',
-    toleranceMinutes: configuration.toleranceMinutes ?? 30,
-    selectionMode: configuration.selectionMode || 'SAME_FOR_ALL',
-    weeklySchedule: configuration.weeklySchedule || [],
-  };
-}
-
-async function saveWeeklyPollEnabled(botId, enabled, configuration) {
+async function saveWeeklyPollEnabled(botId, enabled) {
   const csrfToken = await sessionCsrfToken();
   const response = await fetch(botScopedPath('/api/polls/configuration', botId), {
     method: 'PATCH',
@@ -63,7 +52,7 @@ async function saveWeeklyPollEnabled(botId, enabled, configuration) {
       'content-type': 'application/json',
       'x-csrf-token': csrfToken,
     },
-    body: JSON.stringify(pollConfigurationPayload(configuration, enabled)),
+    body: JSON.stringify({ enabled }),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -104,10 +93,10 @@ async function toggleWeeklyPollSchedule() {
   setWeeklyPollToggleState(previousEnabled, true);
 
   try {
-    const result = await fetchPollConfiguration(botId);
     weeklyPollEnabledByBot.set(botId, targetEnabled);
-    await saveWeeklyPollEnabled(botId, targetEnabled, result.configuration);
+    const result = await saveWeeklyPollEnabled(botId, targetEnabled);
     setWeeklyPollToggleState(targetEnabled);
+    window.dispatchEvent(new window.CustomEvent('poll-automation-changed', { detail: result }));
     showToast(
       `Programación semanal de encuestas ${targetEnabled ? 'activada' : 'desactivada'} correctamente.`,
       'success',
@@ -117,45 +106,6 @@ async function toggleWeeklyPollSchedule() {
     setWeeklyPollToggleState(previousEnabled);
     showToast(error.message || 'No fue posible actualizar la programación semanal.', 'error');
   }
-}
-
-function installPollConfigurationEnabledGuard() {
-  if (window.__neurobotPollEnabledGuardInstalled) return;
-  const originalFetch = window.fetch.bind(window);
-
-  window.fetch = async (input, init = {}) => {
-    const rawUrl = typeof input === 'string' ? input : input?.url;
-    const method = String(init.method || (typeof input !== 'string' ? input?.method : '') || 'GET')
-      .toUpperCase();
-
-    if (
-      rawUrl &&
-      method === 'PATCH' &&
-      /\/api\/polls\/configuration(?:\?|$)/u.test(rawUrl) &&
-      typeof init.body === 'string'
-    ) {
-      const url = new window.URL(rawUrl, window.location.origin);
-      const botId = url.searchParams.get('botId') || selectedBotIdFromHash();
-      if (botId && weeklyPollEnabledByBot.has(botId)) {
-        try {
-          const body = JSON.parse(init.body);
-          init = {
-            ...init,
-            body: JSON.stringify({
-              ...body,
-              enabled: weeklyPollEnabledByBot.get(botId),
-            }),
-          };
-        } catch {
-          // Si el body no es JSON válido, dejamos que la solicitud original gestione el error.
-        }
-      }
-    }
-
-    return originalFetch(input, init);
-  };
-
-  window.__neurobotPollEnabledGuardInstalled = true;
 }
 
 function configureWeeklyPollScheduleCard() {
@@ -569,7 +519,6 @@ function revealActiveNavigationGroup() {
 }
 
 function initializePanelUi() {
-  installPollConfigurationEnabledGuard();
   installPanelEnhancementStyles();
   configureAssistantQuickActionOrder();
   configureWeeklyPollScheduleCard();

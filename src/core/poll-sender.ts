@@ -1,26 +1,32 @@
 import type { Logger } from 'pino';
-import type { PollSendHistoryRecord, PollTemplate } from '../domain/types.js';
+import type { PollRecord } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
-import type { LocalDateTime } from './automatic-message-service.js';
 import type { PollRepository } from './poll-repository.js';
 
-export type PollSendResult = {
-  status: 'SENT' | 'FAILED';
-  attempts: number;
-  errorCode: string | null;
+export type PollSendOutcome = {
+  status: 'sent' | 'failed' | 'skipped';
+  sentGroups: number;
+  failedGroups: number;
+  lastError: string | null;
 };
 
 export type PollSenderOptions = {
   retryDelayMs?: number;
+  maximumAttempts?: number;
   now?: () => Date;
   sleep?: (milliseconds: number) => Promise<void>;
 };
 
+/**
+ * Envía una encuesta nativa a cada grupo con reintentos acotados por grupo y registra el id del
+ * mensaje de WhatsApp para poder asociar los votos que lleguen después.
+ */
 export class PollSender {
   private readonly retryDelayMs: number;
+  private readonly maximumAttempts: number;
   private readonly now: () => Date;
   private readonly sleep: (milliseconds: number) => Promise<void>;
 
@@ -33,90 +39,139 @@ export class PollSender {
     options: PollSenderOptions = {},
   ) {
     this.retryDelayMs = options.retryDelayMs ?? 1_000;
+    this.maximumAttempts = Math.max(1, options.maximumAttempts ?? 2);
     this.now = options.now ?? (() => new Date());
     this.sleep = options.sleep ?? wait;
   }
 
-  public async send(
-    history: PollSendHistoryRecord,
-    template: PollTemplate,
-    local: LocalDateTime,
-  ): Promise<PollSendResult> {
-    let attempts = history.attempts;
-    let errorCode: string | null = null;
-    while (attempts < 2) {
-      const attempt = this.repository.beginAttempt(history.id, this.now());
-      if (attempt === null) break;
-      attempts = attempt;
-      this.record(
-        'DAILY_POLL_SEND_ATTEMPT',
-        history.groupId,
-        template,
-        local,
-        'attempted',
-        null,
-        attempt,
-      );
-      try {
-        await this.client.sendPoll(history.groupId, {
-          question: template.question,
-          options: [...template.options],
-          allowMultipleAnswers: template.allowMultipleAnswers,
-        });
-        this.repository.completeAttempt(history.id, 'SENT', this.now(), null);
-        this.record('DAILY_POLL_SENT', history.groupId, template, local, 'sent', null, attempt);
-        return { status: 'SENT', attempts, errorCode: null };
-      } catch (error) {
-        errorCode = serializeError(error, 'DAILY_POLL_SEND_FAILED', false).errorCode;
-        this.repository.completeAttempt(history.id, 'FAILED', this.now(), errorCode);
-        if (attempts < 2) await this.sleep(this.retryDelayMs);
+  public async send(poll: PollRecord, groupIds: string[]): Promise<PollSendOutcome> {
+    const outcome: PollSendOutcome = {
+      status: 'skipped',
+      sentGroups: 0,
+      failedGroups: 0,
+      lastError: null,
+    };
+    for (const groupId of groupIds) {
+      const result = await this.sendToGroup(poll, groupId);
+      if (result.status === 'sent') outcome.sentGroups += 1;
+      else if (result.status === 'failed') {
+        outcome.failedGroups += 1;
+        outcome.lastError = result.errorCode;
       }
     }
-    this.record(
-      'DAILY_POLL_FAILED',
-      history.groupId,
-      template,
-      local,
-      'failed',
-      errorCode ?? 'DAILY_POLL_SEND_FAILED',
-      attempts,
-    );
-    return { status: 'FAILED', attempts, errorCode: errorCode ?? 'DAILY_POLL_SEND_FAILED' };
+    outcome.status =
+      outcome.sentGroups > 0 ? 'sent' : outcome.failedGroups > 0 ? 'failed' : 'skipped';
+    return outcome;
+  }
+
+  private async sendToGroup(
+    poll: PollRecord,
+    groupId: string,
+  ): Promise<{ status: 'sent' | 'failed' | 'skipped'; errorCode: string | null }> {
+    let errorCode: string | null = null;
+    for (;;) {
+      const delivery = this.repository.claimDelivery(
+        poll.id,
+        groupId,
+        this.now(),
+        this.maximumAttempts,
+      );
+      if (delivery === null) {
+        return { status: errorCode === null ? 'skipped' : 'failed', errorCode };
+      }
+      this.record('POLL_SEND_STARTED', poll, groupId, 'attempted', null, delivery.attempts);
+      let messageId: string | null;
+      try {
+        const receipt = await this.client.sendPoll(groupId, {
+          question: poll.question,
+          options: [...poll.options],
+          allowMultipleAnswers: false,
+        });
+        messageId = receipt?.messageId ?? null;
+      } catch (error) {
+        errorCode = serializeError(error, 'POLL_SEND_FAILED', false).errorCode;
+        this.repository.completeDelivery(delivery.id, 'failed', this.now(), {
+          lastError: errorCode,
+        });
+        this.record('POLL_SEND_FAILED', poll, groupId, 'failed', errorCode, delivery.attempts);
+        if (delivery.attempts >= this.maximumAttempts) return { status: 'failed', errorCode };
+        await this.sleep(this.retryDelayMs);
+        continue;
+      }
+      // El mensaje ya salió: un problema al persistir el recibo nunca debe provocar un reenvío.
+      try {
+        this.repository.completeDelivery(delivery.id, 'sent', this.now(), {
+          whatsappMessageId: messageId,
+        });
+      } catch (error) {
+        this.logger.error(
+          {
+            operation: 'POLL_RECEIPT_PERSISTENCE_FAILED',
+            botId: this.repository.botId,
+            pollId: poll.id,
+            groupHash: this.anonymizer.identifier(groupId),
+            ...serializeError(error, 'POLL_RECEIPT_PERSISTENCE_FAILED', false),
+          },
+          'La encuesta se envió pero no fue posible guardar el id del mensaje',
+        );
+        messageId = null;
+        this.repository.completeDelivery(delivery.id, 'sent', this.now(), {
+          whatsappMessageId: null,
+        });
+      }
+      this.record(
+        'POLL_SENT',
+        poll,
+        groupId,
+        messageId === null ? 'sent_without_id' : 'sent',
+        null,
+        delivery.attempts,
+      );
+      if (messageId === null) {
+        this.logger.warn(
+          {
+            operation: 'POLL_SENT_WITHOUT_MESSAGE_ID',
+            botId: this.repository.botId,
+            pollId: poll.id,
+            groupHash: this.anonymizer.identifier(groupId),
+          },
+          'La encuesta se envió pero el conector no devolvió el id del mensaje; no se podrán asociar votos',
+        );
+      }
+      return { status: 'sent', errorCode: null };
+    }
   }
 
   private record(
     eventType: string,
+    poll: PollRecord,
     groupId: string,
-    template: PollTemplate,
-    local: LocalDateTime,
     result: string,
     errorCode: string | null,
-    attempt?: number,
+    attempt: number,
   ): void {
     const fields = {
       operation: eventType,
+      botId: this.repository.botId,
       groupHash: this.anonymizer.identifier(groupId),
-      templateId: template.id,
-      category: template.category,
-      localDate: local.date,
-      localTime: local.time,
+      pollId: poll.id,
+      category: poll.category,
+      origin: poll.origin,
       result,
-      attempt: attempt ?? null,
+      attempt,
       errorCode,
     };
-    this.logger.info(fields, 'Evento de encuestas');
+    this.logger.info(fields, 'Evento de envío de encuestas');
     try {
       this.database.recordTechnicalEvent({
         botId: this.repository.botId,
         eventType,
         source: 'poll',
         groupHash: fields.groupHash,
-        templateId: template.id,
-        category: template.category,
-        localDate: local.date,
-        localTime: local.time,
+        templateId: poll.id,
+        category: poll.category,
         result,
-        ...(attempt === undefined ? {} : { attempt }),
+        attempt,
         ...(errorCode === null ? {} : { errorCode }),
       });
     } catch (error) {

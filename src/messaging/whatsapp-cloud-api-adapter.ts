@@ -1,6 +1,11 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { Logger } from 'pino';
-import type { DetectedGroup, IncomingMessage, NativePoll } from '../domain/types.js';
+import type {
+  DetectedGroup,
+  IncomingMessage,
+  NativePoll,
+  PollSendReceipt,
+} from '../domain/types.js';
 import type {
   InteractiveMenuPayload,
   MessagingClient,
@@ -133,7 +138,11 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
     });
   }
 
-  public async sendPoll(_chatId: string, _poll: NativePoll): Promise<void> {
+  public supportsNativePolls(): boolean {
+    return false;
+  }
+
+  public async sendPoll(_chatId: string, _poll: NativePoll): Promise<PollSendReceipt> {
     throw new Error('Las encuestas comunitarias no pertenecen al conector comercial Cloud API.');
   }
 

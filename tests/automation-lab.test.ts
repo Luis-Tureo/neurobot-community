@@ -11,7 +11,7 @@ describe('centro de pruebas de automatizaciones', () => {
       'Bienvenida agrupada',
       'Saludo diario',
       'Reglas diarias',
-      'Encuesta diaria',
+      'Encuesta automática',
       'Resumen diario',
       'Resumen semanal',
       'Resumen mensual',

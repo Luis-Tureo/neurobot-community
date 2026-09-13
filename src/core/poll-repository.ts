@@ -1,123 +1,134 @@
 import type {
-  PollConfiguration,
-  PollDateOverride,
+  LegacyPollTemplate,
+  PollAutomationConfiguration,
+  PollDeliveryRecord,
   PollDeliverySource,
-  PollSendHistoryRecord,
-  PollTemplate,
+  PollOrigin,
+  PollRecord,
+  PollStatus,
+  PollVoteOutcome,
 } from '../domain/types.js';
 import type { AppDatabase } from '../persistence/database.js';
 
+/** Acceso a datos de encuestas acotado a un asistente. */
 export class PollRepository {
   public constructor(
     private readonly database: AppDatabase,
     public readonly botId = 'neurobot',
   ) {}
 
-  public configuration(): PollConfiguration {
-    return this.database.getPollConfiguration(this.botId);
+  public configuration(): PollAutomationConfiguration {
+    return this.database.getPollAutomationConfiguration(this.botId);
   }
 
-  public saveConfiguration(configuration: PollConfiguration): void {
-    this.database.savePollConfiguration(configuration, this.botId);
+  public saveConfiguration(
+    configuration: Omit<PollAutomationConfiguration, 'updatedAt'>,
+  ): PollAutomationConfiguration {
+    return this.database.savePollAutomationConfiguration(configuration, this.botId);
   }
 
-  public templates(): PollTemplate[] {
-    return this.database.listPollTemplates(this.botId);
+  public legacyTemplates(): LegacyPollTemplate[] {
+    return this.database.listLegacyPollTemplates(this.botId);
   }
 
-  public hiddenTemplates() {
-    return this.database.listHiddenPollTemplates(this.botId);
+  public legacyTemplateUsage(): Map<number, string> {
+    return this.database.listLegacyTemplateUsage(this.botId);
   }
 
-  public hideDefaultTemplate(id: number, safeActorHash: string, reason: string | null = null) {
-    return this.database.hidePollTemplateForAssistant(this.botId, id, safeActorHash, reason);
+  public insert(input: {
+    question: string;
+    normalizedQuestion: string;
+    options: string[];
+    category: string;
+    origin: PollOrigin;
+    sourcePollId?: number | null;
+    sourceTemplateId?: number | null;
+    status: PollStatus;
+    source?: PollDeliverySource;
+    slotKey?: string | null;
+    scheduledFor?: string | null;
+  }): PollRecord {
+    return this.database.insertPoll(input, this.botId);
   }
 
-  public restoreDefaultTemplate(id: number, safeActorHash: string): boolean {
-    return this.database.restorePollTemplateForAssistant(this.botId, id, safeActorHash);
+  public poll(id: number): PollRecord | null {
+    return this.database.getPoll(id, this.botId);
   }
 
-  public template(id: number): PollTemplate | null {
-    return this.database.getPollTemplate(id, this.botId);
+  public list(filter: Parameters<AppDatabase['listPolls']>[0]): PollRecord[] {
+    return this.database.listPolls(filter, this.botId);
   }
 
-  public saveTemplate(input: Parameters<AppDatabase['savePollTemplate']>[0]): PollTemplate {
-    return this.database.savePollTemplate(input, this.botId);
+  public recentQuestions(sinceIso: string) {
+    return this.database.listRecentPollQuestions(sinceIso, this.botId);
   }
 
-  public deleteTemplate(id: number): boolean {
-    return this.database.deletePollTemplate(id, this.botId);
+  public assignSlot(pollId: number, slotKey: string, scheduledFor: string): boolean {
+    return this.database.assignPollSlot(pollId, slotKey, scheduledFor, this.botId);
   }
 
-  public restoreDefaults(safeActorHash = 'system'): number {
-    return this.database.restoreDefaultPollTemplates(this.botId, safeActorHash);
+  public releaseScheduled(pollIds?: number[]): number {
+    return this.database.releaseScheduledPolls(
+      pollIds === undefined ? {} : { pollIds },
+      this.botId,
+    );
   }
 
-  public override(localDate: string): PollDateOverride | null {
-    return this.database.getPollDateOverride(localDate, this.botId);
+  public claimForSending(pollId: number, now: Date): PollRecord | null {
+    return this.database.claimPollForSending(pollId, now, this.botId);
   }
 
-  public overrides(): PollDateOverride[] {
-    return this.database.listPollDateOverrides(this.botId);
+  public claimForManualSending(pollId: number, now: Date): PollRecord | null {
+    return this.database.claimPollForManualSending(pollId, now, this.botId);
   }
 
-  public saveOverride(localDate: string, templateId: number): PollDateOverride {
-    return this.database.savePollDateOverride(localDate, templateId, this.botId);
-  }
-
-  public deleteOverride(localDate: string): boolean {
-    return this.database.deletePollDateOverride(localDate, this.botId);
-  }
-
-  public claim(input: {
-    deduplicationKey: string;
-    groupId: string;
-    localDate: string;
-    templateId: number;
-    source: PollDeliverySource;
-    countsAsDaily: boolean;
-    scheduledAt: Date;
-  }): PollSendHistoryRecord | null {
-    return this.database.claimPollDelivery(input, this.botId);
-  }
-
-  public delivery(deduplicationKey: string): PollSendHistoryRecord | null {
-    return this.database.getPollDelivery(deduplicationKey, this.botId);
-  }
-
-  public templateIdForLocalDate(localDate: string): number | null {
-    return this.database.getPollTemplateIdForLocalDate(localDate, this.botId);
-  }
-
-  public beginAttempt(id: number, now: Date): number | null {
-    return this.database.beginPollAttempt(id, now);
-  }
-
-  public completeAttempt(
-    id: number,
-    status: 'SENT' | 'FAILED' | 'SKIPPED',
+  public complete(
+    pollId: number,
+    status: 'sent' | 'failed' | 'skipped',
     now: Date,
-    failureCode: string | null,
+    lastError: string | null,
   ): void {
-    this.database.completePollAttempt(id, status, now, failureCode);
+    this.database.completePoll(pollId, status, now, lastError, this.botId);
   }
 
-  public history(limit = 200): PollSendHistoryRecord[] {
-    return this.database.listPollSendHistory(limit, this.botId);
+  public skipDelivery(pollId: number, groupId: string, now: Date, reason: string): void {
+    this.database.markPollDeliverySkipped(pollId, groupId, now, reason, this.botId);
   }
 
-  public usage(
-    sinceLocalDate: string,
-    groupId: string | null,
-  ): Array<{ templateId: number; category: string; localDate: string }> {
-    return this.database.listPollUsage(sinceLocalDate, groupId, this.botId);
+  public interrupted(olderThanIso: string): PollRecord[] {
+    return this.database.listInterruptedPolls(olderThanIso, this.botId);
   }
 
-  public minimumRepeatDays(): number {
-    return this.database.getPollSetting('minimum_repeat_days', 30);
+  public claimDelivery(
+    pollId: number,
+    groupId: string,
+    now: Date,
+    maximumAttempts: number,
+  ): PollDeliveryRecord | null {
+    return this.database.claimPollDelivery(pollId, groupId, now, maximumAttempts, this.botId);
   }
 
-  public maximumCategoryStreak(): number {
-    return this.database.getPollSetting('maximum_category_streak', 2);
+  public completeDelivery(
+    deliveryId: number,
+    status: 'sent' | 'failed' | 'skipped',
+    now: Date,
+    details: { whatsappMessageId?: string | null; lastError?: string | null },
+  ): void {
+    this.database.completePollDelivery(deliveryId, status, now, details);
+  }
+
+  public deliveries(pollId: number): PollDeliveryRecord[] {
+    return this.database.listPollDeliveries(pollId, this.botId);
+  }
+
+  public deliveryByMessageId(whatsappMessageId: string) {
+    return this.database.getPollDeliveryByMessageId(whatsappMessageId, this.botId);
+  }
+
+  public recordVote(
+    input: Parameters<AppDatabase['recordPollVote']>[0],
+    now: Date,
+  ): PollVoteOutcome {
+    return this.database.recordPollVote(input, now, this.botId);
   }
 }

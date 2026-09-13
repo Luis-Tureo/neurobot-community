@@ -1,6 +1,6 @@
 let botId = null;
 let csrfToken = null;
-let polls = [];
+let pollsAvailable = false;
 let authorizedGroups = [];
 let selectedGroupKeys = new Set();
 let botValidation = null;
@@ -356,8 +356,8 @@ function definitions() {
     },
     {
       id: 'poll',
-      title: 'Encuesta diaria',
-      description: 'Envía una encuesta activa sin consumir la del día.',
+      title: 'Encuesta automática',
+      description: 'Envía una encuesta generada por la IA como encuesta nativa de WhatsApp.',
       run: (groupKey) => sendPollTest(groupKey),
     },
     {
@@ -462,17 +462,12 @@ function automaticTest(kind, groupKey) {
 }
 
 function sendPollTest(groupKey) {
-  const templateId = Number(polls[0]?.id);
-  if (!Number.isInteger(templateId) || templateId <= 0)
-    throw new Error('No hay encuestas activas disponibles.');
+  if (!pollsAvailable) {
+    throw new Error('El conector activo no soporta encuestas nativas de WhatsApp.');
+  }
   return api(botPath('/api/polls/send-test'), {
     method: 'POST',
-    body: JSON.stringify({
-      groupKey,
-      templateId,
-      countsAsDaily: false,
-      confirmed: true,
-    }),
+    body: JSON.stringify({ groupKey, confirmed: true }),
   });
 }
 
@@ -968,7 +963,7 @@ async function loadModule() {
     ]);
     if (generation !== moduleLoadGeneration) return;
     authorizedGroups = automaticData.authorizedGroups || digestData.authorizedGroups || [];
-    polls = (pollData.templates || []).filter((item) => item.enabled);
+    pollsAvailable = pollData.nativePollsSupported !== false;
     renderGroupSelector();
     renderTests();
     invalidateBotValidation();

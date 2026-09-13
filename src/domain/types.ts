@@ -212,9 +212,10 @@ export type GroupDiscoverySnapshot = {
   summary?: GroupSynchronizationSummary;
 };
 
-export type PollSelectionMode = 'SAME_FOR_ALL' | 'PER_GROUP';
+export type PollOrigin = 'ai' | 'reused' | 'legacy_bank';
+export type PollStatus = 'generated' | 'scheduled' | 'sending' | 'sent' | 'failed' | 'skipped';
+export type PollDeliveryStatus = 'pending' | 'sending' | 'sent' | 'failed' | 'skipped';
 export type PollDeliverySource = 'scheduled' | 'manual';
-export type PollDeliveryStatus = 'PENDING' | 'SENDING' | 'SENT' | 'FAILED' | 'SKIPPED';
 
 export type NativePoll = {
   question: string;
@@ -222,59 +223,167 @@ export type NativePoll = {
   allowMultipleAnswers: boolean;
 };
 
-export type PollTemplate = NativePoll & {
-  id: number;
-  defaultKey: string | null;
-  category: string;
+/** Recibo del envío de una encuesta nativa; el id permite asociar votos posteriores. */
+export type PollSendReceipt = {
+  messageId: string | null;
+};
+
+/** Configuración mínima de la automatización de encuestas (hora inicial + recurrencia). */
+export type PollAutomationConfiguration = {
   enabled: boolean;
-  isDefault: boolean;
-  favorite: boolean;
+  /** Hora local inicial (HH:MM) desde la que se calcula la recurrencia. */
+  startTime: string;
+  /** Recurrencia en horas entre envíos consecutivos. */
+  intervalHours: number;
+  timezone: string;
+  /** Fecha local desde la que se ancla la serie de horarios (fase de la recurrencia). */
+  anchorLocalDate: string | null;
+  /** Instante de la última activación; solo se envían horarios posteriores. */
+  activatedAt: string | null;
+  updatedAt: string | null;
+};
+
+export const POLL_INTERVAL_HOURS_OPTIONS = [1, 2, 3, 4, 5, 6, 8, 12, 24] as const;
+
+/** Plantilla del banco histórico (solo lectura), usada como último recurso sin IA ni historial. */
+export type LegacyPollTemplate = {
+  id: number;
+  question: string;
+  category: string;
+  options: string[];
+};
+
+/** Contenido generado (o reutilizado) listo para un horario de envío. */
+export type PollContent = {
+  question: string;
+  options: string[];
+  category: string;
+};
+
+export type PollRecord = PollContent & {
+  id: number;
+  botId: string;
+  normalizedQuestion: string;
+  origin: PollOrigin;
+  sourcePollId: number | null;
+  sourceTemplateId: number | null;
+  status: PollStatus;
+  source: PollDeliverySource;
+  /** Clave del horario local (YYYY-MM-DDTHH:MM) cuando la encuesta tiene un slot asignado. */
+  slotKey: string | null;
+  scheduledFor: string | null;
+  sentAt: string | null;
+  attempts: number;
+  lastAttemptAt: string | null;
+  lastError: string | null;
   createdAt: string;
   updatedAt: string;
-  lastUsedAt: string | null;
-  disabledUntil: string | null;
 };
 
-export type HiddenPollTemplate = PollTemplate & {
-  hiddenAt: string;
-  removalReason: string | null;
-};
-
-export type PollConfiguration = {
-  enabled: boolean;
-  sendTime: string;
-  timezone: string;
-  toleranceMinutes: number;
-  selectionMode: PollSelectionMode;
-  weeklySchedule: PollWeeklySchedule[];
-};
-
-export type PollWeeklySchedule = {
-  weekday: number;
-  sendTime: string;
-  templateIds: number[];
-};
-
-export type PollSendHistoryRecord = {
+export type PollDeliveryRecord = {
   id: number;
+  botId: string;
+  pollId: number;
   groupId: string;
-  localDate: string;
-  templateId: number;
-  source: PollDeliverySource;
-  countsAsDaily: boolean;
+  whatsappMessageId: string | null;
   status: PollDeliveryStatus;
   attempts: number;
-  scheduledAt: string;
-  attemptedAt: string | null;
+  lastAttemptAt: string | null;
+  lastError: string | null;
   sentAt: string | null;
-  failureCode: string | null;
-};
-
-export type PollDateOverride = {
-  localDate: string;
-  templateId: number;
   createdAt: string;
   updatedAt: string;
+};
+
+/** Voto recibido desde el conector de mensajería, ya parseado y sin datos superfluos. */
+export type PollVoteEvent = {
+  /** Identificador serializado del mensaje de creación de la encuesta. */
+  pollMessageId: string;
+  /** Identificador del votante tal como lo entrega WhatsApp; se hashea antes de persistir. */
+  voterId: string;
+  /**
+   * Selección completa vigente del votante (vacía cuando deselecciona todo). `index` es el
+   * `localId` asignado al enviar la encuesta; `name` (si WhatsApp lo entrega) se valida de forma
+   * exacta contra la alternativa guardada.
+   */
+  selectedOptions: Array<{ index: number; name: string | null }>;
+  /** Instante (ms) de la interacción reportado por WhatsApp. */
+  votedAtMs: number;
+  /**
+   * Clave idempotente: id estable del mensaje de voto cuando la librería lo expone; si no, clave
+   * determinista derivada de mensaje, votante, instante y selección.
+   */
+  eventKey: string;
+};
+
+export type PollVoteOutcome =
+  | 'recorded'
+  | 'updated'
+  | 'unchanged'
+  | 'duplicate_ignored'
+  | 'stale_ignored'
+  | 'unknown_poll'
+  | 'invalid_option';
+
+export type PollAnalyticsPeriodKey = 'today' | '7d' | '30d' | 'week' | 'month' | 'custom';
+
+export type PollAnalyticsPeriod = {
+  key: PollAnalyticsPeriodKey;
+  /** Fechas locales inclusivas del período (zona horaria del asistente). */
+  fromLocalDate: string;
+  toLocalDate: string;
+  /** Instantes UTC (ISO) equivalentes: inicio inclusivo, fin exclusivo. */
+  fromIso: string;
+  toIso: string;
+  timezone: string;
+};
+
+export type PollOptionResult = {
+  index: number;
+  label: string;
+  votes: number;
+  percentage: number;
+  winner: boolean;
+};
+
+export type PollResultSummary = {
+  id: number;
+  question: string;
+  category: string;
+  origin: PollOrigin;
+  sentAt: string | null;
+  scheduledFor: string | null;
+  status: PollStatus;
+  totalVotes: number;
+  participants: number;
+  options: PollOptionResult[];
+};
+
+export type PollAnalyticsSummary = {
+  period: PollAnalyticsPeriod;
+  totals: {
+    votes: number;
+    participants: number;
+    pollsWithVotes: number;
+    pollsSent: number;
+    averageVotesPerPoll: number | null;
+    /** Variación porcentual de votos vs el período anterior equivalente; null si no hay datos suficientes. */
+    votesChangePercent: number | null;
+  };
+  timeseries: Array<{ localDate: string; votes: number; participants: number }>;
+  topPolls: Array<{ id: number; question: string; category: string; votes: number }>;
+  categories: Array<{ category: string; votes: number; percentage: number }>;
+  trends: Array<{
+    label: string;
+    question: string;
+    pollId: number;
+    percentage: number;
+    votes: number;
+  }>;
+  recent: PollResultSummary[];
+  recentTotal: number;
+  /** Contador monótono que cambia con cada voto o envío; permite refrescos baratos. */
+  version: number;
 };
 
 export type OrganizationType =

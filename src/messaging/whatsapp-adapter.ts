@@ -14,6 +14,8 @@ import type {
   GroupListSource,
   IncomingMessage,
   NativePoll,
+  PollSendReceipt,
+  PollVoteEvent,
   WelcomeParticipant,
 } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
@@ -680,15 +682,22 @@ export class WhatsAppWebAdapter implements MessagingClient {
     await client.sendMessage(chatId, media, { caption });
   }
 
-  public async sendPoll(chatId: string, poll: NativePoll): Promise<void> {
+  public supportsNativePolls(): boolean {
+    return true;
+  }
+
+  public async sendPoll(chatId: string, poll: NativePoll): Promise<PollSendReceipt> {
     const client = this.requireReadyClient();
-    await client.sendMessage(
+    const sentMessage = await client.sendMessage(
       chatId,
       new Poll(poll.question, poll.options, {
         allowMultipleAnswers: poll.allowMultipleAnswers,
         messageSecret: undefined,
       }),
     );
+    // El id serializado del mensaje de creación es el que llega luego en cada `vote_update`
+    // (`parentMessage.id` / `parentMsgKey`), así que basta para asociar los votos.
+    return { messageId: getSerializedId(sentMessage?.id) };
   }
 
   public async sendSelectableMenu(
@@ -1469,6 +1478,18 @@ export class WhatsAppWebAdapter implements MessagingClient {
     });
     client.on('vote_update', (vote: unknown) => {
       if (!this.isCurrent(client, generation)) return;
+      // Los votos de encuestas comunitarias se registran siempre para los resultados del panel,
+      // independientemente de si el asistente abre conversaciones a partir de menús.
+      void this.dispatchPollVote(vote, generation).catch((error: unknown) => {
+        this.logger.error(
+          {
+            ...serializeError(error, 'POLL_VOTE_PROCESSING_FAILED', this.options.developmentMode),
+            operation: 'pollVoteDispatchFailed',
+            clientGeneration: generation,
+          },
+          'No fue posible registrar un voto de encuesta',
+        );
+      });
       if (this.options.communityPollVotesNoAction === true) {
         this.logger.info(
           {
@@ -1975,6 +1996,25 @@ export class WhatsAppWebAdapter implements MessagingClient {
     );
   }
 
+  private async dispatchPollVote(vote: unknown, clientGeneration: number): Promise<void> {
+    const handler = this.events?.onPollVote;
+    if (handler === undefined) return;
+    const event = parsePollVoteEvent(vote, (value) => this.hash(value));
+    if (event === null) return;
+    if (this.isOwnIdentifier(event.voterId)) return;
+    this.logger.info(
+      {
+        operation: 'POLL_VOTE_EVENT_RECEIVED',
+        pollHash: this.hash(event.pollMessageId),
+        userHash: this.hash(event.voterId),
+        selectedCount: event.selectedOptions.length,
+        clientGeneration,
+      },
+      'Se recibió un voto de encuesta nativa',
+    );
+    await handler(event);
+  }
+
   private async processSelectableMenuVote(vote: unknown, clientGeneration: number): Promise<void> {
     this.cleanupSelectableMenuPolls();
     if (this.events === null || typeof vote !== 'object' || vote === null) return;
@@ -2409,6 +2449,62 @@ class WhatsAppClientUnavailableError extends Error {
 
 function readUnknown(value: object, key: string): unknown {
   return Reflect.get(value, key);
+}
+
+/**
+ * Normaliza un `PollVote` de whatsapp-web.js. Cada evento trae la selección completa vigente del
+ * votante (`selectedOptions` con `localId`); una lista vacía significa que deseleccionó todo.
+ */
+export function parsePollVoteEvent(
+  vote: unknown,
+  hash: (value: string) => string,
+): PollVoteEvent | null {
+  if (typeof vote !== 'object' || vote === null) return null;
+  const parentMessage = readUnknown(vote, 'parentMessage');
+  const pollMessageId =
+    (typeof parentMessage === 'object' && parentMessage !== null
+      ? getSerializedId(readUnknown(parentMessage, 'id'))
+      : null) ?? getSerializedId(readUnknown(vote, 'parentMsgKey'));
+  if (pollMessageId === null) return null;
+  const voterId = getSerializedId(readUnknown(vote, 'voter'));
+  if (!isParticipantId(voterId)) return null;
+  const rawSelected = readUnknown(vote, 'selectedOptions');
+  if (!Array.isArray(rawSelected)) return null;
+  const seen = new Set<number>();
+  const selectedOptions: Array<{ index: number; name: string | null }> = [];
+  for (const option of rawSelected) {
+    if (typeof option !== 'object' || option === null) continue;
+    const index = readUnknown(option, 'localId') ?? readUnknown(option, 'id');
+    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || seen.has(index)) {
+      continue;
+    }
+    seen.add(index);
+    const name = readString(option, 'name');
+    selectedOptions.push({ index, name: name === null ? null : name.trim() });
+  }
+  selectedOptions.sort((left, right) => left.index - right.index);
+  const interactedAt = readUnknown(vote, 'interractedAtTs');
+  const votedAtMs =
+    typeof interactedAt === 'number' && Number.isFinite(interactedAt) && interactedAt > 0
+      ? interactedAt < 1e12
+        ? interactedAt * 1000
+        : interactedAt
+      : Date.now();
+  // whatsapp-web.js 1.34.x no expone el id del mensaje de voto en `PollVote`; si una versión
+  // posterior lo incluye (`msgKey`/`id`), se prefiere como identificador estable del evento.
+  const stableId =
+    getSerializedId(readUnknown(vote, 'msgKey')) ?? getSerializedId(readUnknown(vote, 'id'));
+  const indexes = selectedOptions.map((option) => option.index).join(',');
+  return {
+    pollMessageId,
+    voterId,
+    selectedOptions,
+    votedAtMs,
+    eventKey:
+      stableId === null
+        ? `poll-vote:${hash(`${pollMessageId}:${voterId}:${votedAtMs}:${indexes}`)}`
+        : `poll-vote-id:${hash(stableId)}`,
+  };
 }
 
 function readString(value: object, key: string): string | null {

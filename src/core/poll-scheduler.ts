@@ -16,10 +16,7 @@ export class PollScheduler {
   public start(): void {
     if (this.started) return;
     this.started = true;
-    this.logger.info(
-      { operation: 'DAILY_POLL_SCHEDULER_STARTED' },
-      'Programador de encuestas iniciado',
-    );
+    this.logger.info({ operation: 'POLL_SCHEDULER_STARTED' }, 'Programador de encuestas iniciado');
     this.schedule(0);
   }
 

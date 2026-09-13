@@ -17,11 +17,14 @@ import { ConnectionManager, normalizeWhatsAppErrorCode } from './connection-mana
 import { ConversationFlowService } from './conversation-flow-service.js';
 import { GroupDiscoveryService } from './group-discovery-service.js';
 import { MessageProcessor } from './message-processor.js';
+import { PollAnalyticsService } from './poll-analytics-service.js';
+import { PollGenerator } from './poll-generator.js';
+import { PollPlanner } from './poll-planner.js';
 import { PollRepository } from './poll-repository.js';
 import { PollScheduler } from './poll-scheduler.js';
 import { PollSender } from './poll-sender.js';
-import { PollTemplateSelector } from './poll-template-selector.js';
 import { PollService } from './poll-service.js';
+import { PollVoteService } from './poll-vote-service.js';
 import { OutboundMessageQueueService } from './outbound-message-queue-service.js';
 
 export type BotInstanceOptions = {
@@ -55,6 +58,8 @@ export class BotInstance {
   private readonly pollRepository: PollRepository;
   private readonly pollService: PollService;
   private readonly pollScheduler: PollScheduler;
+  private readonly pollVotes: PollVoteService;
+  private readonly pollAnalytics: PollAnalyticsService;
   private readonly aiQueue: AIRequestQueueService;
   private readonly outboundQueue: OutboundMessageQueueService;
   private activeQr: ActiveQr | null = null;
@@ -168,18 +173,20 @@ export class BotInstance {
       botId: bot.id,
     });
     this.pollRepository = new PollRepository(database, bot.id);
-    const pollSelector = new PollTemplateSelector(this.pollRepository);
+    const pollGenerator = new PollGenerator(provider, this.aiQueue, database, logger, bot.id);
+    const pollPlanner = new PollPlanner(this.pollRepository, pollGenerator, database, logger);
     const pollSender = new PollSender(this.pollRepository, database, client, logger, anonymizer);
     this.pollService = new PollService(
       this.pollRepository,
-      pollSelector,
+      pollPlanner,
       pollSender,
       database,
       client,
       logger,
-      anonymizer,
     );
     this.pollScheduler = new PollScheduler(this.pollService, logger);
+    this.pollVotes = new PollVoteService(this.pollRepository, database, logger, anonymizer);
+    this.pollAnalytics = new PollAnalyticsService(database, bot.id);
     this.processor = new MessageProcessor(
       database,
       client,
@@ -363,6 +370,10 @@ export class BotInstance {
         }
         await this.discovery.handleGroupChange(event);
       },
+      onPollVote: async (event) => {
+        if (!this.communityServicesEnabled) return;
+        await this.pollVotes.handle(event);
+      },
     });
   }
 
@@ -456,6 +467,14 @@ export class BotInstance {
 
   public pollTaskScheduler(): PollScheduler {
     return this.pollScheduler;
+  }
+
+  public pollVoteService(): PollVoteService {
+    return this.pollVotes;
+  }
+
+  public pollAnalyticsService(): PollAnalyticsService {
+    return this.pollAnalytics;
   }
 
   public aiRequestQueue(): AIRequestQueueService {

@@ -6,6 +6,8 @@ import type {
   GroupListSource,
   IncomingMessage,
   NativePoll,
+  PollSendReceipt,
+  PollVoteEvent,
   WelcomeParticipant,
 } from '../domain/types.js';
 
@@ -17,6 +19,8 @@ export type MessagingClientEvents = {
   onWhatsAppStateChange?: (state: string, clientGeneration: number) => void;
   onGroupJoin?: (event: GroupJoinEvent) => Promise<void>;
   onGroupChanged?: (event: GroupChangeEvent) => Promise<void>;
+  /** Voto (o cambio de voto) en una encuesta nativa enviada por el asistente. */
+  onPollVote?: (event: PollVoteEvent) => Promise<void>;
 };
 
 export type InteractiveMenuPayload = {
@@ -90,7 +94,9 @@ export interface MessagingClient {
   sendMedia?(chatId: string, absolutePath: string, caption: string): Promise<void>;
   sendInteractiveMenu?(chatId: string, payload: InteractiveMenuPayload): Promise<boolean>;
   sendSelectableMenu?(chatId: string, payload: SelectableMenuPayload): Promise<boolean>;
-  sendPoll(chatId: string, poll: NativePoll): Promise<void>;
+  /** Indica si el conector puede enviar encuestas nativas (Poll). Ausente = no soportado. */
+  supportsNativePolls?(): boolean;
+  sendPoll(chatId: string, poll: NativePoll): Promise<PollSendReceipt>;
   listGroups(): Promise<DetectedGroup[]>;
   getLastGroupScanSkippedCount(): number;
   getLastGroupListSource(): GroupListSource | null;

@@ -1011,9 +1011,61 @@
                   data-module="polls"
                 >
                   <div class="section-heading">
-                    <div><h3>Programación semanal de encuestas</h3></div>
+                    <div>
+                      <h3>Programación semanal de encuestas</h3>
+                      <p class="muted">
+                        La IA crea encuestas distintas y las envía como encuestas nativas de
+                        WhatsApp según la recurrencia configurada.
+                      </p>
+                    </div>
                   </div>
-                  <div id="poll-weekly-schedule" class="poll-weekly-grid"></div>
+                  <form id="poll-automation-form" class="poll-automation-form">
+                    <div class="poll-automation-fields">
+                      <label
+                        >Hora de inicio<input
+                          name="poll_start_time"
+                          type="time"
+                          step="60"
+                          value="09:00"
+                          required
+                      /></label>
+                      <label
+                        >Enviar una nueva encuesta cada<select name="poll_interval_hours">
+                          <option value="1">1 hora</option>
+                          <option value="2">2 horas</option>
+                          <option value="3" selected>3 horas</option>
+                          <option value="4">4 horas</option>
+                          <option value="5">5 horas</option>
+                          <option value="6">6 horas</option>
+                          <option value="8">8 horas</option>
+                          <option value="12">12 horas</option>
+                          <option value="24">24 horas</option>
+                        </select></label
+                      >
+                    </div>
+                    <div class="actions">
+                      <button id="save-poll-automation" type="submit">Guardar configuración</button>
+                    </div>
+                    <p id="poll-automation-support" class="field-error" role="alert" hidden></p>
+                  </form>
+                  <div
+                    id="poll-automation-status"
+                    class="poll-automation-status"
+                    aria-live="polite"
+                  >
+                    <div>
+                      <span class="muted">Próximo envío</span>
+                      <strong id="poll-next-send">Automatización inactiva</strong>
+                    </div>
+                    <div>
+                      <span class="muted">Recurrencia</span>
+                      <strong id="poll-recurrence-label">Cada 3 horas</strong>
+                    </div>
+                    <div>
+                      <span class="muted">Después</span>
+                      <strong id="poll-upcoming-slots">—</strong>
+                    </div>
+                  </div>
                 </article>
                 <article class="card inset automatic-card digest-automation-card" data-collapsible>
                   <div class="section-heading">
@@ -1286,68 +1338,152 @@
             </section>
 
             <section id="section-polls" class="panel-section hidden">
-              <div class="section-heading">
+              <div class="section-heading poll-dashboard-heading">
                 <div>
-                  <p class="eyebrow">Participación diaria</p>
+                  <p class="eyebrow">Analítica de encuestas</p>
                   <h2>Encuestas</h2>
+                  <p class="muted">Participación y resultados de la comunidad</p>
+                </div>
+                <div class="poll-period-controls">
+                  <label class="poll-period-select"
+                    ><span class="sr-only">Período</span
+                    ><select id="poll-period" aria-label="Período de análisis">
+                      <option value="today">Hoy</option>
+                      <option value="7d" selected>7 días</option>
+                      <option value="30d">30 días</option>
+                      <option value="week">Esta semana</option>
+                      <option value="month">Mes actual</option>
+                      <option value="custom">Personalizado</option>
+                    </select></label
+                  >
+                  <div id="poll-custom-range" class="poll-custom-range" hidden>
+                    <label
+                      ><span class="sr-only">Desde</span
+                      ><input id="poll-period-from" type="date" aria-label="Desde"
+                    /></label>
+                    <label
+                      ><span class="sr-only">Hasta</span
+                      ><input id="poll-period-to" type="date" aria-label="Hasta"
+                    /></label>
+                    <button id="poll-apply-range" type="button" class="secondary">Aplicar</button>
+                  </div>
                 </div>
               </div>
-              <p class="muted">
-                Envía encuestas nativas solamente a grupos activos y no bloqueados. No se guardan
-                votantes ni sus respuestas.
-              </p>
+              <p id="poll-dashboard-notice" class="info-callout" hidden></p>
 
-              <article class="card inset">
-                <div class="section-heading">
-                  <div>
-                    <h3>Banco de encuestas</h3>
-                    <p class="muted">Entre 2 y 12 opciones.</p>
+              <div id="poll-kpis" class="poll-kpi-grid" aria-live="polite">
+                <article class="status-card poll-kpi" data-kpi="votes">
+                  <span>Total de votos</span>
+                  <strong>—</strong>
+                  <small class="poll-kpi-hint"></small>
+                </article>
+                <article class="status-card poll-kpi" data-kpi="participants">
+                  <span>Participantes únicos</span>
+                  <strong>—</strong>
+                  <small class="poll-kpi-hint"></small>
+                </article>
+                <article class="status-card poll-kpi" data-kpi="polls">
+                  <span>Encuestas con participación</span>
+                  <strong>—</strong>
+                  <small class="poll-kpi-hint"></small>
+                </article>
+                <article class="status-card poll-kpi" data-kpi="average">
+                  <span>Promedio por encuesta</span>
+                  <strong>—</strong>
+                  <small class="poll-kpi-hint"></small>
+                </article>
+              </div>
+
+              <div id="poll-empty-state" class="card inset poll-empty-state" hidden>
+                <h3>Aún no hay resultados de encuestas</h3>
+                <p class="muted">
+                  Los resultados aparecerán aquí cuando la comunidad comience a votar.
+                </p>
+              </div>
+
+              <div id="poll-dashboard-body" class="poll-dashboard-body">
+                <article class="card inset poll-chart-card">
+                  <div class="section-heading">
+                    <div>
+                      <h3>Participación en encuestas</h3>
+                      <p class="muted">Votos por día</p>
+                    </div>
                   </div>
+                  <div id="poll-timeseries" class="poll-chart" role="img"></div>
+                  <table id="poll-timeseries-table" class="sr-only">
+                    <caption>
+                      Votos por día
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Día</th>
+                        <th scope="col">Votos</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </article>
+
+                <div class="poll-dashboard-columns">
+                  <article class="card inset">
+                    <div class="section-heading">
+                      <div><h3>Encuestas con mayor participación</h3></div>
+                    </div>
+                    <ol id="poll-top-list" class="poll-top-list"></ol>
+                  </article>
+                  <article class="card inset">
+                    <div class="section-heading">
+                      <div><h3>Participación por categoría</h3></div>
+                    </div>
+                    <div id="poll-categories" class="poll-categories"></div>
+                  </article>
+                </div>
+
+                <article id="poll-trends-card" class="card inset" hidden>
+                  <div class="section-heading">
+                    <div>
+                      <h3>Tendencias de la comunidad</h3>
+                      <p class="muted">Preferencias más votadas en el período</p>
+                    </div>
+                  </div>
+                  <div id="poll-trends" class="poll-trends"></div>
+                </article>
+
+                <article class="card inset">
+                  <div class="section-heading">
+                    <div>
+                      <h3>Resultados recientes</h3>
+                      <p class="muted">Últimas encuestas enviadas con su resultado actual</p>
+                    </div>
+                  </div>
+                  <div id="poll-recent-results" class="poll-results-list"></div>
                   <div class="actions">
-                    <button id="new-poll-template" type="button">Crear encuesta</button>
-                    <button id="restore-poll-defaults" class="secondary" type="button">
-                      Restaurar predeterminadas
+                    <button id="poll-load-more" type="button" class="secondary" hidden>
+                      Ver más encuestas
                     </button>
                   </div>
-                </div>
-                <div id="poll-template-editor-host">
-                  <form id="poll-template-form" class="poll-template-editor hidden">
-                    <input name="id" type="hidden" />
-                    <label>Pregunta<input name="question" maxlength="200" required /> </label>
-                    <label
-                      >Opciones, una por línea<textarea
-                        name="options"
-                        maxlength="1212"
-                        rows="8"
-                        required
-                      ></textarea>
-                    </label>
-                    <p class="muted">El orden de las líneas será el orden de las alternativas.</p>
-                    <div class="actions">
-                      <button type="submit">Guardar encuesta</button>
-                      <button id="cancel-poll-template" class="secondary" type="button">
-                        Cancelar
-                      </button>
+                </article>
+              </div>
+
+              <div
+                id="poll-detail-dialog"
+                class="poll-detail-dialog hidden"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="poll-detail-title"
+              >
+                <article class="card poll-detail-card">
+                  <div class="section-heading">
+                    <div>
+                      <p class="eyebrow">Detalle de encuesta</p>
+                      <h3 id="poll-detail-title"></h3>
                     </div>
-                  </form>
-                </div>
-                <div id="poll-templates-list" class="list"></div>
-              </article>
-
-              <article class="card inset" data-collapsible>
-                <div class="section-heading">
-                  <div>
-                    <h3>Encuestas eliminadas de este asistente</h3>
-                    <p class="muted">
-                      Las plantillas permanecen disponibles para los demás asistentes.
-                    </p>
+                    <button id="poll-detail-close" type="button" class="secondary">Cerrar</button>
                   </div>
-                </div>
-                <div id="hidden-poll-templates-list" class="list"></div>
-              </article>
-
-              <h3 class="subsection-title">Historial de envíos</h3>
-              <div id="poll-history-list" class="list"></div>
+                  <dl id="poll-detail-meta" class="poll-detail-meta"></dl>
+                  <div id="poll-detail-results" class="poll-results-list"></div>
+                </article>
+              </div>
             </section>
           </div>
         </div>

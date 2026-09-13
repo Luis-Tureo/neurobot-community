@@ -18,6 +18,7 @@ import type { AutomaticMessageService } from './automatic-message-service.js';
 import type { PollRepository } from './poll-repository.js';
 import type { PollScheduler } from './poll-scheduler.js';
 import type { PollService } from './poll-service.js';
+import type { PollAnalyticsService } from './poll-analytics-service.js';
 import type { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
 
 type ClientFactory = (bot: BotRecord, context: { freshLinkingSession: boolean }) => MessagingClient;
@@ -366,6 +367,10 @@ export class MultiBotManager {
 
   public pollScheduler(botId: string): PollScheduler | null {
     return this.instances.get(botId)?.pollTaskScheduler() ?? null;
+  }
+
+  public pollAnalytics(botId: string): PollAnalyticsService | null {
+    return this.instances.get(botId)?.pollAnalyticsService() ?? null;
   }
 
   public aiQueue(botId: string): AIRequestQueueService | null {

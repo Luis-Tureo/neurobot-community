@@ -4,6 +4,8 @@ import type {
   GroupJoinEvent,
   GroupListSource,
   NativePoll,
+  PollSendReceipt,
+  PollVoteEvent,
   WelcomeParticipant,
 } from '../domain/types.js';
 import type { MessagingClient, MessagingClientEvents } from './messaging-client.js';
@@ -16,7 +18,10 @@ export type SentMessage = {
   mentionIds?: string[];
 };
 
-export type SentPoll = NativePoll & { chatId: string };
+export type SentPoll = NativePoll & { chatId: string; messageId: string };
+
+/** Contador global para que los ids simulados sean únicos incluso entre instancias. */
+let simulatedPollCounter = 0;
 export type SentMedia = { chatId: string; absolutePath: string; caption: string };
 
 export class SimulatedMessagingClient implements MessagingClient {
@@ -28,6 +33,7 @@ export class SimulatedMessagingClient implements MessagingClient {
   public readonly sentSelectableMenus: Array<{ chatId: string; payload: SelectableMenuPayload }> =
     [];
   public interactiveSupported = false;
+  public nativePollsSupported = true;
   public selectableMenusSupported = true;
   public initializeCalls = 0;
   public destroyCalls = 0;
@@ -90,9 +96,21 @@ export class SimulatedMessagingClient implements MessagingClient {
     return [...(this.groupAdministrators.get(chatId) ?? [])];
   }
 
-  public async sendPoll(chatId: string, poll: NativePoll): Promise<void> {
+  public supportsNativePolls(): boolean {
+    return this.nativePollsSupported;
+  }
+
+  public async sendPoll(chatId: string, poll: NativePoll): Promise<PollSendReceipt> {
     if (this.failSending) throw new Error('Fallo simulado');
-    this.sentPolls.push({ chatId, ...poll, options: [...poll.options] });
+    simulatedPollCounter += 1;
+    const messageId = `true_${chatId}_poll-${simulatedPollCounter}-${Math.random().toString(36).slice(2, 8)}`;
+    this.sentPolls.push({ chatId, ...poll, options: [...poll.options], messageId });
+    return { messageId };
+  }
+
+  /** Simula un evento de voto de WhatsApp sobre una encuesta enviada. */
+  public async emitPollVote(event: PollVoteEvent): Promise<void> {
+    await this.events?.onPollVote?.(event);
   }
 
   public async sendMedia(chatId: string, absolutePath: string, caption: string): Promise<void> {

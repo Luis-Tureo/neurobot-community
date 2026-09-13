@@ -53,20 +53,21 @@ import type {
   KnowledgeFragment,
   LinkedGroupRecord,
   HumanAssistanceRequest,
-  HiddenPollTemplate,
   MediaAsset,
   MenuActionType,
   MenuDefinition,
   MenuOption,
   MenuType,
   OrganizationType,
-  PollConfiguration,
-  PollDateOverride,
+  LegacyPollTemplate,
+  PollAutomationConfiguration,
+  PollDeliveryRecord,
   PollDeliverySource,
   PollDeliveryStatus,
-  PollSelectionMode,
-  PollSendHistoryRecord,
-  PollTemplate,
+  PollOrigin,
+  PollRecord,
+  PollStatus,
+  PollVoteOutcome,
   ScheduledDeliveryRecord,
   ScheduledDeliveryStatus,
 } from '../domain/types.js';
@@ -132,34 +133,40 @@ type ScheduledDeliveryRow = {
   sent_at: string | null;
 };
 
-type PollTemplateRow = {
+type PollRow = {
   id: number;
-  default_key: string | null;
+  bot_id: string;
   question: string;
+  normalized_question: string;
   category: string;
-  allow_multiple_answers: number;
-  enabled: number;
-  is_default: number;
-  favorite: number;
+  origin: PollOrigin;
+  source_poll_id: number | null;
+  source_template_id: number | null;
+  status: PollStatus;
+  source: PollDeliverySource;
+  slot_key: string | null;
+  scheduled_for: string | null;
+  sent_at: string | null;
+  attempts: number;
+  last_attempt_at: string | null;
+  last_error: string | null;
   created_at: string;
   updated_at: string;
-  last_used_at: string | null;
-  disabled_until: string | null;
 };
 
-type PollHistoryRow = {
+type PollDeliveryRow = {
   id: number;
+  bot_id: string;
+  poll_id: number;
   group_id: string;
-  local_date: string;
-  template_id: number;
-  source: PollDeliverySource;
-  counts_as_daily: number;
+  whatsapp_message_id: string | null;
   status: PollDeliveryStatus;
   attempts: number;
-  scheduled_at: string;
-  attempted_at: string | null;
+  last_attempt_at: string | null;
+  last_error: string | null;
   sent_at: string | null;
-  failure_code: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 type AssistantProfileRow = {
@@ -2454,6 +2461,107 @@ export class AppDatabase {
             ON bot_ai_provider_history(bot_id, created_at DESC, id DESC);
         `,
       },
+      {
+        version: 37,
+        sql: `
+          -- Encuestas automáticas: recurrencia por hora inicial + intervalo, contenido generado
+          -- por IA y resultados reales de WhatsApp. El banco antiguo (bot_poll_templates,
+          -- bot_poll_options, assistant_poll_template_settings, bot_poll_send_history y
+          -- bot_poll_date_overrides) se conserva intacto como historial y fallback de solo lectura.
+          ALTER TABLE bot_poll_configurations
+            ADD COLUMN interval_hours INTEGER NOT NULL DEFAULT 3 CHECK (interval_hours BETWEEN 1 AND 24);
+          ALTER TABLE bot_poll_configurations ADD COLUMN anchor_local_date TEXT;
+          ALTER TABLE bot_poll_configurations ADD COLUMN activated_at TEXT;
+          -- La semántica cambia (envíos recurrentes generados por IA): se desactiva hasta que un
+          -- administrador vuelva a activar la automatización de forma explícita.
+          UPDATE bot_poll_configurations SET enabled = 0;
+
+          CREATE TABLE bot_polls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            question TEXT NOT NULL,
+            normalized_question TEXT NOT NULL,
+            category TEXT NOT NULL,
+            origin TEXT NOT NULL CHECK (origin IN ('ai', 'reused', 'legacy_bank')),
+            source_poll_id INTEGER REFERENCES bot_polls(id) ON DELETE SET NULL,
+            source_template_id INTEGER,
+            status TEXT NOT NULL CHECK (
+              status IN ('generated', 'scheduled', 'sending', 'sent', 'failed', 'skipped')
+            ),
+            source TEXT NOT NULL DEFAULT 'scheduled' CHECK (source IN ('scheduled', 'manual')),
+            slot_key TEXT,
+            scheduled_for TEXT,
+            sent_at TEXT,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_attempt_at TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          CREATE UNIQUE INDEX idx_bot_polls_slot ON bot_polls(bot_id, slot_key)
+            WHERE slot_key IS NOT NULL;
+          CREATE INDEX idx_bot_polls_status ON bot_polls(bot_id, status, scheduled_for);
+          CREATE INDEX idx_bot_polls_sent ON bot_polls(bot_id, status, sent_at);
+          CREATE INDEX idx_bot_polls_source_template ON bot_polls(bot_id, source_template_id);
+          CREATE INDEX idx_bot_polls_created ON bot_polls(bot_id, created_at);
+
+          CREATE TABLE bot_poll_answer_options (
+            poll_id INTEGER NOT NULL REFERENCES bot_polls(id) ON DELETE CASCADE,
+            option_index INTEGER NOT NULL CHECK (option_index BETWEEN 0 AND 11),
+            label TEXT NOT NULL,
+            PRIMARY KEY (poll_id, option_index)
+          );
+
+          CREATE TABLE bot_poll_deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            poll_id INTEGER NOT NULL REFERENCES bot_polls(id) ON DELETE CASCADE,
+            group_id TEXT NOT NULL,
+            whatsapp_message_id TEXT,
+            status TEXT NOT NULL CHECK (status IN ('pending', 'sending', 'sent', 'failed', 'skipped')),
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_attempt_at TEXT,
+            last_error TEXT,
+            sent_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(poll_id, group_id)
+          );
+          CREATE UNIQUE INDEX idx_bot_poll_deliveries_message
+            ON bot_poll_deliveries(bot_id, whatsapp_message_id) WHERE whatsapp_message_id IS NOT NULL;
+          CREATE INDEX idx_bot_poll_deliveries_poll ON bot_poll_deliveries(poll_id, status);
+
+          CREATE TABLE bot_poll_votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            poll_id INTEGER NOT NULL REFERENCES bot_polls(id) ON DELETE CASCADE,
+            delivery_id INTEGER NOT NULL REFERENCES bot_poll_deliveries(id) ON DELETE CASCADE,
+            voter_hash TEXT NOT NULL,
+            option_index INTEGER NOT NULL,
+            voted_at TEXT NOT NULL,
+            local_date TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(delivery_id, voter_hash, option_index)
+          );
+          CREATE INDEX idx_bot_poll_votes_poll ON bot_poll_votes(poll_id, option_index);
+          CREATE INDEX idx_bot_poll_votes_period ON bot_poll_votes(bot_id, voted_at);
+          CREATE INDEX idx_bot_poll_votes_local_date ON bot_poll_votes(bot_id, local_date);
+          CREATE INDEX idx_bot_poll_votes_voter ON bot_poll_votes(bot_id, voter_hash, voted_at);
+
+          CREATE TABLE bot_poll_vote_events (
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            event_key TEXT NOT NULL,
+            delivery_id INTEGER NOT NULL REFERENCES bot_poll_deliveries(id) ON DELETE CASCADE,
+            voter_hash TEXT NOT NULL,
+            voted_at TEXT NOT NULL,
+            received_at TEXT NOT NULL,
+            PRIMARY KEY (bot_id, event_key)
+          );
+          CREATE INDEX idx_bot_poll_vote_events_voter
+            ON bot_poll_vote_events(delivery_id, voter_hash, voted_at);
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -2470,7 +2578,6 @@ export class AppDatabase {
     this.seedDefaults();
     this.seedAutomaticMessages();
     this.upgradeBriefDefaults();
-    this.seedPolls();
     this.seedAssistantPlatform();
     this.seedMultiBotPlatform();
     this.seedBotScopedAutomationPlatform();
@@ -2507,50 +2614,6 @@ export class AppDatabase {
         )
         .run(new Date().toISOString());
     }
-  }
-
-  private seedPolls(): void {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `
-        INSERT OR IGNORE INTO poll_schedule_config
-          (id, enabled, send_time, timezone, tolerance_minutes, selection_mode, updated_at)
-        VALUES (1, 0, '13:00', 'America/Santiago', 30, 'SAME_FOR_ALL', ?)
-      `,
-      )
-      .run(now);
-    const insertSetting = this.db.prepare(`
-      INSERT OR IGNORE INTO poll_settings(key, value, updated_at) VALUES (?, ?, ?)
-    `);
-    insertSetting.run('minimum_repeat_days', '30', now);
-    insertSetting.run('maximum_category_streak', '2', now);
-    insertSetting.run('vote_tracking_enabled', 'false', now);
-    const insertTemplate = this.db.prepare(`
-      INSERT OR IGNORE INTO poll_templates
-        (default_key, question, category, allow_multiple_answers, enabled, is_default,
-         favorite, disabled_until, last_used_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 1, 1, 0, NULL, NULL, ?, ?)
-    `);
-    const insertOption = this.db.prepare(`
-      INSERT INTO poll_options(template_id, option_order, option_text) VALUES (?, ?, ?)
-    `);
-    const seed = this.db.transaction(() => {
-      for (const template of DEFAULT_POLL_TEMPLATES) {
-        const result = insertTemplate.run(
-          template.key,
-          template.question,
-          template.category,
-          template.allowMultipleAnswers ? 1 : 0,
-          now,
-          now,
-        );
-        if (result.changes !== 1) continue;
-        const templateId = Number(result.lastInsertRowid);
-        template.options.forEach((option, index) => insertOption.run(templateId, index, option));
-      }
-    });
-    seed();
   }
 
   private seedAssistantPlatform(): void {
@@ -2931,8 +2994,8 @@ export class AppDatabase {
     this.db
       .prepare(
         `INSERT OR IGNORE INTO bot_poll_configurations(
-           bot_id, enabled, send_time, timezone, tolerance_minutes, selection_mode, updated_at
-         ) VALUES (?, 0, '13:00', ?, 30, 'SAME_FOR_ALL', ?)`,
+           bot_id, enabled, send_time, timezone, interval_hours, updated_at
+         ) VALUES (?, 0, '09:00', ?, 3, ?)`,
       )
       .run(botId, timezone, now);
     const insertTemplate = this.db.prepare(
@@ -3637,634 +3700,724 @@ export class AppDatabase {
       .run(botId, groupId, until.toISOString(), errorCode, now);
   }
 
-  public getPollConfiguration(botId = 'neurobot'): PollConfiguration {
+  public getPollAutomationConfiguration(botId = 'neurobot'): PollAutomationConfiguration {
     const row = this.db
-      .prepare('SELECT * FROM bot_poll_configurations WHERE bot_id = ?')
+      .prepare(
+        `SELECT enabled, send_time, timezone, interval_hours, anchor_local_date, activated_at,
+                updated_at
+         FROM bot_poll_configurations WHERE bot_id = ?`,
+      )
       .get(botId) as
       | {
           enabled: number;
           send_time: string;
-          timezone: 'America/Santiago';
-          tolerance_minutes: number;
-          selection_mode: PollSelectionMode;
-          weekly_schedule: string;
+          timezone: string;
+          interval_hours: number;
+          anchor_local_date: string | null;
+          activated_at: string | null;
+          updated_at: string;
         }
       | undefined;
     return {
       enabled: row?.enabled === 1,
-      sendTime: row?.send_time ?? '13:00',
+      startTime: row?.send_time ?? '09:00',
+      intervalHours: row?.interval_hours ?? 3,
       timezone: row?.timezone ?? this.getBot(botId)?.timezone ?? 'America/Santiago',
-      toleranceMinutes: row?.tolerance_minutes ?? 30,
-      selectionMode: row?.selection_mode ?? 'SAME_FOR_ALL',
-      weeklySchedule: parsePollWeeklySchedule(row?.weekly_schedule),
+      anchorLocalDate: row?.anchor_local_date ?? null,
+      activatedAt: row?.activated_at ?? null,
+      updatedAt: row?.updated_at ?? null,
     };
   }
 
-  public savePollConfiguration(configuration: PollConfiguration, botId = 'neurobot'): void {
-    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(configuration.sendTime)) {
-      throw new Error('La hora de la encuesta no es válida.');
+  public savePollAutomationConfiguration(
+    configuration: Omit<PollAutomationConfiguration, 'updatedAt'>,
+    botId = 'neurobot',
+  ): PollAutomationConfiguration {
+    if (!isTime(configuration.startTime)) {
+      throw new Error('La hora de inicio de las encuestas no es válida.');
     }
     if (
-      !Number.isInteger(configuration.toleranceMinutes) ||
-      configuration.toleranceMinutes < 0 ||
-      configuration.toleranceMinutes > 180
+      !Number.isInteger(configuration.intervalHours) ||
+      configuration.intervalHours < 1 ||
+      configuration.intervalHours > 24
     ) {
-      throw new Error('La tolerancia de la encuesta no es válida.');
+      throw new Error('La recurrencia de las encuestas debe estar entre 1 y 24 horas.');
     }
-    if (configuration.weeklySchedule.length > 70) {
-      throw new Error('No se permiten más de 70 horarios semanales en total.');
-    }
-    const schedulesPerWeekday = new Map<number, Set<string>>();
-    for (const schedule of configuration.weeklySchedule) {
-      if (!Number.isInteger(schedule.weekday) || schedule.weekday < 0 || schedule.weekday > 6) {
-        throw new Error('El día de la programación no es válido.');
-      }
-      let timesForDay = schedulesPerWeekday.get(schedule.weekday);
-      if (timesForDay === undefined) {
-        timesForDay = new Set<string>();
-        schedulesPerWeekday.set(schedule.weekday, timesForDay);
-      }
-      if (timesForDay.size >= 10) {
-        throw new Error('No se permiten más de 10 horarios para el mismo día.');
-      }
-      if (!isTime(schedule.sendTime) || schedule.templateIds.length === 0) {
-        throw new Error('Cada programación requiere una hora y al menos una encuesta.');
-      }
-      if (timesForDay.has(schedule.sendTime)) {
-        throw new Error('No se permiten horarios duplicados para el mismo día y hora.');
-      }
-      timesForDay.add(schedule.sendTime);
-      if (new Set(schedule.templateIds).size !== schedule.templateIds.length) {
-        throw new Error('Una encuesta no puede repetirse en el mismo horario.');
-      }
-      for (const templateId of schedule.templateIds) {
-        if (this.getPollTemplate(templateId, botId) === null) {
-          throw new Error('La encuesta seleccionada no existe o no está disponible.');
-        }
-      }
-    }
-    const normalizedSchedule = [...configuration.weeklySchedule].sort((a, b) => {
-      if (a.weekday !== b.weekday) return a.weekday - b.weekday;
-      return a.sendTime.localeCompare(b.sendTime);
-    });
+    const now = new Date().toISOString();
     this.db
       .prepare(
-        `
-        UPDATE bot_poll_configurations SET enabled = ?, send_time = ?, timezone = ?,
-          tolerance_minutes = ?, selection_mode = ?, weekly_schedule = ?, updated_at = ?
-          WHERE bot_id = ?
-      `,
+        `INSERT INTO bot_poll_configurations(
+           bot_id, enabled, send_time, timezone, interval_hours, anchor_local_date, activated_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(bot_id) DO UPDATE SET enabled = excluded.enabled,
+           send_time = excluded.send_time, timezone = excluded.timezone,
+           interval_hours = excluded.interval_hours, anchor_local_date = excluded.anchor_local_date,
+           activated_at = excluded.activated_at, updated_at = excluded.updated_at`,
       )
       .run(
-        configuration.enabled ? 1 : 0,
-        configuration.sendTime,
-        configuration.timezone,
-        configuration.toleranceMinutes,
-        configuration.selectionMode,
-        JSON.stringify(normalizedSchedule),
-        new Date().toISOString(),
         botId,
+        configuration.enabled ? 1 : 0,
+        configuration.startTime,
+        configuration.timezone,
+        configuration.intervalHours,
+        configuration.anchorLocalDate,
+        configuration.activatedAt,
+        now,
       );
+    return this.getPollAutomationConfiguration(botId);
   }
 
-  public getPollSetting<T>(key: string, fallback: T): T {
-    const row = this.db.prepare('SELECT value FROM poll_settings WHERE key = ?').get(key) as
-      { value: string } | undefined;
-    if (row === undefined) return fallback;
-    try {
-      return JSON.parse(row.value) as T;
-    } catch {
-      return fallback;
-    }
-  }
-
-  public listPollTemplates(botId = 'neurobot'): PollTemplate[] {
+  /**
+   * Banco histórico de plantillas (tablas `bot_poll_templates`/`bot_poll_options`). Se conserva
+   * de solo lectura como último recurso cuando Groq no está disponible y no existe historial.
+   */
+  public listLegacyPollTemplates(botId = 'neurobot'): LegacyPollTemplate[] {
     const rows = this.db
       .prepare(
-        `SELECT templates.* FROM bot_poll_templates templates
-        LEFT JOIN assistant_poll_template_settings settings
-          ON settings.assistant_id = templates.bot_id AND settings.poll_template_id = templates.id
-        WHERE templates.bot_id = ? AND COALESCE(settings.status, 'ACTIVE') != 'HIDDEN'
-        ORDER BY templates.is_default DESC, templates.id`,
+        `SELECT templates.id, templates.question, templates.category
+         FROM bot_poll_templates templates
+         LEFT JOIN assistant_poll_template_settings settings
+           ON settings.assistant_id = templates.bot_id AND settings.poll_template_id = templates.id
+         WHERE templates.bot_id = ? AND templates.enabled = 1
+           AND (settings.status IS NULL OR settings.status <> 'HIDDEN')
+         ORDER BY templates.id`,
       )
-      .all(botId) as PollTemplateRow[];
-    const optionRows = this.db
+      .all(botId) as Array<{ id: number; question: string; category: string }>;
+    const options = new Map<number, string[]>();
+    for (const option of this.db
       .prepare(
         `SELECT options.template_id, options.option_text FROM bot_poll_options options
-        JOIN bot_poll_templates templates ON templates.id = options.template_id
-        WHERE templates.bot_id = ? ORDER BY options.option_order`,
+         JOIN bot_poll_templates templates ON templates.id = options.template_id
+         WHERE templates.bot_id = ? ORDER BY options.template_id, options.option_order`,
       )
-      .all(botId) as Array<{ template_id: number; option_text: string }>;
-    const options = new Map<number, string[]>();
-    for (const row of optionRows) {
-      const values = options.get(row.template_id) ?? [];
-      values.push(row.option_text);
-      options.set(row.template_id, values);
+      .all(botId) as Array<{ template_id: number; option_text: string }>) {
+      const list = options.get(option.template_id) ?? [];
+      list.push(option.option_text);
+      options.set(option.template_id, list);
     }
-    return rows.map((row) => mapPollTemplate(row, options.get(row.id) ?? []));
+    return rows
+      .map((row) => ({ ...row, options: options.get(row.id) ?? [] }))
+      .filter((template) => template.options.length >= 2);
   }
 
-  public listHiddenPollTemplates(botId = 'neurobot'): HiddenPollTemplate[] {
-    const rows = this.db
-      .prepare(
-        `SELECT templates.*, settings.hidden_at, settings.removal_reason
-      FROM bot_poll_templates templates
-      JOIN assistant_poll_template_settings settings
-        ON settings.assistant_id = templates.bot_id AND settings.poll_template_id = templates.id
-      WHERE templates.bot_id = ? AND templates.is_default = 1 AND settings.status = 'HIDDEN'
-      ORDER BY settings.hidden_at DESC`,
-      )
-      .all(botId) as Array<
-      PollTemplateRow & {
-        hidden_at: string;
-        removal_reason: string | null;
-      }
-    >;
-    const optionRows = this.db
-      .prepare(
-        `SELECT options.template_id, options.option_text
-      FROM bot_poll_options options JOIN bot_poll_templates templates ON templates.id = options.template_id
-      WHERE templates.bot_id = ? ORDER BY options.option_order`,
-      )
-      .all(botId) as Array<{
-      template_id: number;
-      option_text: string;
-    }>;
-    const options = new Map<number, string[]>();
-    for (const row of optionRows)
-      options.set(row.template_id, [...(options.get(row.template_id) ?? []), row.option_text]);
-    return rows.map((row) => ({
-      ...mapPollTemplate(row, options.get(row.id) ?? []),
-      hiddenAt: row.hidden_at,
-      removalReason: row.removal_reason,
-    }));
-  }
-
-  public hidePollTemplateForAssistant(
-    botId: string,
-    templateId: number,
-    safeActorHash: string,
-    removalReason: string | null = null,
-  ): { hidden: boolean; cancelledOverrides: number; cancelledDeliveries: number } {
-    const template = this.db
-      .prepare('SELECT id, is_default FROM bot_poll_templates WHERE id = ? AND bot_id = ?')
-      .get(templateId, botId) as { id: number; is_default: number } | undefined;
-    if (template === undefined || template.is_default !== 1)
-      throw new Error('POLL_ASSISTANT_MISMATCH');
-    const existing = this.db
-      .prepare(
-        `SELECT status FROM assistant_poll_template_settings
-      WHERE assistant_id = ? AND poll_template_id = ?`,
-      )
-      .get(botId, templateId) as { status: string } | undefined;
-    if (existing?.status === 'HIDDEN')
-      return { hidden: false, cancelledOverrides: 0, cancelledDeliveries: 0 };
-    const now = new Date().toISOString();
-    return this.db.transaction(() => {
-      this.db
-        .prepare(
-          `INSERT INTO assistant_poll_template_settings(
-        assistant_id, poll_template_id, status, hidden_at, restored_at, safe_actor_hash,
-        removal_reason, created_at, updated_at
-      ) VALUES (?, ?, 'HIDDEN', ?, NULL, ?, ?, ?, ?)
-      ON CONFLICT(assistant_id, poll_template_id) DO UPDATE SET status = 'HIDDEN',
-        hidden_at = excluded.hidden_at, restored_at = NULL, safe_actor_hash = excluded.safe_actor_hash,
-        removal_reason = excluded.removal_reason, updated_at = excluded.updated_at`,
-        )
-        .run(botId, templateId, now, safeActorHash, removalReason, now, now);
-      const cancelledOverrides = this.db
-        .prepare(
-          'DELETE FROM bot_poll_date_overrides WHERE bot_id = ? AND template_id = ? AND local_date > date(?)',
-        )
-        .run(botId, templateId, now).changes;
-      const cancelledDeliveries = this.db
-        .prepare(
-          `UPDATE bot_poll_send_history
-        SET status = 'SKIPPED', failure_code = 'POLL_TEMPLATE_HIDDEN', attempted_at = ?,
-          attempts = CASE WHEN attempts = 0 THEN 1 ELSE attempts END
-        WHERE bot_id = ? AND template_id = ? AND status = 'PENDING'`,
-        )
-        .run(now, botId, templateId).changes;
-      this.removePollTemplateFromWeeklySchedule(botId, templateId, now);
-      return { hidden: true, cancelledOverrides, cancelledDeliveries };
-    })();
-  }
-
-  public restorePollTemplateForAssistant(
-    botId: string,
-    templateId: number,
-    safeActorHash: string,
-  ): boolean {
-    const now = new Date().toISOString();
-    const result = this.db
-      .prepare(
-        `UPDATE assistant_poll_template_settings
-      SET status = 'ACTIVE', hidden_at = NULL, restored_at = ?, safe_actor_hash = ?, updated_at = ?
-      WHERE assistant_id = ? AND poll_template_id = ? AND status = 'HIDDEN'
-        AND EXISTS (SELECT 1 FROM bot_poll_templates templates
-          WHERE templates.id = poll_template_id AND templates.bot_id = assistant_id AND templates.is_default = 1)`,
-      )
-      .run(now, safeActorHash, now, botId, templateId);
-    return result.changes === 1;
-  }
-
-  public restoreAllDefaultPollsForAssistant(botId: string, safeActorHash: string): number {
-    const now = new Date().toISOString();
-    return this.db
-      .prepare(
-        `UPDATE assistant_poll_template_settings
-      SET status = 'ACTIVE', hidden_at = NULL, restored_at = ?, safe_actor_hash = ?, updated_at = ?
-      WHERE assistant_id = ? AND status = 'HIDDEN' AND poll_template_id IN (
-        SELECT id FROM bot_poll_templates WHERE bot_id = ? AND is_default = 1
-      )`,
-      )
-      .run(now, safeActorHash, now, botId, botId).changes;
-  }
-
-  public getPollTemplate(id: number, botId = 'neurobot'): PollTemplate | null {
-    return this.listPollTemplates(botId).find((template) => template.id === id) ?? null;
-  }
-
-  public savePollTemplate(
+  public insertPoll(
     input: {
-      id?: number;
       question: string;
-      category: string;
+      normalizedQuestion: string;
       options: string[];
-      allowMultipleAnswers: boolean;
-      enabled: boolean;
-      favorite: boolean;
-      disabledUntil: string | null;
+      category: string;
+      origin: PollOrigin;
+      sourcePollId?: number | null;
+      sourceTemplateId?: number | null;
+      status: PollStatus;
+      source?: PollDeliverySource;
+      slotKey?: string | null;
+      scheduledFor?: string | null;
     },
     botId = 'neurobot',
-  ): PollTemplate {
-    const content = validatePollTemplateContent(input.question, input.category, input.options);
-    if (input.disabledUntil !== null && !Number.isFinite(Date.parse(input.disabledUntil))) {
-      throw new Error('La fecha de exclusión temporal no es válida.');
-    }
+  ): PollRecord {
     const now = new Date().toISOString();
-    const save = this.db.transaction(() => {
-      let id = input.id;
-      if (id === undefined) {
-        const result = this.db
-          .prepare(
-            `
-            INSERT INTO bot_poll_templates
-              (bot_id, default_key, question, category, allow_multiple_answers, enabled, is_default,
-               favorite, disabled_until, last_used_at, created_at, updated_at)
-            VALUES (?, NULL, ?, ?, ?, ?, 0, ?, ?, NULL, ?, ?)
-          `,
-          )
-          .run(
-            botId,
-            content.question,
-            content.category,
-            input.allowMultipleAnswers ? 1 : 0,
-            input.enabled ? 1 : 0,
-            input.favorite ? 1 : 0,
-            input.disabledUntil,
-            now,
-            now,
-          );
-        id = Number(result.lastInsertRowid);
-      } else {
-        const result = this.db
-          .prepare(
-            `
-            UPDATE bot_poll_templates SET question = ?, category = ?, allow_multiple_answers = ?,
-              enabled = ?, favorite = ?, disabled_until = ?, updated_at = ? WHERE id = ? AND bot_id = ?
-          `,
-          )
-          .run(
-            content.question,
-            content.category,
-            input.allowMultipleAnswers ? 1 : 0,
-            input.enabled ? 1 : 0,
-            input.favorite ? 1 : 0,
-            input.disabledUntil,
-            now,
-            id,
-            botId,
-          );
-        if (result.changes !== 1) throw new Error('La plantilla de encuesta no existe.');
-        this.db.prepare('DELETE FROM bot_poll_options WHERE template_id = ?').run(id);
-      }
-      const insertOption = this.db.prepare(`
-        INSERT INTO bot_poll_options(template_id, option_order, option_text) VALUES (?, ?, ?)
-      `);
-      content.options.forEach((option, index) => insertOption.run(id, index, option));
-      return id;
-    });
-    return this.getPollTemplate(save(), botId) as PollTemplate;
-  }
-
-  public deletePollTemplate(id: number, botId = 'neurobot'): boolean {
-    const template = this.getPollTemplate(id, botId);
-    if (template === null) return false;
-    if (template.isDefault) throw new Error('Las encuestas predeterminadas no se pueden eliminar.');
-    const now = new Date().toISOString();
-    return this.db.transaction(() => {
-      this.removePollTemplateFromWeeklySchedule(botId, id, now);
-      return (
-        this.db.prepare('DELETE FROM bot_poll_templates WHERE id = ? AND bot_id = ?').run(id, botId)
-          .changes === 1
-      );
-    })();
-  }
-
-  private removePollTemplateFromWeeklySchedule(
-    botId: string,
-    templateId: number,
-    now: string,
-  ): void {
-    const configuration = this.getPollConfiguration(botId);
-    const weeklySchedule = configuration.weeklySchedule
-      .map((entry) => ({
-        ...entry,
-        templateIds: entry.templateIds.filter((id) => id !== templateId),
-      }))
-      .filter((entry) => entry.templateIds.length > 0);
-    if (
-      weeklySchedule.length === configuration.weeklySchedule.length &&
-      weeklySchedule.every(
-        (entry, index) =>
-          entry.templateIds.length === configuration.weeklySchedule[index]?.templateIds.length,
-      )
-    ) {
-      return;
-    }
-    this.db
-      .prepare(
-        `UPDATE bot_poll_configurations SET weekly_schedule = ?, enabled = ?, updated_at = ?
-         WHERE bot_id = ?`,
-      )
-      .run(
-        JSON.stringify(weeklySchedule),
-        configuration.enabled && weeklySchedule.length > 0 ? 1 : 0,
-        now,
-        botId,
-      );
-  }
-
-  public restoreDefaultPollTemplates(botId = 'neurobot', safeActorHash = 'system'): number {
-    const hiddenRestored = this.restoreAllDefaultPollsForAssistant(botId, safeActorHash);
-    const now = new Date().toISOString();
-    let restored = hiddenRestored;
-    const restore = this.db.transaction(() => {
-      for (const template of DEFAULT_POLL_TEMPLATES) {
-        const existing = this.db
-          .prepare('SELECT id FROM bot_poll_templates WHERE bot_id = ? AND default_key = ?')
-          .get(botId, template.key) as { id: number } | undefined;
-        let id: number;
-        if (existing === undefined) {
-          const result = this.db
-            .prepare(
-              `
-              INSERT INTO bot_poll_templates
-                (bot_id, default_key, question, category, allow_multiple_answers, enabled, is_default,
-                 favorite, disabled_until, last_used_at, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, 1, 1, 0, NULL, NULL, ?, ?)
-            `,
-            )
-            .run(
-              botId,
-              template.key,
-              template.question,
-              template.category,
-              template.allowMultipleAnswers ? 1 : 0,
-              now,
-              now,
-            );
-          id = Number(result.lastInsertRowid);
-        } else {
-          continue;
-        }
-        const insert = this.db.prepare(`
-          INSERT INTO bot_poll_options(template_id, option_order, option_text) VALUES (?, ?, ?)
-        `);
-        template.options.forEach((option, index) => insert.run(id, index, option));
-        restored += 1;
-      }
-    });
-    restore();
-    return restored;
-  }
-
-  public getPollDateOverride(localDate: string, botId = 'neurobot'): PollDateOverride | null {
-    const row = this.db
-      .prepare('SELECT * FROM bot_poll_date_overrides WHERE bot_id = ? AND local_date = ?')
-      .get(botId, localDate) as
-      | { local_date: string; template_id: number; created_at: string; updated_at: string }
-      | undefined;
-    return row === undefined
-      ? null
-      : {
-          localDate: row.local_date,
-          templateId: row.template_id,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        };
-  }
-
-  public listPollDateOverrides(botId = 'neurobot'): PollDateOverride[] {
-    return (
-      this.db
-        .prepare('SELECT * FROM bot_poll_date_overrides WHERE bot_id = ? ORDER BY local_date')
-        .all(botId) as Array<{
-        local_date: string;
-        template_id: number;
-        created_at: string;
-        updated_at: string;
-      }>
-    ).map((row) => ({
-      localDate: row.local_date,
-      templateId: row.template_id,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
-  }
-
-  public savePollDateOverride(
-    localDate: string,
-    templateId: number,
-    botId = 'neurobot',
-  ): PollDateOverride {
-    const template = this.getPollTemplate(templateId, botId);
-    if (template === null) throw new Error('La encuesta seleccionada no existe.');
-    if (!template.enabled) throw new Error('La encuesta seleccionada está desactivada.');
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `
-        INSERT INTO bot_poll_date_overrides(bot_id, local_date, template_id, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(bot_id, local_date) DO UPDATE SET template_id = excluded.template_id,
-          updated_at = excluded.updated_at
-      `,
-      )
-      .run(botId, localDate, templateId, now, now);
-    return this.getPollDateOverride(localDate, botId) as PollDateOverride;
-  }
-
-  public deletePollDateOverride(localDate: string, botId = 'neurobot'): boolean {
-    return (
-      this.db
-        .prepare('DELETE FROM bot_poll_date_overrides WHERE bot_id = ? AND local_date = ?')
-        .run(botId, localDate).changes === 1
-    );
-  }
-
-  public claimPollDelivery(
-    input: {
-      deduplicationKey: string;
-      groupId: string;
-      localDate: string;
-      templateId: number;
-      source: PollDeliverySource;
-      countsAsDaily: boolean;
-      scheduledAt: Date;
-    },
-    botId = 'neurobot',
-  ): PollSendHistoryRecord | null {
-    const claim = this.db.transaction(() => {
-      const existing = this.db
-        .prepare('SELECT * FROM bot_poll_send_history WHERE bot_id = ? AND deduplication_key = ?')
-        .get(botId, input.deduplicationKey) as PollHistoryRow | undefined;
-      if (existing !== undefined) {
-        if (
-          existing.status === 'SENT' ||
-          existing.status === 'SENDING' ||
-          existing.status === 'SKIPPED' ||
-          existing.attempts >= 2
-        ) {
-          return null;
-        }
-        return mapPollHistory(existing);
-      }
+    const insert = this.db.transaction(() => {
       const result = this.db
         .prepare(
-          `
-          INSERT INTO bot_poll_send_history
-            (bot_id, deduplication_key, group_id, local_date, template_id, source, counts_as_daily,
-             status, attempts, scheduled_at, attempted_at, sent_at, failure_code)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', 0, ?, NULL, NULL, NULL)
-        `,
+          `INSERT INTO bot_polls(
+             bot_id, question, normalized_question, category, origin, source_poll_id,
+             source_template_id, status, source, slot_key, scheduled_for, sent_at, attempts,
+             last_attempt_at, last_error, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, ?, ?)`,
         )
         .run(
           botId,
-          input.deduplicationKey,
-          input.groupId,
-          input.localDate,
-          input.templateId,
-          input.source,
-          input.countsAsDaily ? 1 : 0,
-          input.scheduledAt.toISOString(),
+          input.question,
+          input.normalizedQuestion,
+          input.category,
+          input.origin,
+          input.sourcePollId ?? null,
+          input.sourceTemplateId ?? null,
+          input.status,
+          input.source ?? 'scheduled',
+          input.slotKey ?? null,
+          input.scheduledFor ?? null,
+          now,
+          now,
         );
-      return mapPollHistory(
+      const id = Number(result.lastInsertRowid);
+      const insertOption = this.db.prepare(
+        'INSERT INTO bot_poll_answer_options(poll_id, option_index, label) VALUES (?, ?, ?)',
+      );
+      input.options.forEach((label, index) => insertOption.run(id, index, label));
+      return id;
+    });
+    return this.getPoll(insert(), botId) as PollRecord;
+  }
+
+  public getPoll(id: number, botId = 'neurobot'): PollRecord | null {
+    const row = this.db
+      .prepare('SELECT * FROM bot_polls WHERE id = ? AND bot_id = ?')
+      .get(id, botId) as PollRow | undefined;
+    if (row === undefined) return null;
+    return mapPoll(row, this.pollOptionsFor([id]).get(id) ?? []);
+  }
+
+  public listPolls(
+    filter: {
+      statuses?: PollStatus[];
+      sentSince?: string;
+      createdSince?: string;
+      orderBy?: 'created_asc' | 'scheduled_asc' | 'sent_desc' | 'sent_asc';
+      limit?: number;
+    },
+    botId = 'neurobot',
+  ): PollRecord[] {
+    const conditions = ['bot_id = ?'];
+    const parameters: Array<string | number> = [botId];
+    if (filter.statuses !== undefined && filter.statuses.length > 0) {
+      conditions.push(`status IN (${filter.statuses.map(() => '?').join(', ')})`);
+      parameters.push(...filter.statuses);
+    }
+    if (filter.sentSince !== undefined) {
+      conditions.push('sent_at >= ?');
+      parameters.push(filter.sentSince);
+    }
+    if (filter.createdSince !== undefined) {
+      conditions.push('created_at >= ?');
+      parameters.push(filter.createdSince);
+    }
+    const order =
+      filter.orderBy === 'scheduled_asc'
+        ? 'scheduled_for ASC, id ASC'
+        : filter.orderBy === 'sent_desc'
+          ? 'sent_at DESC, id DESC'
+          : filter.orderBy === 'sent_asc'
+            ? 'sent_at ASC, id ASC'
+            : 'created_at ASC, id ASC';
+    const limit = Math.min(2000, Math.max(1, Math.trunc(filter.limit ?? 500)));
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM bot_polls WHERE ${conditions.join(' AND ')} ORDER BY ${order} LIMIT ?`,
+      )
+      .all(...parameters, limit) as PollRow[];
+    const options = this.pollOptionsFor(rows.map((row) => row.id));
+    return rows.map((row) => mapPoll(row, options.get(row.id) ?? []));
+  }
+
+  /** Preguntas (normalizadas) usadas o preparadas recientemente para evitar repeticiones. */
+  public listRecentPollQuestions(
+    sinceIso: string,
+    botId = 'neurobot',
+  ): Array<{ id: number; question: string; normalizedQuestion: string; category: string }> {
+    return this.db
+      .prepare(
+        `SELECT id, question, normalized_question AS normalizedQuestion, category
+         FROM bot_polls
+         WHERE bot_id = ? AND (
+           status IN ('generated', 'scheduled', 'sending')
+           OR (status IN ('sent', 'failed') AND COALESCE(sent_at, last_attempt_at, created_at) >= ?)
+         )
+         ORDER BY id DESC LIMIT 400`,
+      )
+      .all(botId, sinceIso) as Array<{
+      id: number;
+      question: string;
+      normalizedQuestion: string;
+      category: string;
+    }>;
+  }
+
+  /** Último uso (envío o preparación) de cada plantilla del banco, para rotarlas. */
+  public listLegacyTemplateUsage(botId = 'neurobot'): Map<number, string> {
+    return new Map(
+      (
         this.db
-          .prepare('SELECT * FROM bot_poll_send_history WHERE id = ?')
-          .get(Number(result.lastInsertRowid)) as PollHistoryRow,
+          .prepare(
+            `SELECT source_template_id AS templateId, MAX(created_at) AS lastUsedAt
+             FROM bot_polls WHERE bot_id = ? AND source_template_id IS NOT NULL
+             GROUP BY source_template_id`,
+          )
+          .all(botId) as Array<{ templateId: number; lastUsedAt: string }>
+      ).map((row) => [row.templateId, row.lastUsedAt]),
+    );
+  }
+
+  /** Asigna un horario a una encuesta en reserva; devuelve false si el slot ya está ocupado. */
+  public assignPollSlot(
+    pollId: number,
+    slotKey: string,
+    scheduledFor: string,
+    botId = 'neurobot',
+  ): boolean {
+    try {
+      const result = this.db
+        .prepare(
+          `UPDATE bot_polls SET status = 'scheduled', slot_key = ?, scheduled_for = ?, updated_at = ?
+           WHERE id = ? AND bot_id = ? AND status = 'generated'`,
+        )
+        .run(slotKey, scheduledFor, new Date().toISOString(), pollId, botId);
+      return result.changes === 1;
+    } catch (error) {
+      if (isUniqueConstraintError(error)) return false;
+      throw error;
+    }
+  }
+
+  /** Devuelve encuestas programadas (aún no enviadas) a la reserva. */
+  public releaseScheduledPolls(filter: { pollIds?: number[] } = {}, botId = 'neurobot'): number {
+    const ids = filter.pollIds;
+    if (ids !== undefined && ids.length === 0) return 0;
+    const where = ids === undefined ? '' : ` AND id IN (${ids.map(() => '?').join(', ')})`;
+    const result = this.db
+      .prepare(
+        `UPDATE bot_polls SET status = 'generated', slot_key = NULL, scheduled_for = NULL,
+           updated_at = ?
+         WHERE bot_id = ? AND status = 'scheduled'${where}`,
+      )
+      .run(new Date().toISOString(), botId, ...(ids ?? []));
+    return result.changes;
+  }
+
+  /** Reclama atómicamente una encuesta programada para enviarla; solo una ejecución la obtiene. */
+  public claimPollForSending(pollId: number, now: Date, botId = 'neurobot'): PollRecord | null {
+    const result = this.db
+      .prepare(
+        `UPDATE bot_polls SET status = 'sending', attempts = attempts + 1, last_attempt_at = ?,
+           last_error = NULL, updated_at = ?
+         WHERE id = ? AND bot_id = ? AND status = 'scheduled'`,
+      )
+      .run(now.toISOString(), now.toISOString(), pollId, botId);
+    return result.changes === 1 ? this.getPoll(pollId, botId) : null;
+  }
+
+  /** Toma una encuesta de la reserva para un envío manual (Centro de pruebas). */
+  public claimPollForManualSending(
+    pollId: number,
+    now: Date,
+    botId = 'neurobot',
+  ): PollRecord | null {
+    const result = this.db
+      .prepare(
+        `UPDATE bot_polls SET status = 'sending', source = 'manual', attempts = attempts + 1,
+           last_attempt_at = ?, last_error = NULL, updated_at = ?
+         WHERE id = ? AND bot_id = ? AND status = 'generated'`,
+      )
+      .run(now.toISOString(), now.toISOString(), pollId, botId);
+    return result.changes === 1 ? this.getPoll(pollId, botId) : null;
+  }
+
+  public completePoll(
+    pollId: number,
+    status: 'sent' | 'failed' | 'skipped',
+    now: Date,
+    lastError: string | null,
+    botId = 'neurobot',
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE bot_polls SET status = ?, sent_at = CASE WHEN ? = 'sent' THEN ? ELSE sent_at END,
+           last_error = ?, updated_at = ?
+         WHERE id = ? AND bot_id = ? AND status = 'sending'`,
+      )
+      .run(status, status, now.toISOString(), lastError, now.toISOString(), pollId, botId);
+  }
+
+  /** Encuestas que quedaron en `sending` por un reinicio; se cierran según sus entregas. */
+  public listInterruptedPolls(olderThanIso: string, botId = 'neurobot'): PollRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM bot_polls WHERE bot_id = ? AND status = 'sending'
+           AND COALESCE(last_attempt_at, updated_at) < ? ORDER BY id`,
+      )
+      .all(botId, olderThanIso) as PollRow[];
+    const options = this.pollOptionsFor(rows.map((row) => row.id));
+    return rows.map((row) => mapPoll(row, options.get(row.id) ?? []));
+  }
+
+  public claimPollDelivery(
+    pollId: number,
+    groupId: string,
+    now: Date,
+    maximumAttempts: number,
+    botId = 'neurobot',
+  ): PollDeliveryRecord | null {
+    const claim = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO bot_poll_deliveries(
+             bot_id, poll_id, group_id, whatsapp_message_id, status, attempts, last_attempt_at,
+             last_error, sent_at, created_at, updated_at
+           ) VALUES (?, ?, ?, NULL, 'pending', 0, NULL, NULL, NULL, ?, ?)`,
+        )
+        .run(botId, pollId, groupId, now.toISOString(), now.toISOString());
+      const existing = this.db
+        .prepare('SELECT * FROM bot_poll_deliveries WHERE poll_id = ? AND group_id = ?')
+        .get(pollId, groupId) as PollDeliveryRow | undefined;
+      if (existing === undefined) return null;
+      if (
+        existing.status === 'sent' ||
+        existing.status === 'sending' ||
+        existing.status === 'skipped' ||
+        existing.attempts >= maximumAttempts
+      ) {
+        return null;
+      }
+      this.db
+        .prepare(
+          `UPDATE bot_poll_deliveries SET status = 'sending', attempts = attempts + 1,
+             last_attempt_at = ?, last_error = NULL, updated_at = ? WHERE id = ?`,
+        )
+        .run(now.toISOString(), now.toISOString(), existing.id);
+      return mapPollDelivery(
+        this.db
+          .prepare('SELECT * FROM bot_poll_deliveries WHERE id = ?')
+          .get(existing.id) as PollDeliveryRow,
       );
     });
     return claim();
   }
 
-  public getPollDelivery(
-    deduplicationKey: string,
+  /** Registra que un grupo quedó fuera del envío sin consumir intentos. */
+  public markPollDeliverySkipped(
+    pollId: number,
+    groupId: string,
+    now: Date,
+    reason: string,
     botId = 'neurobot',
-  ): PollSendHistoryRecord | null {
-    const row = this.db
-      .prepare('SELECT * FROM bot_poll_send_history WHERE bot_id = ? AND deduplication_key = ?')
-      .get(botId, deduplicationKey) as PollHistoryRow | undefined;
-    return row === undefined ? null : mapPollHistory(row);
-  }
-
-  public getPollTemplateIdForLocalDate(localDate: string, botId = 'neurobot'): number | null {
-    const row = this.db
-      .prepare(
-        `SELECT template_id FROM bot_poll_send_history
-         WHERE bot_id = ? AND local_date = ? AND counts_as_daily = 1 ORDER BY id LIMIT 1`,
-      )
-      .get(botId, localDate) as { template_id: number } | undefined;
-    return row?.template_id ?? null;
-  }
-
-  public beginPollAttempt(id: number, attemptedAt: Date): number | null {
-    const result = this.db
-      .prepare(
-        `
-        UPDATE bot_poll_send_history SET status = 'SENDING', attempts = attempts + 1,
-          attempted_at = ?, failure_code = NULL
-        WHERE id = ? AND status IN ('PENDING', 'FAILED') AND attempts < 2
-      `,
-      )
-      .run(attemptedAt.toISOString(), id);
-    if (result.changes !== 1) return null;
-    return (
-      this.db.prepare('SELECT attempts FROM bot_poll_send_history WHERE id = ?').get(id) as {
-        attempts: number;
-      }
-    ).attempts;
-  }
-
-  public completePollAttempt(
-    id: number,
-    status: 'SENT' | 'FAILED' | 'SKIPPED',
-    completedAt: Date,
-    failureCode: string | null,
   ): void {
-    const complete = this.db.transaction(() => {
+    this.db
+      .prepare(
+        `INSERT INTO bot_poll_deliveries(
+           bot_id, poll_id, group_id, whatsapp_message_id, status, attempts, last_attempt_at,
+           last_error, sent_at, created_at, updated_at
+         ) VALUES (?, ?, ?, NULL, 'skipped', 0, NULL, ?, NULL, ?, ?)
+         ON CONFLICT(poll_id, group_id) DO UPDATE SET status = 'skipped',
+           last_error = excluded.last_error, updated_at = excluded.updated_at
+         WHERE bot_poll_deliveries.status IN ('pending', 'failed')`,
+      )
+      .run(botId, pollId, groupId, reason, now.toISOString(), now.toISOString());
+  }
+
+  public completePollDelivery(
+    deliveryId: number,
+    status: 'sent' | 'failed' | 'skipped',
+    now: Date,
+    details: { whatsappMessageId?: string | null; lastError?: string | null },
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE bot_poll_deliveries SET status = ?,
+           whatsapp_message_id = COALESCE(?, whatsapp_message_id),
+           sent_at = CASE WHEN ? = 'sent' THEN ? ELSE sent_at END,
+           last_error = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(
+        status,
+        details.whatsappMessageId ?? null,
+        status,
+        now.toISOString(),
+        details.lastError ?? null,
+        now.toISOString(),
+        deliveryId,
+      );
+  }
+
+  public listPollDeliveries(pollId: number, botId = 'neurobot'): PollDeliveryRecord[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM bot_poll_deliveries WHERE poll_id = ? AND bot_id = ? ORDER BY id')
+        .all(pollId, botId) as PollDeliveryRow[]
+    ).map(mapPollDelivery);
+  }
+
+  public getPollDeliveryByMessageId(
+    whatsappMessageId: string,
+    botId = 'neurobot',
+  ): { delivery: PollDeliveryRecord; poll: PollRecord } | null {
+    const row = this.db
+      .prepare('SELECT * FROM bot_poll_deliveries WHERE bot_id = ? AND whatsapp_message_id = ?')
+      .get(botId, whatsappMessageId) as PollDeliveryRow | undefined;
+    if (row === undefined) return null;
+    const poll = this.getPoll(row.poll_id, botId);
+    return poll === null ? null : { delivery: mapPollDelivery(row), poll };
+  }
+
+  /**
+   * Aplica un evento de voto de forma idempotente. Cada evento trae la selección completa del
+   * votante; los cambios reemplazan la selección anterior (nunca se suman) y los eventos
+   * repetidos o más antiguos que el último procesado se ignoran.
+   */
+  public recordPollVote(
+    input: {
+      pollId: number;
+      deliveryId: number;
+      voterHash: string;
+      selectedOptionIndexes: number[];
+      votedAt: string;
+      localDate: string;
+      eventKey: string;
+    },
+    now: Date,
+    botId = 'neurobot',
+  ): PollVoteOutcome {
+    const apply = this.db.transaction((): PollVoteOutcome => {
+      const duplicate = this.db
+        .prepare('SELECT 1 FROM bot_poll_vote_events WHERE bot_id = ? AND event_key = ?')
+        .get(botId, input.eventKey);
+      if (duplicate !== undefined) return 'duplicate_ignored';
+      const latest = this.db
+        .prepare(
+          `SELECT MAX(voted_at) AS votedAt FROM bot_poll_vote_events
+           WHERE delivery_id = ? AND voter_hash = ?`,
+        )
+        .get(input.deliveryId, input.voterHash) as { votedAt: string | null };
       this.db
         .prepare(
-          `
-          UPDATE bot_poll_send_history SET status = ?, sent_at = CASE WHEN ? = 'SENT' THEN ? ELSE sent_at END,
-            failure_code = ? WHERE id = ?
-        `,
+          `INSERT INTO bot_poll_vote_events(
+             bot_id, event_key, delivery_id, voter_hash, voted_at, received_at
+           ) VALUES (?, ?, ?, ?, ?, ?)`,
         )
-        .run(status, status, completedAt.toISOString(), failureCode, id);
-      if (status === 'SENT') {
-        this.db
-          .prepare(
-            `
-            UPDATE bot_poll_templates SET last_used_at = ?, updated_at = ?
-            WHERE id = (SELECT template_id FROM bot_poll_send_history WHERE id = ?)
-          `,
-          )
-          .run(completedAt.toISOString(), completedAt.toISOString(), id);
+        .run(
+          botId,
+          input.eventKey,
+          input.deliveryId,
+          input.voterHash,
+          input.votedAt,
+          now.toISOString(),
+        );
+      if (latest.votedAt !== null && latest.votedAt > input.votedAt) return 'stale_ignored';
+      const current = new Set(
+        (
+          this.db
+            .prepare(
+              `SELECT option_index FROM bot_poll_votes WHERE delivery_id = ? AND voter_hash = ?`,
+            )
+            .all(input.deliveryId, input.voterHash) as Array<{ option_index: number }>
+        ).map((row) => row.option_index),
+      );
+      const next = new Set(input.selectedOptionIndexes);
+      const removed = [...current].filter((index) => !next.has(index));
+      const added = [...next].filter((index) => !current.has(index));
+      if (removed.length === 0 && added.length === 0) return 'unchanged';
+      const remove = this.db.prepare(
+        'DELETE FROM bot_poll_votes WHERE delivery_id = ? AND voter_hash = ? AND option_index = ?',
+      );
+      for (const index of removed) remove.run(input.deliveryId, input.voterHash, index);
+      const insert = this.db.prepare(
+        `INSERT INTO bot_poll_votes(
+           bot_id, poll_id, delivery_id, voter_hash, option_index, voted_at, local_date,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const index of added) {
+        insert.run(
+          botId,
+          input.pollId,
+          input.deliveryId,
+          input.voterHash,
+          index,
+          input.votedAt,
+          input.localDate,
+          now.toISOString(),
+          now.toISOString(),
+        );
       }
+      return current.size === 0 ? 'recorded' : 'updated';
     });
-    complete();
+    return apply();
   }
 
-  public listPollSendHistory(limit = 200, botId = 'neurobot'): PollSendHistoryRecord[] {
-    const safeLimit = Math.min(1000, Math.max(1, Math.trunc(limit)));
-    return (
-      this.db
-        .prepare('SELECT * FROM bot_poll_send_history WHERE bot_id = ? ORDER BY id DESC LIMIT ?')
-        .all(botId, safeLimit) as PollHistoryRow[]
-    ).map(mapPollHistory);
-  }
+  // ----- Agregados para el panel de resultados (nunca devuelven identificadores de votantes) -----
 
-  public listPollUsage(
-    sinceLocalDate: string,
-    groupId: string | null,
+  public countPollVotes(
+    fromIso: string,
+    toIso: string,
     botId = 'neurobot',
-  ): Array<{ templateId: number; category: string; localDate: string }> {
-    const whereGroup = groupId === null ? '' : ' AND history.group_id = ?';
-    const parameters: Array<string> = [botId, sinceLocalDate];
-    if (groupId !== null) parameters.push(groupId);
+  ): { votes: number; participants: number; pollsWithVotes: number } {
     return this.db
       .prepare(
-        `
-        SELECT history.template_id AS templateId, templates.category, history.local_date AS localDate
-        FROM bot_poll_send_history history
-        JOIN bot_poll_templates templates ON templates.id = history.template_id
-        WHERE history.bot_id = ? AND history.status = 'SENT' AND history.counts_as_daily = 1
-          AND history.local_date >= ?${whereGroup}
-        ORDER BY history.local_date DESC, history.id DESC
-      `,
+        `SELECT COUNT(*) AS votes, COUNT(DISTINCT voter_hash) AS participants,
+                COUNT(DISTINCT poll_id) AS pollsWithVotes
+         FROM bot_poll_votes WHERE bot_id = ? AND voted_at >= ? AND voted_at < ?`,
       )
-      .all(...parameters) as Array<{ templateId: number; category: string; localDate: string }>;
+      .get(botId, fromIso, toIso) as {
+      votes: number;
+      participants: number;
+      pollsWithVotes: number;
+    };
+  }
+
+  public countPollsSent(fromIso: string, toIso: string, botId = 'neurobot'): number {
+    return (
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS total FROM bot_polls
+           WHERE bot_id = ? AND status = 'sent' AND sent_at >= ? AND sent_at < ?`,
+        )
+        .get(botId, fromIso, toIso) as { total: number }
+    ).total;
+  }
+
+  public listPollVotesByLocalDate(
+    fromIso: string,
+    toIso: string,
+    botId = 'neurobot',
+  ): Array<{ localDate: string; votes: number; participants: number }> {
+    return this.db
+      .prepare(
+        `SELECT local_date AS localDate, COUNT(*) AS votes,
+                COUNT(DISTINCT voter_hash) AS participants
+         FROM bot_poll_votes WHERE bot_id = ? AND voted_at >= ? AND voted_at < ?
+         GROUP BY local_date ORDER BY local_date`,
+      )
+      .all(botId, fromIso, toIso) as Array<{
+      localDate: string;
+      votes: number;
+      participants: number;
+    }>;
+  }
+
+  public listTopPolls(
+    fromIso: string,
+    toIso: string,
+    limit: number,
+    botId = 'neurobot',
+  ): Array<{ id: number; question: string; category: string; votes: number }> {
+    return this.db
+      .prepare(
+        `SELECT polls.id, polls.question, polls.category, COUNT(votes.id) AS votes
+         FROM bot_poll_votes votes JOIN bot_polls polls ON polls.id = votes.poll_id
+         WHERE votes.bot_id = ? AND votes.voted_at >= ? AND votes.voted_at < ?
+         GROUP BY polls.id ORDER BY votes DESC, polls.sent_at DESC LIMIT ?`,
+      )
+      .all(botId, fromIso, toIso, Math.min(50, Math.max(1, limit))) as Array<{
+      id: number;
+      question: string;
+      category: string;
+      votes: number;
+    }>;
+  }
+
+  public listPollVotesByCategory(
+    fromIso: string,
+    toIso: string,
+    botId = 'neurobot',
+  ): Array<{ category: string; votes: number }> {
+    return this.db
+      .prepare(
+        `SELECT polls.category, COUNT(votes.id) AS votes
+         FROM bot_poll_votes votes JOIN bot_polls polls ON polls.id = votes.poll_id
+         WHERE votes.bot_id = ? AND votes.voted_at >= ? AND votes.voted_at < ?
+         GROUP BY polls.category ORDER BY votes DESC`,
+      )
+      .all(botId, fromIso, toIso) as Array<{ category: string; votes: number }>;
+  }
+
+  /** Votos por opción de un conjunto de encuestas (estado completo, sin filtrar por período). */
+  public listPollOptionVotes(
+    pollIds: number[],
+    botId = 'neurobot',
+  ): Map<number, { participants: number; options: Map<number, number> }> {
+    const result = new Map<number, { participants: number; options: Map<number, number> }>();
+    if (pollIds.length === 0) return result;
+    const placeholders = pollIds.map(() => '?').join(', ');
+    for (const row of this.db
+      .prepare(
+        `SELECT poll_id AS pollId, option_index AS optionIndex, COUNT(*) AS votes
+         FROM bot_poll_votes WHERE bot_id = ? AND poll_id IN (${placeholders})
+         GROUP BY poll_id, option_index`,
+      )
+      .all(botId, ...pollIds) as Array<{ pollId: number; optionIndex: number; votes: number }>) {
+      const entry = result.get(row.pollId) ?? { participants: 0, options: new Map() };
+      entry.options.set(row.optionIndex, row.votes);
+      result.set(row.pollId, entry);
+    }
+    for (const row of this.db
+      .prepare(
+        `SELECT poll_id AS pollId, COUNT(DISTINCT voter_hash) AS participants
+         FROM bot_poll_votes WHERE bot_id = ? AND poll_id IN (${placeholders})
+         GROUP BY poll_id`,
+      )
+      .all(botId, ...pollIds) as Array<{ pollId: number; participants: number }>) {
+      const entry = result.get(row.pollId) ?? { participants: 0, options: new Map() };
+      entry.participants = row.participants;
+      result.set(row.pollId, entry);
+    }
+    return result;
+  }
+
+  /** Votos por opción considerando solo los votos emitidos dentro del período. */
+  public listPollOptionVotesInPeriod(
+    fromIso: string,
+    toIso: string,
+    botId = 'neurobot',
+  ): Array<{ pollId: number; optionIndex: number; votes: number }> {
+    return this.db
+      .prepare(
+        `SELECT poll_id AS pollId, option_index AS optionIndex, COUNT(*) AS votes
+         FROM bot_poll_votes WHERE bot_id = ? AND voted_at >= ? AND voted_at < ?
+         GROUP BY poll_id, option_index ORDER BY poll_id, votes DESC`,
+      )
+      .all(botId, fromIso, toIso) as Array<{ pollId: number; optionIndex: number; votes: number }>;
+  }
+
+  public listSentPollsPage(
+    fromIso: string,
+    toIso: string,
+    limit: number,
+    offset: number,
+    botId = 'neurobot',
+  ): { polls: PollRecord[]; total: number } {
+    const total = (
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS total FROM bot_polls
+           WHERE bot_id = ? AND status = 'sent' AND sent_at >= ? AND sent_at < ?`,
+        )
+        .get(botId, fromIso, toIso) as { total: number }
+    ).total;
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM bot_polls WHERE bot_id = ? AND status = 'sent' AND sent_at >= ? AND sent_at < ?
+         ORDER BY sent_at DESC, id DESC LIMIT ? OFFSET ?`,
+      )
+      .all(
+        botId,
+        fromIso,
+        toIso,
+        Math.min(100, Math.max(1, limit)),
+        Math.max(0, offset),
+      ) as PollRow[];
+    const options = this.pollOptionsFor(rows.map((row) => row.id));
+    return { polls: rows.map((row) => mapPoll(row, options.get(row.id) ?? [])), total };
+  }
+
+  /** Contador monótono barato para detectar cambios (votos nuevos o envíos) desde el panel. */
+  public pollAnalyticsVersion(botId = 'neurobot'): number {
+    const row = this.db
+      .prepare(
+        `SELECT (SELECT COUNT(*) FROM bot_poll_vote_events WHERE bot_id = ?) AS events,
+                (SELECT COUNT(*) FROM bot_polls WHERE bot_id = ? AND status = 'sent') AS sent`,
+      )
+      .get(botId, botId) as { events: number; sent: number };
+    return row.events * 100_000 + row.sent;
+  }
+
+  private pollOptionsFor(pollIds: number[]): Map<number, string[]> {
+    const options = new Map<number, string[]>();
+    if (pollIds.length === 0) return options;
+    const rows = this.db
+      .prepare(
+        `SELECT poll_id, option_index, label FROM bot_poll_answer_options
+         WHERE poll_id IN (${pollIds.map(() => '?').join(', ')})
+         ORDER BY poll_id, option_index`,
+      )
+      .all(...pollIds) as Array<{ poll_id: number; option_index: number; label: string }>;
+    for (const row of rows) {
+      const list = options.get(row.poll_id) ?? [];
+      list[row.option_index] = row.label;
+      options.set(row.poll_id, list);
+    }
+    return options;
   }
 
   public listBots(): BotRecord[] {
@@ -9089,39 +9242,55 @@ function mapScheduledDelivery(row: ScheduledDeliveryRow): ScheduledDeliveryRecor
   };
 }
 
-function mapPollTemplate(row: PollTemplateRow, options: string[]): PollTemplate {
+function mapPoll(row: PollRow, options: string[]): PollRecord {
   return {
     id: row.id,
-    defaultKey: row.default_key,
+    botId: row.bot_id,
     question: row.question,
-    category: row.category,
+    normalizedQuestion: row.normalized_question,
     options,
-    allowMultipleAnswers: row.allow_multiple_answers === 1,
-    enabled: row.enabled === 1,
-    isDefault: row.is_default === 1,
-    favorite: row.favorite === 1,
+    category: row.category,
+    origin: row.origin,
+    sourcePollId: row.source_poll_id,
+    sourceTemplateId: row.source_template_id,
+    status: row.status,
+    source: row.source,
+    slotKey: row.slot_key,
+    scheduledFor: row.scheduled_for,
+    sentAt: row.sent_at,
+    attempts: row.attempts,
+    lastAttemptAt: row.last_attempt_at,
+    lastError: row.last_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    lastUsedAt: row.last_used_at,
-    disabledUntil: row.disabled_until,
   };
 }
 
-function mapPollHistory(row: PollHistoryRow): PollSendHistoryRecord {
+function mapPollDelivery(row: PollDeliveryRow): PollDeliveryRecord {
   return {
     id: row.id,
+    botId: row.bot_id,
+    pollId: row.poll_id,
     groupId: row.group_id,
-    localDate: row.local_date,
-    templateId: row.template_id,
-    source: row.source,
-    countsAsDaily: row.counts_as_daily === 1,
+    whatsappMessageId: row.whatsapp_message_id,
     status: row.status,
     attempts: row.attempts,
-    scheduledAt: row.scheduled_at,
-    attemptedAt: row.attempted_at,
+    lastAttemptAt: row.last_attempt_at,
+    lastError: row.last_error,
     sentAt: row.sent_at,
-    failureCode: row.failure_code,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string' &&
+    (error as { code: string }).code.startsWith('SQLITE_CONSTRAINT')
+  );
 }
 
 function mapAssistantProfile(row: AssistantProfileRow): AssistantProfile {
@@ -9754,72 +9923,6 @@ function validateDate(value: string): string {
 
 function isTime(value: string): boolean {
   return /^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(value);
-}
-
-function parsePollWeeklySchedule(value: string | undefined): PollConfiguration['weeklySchedule'] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(
-        (entry): entry is PollConfiguration['weeklySchedule'][number] =>
-          typeof entry === 'object' &&
-          entry !== null &&
-          Number.isInteger((entry as { weekday?: unknown }).weekday) &&
-          Number((entry as { weekday: number }).weekday) >= 0 &&
-          Number((entry as { weekday: number }).weekday) <= 6 &&
-          typeof (entry as { sendTime?: unknown }).sendTime === 'string' &&
-          isTime((entry as { sendTime: string }).sendTime) &&
-          Array.isArray((entry as { templateIds?: unknown }).templateIds) &&
-          (entry as { templateIds: unknown[] }).templateIds.every(
-            (templateId) => Number.isInteger(templateId) && Number(templateId) > 0,
-          ) &&
-          (entry as { templateIds: unknown[] }).templateIds.length > 0,
-      )
-      .map((entry) => ({
-        weekday: Number(entry.weekday),
-        sendTime: entry.sendTime,
-        templateIds: [...new Set(entry.templateIds.map(Number))],
-      }))
-      .sort((a, b) => {
-        if (a.weekday !== b.weekday) return a.weekday - b.weekday;
-        return a.sendTime.localeCompare(b.sendTime);
-      });
-  } catch {
-    return [];
-  }
-}
-
-function validatePollTemplateContent(
-  questionValue: string,
-  categoryValue: string,
-  optionValues: string[],
-): { question: string; category: string; options: string[] } {
-  const question = validatePollPlainText(questionValue, 'pregunta', 200);
-  const category = validatePollPlainText(categoryValue, 'categoría', 80);
-  if (optionValues.length < 2 || optionValues.length > 12) {
-    throw new Error('Una encuesta debe tener entre 2 y 12 alternativas.');
-  }
-  const options = optionValues.map((option) => validatePollPlainText(option, 'alternativa', 100));
-  const normalized = options.map((option) =>
-    option.normalize('NFKC').trim().toLocaleLowerCase('es'),
-  );
-  if (new Set(normalized).size !== options.length) {
-    throw new Error('Las alternativas de una encuesta no pueden repetirse.');
-  }
-  return { question, category, options };
-}
-
-function validatePollPlainText(value: string, field: string, maximumLength: number): string {
-  const normalized = value.normalize('NFKC').trim();
-  if (normalized.length === 0 || normalized.length > maximumLength) {
-    throw new Error(`La ${field} debe tener entre 1 y ${maximumLength} caracteres.`);
-  }
-  if (/[<>]|```/u.test(normalized) || normalized.includes('\u0000')) {
-    throw new Error(`La ${field} debe contener solamente texto plano.`);
-  }
-  return normalized;
 }
 
 function operatingModeFor(mode: BotMode): BotOperatingMode {
