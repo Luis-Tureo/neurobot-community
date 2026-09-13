@@ -20,7 +20,7 @@ describe('bootstrap resiliente del panel administrativo', () => {
 
   it('permite reintentar el runtime y no deja el bootstrap bloqueado tras un fallo', () => {
     expect(bootstrap).toContain('for (let attempt = 1; attempt <= 2; attempt += 1)');
-    expect(bootstrap).toContain("'/app-panel.js?retry=");
+    expect(bootstrap).toContain('/app-panel.js?retry=');
     expect(bootstrap).toContain('panelRuntimeStarted = false;');
     expect(bootstrap).toContain("console.error('ADMIN_PANEL_RUNTIME_LOAD_FAILED'");
   });
