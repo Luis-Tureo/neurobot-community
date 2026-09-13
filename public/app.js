@@ -128,6 +128,25 @@ function repairAutomaticMessagesMarkup() {
     if (pollPanel instanceof HTMLElement && pollPanel.contains(control)) return;
     control.setAttribute('form', 'automatic-messages-form');
   });
+
+  if (section.dataset.automaticInputBridge !== 'true') {
+    section.dataset.automaticInputBridge = 'true';
+    section.addEventListener('input', (event) => {
+      const target = event.target;
+      if (
+        !(
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLSelectElement ||
+          target instanceof HTMLTextAreaElement
+        )
+      ) {
+        return;
+      }
+      if (automaticForm.contains(target)) return;
+      if (target.getAttribute('form') !== 'automatic-messages-form') return;
+      automaticForm.dispatchEvent(new Event('input'));
+    });
+  }
 }
 
 function wait(milliseconds) {
