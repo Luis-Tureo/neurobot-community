@@ -157,8 +157,8 @@ async function importPanelRuntime() {
   let lastError;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      const moduleUrl = attempt === 1 ? '/app-panel.js' : `/app-panel.js?retry=${Date.now()}`;
-      await import(moduleUrl);
+      if (attempt === 1) await import('/app-panel.js');
+      else await import(`/app-panel.js?retry=${Date.now()}`);
       return;
     } catch (error) {
       lastError = error;
