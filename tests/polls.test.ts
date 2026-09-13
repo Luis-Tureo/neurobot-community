@@ -14,6 +14,7 @@ import { PollSender } from '../src/core/poll-sender.js';
 import { PollService } from '../src/core/poll-service.js';
 import { PollVoteService } from '../src/core/poll-vote-service.js';
 import { createLogger } from '../src/infrastructure/logger.js';
+import { parsePollVoteEvent } from '../src/messaging/whatsapp-adapter.js';
 import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { Anonymizer } from '../src/security/anonymizer.js';
@@ -437,6 +438,44 @@ describe('generación y planificación anticipada', () => {
     }
   });
 
+  it('salta plantillas legacy con más de seis opciones sin truncarlas', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '11:50') });
+    try {
+      enable(subject.service);
+      subject.generator.available = false;
+      const incompatible = {
+        id: 900,
+        question: '¿Qué número representa mejor tu experiencia?',
+        category: 'Reflexión',
+        options: Array.from({ length: 11 }, (_, index) => String(index + 1)),
+      };
+      const compatible = {
+        id: 901,
+        question: '¿Qué ritmo prefieres hoy?',
+        category: 'Preferencias',
+        options: ['Muy tranquilo', 'Tranquilo', 'Intermedio', 'Activo', 'Muy activo'],
+      };
+      vi.spyOn(subject.repository, 'legacyTemplates').mockReturnValue([
+        incompatible,
+        compatible,
+      ]);
+      vi.spyOn(subject.repository, 'legacyTemplateUsage').mockReturnValue(new Map());
+
+      const plan = await subject.planner.ensureCoverage();
+      const scheduled = subject.repository.list({ statuses: ['scheduled'] })[0];
+
+      expect(plan.bank).toBe(1);
+      expect(scheduled).toMatchObject({
+        origin: 'legacy_bank',
+        sourceTemplateId: compatible.id,
+        options: compatible.options,
+      });
+      expect(scheduled?.options).not.toEqual(incompatible.options.slice(0, 6));
+    } finally {
+      subject.database.close();
+    }
+  });
+
   it('cuando no hay cooldown disponible reutiliza primero la menos reciente', async () => {
     const subject = createSubject({ initialNow: at('2026-01-20', '11:50') });
     try {
@@ -704,39 +743,111 @@ describe('recepción de votos', () => {
     };
   }
 
-  it('registra votos, ignora duplicados y trata cambios como reemplazo', async () => {
+  it('mantiene idempotente cada estado aunque cambie el eventKey, incluido cambio y retirada', async () => {
     const subject = createSubject({ initialNow: at('2026-01-05', '08:59') });
     try {
       const { poll, messageId } = await sendOne(subject);
       const t0 = at('2026-01-05', '09:05').getTime();
-      expect(await subject.votes.handle(vote(messageId, '56911111111@c.us', [0], t0))).toBe(
-        'recorded',
+      const voterId = '56911111111@c.us';
+      const optionAName = poll.options[0];
+      if (optionAName === undefined) throw new Error('la encuesta no tiene opción A');
+      const rawVoteWithoutOwnId = {
+        voter: voterId,
+        selectedOptions: [{ localId: 0, name: optionAName }],
+        parentMsgKey: { _serialized: messageId },
+      };
+      const dateNow = vi
+        .spyOn(Date, 'now')
+        .mockReturnValueOnce(t0)
+        .mockReturnValueOnce(t0 + 1);
+      const optionA = parsePollVoteEvent(rawVoteWithoutOwnId, (value) =>
+        subject.anonymizer.identifier(value),
       );
-      expect(await subject.votes.handle(vote(messageId, '56911111111@c.us', [0], t0))).toBe(
-        'duplicate_ignored',
+      const retransmittedOptionA = parsePollVoteEvent(rawVoteWithoutOwnId, (value) =>
+        subject.anonymizer.identifier(value),
       );
-      expect(await subject.votes.handle(vote(messageId, '56911111111@c.us', [1], t0 + 1000))).toBe(
-        'updated',
-      );
+      dateNow.mockRestore();
+      if (optionA === null || retransmittedOptionA === null) {
+        throw new Error('el vote_update no pudo normalizarse');
+      }
+      expect(optionA.eventKey).not.toBe(retransmittedOptionA.eventKey);
+      expect(await subject.votes.handle(optionA)).toBe('recorded');
+      expect(await subject.votes.handle(optionA)).toBe('duplicate_ignored');
+      expect(await subject.votes.handle(retransmittedOptionA)).toBe('unchanged');
+      expect(subject.database.listPollOptionVotes([poll.id]).get(poll.id)).toMatchObject({
+        participants: 1,
+      });
+      expect(subject.database.listPollOptionVotes([poll.id]).get(poll.id)?.options.get(0)).toBe(1);
+
+      const optionB = vote(messageId, voterId, [1], t0 + 1000);
+      expect(await subject.votes.handle(optionB)).toBe('updated');
+      expect(
+        await subject.votes.handle({
+          ...optionB,
+          votedAtMs: t0 + 1001,
+          eventKey: `${optionB.eventKey}:retransmitted`,
+        }),
+      ).toBe('unchanged');
       const results = subject.database.listPollOptionVotes([poll.id]).get(poll.id);
       expect(results?.options.get(0) ?? 0).toBe(0);
       expect(results?.options.get(1)).toBe(1);
       expect(results?.participants).toBe(1);
       // Un evento más antiguo que el último procesado no revierte el estado.
-      expect(await subject.votes.handle(vote(messageId, '56911111111@c.us', [0], t0 - 5000))).toBe(
+      expect(await subject.votes.handle(vote(messageId, voterId, [0], t0 - 5000))).toBe(
         'stale_ignored',
       );
       expect(subject.database.listPollOptionVotes([poll.id]).get(poll.id)?.options.get(1)).toBe(1);
       // Retirar el voto (selección vacía) deja de contar.
-      expect(await subject.votes.handle(vote(messageId, '56911111111@c.us', [], t0 + 2000))).toBe(
-        'updated',
-      );
+      const withdrawn = vote(messageId, voterId, [], t0 + 2000);
+      expect(await subject.votes.handle(withdrawn)).toBe('updated');
+      expect(
+        await subject.votes.handle({
+          ...withdrawn,
+          votedAtMs: t0 + 2001,
+          eventKey: `${withdrawn.eventKey}:retransmitted`,
+        }),
+      ).toBe('unchanged');
       expect(
         subject.database.countPollVotes('2026-01-01T00:00:00.000Z', '2026-12-31T00:00:00.000Z'),
       ).toMatchObject({
         votes: 0,
         participants: 0,
       });
+    } finally {
+      subject.database.close();
+    }
+  });
+
+  it('resuelve exactamente parentMsgKey desde el recibo de sendPoll y actualiza el resultado', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:59') });
+    try {
+      const { poll, messageId } = await sendOne(subject);
+      const delivery = subject.repository.deliveries(poll.id)[0];
+      const optionName = poll.options[1];
+      if (optionName === undefined) throw new Error('la encuesta no tiene una segunda opción');
+      expect(messageId).not.toBe('');
+      expect(delivery).toMatchObject({
+        pollId: poll.id,
+        whatsappMessageId: messageId,
+        status: 'sent',
+      });
+
+      const event = parsePollVoteEvent(
+        {
+          voter: '56911111111@c.us',
+          selectedOptions: [{ localId: 1, name: optionName }],
+          interractedAtTs: at('2026-01-05', '09:05').getTime(),
+          parentMsgKey: { _serialized: messageId },
+        },
+        (value) => subject.anonymizer.identifier(value),
+      );
+      expect(event?.pollMessageId).toBe(messageId);
+      if (event === null) throw new Error('el vote_update no pudo normalizarse');
+      expect(await subject.votes.handle(event)).toBe('recorded');
+      expect(subject.database.listPollOptionVotes([poll.id]).get(poll.id)).toMatchObject({
+        participants: 1,
+      });
+      expect(subject.database.listPollOptionVotes([poll.id]).get(poll.id)?.options.get(1)).toBe(1);
     } finally {
       subject.database.close();
     }
@@ -779,6 +890,7 @@ describe('recepción de votos', () => {
       expect(
         await subject.votes.handle(vote(messageId, '56911111111@c.us', [0], t0, ['Otra cosa'])),
       ).toBe('invalid_option');
+      expect(subject.database.listPollOptionVotes([poll.id]).get(poll.id)).toBeUndefined();
       expect(
         await subject.votes.handle(
           vote(messageId, '56911111111@c.us', [0], t0 + 1, [poll.options[0] ?? null]),

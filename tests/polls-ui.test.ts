@@ -18,6 +18,16 @@ describe('interfaz de encuestas', () => {
       'Banco de encuestas',
       'Crear encuesta',
       'Restaurar predeterminadas',
+      'Editar',
+      'Eliminar',
+      'Encuestas ocultas',
+    ]) {
+      expect(pollsSection).not.toContain(removed);
+    }
+    for (const removed of [
+      'Banco de encuestas',
+      'Crear encuesta',
+      'Restaurar predeterminadas',
       'Encuestas eliminadas de este asistente',
       'id="poll-template-form"',
       'id="poll-templates-list"',

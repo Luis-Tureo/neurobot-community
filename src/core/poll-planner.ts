@@ -284,6 +284,10 @@ export class PollPlanner {
     const usage = this.repository.legacyTemplateUsage();
     const templates = this.repository
       .legacyTemplates()
+      // El banco histórico contiene escalas y preguntas extensas de hasta 12 alternativas.
+      // Solo se reutilizan plantillas que ya cumplen la experiencia actual: recortarlas cambiaría
+      // el significado de la encuesta y podría eliminar alternativas esenciales.
+      .filter((template) => template.options.length >= 2 && template.options.length <= 6)
       .filter((template) => findSimilarQuestion(template.question, recent) === null)
       .sort((left, right) => {
         const leftUsed = usage.get(left.id) ?? '';
@@ -294,7 +298,7 @@ export class PollPlanner {
     if (template === undefined) return null;
     const poll = this.repository.insert({
       question: template.question,
-      options: [...template.options].slice(0, 12),
+      options: [...template.options],
       category: template.category.toLocaleLowerCase('es'),
       normalizedQuestion: normalizePollQuestion(template.question),
       origin: 'legacy_bank',

@@ -555,6 +555,12 @@ describe('persistencia SQLite', () => {
           'idx_bot_poll_vote_events_voter',
         ]),
       );
+      const currentVoteSchema = verify
+        .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bot_poll_votes'")
+        .get() as { sql: string };
+      expect(currentVoteSchema.sql).toContain(
+        'UNIQUE(delivery_id, voter_hash, option_index)',
+      );
       verify.close();
     } finally {
       for (const handle of handles) {
