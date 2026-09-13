@@ -48,7 +48,7 @@ describe('API administrativa', () => {
     const anonymizer = new Anonymizer('x'.repeat(32));
     const secretVault = new SecretVault('clave-de-cifrado-para-pruebas');
     testSecretVault = secretVault;
-    const aiProviderFactory = new AIProviderFactory(database, secretVault, undefined, 'gemini');
+    const aiProviderFactory = new AIProviderFactory(database, secretVault, undefined, 'groq');
     const automaticMessages = new AutomaticMessageService(database, client, logger, anonymizer, {
       retryDelayMs: 0,
       sleep: async () => undefined,
@@ -976,15 +976,15 @@ describe('API administrativa', () => {
     expect(initialResponse.statusCode).toBe(200);
     const initial = initialResponse.json();
     expect(initial.currentProvider).toMatchObject({
-      id: 'gemini',
-      name: 'Gemini',
-      model: 'gemini-3.8-flash',
-      preferredModel: 'gemini-3.8-flash',
+      id: 'groq',
+      name: 'Groq',
+      model: 'openai/gpt-oss-120b',
+      preferredModel: 'openai/gpt-oss-120b',
       effectiveModel: null,
       alternativeModelActive: false,
       modelResolutionStatus: 'unresolved',
-      backend: 'gemini-developer-api',
-      apiVersion: 'v1beta',
+      backend: 'groq-api',
+      apiVersion: 'openai/v1',
       configured: false,
       enabled: false,
     });
@@ -1078,7 +1078,7 @@ describe('API administrativa', () => {
     const cred = database.getBotEncryptedCredential('neurobot');
     expect(cred.displayName).toBe('Asistente IA Editado');
     // Al desencriptar debe retornar la clave original
-    const rawKey = testSecretVault.decrypt(cred.encryptedApiKey!, 'bot:neurobot:gemini');
+    const rawKey = testSecretVault.decrypt(cred.encryptedApiKey!, 'bot:neurobot:groq');
     expect(rawKey).toBe('token-de-prueba-original-super-largo');
 
     // Enviar API key vacía
@@ -1094,7 +1094,7 @@ describe('API administrativa', () => {
     expect(responseEmpty.statusCode).toBe(200);
     const cred2 = database.getBotEncryptedCredential('neurobot');
     expect(cred2.displayName).toBe('Asistente IA Vacío');
-    const rawKey2 = testSecretVault.decrypt(cred2.encryptedApiKey!, 'bot:neurobot:gemini');
+    const rawKey2 = testSecretVault.decrypt(cred2.encryptedApiKey!, 'bot:neurobot:groq');
     expect(rawKey2).toBe('token-de-prueba-original-super-largo');
   });
 
@@ -1109,12 +1109,12 @@ describe('API administrativa', () => {
     expect(response.json()).toMatchObject({
       connection: 'failed',
       errorCode: 'AI_NOT_CONFIGURED',
-      preferredModel: 'gemini-3.8-flash',
+      preferredModel: 'openai/gpt-oss-120b',
       effectiveModel: null,
       alternativeModelActive: false,
       visibleModels: [],
-      backend: 'gemini-developer-api',
-      apiVersion: 'v1beta',
+      backend: 'groq-api',
+      apiVersion: 'openai/v1',
       failoverOccurred: false,
     });
   });

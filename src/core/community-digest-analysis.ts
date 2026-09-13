@@ -89,6 +89,7 @@ export const DIGEST_ANALYSIS_JSON_SCHEMA: Record<string, unknown> = {
           'hasAnswers',
           'messageShare',
         ],
+        additionalProperties: false,
       },
     },
     agreements: {
@@ -112,12 +113,14 @@ export const DIGEST_ANALYSIS_JSON_SCHEMA: Record<string, unknown> = {
         repair: { type: 'array', maxItems: 5, items: { type: 'string' } },
       },
       required: ['supportive', 'confusion', 'friction', 'repair'],
+      additionalProperties: false,
       description:
         'Evidencia explícita y agregada de la dinámica del grupo (nunca sobre personas concretas).',
     },
     activityLevel: { type: 'string', enum: ['very_low', 'low', 'medium', 'high'] },
   },
   required: ['topics', 'agreements', 'pending', 'communitySignals', 'activityLevel'],
+  additionalProperties: false,
 };
 
 const PRIVACY_RULES =

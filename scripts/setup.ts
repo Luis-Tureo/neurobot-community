@@ -7,8 +7,8 @@ const destination = resolve(process.cwd(), '.env');
 if (existsSync(destination)) {
   const current = await readFile(destination, 'utf8');
   const missing: string[] = [];
-  if (!/^AI_PROVIDER=/mu.test(current)) missing.push('AI_PROVIDER=gemini');
-  if (!/^GEMINI_API_KEY=/mu.test(current)) missing.push('GEMINI_API_KEY=');
+  if (!/^AI_PROVIDER=/mu.test(current)) missing.push('AI_PROVIDER=groq');
+  if (!/^GROQ_API_KEY=/mu.test(current)) missing.push('GROQ_API_KEY=');
   if (!/^APP_ENCRYPTION_KEY=/mu.test(current)) {
     missing.push(`APP_ENCRYPTION_KEY=${randomBytes(32).toString('base64url')}`);
   }
@@ -39,8 +39,8 @@ MAX_RECONNECT_ATTEMPTS=8
 MAX_RECONNECT_DELAY_SECONDS=300
 DEVELOPMENT_MODE=false
 CHROME_EXECUTABLE_PATH=
-AI_PROVIDER=gemini
-GEMINI_API_KEY=
+AI_PROVIDER=groq
+GROQ_API_KEY=
 APP_ENCRYPTION_KEY=${appEncryptionKey}
 `;
 

@@ -1,6 +1,6 @@
 # Cola de inteligencia artificial
 
-Cada asistente dispone de una cola independiente para impedir que varias consultas simultáneas saturen Gemini. La cola es la **única autoridad de reintentos**: ni el SDK (`retryOptions.attempts = 1`) ni el proveedor reintentan por su cuenta. Las respuestas locales, preguntas frecuentes, caché, conocimiento directo y mensajes de seguridad se resuelven antes de la cola y no consumen su capacidad.
+Cada asistente dispone de una cola independiente para impedir que varias consultas simultáneas saturen Groq. La cola es la **única autoridad de reintentos**: el SDK se construye con `maxRetries: 0` y el proveedor no reintenta por su cuenta. Las respuestas locales, preguntas frecuentes, caché, conocimiento directo y mensajes de seguridad se resuelven antes de la cola y no consumen su capacidad.
 
 ## Configuración recomendada
 
@@ -18,7 +18,7 @@ Los valores se cambian en **Inteligencia artificial > Capacidad y disponibilidad
 
 ## Saturación y errores
 
-Una cola ocupada conserva la consulta en FIFO y puede enviar un aviso único. Una cola llena rechaza temporalmente sin crear una reserva ni mostrar un mensaje de tokens. Una consulta expirada no llega a Gemini. Un timeout o error 429 libera la reserva y se reintenta únicamente dentro de la misma consulta lógica. Solo una respuesta válida y exitosa confirma el consumo.
+Una cola ocupada conserva la consulta en FIFO y puede enviar un aviso único. Una cola llena rechaza temporalmente sin crear una reserva ni mostrar un mensaje de tokens. Una consulta expirada no llega a Groq. Un timeout o error 429 libera la reserva y se reintenta únicamente dentro de la misma consulta lógica. Solo una respuesta válida y exitosa confirma el consumo.
 
 El circuit breaker se abre después de cinco fallos temporales consecutivos, evita nuevas llamadas durante 60 segundos y permite una prueba en estado `HALF_OPEN`. Las respuestas locales continúan disponibles cuando el circuito está abierto.
 
@@ -34,4 +34,4 @@ Cada chat tiene su propia cola FIFO. Los mensajes del mismo chat se espacian y u
 
 La cola vive en memoria. Al reiniciar se cancelan solicitudes pendientes y no se restauran preguntas. SQLite almacena únicamente configuración, métricas agregadas y códigos seguros. No se guardan preguntas, respuestas, teléfonos, nombres, identificadores reales, claves ni códigos QR.
 
-En desarrollo, **Probar cola de IA** simula hasta 30 consultas, repetición, timeout y 429 sin llamar a Gemini ni WhatsApp.
+En desarrollo, **Probar cola de IA** simula hasta 30 consultas, repetición, timeout y 429 sin llamar a Groq ni WhatsApp.

@@ -16,7 +16,7 @@ El envío ya no depende del minuto exacto configurado. Cada 30 segundos el plani
 
 **Reintentos**: un timeout, 429, 5xx, error de red, historial no disponible o WhatsApp desconectado dejan el trabajo en `RETRY_WAIT` con backoff (1, 2, 5, 10, 15 y 30 minutos; un `Retry-After` mayor se respeta) hasta que la ventana venza. Esperar a WhatsApp no consume intentos. Errores definitivos (`AI_INVALID_KEY`, `AI_MODEL_UNAVAILABLE`, `AI_NOT_CONFIGURED`, `AI_PERMANENT_ERROR`, `CONTEXT_TOO_LARGE`) terminan en `FAILED_FINAL` sin bucles.
 
-**Generación y publicación separadas**: el texto generado se guarda cifrado en el trabajo (`SEND_PENDING`). Si WhatsApp falla al enviar, solo se reintenta el envío (`SEND_RETRY_WAIT`, hasta 12 intentos dentro de la ventana) sin volver a llamar a Gemini. Los bloques ya analizados se guardan como **checkpoint cifrado**: tras un reinicio o un fallo en el bloque 6, los cinco anteriores no se repiten.
+**Generación y publicación separadas**: el texto generado se guarda cifrado en el trabajo (`SEND_PENDING`). Si WhatsApp falla al enviar, solo se reintenta el envío (`SEND_RETRY_WAIT`, hasta 12 intentos dentro de la ventana) sin volver a llamar a Groq. Los bloques ya analizados se guardan como **checkpoint cifrado**: tras un reinicio o un fallo en el bloque 6, los cinco anteriores no se repiten.
 
 **Trabajos abandonados**: si el proceso muere en `PROCESSING`, otro tick lo reclama pasados 20 minutos.
 
@@ -34,15 +34,15 @@ El envío ya no depende del minuto exacto configurado. Cada 30 segundos el plani
 - A la IA solo llegan etiquetas efímeras (`P1`, `P2`…) para distinguir intercambios. El resultado final nunca incluye nombres, números, alias, menciones, identificadores ni citas; una barrera final vuelve a sanitizar el texto antes de enviarlo (`DIGEST_OUTPUT_SANITIZED`).
 - Solo se procesan mensajes de texto. Adjuntos, stickers, audios y mensajes del propio bot se excluyen.
 
-## Estrategia por tokens (Gemini 3.8 Flash)
+## Estrategia por tokens (Groq GPT-OSS)
 
 El troceado es por tokens estimados (≈3,2 caracteres por token), no por caracteres:
 
-- hasta ~100.000 tokens: **una sola llamada**;
-- por encima: bloques de ~60.000 tokens → **MAP** estructurado → **REDUCE**;
-- si los análisis parciales superan ~100.000 tokens: REDUCE **jerárquico** (máximo 4 niveles, 64 bloques).
+- hasta ~6.000 tokens estimados: **una sola llamada**;
+- por encima: bloques de ~5.500 tokens → **MAP** estructurado → **REDUCE**;
+- si los análisis parciales superan ~5.500 tokens: REDUCE **jerárquico** (máximo 4 niveles, 64 bloques).
 
-Cada llamada usa `thinkingLevel: LOW`, salida JSON con esquema (`responseJsonSchema`), un timeout acotado que crece con el tamaño (45 s + 1 ms por token, máximo 3 min) y la cola de IA como única autoridad de reintentos.
+Cada llamada usa `reasoning_effort: low`, salida JSON estricta (`response_format.json_schema`), un máximo de 1.000 tokens de completion, un timeout acotado que crece con el tamaño (45 s + 1 ms por token, máximo 3 min) y la cola de IA como única autoridad de reintentos. El render final queda limitado a 1.000 caracteres.
 
 **MAP** extrae temas (título, resumen, importancia, tipo, preguntas/respuestas, proporción), acuerdos, pendientes y señales de convivencia agregadas. **REDUCE** fusiona temas equivalentes y conserva acuerdos y pendientes. La importancia final combina la relevancia informada, el tipo (coordinación, preguntas respondidas, apoyo), la recurrencia entre bloques y solo una fracción del volumen: 50 mensajes de "jaja" no desplazan un tema importante tratado en 8 mensajes. Saludos, acuses, risas, emojis sueltos y comandos del bot se filtran de forma conservadora; los mensajes repetidos se compactan.
 
@@ -78,4 +78,4 @@ El panel muestra por frecuencia: último resumen (Enviado / Pendiente / Reintent
 
 ## Migración
 
-La versión 35 crea `community_digest_jobs`, `community_digest_messages` y `community_digest_rollups`. Es compatible con instalaciones existentes; las frecuencias ya activas conservan su configuración y las ocurrencias anteriores a la actualización no se envían retroactivamente.
+La versión 35 crea `community_digest_jobs`, `community_digest_messages` y `community_digest_rollups`. La versión 36 normaliza la integración activa a Groq y fija `openai/gpt-oss-120b` sin reescribir ciphertext ni fingerprint de credenciales `per_bot`; las frecuencias ya activas conservan su configuración y las ocurrencias anteriores a la actualización no se envían retroactivamente.

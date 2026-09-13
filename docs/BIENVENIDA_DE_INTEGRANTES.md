@@ -24,7 +24,7 @@ La reconciliación conserva una línea base. Al iniciar por primera vez solo reg
 
 La vista previa usa un nombre ficticio y no consulta WhatsApp, no persiste el nombre y no envía mensajes. “Enviar bienvenida de prueba” exige grupo y confirmación, agrega la leyenda “Mensaje de prueba” y no crea un ingreso ni modifica la línea base.
 
-La bienvenida no usa Gemini, no entra en la cola de IA y consume cero tokens.
+La bienvenida no usa Groq, no entra en la cola de IA y consume cero tokens.
 
 ## Prueba manual
 

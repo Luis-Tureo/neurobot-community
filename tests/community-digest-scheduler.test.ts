@@ -239,7 +239,7 @@ describe('planificador durable de resúmenes', () => {
     }
   });
 
-  it('Gemini agota el tiempo y luego funciona: el trabajo reintenta más tarde', async () => {
+  it('Groq agota el tiempo y luego funciona: el trabajo reintenta más tarde', async () => {
     const provider = createProvider((_request, call) => {
       if (call === 1) throw new AIProviderError('AI_TIMEOUT', 'timeout', true);
       return { text: analysisJson() };

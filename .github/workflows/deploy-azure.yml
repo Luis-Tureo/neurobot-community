@@ -157,7 +157,7 @@ jobs:
               DATA_ROOT=/home/neurobot \
               PUPPETEER_CACHE_DIR=/app/.cache/puppeteer \
               CHROME_EXECUTABLE_PATH=/usr/local/bin/neurobot-chrome \
-              AI_PROVIDER=gemini \
+              AI_PROVIDER=groq \
             >/dev/null
 
           # LocalAuth/Chromium exige un único escritor por perfil: la Web App debe ejecutarse

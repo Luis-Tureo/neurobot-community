@@ -2,7 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import BetterSqlite3 from 'better-sqlite3';
+import { GROQ_PREFERRED_MODEL } from '../src/ai/groq-constants.js';
 import { AppDatabase } from '../src/persistence/database.js';
+import { SecretVault } from '../src/security/secret-vault.js';
 
 describe('persistencia SQLite', () => {
   it('aplica migraciones y semillas de forma idempotente', () => {
@@ -11,7 +13,7 @@ describe('persistencia SQLite', () => {
     database.migrate();
     expect(database.getMigrationVersions()).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-      27, 28, 29, 30, 31, 32, 33, 34, 35,
+      27, 28, 29, 30, 31, 32, 33, 34, 35, 36,
     ]);
     expect(database.getBotProfile('neurobot')).toMatchObject({
       botName: 'Neurobot',
@@ -50,6 +52,45 @@ describe('persistencia SQLite', () => {
       weeklySchedule: [],
     });
     database.close();
+  });
+
+  it('la migración Groq conserva ciphertext y fingerprint per_bot y normaliza la configuración activa', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'neurobot-groq-migration-'));
+    const path = join(directory, 'test.db');
+    const vault = new SecretVault('clave-de-cifrado-para-pruebas-12345678');
+    const encrypted = vault.encrypt('gsk_historical_key_123456', 'bot:neurobot:gemini');
+
+    try {
+      const seeded = new AppDatabase(path);
+      seeded.migrate();
+      seeded.setBotEncryptedCredential(
+        'neurobot',
+        'per_bot',
+        encrypted.encrypted,
+        encrypted.fingerprint,
+      );
+      const before = seeded.getBotEncryptedCredential('neurobot');
+      seeded.close();
+
+      const raw = new BetterSqlite3(path);
+      raw.prepare('DELETE FROM migrations WHERE version = 36').run();
+      raw.close();
+
+      const migrated = new AppDatabase(path);
+      migrated.migrate();
+      expect(migrated.getBotEncryptedCredential('neurobot')).toMatchObject({
+        mode: 'per_bot',
+        encryptedApiKey: before.encryptedApiKey,
+        keyFingerprint: before.keyFingerprint,
+      });
+      expect(migrated.getAISettings(migrated.getBotProfile('neurobot').id)).toMatchObject({
+        provider: 'groq',
+        model: GROQ_PREFERRED_MODEL,
+      });
+      migrated.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
   });
 
   it('actualiza la configuración vigente sin reescribir los campos legacy de identidad', () => {
@@ -91,12 +132,12 @@ describe('persistencia SQLite', () => {
     const database = new AppDatabase(':memory:');
     database.migrate();
     database.saveBotAIProviderConfiguration('neurobot', 'Mi IA');
-    database.recordAIProviderChange('neurobot', 'gemini', 'PROVIDER_ADDED', 'Mi IA');
-    database.recordAIProviderChange('neurobot', 'gemini', 'TOKEN_CHANGED', 'Mi IA');
+    database.recordAIProviderChange('neurobot', 'groq', 'PROVIDER_ADDED', 'Mi IA');
+    database.recordAIProviderChange('neurobot', 'groq', 'TOKEN_CHANGED', 'Mi IA');
 
     expect(database.listAIProviderChanges('neurobot')).toMatchObject([
-      { provider: 'gemini', displayName: 'Mi IA', action: 'TOKEN_CHANGED' },
-      { provider: 'gemini', displayName: 'Mi IA', action: 'PROVIDER_ADDED' },
+      { provider: 'groq', displayName: 'Mi IA', action: 'TOKEN_CHANGED' },
+      { provider: 'groq', displayName: 'Mi IA', action: 'PROVIDER_ADDED' },
     ]);
     expect(database.getBotEncryptedCredential('neurobot')).toMatchObject({
       displayName: 'Mi IA',

@@ -17,7 +17,7 @@
 10. Se carga la base de conocimiento oficial, sin conversaciones ni datos personales.
 11. Se configuran automatizaciones, encuestas, grupos y silencios aplicables.
 12. Se configuran límites por usuario, grupo, asistente e instalación.
-13. Si corresponde, el cliente ingresa su clave de Gemini directamente en el panel y ejecuta la prueba segura de conexión.
+13. Si corresponde, el cliente ingresa su clave de Groq directamente en el panel y ejecuta la prueba segura de conexión.
 
 ## Prueba y entrega
 

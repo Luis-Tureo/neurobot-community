@@ -867,7 +867,7 @@ describe('resumen diario — centro de pruebas', () => {
 });
 
 describe('sanitización y contexto grande de resúmenes', () => {
-  it('incluye 2.500 mensajes de un día activo en una sola llamada por tokens', async () => {
+  it('incluye 2.500 mensajes de un día activo y los divide dentro del presupuesto Groq', async () => {
     const requests: Array<Parameters<AIProvider['generateGroundedResponse']>[0]> = [];
     const provider: AIProvider = {
       ...createProvider(),
@@ -900,8 +900,9 @@ describe('sanitización y contexto grande de resúmenes', () => {
       const allContexts = requests.map((request) => request.context).join('\n');
 
       expect(requestedLimit).toBe(10_000);
-      expect(result).toMatchObject({ status: 'SENT', messageCount: 2_500, blockCount: 1 });
-      expect(requests).toHaveLength(1);
+      expect(result).toMatchObject({ status: 'SENT', messageCount: 2_500 });
+      expect(result.blockCount).toBeGreaterThan(1);
+      expect(requests.length).toBeGreaterThan(1);
       expect(allContexts).toContain('Mensaje completo del día 0');
       expect(allContexts).toContain('Mensaje completo del día 1250');
       expect(allContexts).toContain('Mensaje completo del día 2499');
@@ -1205,7 +1206,7 @@ describe('resiliencia del procesamiento de resúmenes', () => {
       expect(blockAttempts.length).toBeGreaterThan(1);
       expect(blockAttempts[0]).toBe(1);
       expect(blockAttempts[1]).toBe(2);
-      expect(waits).toEqual([3_000]);
+      expect(waits).toEqual([3_150]);
       expect(client.sentMessages).toHaveLength(1);
     } finally {
       database.close();
@@ -1379,7 +1380,7 @@ describe('resiliencia del procesamiento de resúmenes', () => {
       const firstWait = service.getManualTest(started.run.jobId);
       expect(firstWait).toMatchObject({
         status: 'waiting_provider',
-        retryAfterSeconds: 58,
+        retryAfterSeconds: 61,
         retryCount: 1,
         completedSends: 0,
         messageCount: 8,
@@ -1402,7 +1403,7 @@ describe('resiliencia del procesamiento de resúmenes', () => {
       await vi.waitFor(() => expect(retryReleases).toHaveLength(1));
       expect(service.getManualTest(started.run.jobId)).toMatchObject({
         status: 'waiting_provider',
-        retryAfterSeconds: 2,
+        retryAfterSeconds: 3,
         retryCount: 2,
       });
       retryReleases.shift()?.();
@@ -1422,7 +1423,7 @@ describe('resiliencia del procesamiento de resúmenes', () => {
       });
       expect(completed?.windowStart).toBe('2026-08-05T22:00:00.000Z');
       expect(completed?.windowEnd).toBe(NOW.toISOString());
-      expect(retryWaits).toEqual([58_000, 2_000]);
+      expect(retryWaits).toEqual([60_500, 2_625]);
       expect(client.sentMessages).toHaveLength(1);
       expect(JSON.stringify(completed)).not.toContain('Detalle privado');
     } finally {

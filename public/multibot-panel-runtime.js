@@ -1038,9 +1038,11 @@ async function loadRequests() {
   });
 }
 
-function geminiModelLabel(model) {
-  const match = /^gemini-(\d+(?:\.\d+)?)-flash$/u.exec(String(model || ''));
-  return match ? `Gemini ${match[1]} Flash` : String(model || 'Modelo no resuelto');
+function groqModelLabel(model) {
+  const normalized = String(model || '');
+  if (normalized === 'openai/gpt-oss-120b') return 'GPT-OSS 120B';
+  if (normalized === 'openai/gpt-oss-20b') return 'GPT-OSS 20B';
+  return normalized || 'Modelo no resuelto';
 }
 
 async function loadAI() {
@@ -1053,13 +1055,13 @@ async function loadAI() {
     currentProvider.name || 'Sin IA configurada';
   const currentProviderLabel = document.querySelector('#ai-provider-current-provider');
   if (currentProviderLabel) {
-    currentProviderLabel.textContent = `${currentProvider.providerName || 'Gemini'} · Proveedor: ${currentProvider.providerLabel || 'Google'}`;
+    currentProviderLabel.textContent = `${currentProvider.providerName || 'Groq'} · Proveedor: ${currentProvider.providerLabel || 'GroqCloud'}`;
   }
   const currentModelSpan = document.querySelector('#ai-provider-current-model');
   if (currentModelSpan) {
     const effectiveModel = currentProvider.effectiveModel || currentProvider.model;
     currentModelSpan.textContent = effectiveModel
-      ? `(${geminiModelLabel(effectiveModel)}${currentProvider.alternativeModelActive ? ' · Modelo alternativo activo' : ''})`
+      ? `(${groqModelLabel(effectiveModel)}${currentProvider.alternativeModelActive ? ' · Modelo alternativo activo' : ''})`
       : '(Modelo pendiente de diagnóstico)';
   }
   const toggleButton = document.querySelector('#toggle-ai-enabled');
@@ -1068,11 +1070,11 @@ async function loadAI() {
     ariaLabel: 'inteligencia artificial',
   });
   const providerForm = document.querySelector('#ai-provider-form');
-  providerForm.elements.displayName.value = currentProvider.name || 'Gemini';
+  providerForm.elements.displayName.value = currentProvider.name || 'Groq';
   providerForm.elements.apiKey.value = '';
   const fixedModel = document.querySelector('#ai-provider-form-model');
   if (fixedModel) {
-    fixedModel.textContent = 'Gemini 3.8 Flash preferido · fallback Flash estable automático';
+    fixedModel.textContent = 'GPT-OSS 120B preferido · fallback GPT-OSS 20B automático';
   }
 
   document.querySelector('#ai-token-help').textContent = currentProvider.configured
@@ -1135,7 +1137,7 @@ function setAIProviderEditorOpen(open) {
 function resetAIProviderEditor() {
   const currentProvider = panelState.aiCurrentProvider;
   const form = document.querySelector('#ai-provider-form');
-  form.elements.displayName.value = currentProvider?.name || 'Gemini';
+  form.elements.displayName.value = currentProvider?.name || 'Groq';
   form.elements.apiKey.value = '';
 }
 
@@ -1395,17 +1397,17 @@ function configureForms() {
           notify(`Conexión correcta. Modelo efectivo: ${effectiveModel}.`);
         }
       } else {
-        let errorMsg = 'No se pudo conectar con Gemini. Verifica la clave.';
+        let errorMsg = 'No se pudo conectar con Groq. Verifica la clave.';
         if (result.errorCode === 'AI_INVALID_KEY') {
-          errorMsg = 'La clave de Gemini no es válida o fue revocada.';
+          errorMsg = 'La clave de Groq no es válida o fue revocada.';
         } else if (result.errorCode === 'AI_MODEL_UNAVAILABLE') {
-          errorMsg = 'No hay un modelo Gemini Flash compatible disponible para esta credencial.';
+          errorMsg = 'No hay un modelo GPT-OSS compatible disponible para esta credencial.';
         } else if (result.errorCode === 'AI_PROVIDER_RATE_LIMITED') {
-          errorMsg = 'Gemini alcanzó temporalmente su límite de uso. Intenta nuevamente más tarde.';
+          errorMsg = 'Groq alcanzó temporalmente su límite de uso. Intenta nuevamente más tarde.';
         } else if (result.errorCode === 'AI_TIMEOUT') {
-          errorMsg = 'Gemini está temporalmente no disponible (timeout).';
+          errorMsg = 'Groq está temporalmente no disponible (timeout).';
         } else if (result.errorCode === 'AI_TEMPORARY_ERROR') {
-          errorMsg = 'Gemini está temporalmente no disponible (5xx).';
+          errorMsg = 'Groq está temporalmente no disponible (5xx).';
         }
         notify(errorMsg, true);
       }
@@ -1426,7 +1428,7 @@ function configureForms() {
     });
     try {
       await saveAIProvider({
-        displayName: panelState.aiCurrentProvider?.name || 'Gemini',
+        displayName: panelState.aiCurrentProvider?.name || 'Groq',
         enabled,
       });
       await Promise.all([loadAI(), loadBotSummary(false), loadBots()]);

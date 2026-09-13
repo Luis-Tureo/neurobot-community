@@ -77,7 +77,7 @@ function setup(withCurrentGroup = true): Setup {
   database.saveAISettings({
     ...database.getAISettings(profile.id),
     enabled: true,
-    provider: 'gemini',
+    provider: 'groq',
     updatedAt: new Date().toISOString(),
   });
   const provider = new ContextProvider();

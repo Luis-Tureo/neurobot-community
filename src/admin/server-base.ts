@@ -13,13 +13,13 @@ import type { AIProvider } from '../ai/ai-provider.js';
 import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
 import { hashNormalizedQuestion, normalizeQuestionForCache } from '../ai/answer-cache-service.js';
 import {
-  GEMINI_API_BACKEND,
-  GEMINI_API_VERSION,
-  GEMINI_MODEL,
-  GEMINI_PROVIDER_ID,
-  GEMINI_PROVIDER_LABEL,
-  GEMINI_PROVIDER_NAME,
-} from '../ai/gemini-constants.js';
+  GROQ_API_BACKEND,
+  GROQ_API_VERSION,
+  GROQ_PREFERRED_MODEL,
+  GROQ_PROVIDER_ID,
+  GROQ_PROVIDER_LABEL,
+  GROQ_PROVIDER_NAME,
+} from '../ai/groq-constants.js';
 import type { AutomaticMessageService } from '../core/automatic-message-service.js';
 import { CatalogService } from '../core/catalog-service.js';
 import {
@@ -118,8 +118,8 @@ const knowledgeEntrySchema = z
 const aiSettingsSchema = z
   .object({
     enabled: z.boolean(),
-    provider: z.enum(['gemini', 'disabled']),
-    model: z.literal(GEMINI_MODEL).nullable().optional(),
+    provider: z.enum(['groq', 'disabled']),
+    model: z.literal(GROQ_PREFERRED_MODEL).nullable().optional(),
     questionMaxChars: z.number().int().min(1).max(3000),
     contextMaxTokens: z.number().int().min(1).max(7000),
     inputMaxTokens: z.number().int().min(1).max(10_000),
@@ -234,7 +234,7 @@ const botCreateSchema = z
     timezone: z.string().trim().min(1).max(80),
     mode: z.enum(['community', 'business', 'mixed']),
     connectorType: z.enum(['WHATSAPP_WEB', 'WHATSAPP_CLOUD_API']),
-    provider: z.enum(['gemini', 'disabled']),
+    provider: z.enum(['groq', 'disabled']),
     menuType: z
       .enum(['automatic', 'native_buttons', 'native_list', 'numbered'])
       .default('automatic'),
@@ -1349,19 +1349,19 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         encryptionAvailable: context.secretVault?.isConfigured() ?? false,
       },
       currentProvider: {
-        id: GEMINI_PROVIDER_ID,
+        id: GROQ_PROVIDER_ID,
         name: credential.displayName,
-        providerName: GEMINI_PROVIDER_NAME,
-        providerLabel: GEMINI_PROVIDER_LABEL,
-        model: modelInformation?.model ?? GEMINI_MODEL,
-        preferredModel: modelInformation?.preferredModel ?? GEMINI_MODEL,
+        providerName: GROQ_PROVIDER_NAME,
+        providerLabel: GROQ_PROVIDER_LABEL,
+        model: modelInformation?.model ?? GROQ_PREFERRED_MODEL,
+        preferredModel: modelInformation?.preferredModel ?? GROQ_PREFERRED_MODEL,
         effectiveModel: modelInformation?.effectiveModel ?? null,
         alternativeModelActive: modelInformation?.alternativeModelActive ?? false,
         modelResolutionStatus: modelInformation?.resolutionStatus ?? 'unresolved',
-        backend: modelInformation?.backend ?? GEMINI_API_BACKEND,
-        apiVersion: modelInformation?.apiVersion ?? GEMINI_API_VERSION,
+        backend: modelInformation?.backend ?? GROQ_API_BACKEND,
+        apiVersion: modelInformation?.apiVersion ?? GROQ_API_VERSION,
         configured,
-        enabled: configured && settings.enabled && settings.provider === GEMINI_PROVIDER_ID,
+        enabled: configured && settings.enabled && settings.provider === GROQ_PROVIDER_ID,
         maskedToken,
       },
       providerHistory: context.database.listAIProviderChanges(botId),
@@ -1377,8 +1377,8 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         ? context.aiProviderFactory.listAvailableModels(botId)
         : Promise.resolve({
             models: [],
-            currentModel: GEMINI_MODEL,
-            defaultModel: GEMINI_MODEL,
+            currentModel: GROQ_PREFERRED_MODEL,
+            defaultModel: GROQ_PREFERRED_MODEL,
             catalogStatus: 'unavailable' as const,
           }));
       return result;
@@ -1407,7 +1407,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           displayName: z.string().trim().min(1).max(80),
           apiKey: z.string().trim().min(16).max(500).optional(),
           enabled: z.boolean(),
-          model: z.literal(GEMINI_MODEL).nullable().optional(),
+          model: z.literal(GROQ_PREFERRED_MODEL).nullable().optional(),
         })
         .strict()
         .parse(body);
@@ -1434,14 +1434,14 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
             error: 'APP_ENCRYPTION_KEY debe estar configurada para guardar una clave por bot.',
           });
         }
-        const encrypted = secretVault.encrypt(input.apiKey, `bot:${botId}:gemini`);
+        const encrypted = secretVault.encrypt(input.apiKey, `bot:${botId}:groq`);
         context.database.saveBotAIProviderConfiguration(botId, input.displayName, {
           encryptedApiKey: encrypted.encrypted,
           fingerprint: encrypted.fingerprint,
         });
         context.database.recordAIProviderChange(
           botId,
-          GEMINI_PROVIDER_ID,
+          GROQ_PROVIDER_ID,
           !wasConfigured
             ? 'PROVIDER_ADDED'
             : previousCredential.displayName !== input.displayName
@@ -1453,7 +1453,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       if (input.apiKey === undefined && previousCredential.displayName !== input.displayName) {
         context.database.recordAIProviderChange(
           botId,
-          GEMINI_PROVIDER_ID,
+          GROQ_PROVIDER_ID,
           'PROVIDER_REPLACED',
           input.displayName,
         );
@@ -1463,13 +1463,13 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         ...previousSettings,
         ...(input.model !== undefined ? { model: input.model ? input.model.trim() : null } : {}),
         enabled: input.enabled,
-        provider: input.enabled ? GEMINI_PROVIDER_ID : 'disabled',
+        provider: input.enabled ? GROQ_PROVIDER_ID : 'disabled',
         updatedAt: new Date().toISOString(),
       });
       if (previousSettings.enabled !== settings.enabled) {
         context.database.recordAIProviderChange(
           botId,
-          GEMINI_PROVIDER_ID,
+          GROQ_PROVIDER_ID,
           settings.enabled ? 'ACTIVATED' : 'DEACTIVATED',
           input.displayName,
         );
@@ -1481,11 +1481,11 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           : maskApiKey(input.apiKey);
       return {
         provider: {
-          id: GEMINI_PROVIDER_ID,
+          id: GROQ_PROVIDER_ID,
           name: input.displayName,
-          providerName: GEMINI_PROVIDER_NAME,
-          providerLabel: GEMINI_PROVIDER_LABEL,
-          model: GEMINI_MODEL,
+          providerName: GROQ_PROVIDER_NAME,
+          providerLabel: GROQ_PROVIDER_LABEL,
+          model: GROQ_PREFERRED_MODEL,
           configured: input.apiKey !== undefined || wasConfigured,
           enabled: settings.enabled,
           maskedToken,
@@ -1614,7 +1614,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         const displayName = context.database.getBotEncryptedCredential(botId).displayName;
         context.database.recordAIProviderChange(
           botId,
-          GEMINI_PROVIDER_ID,
+          GROQ_PROVIDER_ID,
           settings.enabled ? 'ACTIVATED' : 'DEACTIVATED',
           displayName,
         );
@@ -1646,14 +1646,14 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         configured: provider.isConfigured(),
         connection: result.successful ? 'successful' : 'failed',
         errorCode: result.successful ? null : result.errorCode,
-        provider: GEMINI_PROVIDER_ID,
+        provider: GROQ_PROVIDER_ID,
         model: result.effectiveModel ?? provider.getModelInformation().model,
-        preferredModel: result.preferredModel ?? GEMINI_MODEL,
+        preferredModel: result.preferredModel ?? GROQ_PREFERRED_MODEL,
         effectiveModel: result.effectiveModel ?? null,
         alternativeModelActive: result.alternativeModelActive ?? false,
         visibleModels: result.visibleModels ?? [],
-        backend: result.backend ?? GEMINI_API_BACKEND,
-        apiVersion: result.apiVersion ?? GEMINI_API_VERSION,
+        backend: result.backend ?? GROQ_API_BACKEND,
+        apiVersion: result.apiVersion ?? GROQ_API_VERSION,
         preferredModelGetFound: result.preferredModelGetFound ?? null,
         preferredModelListFound: result.preferredModelListFound ?? null,
         failoverOccurred: result.failoverOccurred ?? false,
@@ -1836,7 +1836,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const input = z
         .object({
           mode: z.enum(['global', 'per_bot']),
-          provider: z.literal(GEMINI_PROVIDER_ID).default(GEMINI_PROVIDER_ID),
+          provider: z.literal(GROQ_PROVIDER_ID).default(GROQ_PROVIDER_ID),
           operation: z.enum(['add', 'replace_provider', 'replace_token']).default('replace_token'),
           apiKey: z.string().min(16).max(500).optional(),
         })
@@ -1865,7 +1865,7 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       }
       const wasConfigured = context.aiProviderFactory?.forBot(botId).isConfigured() ?? false;
       const displayName = context.database.getBotEncryptedCredential(botId).displayName;
-      const encrypted = context.secretVault.encrypt(input.apiKey, `bot:${botId}:gemini`);
+      const encrypted = context.secretVault.encrypt(input.apiKey, `bot:${botId}:groq`);
       context.database.setBotEncryptedCredential(
         botId,
         'per_bot',
@@ -2492,14 +2492,14 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         configured: context.aiProvider.isConfigured(),
         connection: result.successful ? 'successful' : 'failed',
         errorCode: result.successful ? null : result.errorCode,
-        provider: GEMINI_PROVIDER_ID,
+        provider: GROQ_PROVIDER_ID,
         model: result.effectiveModel ?? context.aiProvider.getModelInformation().model,
-        preferredModel: result.preferredModel ?? GEMINI_MODEL,
+        preferredModel: result.preferredModel ?? GROQ_PREFERRED_MODEL,
         effectiveModel: result.effectiveModel ?? null,
         alternativeModelActive: result.alternativeModelActive ?? false,
         visibleModels: result.visibleModels ?? [],
-        backend: result.backend ?? GEMINI_API_BACKEND,
-        apiVersion: result.apiVersion ?? GEMINI_API_VERSION,
+        backend: result.backend ?? GROQ_API_BACKEND,
+        apiVersion: result.apiVersion ?? GROQ_API_VERSION,
         preferredModelGetFound: result.preferredModelGetFound ?? null,
         preferredModelListFound: result.preferredModelListFound ?? null,
         failoverOccurred: result.failoverOccurred ?? false,

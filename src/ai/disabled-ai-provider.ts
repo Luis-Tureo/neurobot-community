@@ -26,6 +26,20 @@ export class DisabledAIProvider implements AIProvider {
     return { provider: 'disabled', model: 'disabled' };
   }
 
+  public getOperationalLimits() {
+    return {
+      contextWindowTokens: 0,
+      recommendedInputTokensPerRequest: 0,
+      recommendedOutputTokens: 0,
+      maxOutputTokens: 0,
+      tokenRateLimited: false,
+    };
+  }
+
+  public getRateLimitDiagnostic(): null {
+    return null;
+  }
+
   public normalizeUsage(): { inputTokens: number; outputTokens: number; totalTokens: number } {
     return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   }

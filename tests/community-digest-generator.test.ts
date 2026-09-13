@@ -55,8 +55,10 @@ describe('generador adaptativo por tokens', () => {
     expect(result).toMatchObject({ strategy: 'single', blockCount: 1, aiCallCount: 1 });
     expect(requests[0]).toMatchObject({ stage: 'single', stageKey: 'single:0' });
     expect(result.analysis.topics[0]?.title).toBe('Único');
-    expect(DEFAULT_DIGEST_GENERATION_LIMITS.singlePassMaxTokens).toBe(100_000);
-    expect(DEFAULT_DIGEST_GENERATION_LIMITS.blockTargetTokens).toBe(60_000);
+    expect(DEFAULT_DIGEST_GENERATION_LIMITS.singlePassMaxTokens).toBe(6_000);
+    expect(DEFAULT_DIGEST_GENERATION_LIMITS.blockTargetTokens).toBe(5_500);
+    expect(DEFAULT_DIGEST_GENERATION_LIMITS.reduceMaxTokens).toBe(5_500);
+    expect(DEFAULT_DIGEST_GENERATION_LIMITS.mapOutputTokens).toBe(1_000);
   });
 
   it('volumen medio: map por bloques y un único reduce', async () => {

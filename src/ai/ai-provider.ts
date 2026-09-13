@@ -23,6 +23,14 @@ export type AIModelInformation = {
   apiVersion?: string;
 };
 
+export type AIProviderOperationalLimits = {
+  contextWindowTokens: number;
+  recommendedInputTokensPerRequest: number;
+  recommendedOutputTokens: number;
+  maxOutputTokens: number;
+  tokenRateLimited: boolean;
+};
+
 export type AIProviderConnectionDiagnostic = {
   preferredModel: string;
   effectiveModel: string | null;
@@ -62,7 +70,7 @@ export type AIRateLimitDiagnostic = {
   tokenReset: string | null;
 };
 
-/** Niveles de razonamiento admitidos por Gemini 3.8 Flash (`minimal` no está soportado). */
+/** Niveles de razonamiento compatibles con los modelos Groq GPT-OSS. */
 export type AIThinkingLevel = 'low' | 'medium' | 'high';
 
 export type GroundedResponseRequest = {
@@ -71,8 +79,7 @@ export type GroundedResponseRequest = {
   context: string;
   maximumOutputTokens: number;
   /**
-   * Temperatura de muestreo. Gemini 3 recomienda conservar el valor predeterminado (1.0);
-   * cuando se omite no se envía ningún valor al proveedor.
+   * Temperatura de muestreo; cuando se omite no se envía ningún valor al proveedor.
    */
   temperature?: number;
   timeoutMs: number;
@@ -94,6 +101,10 @@ export interface AIProvider {
   testConnection(timeoutMs?: number): Promise<AIProviderConnectionResult>;
   generateGroundedResponse(request: GroundedResponseRequest): Promise<GroundedResponseResult>;
   getModelInformation(): AIModelInformation;
+  /** Metadatos operativos para que los generadores adapten bloques y salida al proveedor. */
+  getOperationalLimits?(): AIProviderOperationalLimits;
+  /** Últimas cabeceras de cuota observadas, sin contenido ni credenciales. */
+  getRateLimitDiagnostic?(): AIRateLimitDiagnostic | null;
   normalizeUsage(value: unknown): AIUsage;
   classifyProviderError(error: unknown): AIProviderErrorCode;
 }

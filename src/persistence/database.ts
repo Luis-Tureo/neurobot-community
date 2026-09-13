@@ -14,7 +14,7 @@ import {
   LEGACY_COMMAND_RESPONSES,
 } from '../core/brief-message-defaults.js';
 import { DEFAULT_POLL_TEMPLATES } from '../core/poll-defaults.js';
-import { GEMINI_MODEL } from '../ai/gemini-constants.js';
+import { GROQ_PREFERRED_MODEL } from '../ai/groq-constants.js';
 import type {
   AutomaticMessageConfiguration,
   AutomaticMessageType,
@@ -2368,7 +2368,90 @@ export class AppDatabase {
             UNIQUE (bot_id, group_hash, day_key)
           );
           CREATE INDEX idx_community_digest_rollups_expiry
-            ON community_digest_rollups(expires_at);
+           ON community_digest_rollups(expires_at);
+        `,
+      },
+      {
+        version: 36,
+        sql: `
+          -- Migración definitiva a Groq. No toca ciphertext ni fingerprint de credenciales
+          -- per_bot; solo normaliza el proveedor activo y conserva el historial anterior.
+          ALTER TABLE ai_settings RENAME TO ai_settings_legacy_groq;
+          CREATE TABLE ai_settings (
+            profile_id INTEGER PRIMARY KEY REFERENCES assistant_profiles(id) ON DELETE CASCADE,
+            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+            provider TEXT NOT NULL DEFAULT 'groq' CHECK (provider IN ('groq', 'disabled')),
+            question_max_chars INTEGER NOT NULL DEFAULT 300,
+            context_max_tokens INTEGER NOT NULL DEFAULT 700,
+            input_max_tokens INTEGER NOT NULL DEFAULT 1000,
+            response_max_tokens INTEGER NOT NULL DEFAULT 1024,
+            response_max_chars INTEGER NOT NULL DEFAULT 4096,
+            response_max_lines INTEGER NOT NULL DEFAULT 50,
+            temperature REAL NOT NULL DEFAULT 0.6,
+            user_hourly_limit INTEGER NOT NULL DEFAULT 5,
+            user_daily_limit INTEGER NOT NULL DEFAULT 10,
+            user_cooldown_seconds INTEGER NOT NULL DEFAULT 30,
+            group_hourly_limit INTEGER NOT NULL DEFAULT 20,
+            group_daily_limit INTEGER NOT NULL DEFAULT 100,
+            global_daily_limit INTEGER NOT NULL DEFAULT 800,
+            global_monthly_limit INTEGER NOT NULL DEFAULT 30000,
+            global_daily_token_limit INTEGER NOT NULL DEFAULT 160000,
+            global_monthly_token_limit INTEGER NOT NULL DEFAULT 1600000,
+            timeout_ms INTEGER NOT NULL DEFAULT 15000,
+            updated_at TEXT NOT NULL,
+            bot_id TEXT NOT NULL DEFAULT 'neurobot',
+            interaction_hourly_limit INTEGER NOT NULL DEFAULT 60,
+            interaction_cooldown_seconds INTEGER NOT NULL DEFAULT 3,
+            duplicate_query_window_seconds INTEGER NOT NULL DEFAULT 15,
+            model TEXT
+          );
+          INSERT INTO ai_settings(
+            profile_id, enabled, provider, question_max_chars, context_max_tokens,
+            input_max_tokens, response_max_tokens, response_max_chars, response_max_lines,
+            temperature, user_hourly_limit, user_daily_limit, user_cooldown_seconds,
+            group_hourly_limit, group_daily_limit, global_daily_limit, global_monthly_limit,
+            global_daily_token_limit, global_monthly_token_limit, timeout_ms, updated_at,
+            bot_id, interaction_hourly_limit, interaction_cooldown_seconds,
+            duplicate_query_window_seconds, model
+          )
+          SELECT profile_id, enabled,
+            CASE WHEN provider = 'disabled' THEN 'disabled' ELSE 'groq' END,
+            question_max_chars, context_max_tokens, input_max_tokens, response_max_tokens,
+            response_max_chars, response_max_lines, temperature, user_hourly_limit,
+            user_daily_limit, user_cooldown_seconds, group_hourly_limit, group_daily_limit,
+            global_daily_limit, global_monthly_limit, global_daily_token_limit,
+            global_monthly_token_limit, timeout_ms, updated_at, bot_id,
+            interaction_hourly_limit, interaction_cooldown_seconds,
+            duplicate_query_window_seconds,
+            CASE WHEN provider = 'disabled' THEN NULL ELSE 'openai/gpt-oss-120b' END
+          FROM ai_settings_legacy_groq;
+          DROP TABLE ai_settings_legacy_groq;
+
+          UPDATE provider_health SET provider = 'groq' WHERE provider = 'gemini';
+          UPDATE assistant_ai_provider_health SET provider = 'groq' WHERE provider = 'gemini';
+
+          -- La clave actual puede haber sido cifrada con el AAD histórico; se conserva intacta.
+          UPDATE bot_ai_credentials
+          SET display_name = 'Groq', updated_at = datetime('now')
+          WHERE display_name = 'Gemini';
+
+          ALTER TABLE bot_ai_provider_history RENAME TO bot_ai_provider_history_legacy_groq;
+          CREATE TABLE bot_ai_provider_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            provider TEXT NOT NULL CHECK (provider IN ('groq', 'gemini')),
+            action TEXT NOT NULL CHECK (action IN (
+              'PROVIDER_ADDED', 'PROVIDER_REPLACED', 'TOKEN_CHANGED', 'ACTIVATED', 'DEACTIVATED'
+            )),
+            created_at TEXT NOT NULL,
+            display_name TEXT NOT NULL DEFAULT 'Groq'
+          );
+          INSERT INTO bot_ai_provider_history(id, bot_id, provider, action, created_at, display_name)
+            SELECT id, bot_id, provider, action, created_at, display_name
+            FROM bot_ai_provider_history_legacy_groq;
+          DROP TABLE bot_ai_provider_history_legacy_groq;
+          CREATE INDEX idx_bot_ai_provider_history
+            ON bot_ai_provider_history(bot_id, created_at DESC, id DESC);
         `,
       },
     ];
@@ -2525,14 +2608,14 @@ export class AppDatabase {
         `INSERT OR IGNORE INTO ai_settings(
            profile_id, enabled, provider, response_max_tokens, response_max_chars,
            response_max_lines, updated_at
-         ) VALUES (?, 0, 'gemini', 1024, 4096, 50, ?)`,
+         ) VALUES (?, 0, 'groq', 1024, 4096, 50, ?)`,
       )
       .run(profile.id, now);
     this.db
       .prepare(
         `INSERT OR IGNORE INTO provider_health(
            profile_id, provider, connection_status, last_checked_at, last_error_code, updated_at
-         ) VALUES (?, 'gemini', 'not_tested', NULL, NULL, ?)`,
+         ) VALUES (?, 'groq', 'not_tested', NULL, NULL, ?)`,
       )
       .run(profile.id, now);
 
@@ -2741,7 +2824,7 @@ export class AppDatabase {
       .prepare(
         `INSERT OR IGNORE INTO bot_ai_credentials(
            bot_id, credential_mode, encrypted_api_key, key_fingerprint, updated_at, display_name
-         ) VALUES ('neurobot', 'global', NULL, NULL, ?, 'Gemini')`,
+         ) VALUES ('neurobot', 'global', NULL, NULL, ?, 'Groq')`,
       )
       .run(now);
     const initialMenu = this.db
@@ -2842,7 +2925,7 @@ export class AppDatabase {
     this.db
       .prepare(
         `INSERT OR IGNORE INTO assistant_ai_provider_health(assistant_id, provider, state, updated_at)
-      VALUES (?, 'gemini', 'AVAILABLE', ?)`,
+      VALUES (?, 'groq', 'AVAILABLE', ?)`,
       )
       .run(botId, now);
     this.db
@@ -4860,7 +4943,7 @@ export class AppDatabase {
         .prepare(
           `INSERT INTO bot_ai_credentials(
              bot_id, credential_mode, encrypted_api_key, key_fingerprint, updated_at, display_name
-           ) VALUES (?, 'global', NULL, NULL, ?, 'Gemini')`,
+           ) VALUES (?, 'global', NULL, NULL, ?, 'Groq')`,
         )
         .run(botId, now);
       this.seedBotKnowledgeCategories(botId, profile.id, input.mode, now);
@@ -5191,16 +5274,18 @@ export class AppDatabase {
   public getBotEncryptedCredential(botId: string): {
     mode: 'global' | 'per_bot';
     encryptedApiKey: string | null;
+    keyFingerprint: string | null;
     displayName: string;
   } {
     const row = this.db
       .prepare(
-        'SELECT credential_mode, encrypted_api_key, display_name FROM bot_ai_credentials WHERE bot_id = ?',
+        'SELECT credential_mode, encrypted_api_key, key_fingerprint, display_name FROM bot_ai_credentials WHERE bot_id = ?',
       )
       .get(botId) as
       | {
           credential_mode: 'global' | 'per_bot';
           encrypted_api_key: string | null;
+          key_fingerprint: string | null;
           display_name: string;
         }
       | undefined;
@@ -5208,6 +5293,7 @@ export class AppDatabase {
     return {
       mode: row.credential_mode,
       encryptedApiKey: row.encrypted_api_key,
+      keyFingerprint: row.key_fingerprint,
       displayName: row.display_name,
     };
   }
@@ -5237,9 +5323,9 @@ export class AppDatabase {
 
   public recordAIProviderChange(
     botId: string,
-    provider: 'gemini',
+    provider: 'groq' | 'gemini',
     action: AIProviderChangeAction,
-    displayName = 'Gemini',
+    displayName = 'Groq',
   ): AIProviderChange {
     const createdAt = new Date().toISOString();
     const normalizedName = validatePlainText(displayName, 'nombre de la IA', 80);
@@ -5273,7 +5359,7 @@ export class AppDatabase {
         .all(botId, safeLimit) as Array<{
         id: number;
         bot_id: string;
-        provider: 'gemini';
+        provider: 'groq' | 'gemini';
         display_name: string;
         action: AIProviderChangeAction;
         created_at: string;
@@ -6113,7 +6199,7 @@ export class AppDatabase {
           `INSERT INTO ai_settings(
              profile_id, enabled, provider, response_max_tokens, response_max_chars,
              response_max_lines, updated_at, bot_id
-           ) VALUES (?, 0, 'gemini', 1024, 4096, 50, ?, ?)`,
+           ) VALUES (?, 0, 'groq', 1024, 4096, 50, ?, ?)`,
         )
         .run(profileId, now, botId);
       if (botId === 'neurobot') {
@@ -6130,7 +6216,7 @@ export class AppDatabase {
       this.db
         .prepare(
           `INSERT INTO provider_health(profile_id, provider, connection_status, updated_at, bot_id)
-           VALUES (?, 'gemini', 'not_tested', ?, ?)`,
+           VALUES (?, 'groq', 'not_tested', ?, ?)`,
         )
         .run(profileId, now, botId);
       return profileId;
@@ -6815,7 +6901,7 @@ export class AppDatabase {
     const row = this.db
       .prepare('SELECT model FROM ai_settings WHERE profile_id = ?')
       .get(profile.id) as { model: string | null } | undefined;
-    return row?.model === GEMINI_MODEL ? GEMINI_MODEL : null;
+    return row?.model === GROQ_PREFERRED_MODEL ? GROQ_PREFERRED_MODEL : null;
   }
 
   public getAISettings(profileId: number): AISettings {
@@ -6828,7 +6914,7 @@ export class AppDatabase {
   public saveAISettings(settings: AISettings): AISettings {
     validateAISettings(settings);
     const now = new Date().toISOString();
-    const modelToSave = settings.model === GEMINI_MODEL ? GEMINI_MODEL : null;
+    const modelToSave = settings.model === GROQ_PREFERRED_MODEL ? GROQ_PREFERRED_MODEL : null;
     const result = this.db
       .prepare(
         `UPDATE ai_settings SET enabled = ?, provider = ?, model = ?, question_max_chars = ?,
@@ -7123,10 +7209,10 @@ export class AppDatabase {
           `SELECT provider,state,consecutive_failures AS consecutiveFailures,
       circuit_state AS circuitState,circuit_opened_at AS circuitOpenedAt,circuit_retry_at AS circuitRetryAt,
       last_success_at AS lastSuccessAt,last_failure_at AS lastFailureAt,last_safe_error_code AS lastSafeErrorCode,
-      updated_at AS updatedAt FROM assistant_ai_provider_health WHERE assistant_id=? AND provider='gemini'`,
+       updated_at AS updatedAt FROM assistant_ai_provider_health WHERE assistant_id=? AND provider='groq'`,
         )
         .get(botId) as Record<string, unknown> | undefined) ?? {
-        provider: 'gemini',
+        provider: 'groq',
         state: 'NOT_CONFIGURED',
         consecutiveFailures: 0,
         circuitState: 'CLOSED',
@@ -9135,7 +9221,7 @@ function mapAISettings(row: Record<string, number | string | null>): AISettings 
   return {
     profileId: Number(row.profile_id),
     enabled: row.enabled === 1,
-    provider: row.provider === 'disabled' ? 'disabled' : 'gemini',
+    provider: row.provider === 'disabled' ? 'disabled' : 'groq',
     model: typeof row.model === 'string' && row.model.trim().length > 0 ? row.model.trim() : null,
     questionMaxChars: Number(row.question_max_chars),
     contextMaxTokens: Number(row.context_max_tokens),
@@ -9357,7 +9443,7 @@ function validateAISettings(settings: AISettings): void {
     if (typeof settings.model !== 'string') {
       throw new Error('El modelo de IA no es válido.');
     }
-    if (settings.model.trim() !== GEMINI_MODEL) {
+    if (settings.model.trim() !== GROQ_PREFERRED_MODEL) {
       throw new Error('El modelo de IA no es válido.');
     }
   }

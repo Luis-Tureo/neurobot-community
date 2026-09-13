@@ -423,7 +423,7 @@ export type CachedAnswer = {
 export type AISettings = {
   profileId: number;
   enabled: boolean;
-  provider: 'gemini' | 'disabled';
+  provider: 'groq' | 'disabled';
   model: string | null;
   questionMaxChars: number;
   contextMaxTokens: number;
@@ -450,7 +450,8 @@ export type AIProviderChangeAction =
 export type AIProviderChange = {
   id: number;
   botId: string;
-  provider: 'gemini';
+  /** Gemini se conserva únicamente para historial de instalaciones antiguas. */
+  provider: 'groq' | 'gemini';
   displayName: string;
   action: AIProviderChangeAction;
   createdAt: string;
@@ -460,6 +461,7 @@ export type AIUsage = {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  reasoningTokens?: number;
 };
 
 export type AIUsageSummary = AIUsage & {

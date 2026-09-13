@@ -22,8 +22,8 @@ const sensitivePaths = [
   'req.headers.authorization',
   'apiKey',
   '*.apiKey',
-  'geminiApiKey',
-  '*.geminiApiKey',
+  'groqApiKey',
+  '*.groqApiKey',
   'jwt',
   '*.jwt',
   'session',
@@ -166,7 +166,7 @@ function resolveModuleTag(record: Record<string, unknown>): string {
   if (/digest|resumen|communitydigest/i.test(combined)) {
     return 'Resumen';
   }
-  if (/ai_|gemini|assistant|provider/i.test(combined)) {
+  if (/ai_|groq|assistant|provider/i.test(combined)) {
     return 'IA';
   }
   if (/db|database|migration|sqlite/i.test(combined)) {

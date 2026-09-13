@@ -6,7 +6,7 @@ import {
   type AIProviderErrorCode,
   type AIRateLimitDiagnostic,
 } from './ai-provider.js';
-import { GEMINI_PROVIDER_ID } from './gemini-constants.js';
+import { GROQ_PROVIDER_ID } from './groq-constants.js';
 
 const MAX_PROVIDER_RETRY_AFTER_MS = 5 * 60_000;
 
@@ -266,14 +266,18 @@ export class AIRequestQueueService {
           settings.maximumRetryDelaySeconds * 1000,
           settings.initialRetryDelaySeconds * 1000 * (attempt === 0 ? 1 : 2.5 ** attempt),
         );
-        const base =
+        const providerDelay =
           error instanceof AIProviderError && error.retryAfterSeconds !== null
             ? Math.max(0, error.retryAfterSeconds * 1000)
-            : calculatedBase;
+            : null;
+        const base =
+          providerDelay === null ? calculatedBase : Math.max(calculatedBase, providerDelay);
+        // Retry-After es el mínimo obligatorio; un jitter pequeño evita que varios trabajos
+        // reanudados al mismo tiempo vuelvan a golpear el mismo límite de Groq.
         const delay =
-          error instanceof AIProviderError && error.retryAfterSeconds !== null
-            ? base
-            : base * (0.85 + this.random() * 0.3);
+          providerDelay === null
+            ? base * (0.85 + this.random() * 0.3)
+            : base + Math.floor(this.random() * Math.min(5_000, Math.max(250, base * 0.1)));
         const roundedDelay = Math.max(0, Math.round(delay));
         if (roundedDelay > MAX_PROVIDER_RETRY_AFTER_MS) {
           this.event('AI_PROVIDER_RETRY_SKIPPED', 'RETRY_AFTER_TOO_LONG');
@@ -361,7 +365,7 @@ export class AIRequestQueueService {
     try {
       this.database.saveAIProviderQueueHealth({
         botId: this.botId,
-        provider: GEMINI_PROVIDER_ID,
+        provider: GROQ_PROVIDER_ID,
         state,
         consecutiveFailures: this.consecutiveFailures,
         circuitState: this.circuitState,
@@ -467,7 +471,7 @@ function resolvedResultRepresentsProviderSuccess(value: unknown): boolean {
 
   // Estos resultados se resuelven sin una confirmación fiable de éxito del proveedor:
   // PRE-PROVEEDOR (SQLite/config/cuota), límites locales o fallos internos post-proveedor.
-  // En esos casos preservamos la salud previa de Gemini en lugar de marcarlo falsamente AVAILABLE.
+  // En esos casos preservamos la salud previa en lugar de marcar al proveedor falsamente AVAILABLE.
   return code !== 'AI_INTERNAL_ERROR' && code !== 'LIMIT_REACHED';
 }
 

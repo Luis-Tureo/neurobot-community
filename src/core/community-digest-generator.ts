@@ -15,9 +15,9 @@ import {
  * - por encima: bloques de ~`blockTargetTokens` → MAP estructurado → REDUCE;
  * - si los análisis parciales superan `reduceMaxTokens`: REDUCE jerárquico por lotes.
  *
- * Los valores se eligieron para minimizar llamadas y riesgo de 429/timeout sin enviar
- * contextos gigantes innecesarios (Gemini 3.8 Flash admite 1M tokens, pero un bloque de
- * ~60k tokens responde en decenas de segundos con razonamiento `low`).
+ * Los valores se eligieron para respetar el presupuesto de tokens por minuto de Groq:
+ * la ventana de contexto publicada es grande, pero la ventana operativa por solicitud es
+ * deliberadamente pequeña para que una conversación diaria normal use una sola llamada.
  */
 export type DigestGenerationLimits = {
   singlePassMaxTokens: number;
@@ -29,12 +29,12 @@ export type DigestGenerationLimits = {
 };
 
 export const DEFAULT_DIGEST_GENERATION_LIMITS: DigestGenerationLimits = {
-  singlePassMaxTokens: 100_000,
-  blockTargetTokens: 60_000,
-  reduceMaxTokens: 100_000,
+  singlePassMaxTokens: 6_000,
+  blockTargetTokens: 5_500,
+  reduceMaxTokens: 5_500,
   maxBlocks: 64,
   maxReduceLevels: 4,
-  mapOutputTokens: 4_096,
+  mapOutputTokens: 1_000,
 };
 
 export type DigestGenerationStage = 'single' | 'map' | 'reduce';

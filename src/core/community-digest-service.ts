@@ -1,6 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import type { Logger } from 'pino';
-import { AIProviderError, type AIProvider, type AIProviderErrorCode } from '../ai/ai-provider.js';
+import {
+  AIProviderError,
+  type AIProvider,
+  type AIProviderErrorCode,
+  type AIProviderOperationalLimits,
+} from '../ai/ai-provider.js';
 import { AIRequestQueueService, type AIQueueRetryNotice } from '../ai/ai-request-queue-service.js';
 import type { IncomingMessage } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
@@ -23,6 +28,7 @@ import {
   type DigestAnalysis,
 } from './community-digest-analysis.js';
 import {
+  DEFAULT_DIGEST_GENERATION_LIMITS,
   emptyDigestCheckpoint,
   generateDigestAnalysis,
   isDigestCheckpoint,
@@ -427,7 +433,10 @@ export class CommunityDigestService {
       ...DEFAULT_COMMUNITY_DIGEST_RECOVERY_WINDOWS,
       ...(options.recoveryWindows ?? {}),
     };
-    this.generationLimits = options.generationLimits ?? {};
+    this.generationLimits = {
+      ...digestGenerationLimitsForProvider(provider.getOperationalLimits?.()),
+      ...(options.generationLimits ?? {}),
+    };
     this.testRuns = new CommunityDigestTestRunStore(database, options.botId, this.now);
     this.buffer = new CommunityDigestMessageBuffer(database, anonymizer, {
       botId: options.botId,
@@ -2772,6 +2781,32 @@ function anyPeriodEnabled(configuration: CommunityDigestConfiguration): boolean 
   return (
     configuration.daily.enabled || configuration.weekly.enabled || configuration.monthly.enabled
   );
+}
+
+function digestGenerationLimitsForProvider(
+  operational: AIProviderOperationalLimits | undefined,
+): Partial<DigestGenerationLimits> {
+  if (operational === undefined || operational.contextWindowTokens <= 0) return {};
+  const inputBudget = Math.max(
+    1_000,
+    Math.min(
+      operational.recommendedInputTokensPerRequest,
+      operational.contextWindowTokens - operational.recommendedOutputTokens - 256,
+    ),
+  );
+  const outputBudget = Math.max(
+    64,
+    Math.min(operational.recommendedOutputTokens, operational.maxOutputTokens),
+  );
+  return {
+    singlePassMaxTokens: Math.min(
+      DEFAULT_DIGEST_GENERATION_LIMITS.singlePassMaxTokens,
+      inputBudget + 500,
+    ),
+    blockTargetTokens: Math.min(DEFAULT_DIGEST_GENERATION_LIMITS.blockTargetTokens, inputBudget),
+    reduceMaxTokens: Math.min(DEFAULT_DIGEST_GENERATION_LIMITS.reduceMaxTokens, inputBudget),
+    mapOutputTokens: Math.min(DEFAULT_DIGEST_GENERATION_LIMITS.mapOutputTokens, outputBudget),
+  };
 }
 
 function providerTimeoutFor(estimatedTokens: number, configuredSeconds: number): number {

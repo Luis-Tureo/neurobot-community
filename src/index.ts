@@ -60,7 +60,7 @@ async function main(): Promise<void> {
   const aiProviders = new AIProviderFactory(
     database,
     vault,
-    environment.geminiApiKey,
+    environment.groqApiKey,
     environment.aiProvider,
     undefined,
     logger,

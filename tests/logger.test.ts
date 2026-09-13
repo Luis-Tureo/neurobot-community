@@ -126,7 +126,7 @@ describe('sistema de logger y formato amigable', () => {
       const logger = createLogger('info', false);
       logger.info(
         {
-          apiKey: 'secret_gemini_key_123',
+          apiKey: 'secret_groq_key_123',
           password: 'super_secret_password',
           token: 'jwt_token_xyz',
           normalField: 'visible_data',
@@ -135,7 +135,7 @@ describe('sistema de logger y formato amigable', () => {
       );
 
       expect(output).toContain('[OCULTO]');
-      expect(output).not.toContain('secret_gemini_key_123');
+      expect(output).not.toContain('secret_groq_key_123');
       expect(output).not.toContain('super_secret_password');
       expect(output).not.toContain('jwt_token_xyz');
       expect(output).toContain('visible_data');

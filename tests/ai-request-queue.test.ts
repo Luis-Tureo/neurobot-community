@@ -179,7 +179,7 @@ describe('cola de solicitudes de IA por asistente', () => {
     expect(recovered.value).toBe('ok');
     expect(calls).toBe(3);
     expect(waits).toHaveLength(2);
-    expect(waits[0]).toBe(7_000);
+    expect(waits[0]).toBe(7_350);
     expect(waits[1]).toBe(2_500);
     let permanentCalls = 0;
     await expect(
@@ -210,6 +210,7 @@ describe('cola de solicitudes de IA por asistente', () => {
       async (milliseconds) => {
         waits.push(milliseconds);
       },
+      () => 0.5,
     );
     let calls = 0;
 
@@ -227,7 +228,7 @@ describe('cola de solicitudes de IA por asistente', () => {
 
     expect(result.value).toBe('recuperado');
     expect(calls).toBe(2);
-    expect(waits).toEqual([120_000]);
+    expect(waits).toEqual([122_500]);
   });
 
   it('aplica backoff sin Retry-After y agota los reintentos sin ciclos infinitos', async () => {
@@ -315,7 +316,7 @@ describe('cola de solicitudes de IA por asistente', () => {
         operation: async () => {
           throw new AIProviderError(
             'AI_PROVIDER_RATE_LIMITED',
-            'Authorization: Bearer AIza_secreto-no-registrar',
+            'Authorization: Bearer gsk_secreto-no-registrar',
             true,
             9,
             {
@@ -342,7 +343,7 @@ describe('cola de solicitudes de IA por asistente', () => {
         }),
       ]),
     );
-    expect(JSON.stringify(entries)).not.toContain('AIza_secreto');
+    expect(JSON.stringify(entries)).not.toContain('gsk_secreto');
     expect(JSON.stringify(entries)).not.toContain('Authorization');
   });
 

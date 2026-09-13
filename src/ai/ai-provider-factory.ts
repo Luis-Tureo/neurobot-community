@@ -8,16 +8,17 @@ import {
   type AIProviderConnectionDiagnostic,
   type AIProviderConnectionResult,
   type AIProviderErrorCode,
+  type AIRateLimitDiagnostic,
   type GroundedResponseRequest,
   type GroundedResponseResult,
 } from './ai-provider.js';
 import { DisabledAIProvider } from './disabled-ai-provider.js';
 import {
-  GeminiAIProvider,
-  type GeminiClientFactory,
-  type GeminiSafeDiagnostic,
-} from './gemini-ai-provider.js';
-import { GEMINI_MODEL, GEMINI_PROVIDER_ID } from './gemini-constants.js';
+  GroqAIProvider,
+  type GroqClientFactory,
+  type GroqSafeDiagnostic,
+} from './groq-ai-provider.js';
+import { GROQ_PREFERRED_MODEL, GROQ_PROVIDER_ID } from './groq-constants.js';
 
 export type AIModelSelectionValidation = {
   allowed: boolean;
@@ -32,8 +33,8 @@ export class AIProviderFactory {
     private readonly database: AppDatabase,
     private readonly vault: SecretVault,
     private readonly globalApiKey: string | undefined,
-    private readonly providerName: 'gemini' | 'disabled' = GEMINI_PROVIDER_ID,
-    private readonly clientFactory?: GeminiClientFactory,
+    private readonly providerName: 'groq' | 'disabled' = GROQ_PROVIDER_ID,
+    private readonly clientFactory?: GroqClientFactory,
     private readonly logger?: Logger,
   ) {}
 
@@ -70,8 +71,8 @@ export class AIProviderFactory {
     return {
       models: diagnostic?.visibleModels ?? [],
       currentModel: diagnostic?.effectiveModel ?? modelInformation.model,
-      defaultModel: GEMINI_MODEL,
-      catalogStatus: diagnostic?.effectiveModel ? 'live' : 'unavailable',
+      defaultModel: GROQ_PREFERRED_MODEL,
+      catalogStatus: configured ? 'live' : 'unavailable',
     };
   }
 
@@ -80,7 +81,7 @@ export class AIProviderFactory {
     model: string,
     _candidateApiKey?: string,
   ): AIModelSelectionValidation {
-    return model.trim() === GEMINI_MODEL
+    return model.trim() === GROQ_PREFERRED_MODEL
       ? { allowed: true, catalogStatus: 'live' }
       : { allowed: false, catalogStatus: 'live', reason: 'MODEL_NOT_AVAILABLE' };
   }
@@ -95,7 +96,7 @@ export class AIProviderFactory {
     if (credential.mode === 'global') return this.globalApiKey;
     if (credential.encryptedApiKey === null || !this.vault.isConfigured()) return undefined;
     try {
-      return this.vault.decrypt(credential.encryptedApiKey, `bot:${botId}:gemini`);
+      return decryptGroqCredential(this.vault, credential.encryptedApiKey, botId);
     } catch {
       return undefined;
     }
@@ -103,7 +104,7 @@ export class AIProviderFactory {
 }
 
 class ScopedBotAIProvider implements AIProvider {
-  private provider: GeminiAIProvider | null = null;
+  private provider: GroqAIProvider | null = null;
   private apiKeySignature: string | null = null;
 
   public constructor(
@@ -111,7 +112,7 @@ class ScopedBotAIProvider implements AIProvider {
     private readonly database: AppDatabase,
     private readonly vault: SecretVault,
     private readonly globalApiKey: string | undefined,
-    private readonly clientFactory: GeminiClientFactory | undefined,
+    private readonly clientFactory: GroqClientFactory | undefined,
     private readonly logger: Logger | undefined,
   ) {}
 
@@ -125,8 +126,8 @@ class ScopedBotAIProvider implements AIProvider {
     return provider.testConnection(timeoutMs);
   }
 
-  public async listCompatibleModels(timeoutMs?: number): Promise<AIProviderConnectionDiagnostic> {
-    return this.createProvider().listCompatibleModels(timeoutMs);
+  public async listCompatibleModels(): Promise<AIProviderConnectionDiagnostic> {
+    return this.createProvider().listCompatibleModels();
   }
 
   public async generateGroundedResponse(
@@ -142,6 +143,14 @@ class ScopedBotAIProvider implements AIProvider {
     return this.createProvider().getModelInformation();
   }
 
+  public getOperationalLimits() {
+    return this.createProvider().getOperationalLimits();
+  }
+
+  public getRateLimitDiagnostic(): AIRateLimitDiagnostic | null {
+    return this.createProvider().getRateLimitDiagnostic();
+  }
+
   public normalizeUsage(value: unknown) {
     return this.createProvider().normalizeUsage(value);
   }
@@ -150,11 +159,11 @@ class ScopedBotAIProvider implements AIProvider {
     return this.createProvider().classifyProviderError(error);
   }
 
-  private createProvider(): GeminiAIProvider {
+  private createProvider(): GroqAIProvider {
     const apiKey = this.resolveApiKey();
     const signature = credentialSignature(apiKey);
     if (this.provider === null || this.apiKeySignature !== signature) {
-      this.provider = new GeminiAIProvider(apiKey, this.clientFactory, {
+      this.provider = new GroqAIProvider(apiKey, this.clientFactory, {
         onDiagnostic: (diagnostic) => this.recordDiagnostic(diagnostic),
       });
       this.apiKeySignature = signature;
@@ -167,7 +176,7 @@ class ScopedBotAIProvider implements AIProvider {
     if (credential.mode === 'global') return this.globalApiKey;
     if (credential.encryptedApiKey === null || !this.vault.isConfigured()) return undefined;
     try {
-      return this.vault.decrypt(credential.encryptedApiKey, `bot:${this.botId}:gemini`);
+      return decryptGroqCredential(this.vault, credential.encryptedApiKey, this.botId);
     } catch {
       return undefined;
     }
@@ -185,7 +194,7 @@ class ScopedBotAIProvider implements AIProvider {
     }
   }
 
-  private recordDiagnostic(diagnostic: GeminiSafeDiagnostic): void {
+  private recordDiagnostic(diagnostic: GroqSafeDiagnostic): void {
     const fields = {
       module: 'IA',
       botId: this.botId,
@@ -202,16 +211,17 @@ class ScopedBotAIProvider implements AIProvider {
       failoverOccurred: diagnostic.failoverOccurred,
       errorCode: diagnostic.errorCode,
       providerMessage: diagnostic.providerMessage,
+      rateLimit: diagnostic.rateLimit,
     };
     if (diagnostic.errorCode === null) {
-      this.logger?.info(fields, 'Diagnóstico seguro de modelo Gemini');
+      this.logger?.info(fields, 'Diagnóstico seguro de modelo Groq');
     } else {
-      this.logger?.warn(fields, 'Diagnóstico seguro de modelo Gemini');
+      this.logger?.warn(fields, 'Diagnóstico seguro de modelo Groq');
     }
     try {
       this.database.recordTechnicalEvent({
         botId: this.botId,
-        eventType: 'GEMINI_MODEL_DIAGNOSTIC',
+        eventType: 'GROQ_MODEL_DIAGNOSTIC',
         result: JSON.stringify(fields),
         ...(diagnostic.errorCode === null ? {} : { errorCode: diagnostic.errorCode }),
       });
@@ -219,6 +229,23 @@ class ScopedBotAIProvider implements AIProvider {
       // La telemetría nunca debe impedir una respuesta válida del asistente.
     }
   }
+}
+
+function decryptGroqCredential(
+  vault: SecretVault,
+  encryptedApiKey: string,
+  botId: string,
+): string | undefined {
+  // El segundo AAD solo conserva ciphertext creado por versiones históricas que todavía
+  // etiquetaban la credencial como Gemini. No se re-cifra ni se modifica su fingerprint.
+  for (const providerSuffix of ['groq', 'gemini'] as const) {
+    try {
+      return vault.decrypt(encryptedApiKey, `bot:${botId}:${providerSuffix}`);
+    } catch {
+      // Probar el siguiente AAD histórico sin cambiar el modo per_bot ni caer al global.
+    }
+  }
+  return undefined;
 }
 
 function credentialSignature(value: string | undefined): string {

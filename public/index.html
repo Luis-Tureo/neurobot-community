@@ -226,7 +226,7 @@
                 <div class="form-row">
                   <label
                     >Proveedor de IA<select name="provider">
-                      <option value="gemini">Gemini</option>
+                      <option value="groq">Groq</option>
                       <option value="disabled">Desactivado</option>
                     </select></label
                   >
@@ -809,7 +809,7 @@
                       style="font-size: 0.88rem; margin-left: 0.5rem"
                     ></span>
                   </div>
-                  <p id="ai-provider-current-provider" class="muted">Gemini · Proveedor: Google</p>
+                  <p id="ai-provider-current-provider" class="muted">Groq · Proveedor: GroqCloud</p>
                 </div>
                 <div
                   class="ai-token-display-line"
@@ -834,7 +834,7 @@
                     aria-controls="ai-provider-form"
                     aria-expanded="false"
                   >
-                    Cambiar configuración de Gemini
+                    Cambiar configuración de Groq
                   </button>
                   <button
                     id="toggle-ai-enabled"
@@ -852,12 +852,12 @@
                 <h3>Configuración de inteligencia artificial</h3>
                 <label>
                   Nombre de la IA
-                  <input name="displayName" maxlength="80" placeholder="Ej.: Gemini" required />
+                  <input name="displayName" maxlength="80" placeholder="Ej.: Groq" required />
                 </label>
                 <div class="form-field">
                   <span class="field-label">Modelo principal</span>
                   <output id="ai-provider-form-model" class="muted"
-                    >Gemini 3.8 Flash preferido · fallback Flash estable automático</output
+                    >GPT-OSS 120B preferido · fallback GPT-OSS 20B automático</output
                   >
                 </div>
                 <label>

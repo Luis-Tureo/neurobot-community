@@ -12,8 +12,8 @@ describe('configuración de entorno', () => {
     expect(environment.panelPort).toBe(3000);
     expect(environment.databasePath).toContain('data');
     expect(environment.developmentMode).toBe(false);
-    expect(environment.aiProvider).toBe('gemini');
-    expect(environment.geminiApiKey).toBeUndefined();
+    expect(environment.aiProvider).toBe('groq');
+    expect(environment.groqApiKey).toBeUndefined();
   });
 
   it('convierte y valida opciones de ejecución', () => {
@@ -53,8 +53,8 @@ describe('configuración de entorno', () => {
     expect(environment.chromeExecutablePath).toBeUndefined();
   });
 
-  it('acepta la clave oficial de Gemini sin incorporarla a la configuración del navegador', () => {
-    const environment = loadEnvironment({ ...valid, GEMINI_API_KEY: 'AIza_test_key_123456789' });
-    expect(environment.geminiApiKey).toBe('AIza_test_key_123456789');
+  it('acepta la clave oficial de Groq sin incorporarla a la configuración del navegador', () => {
+    const environment = loadEnvironment({ ...valid, GROQ_API_KEY: 'gsk_test_key_123456789' });
+    expect(environment.groqApiKey).toBe('gsk_test_key_123456789');
   });
 });

@@ -41,8 +41,8 @@ const environmentSchema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
   CHROME_EXECUTABLE_PATH: optionalTrimmedString,
-  AI_PROVIDER: z.enum(['gemini', 'disabled']).default('gemini'),
-  GEMINI_API_KEY: optionalTrimmedString,
+  AI_PROVIDER: z.enum(['groq', 'disabled']).default('groq'),
+  GROQ_API_KEY: optionalTrimmedString,
   APP_ENCRYPTION_KEY: optionalTrimmedString,
 });
 
@@ -62,8 +62,8 @@ export type Environment = {
   shutdownTimeoutMs: number;
   developmentMode: boolean;
   chromeExecutablePath?: string;
-  aiProvider: 'gemini' | 'disabled';
-  geminiApiKey?: string;
+  aiProvider: 'groq' | 'disabled';
+  groqApiKey?: string;
   appEncryptionKey?: string;
 };
 
@@ -112,7 +112,7 @@ export function loadEnvironment(
     shutdownTimeoutMs: value.SHUTDOWN_TIMEOUT_SECONDS * 1000,
     developmentMode: value.DEVELOPMENT_MODE,
     aiProvider: value.AI_PROVIDER,
-    ...(value.GEMINI_API_KEY === undefined ? {} : { geminiApiKey: value.GEMINI_API_KEY }),
+    ...(value.GROQ_API_KEY === undefined ? {} : { groqApiKey: value.GROQ_API_KEY }),
     ...(value.APP_ENCRYPTION_KEY === undefined
       ? {}
       : { appEncryptionKey: value.APP_ENCRYPTION_KEY }),

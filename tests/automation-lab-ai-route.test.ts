@@ -27,7 +27,7 @@ describe('simulador conversacional del Centro de pruebas', () => {
     database.saveAISettings({
       ...settings,
       enabled: true,
-      provider: 'gemini',
+      provider: 'groq',
       updatedAt: new Date().toISOString(),
     });
     database.upsertDetectedGroup('grupo-laboratorio@g.us', 'Grupo laboratorio');

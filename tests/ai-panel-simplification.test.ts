@@ -32,9 +32,9 @@ describe('módulo mínimo de inteligencia artificial', () => {
     expect(html).toContain('id="toggle-ai-enabled"');
     expect(html).toContain('class="status-switch"');
     expect(html).toContain('role="switch"');
-    expect(html).toContain('Cambiar configuración de Gemini');
-    expect(html).toContain('Gemini 3.8 Flash');
-    expect(html).toContain('Proveedor: Google');
+    expect(html).toContain('Cambiar configuración de Groq');
+    expect(html).toContain('GPT-OSS 120B');
+    expect(html).toContain('Proveedor: GroqCloud');
     expect(html).not.toContain('id="ai-provider-model"');
     expect(html).toContain('id="cancel-ai-provider-form"');
     expect(html).toContain('name="displayName"');

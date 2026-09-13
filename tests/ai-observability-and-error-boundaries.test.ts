@@ -23,7 +23,7 @@ class MockObservabilityProvider implements AIProvider {
   public readonly requests: GroundedResponseRequest[] = [];
   public responseText =
     'La dispraxia o trastorno del desarrollo de la coordinación afecta la planificación motora.';
-  public model = 'gemini-3.8-flash';
+  public model = 'openai/gpt-oss-120b';
   public failure: Error | null = null;
   public customErrorCode: AIProviderErrorCode = 'AI_TEMPORARY_ERROR';
 
@@ -49,7 +49,7 @@ class MockObservabilityProvider implements AIProvider {
   }
 
   public getModelInformation(): { provider: string; model: string } {
-    return { provider: 'gemini', model: this.model };
+    return { provider: 'groq', model: this.model };
   }
 
   public normalizeUsage(value: unknown): {
@@ -93,7 +93,7 @@ function setupTestContext(): TestContext {
   database.saveAISettings({
     ...database.getAISettings(profile.id),
     enabled: true,
-    provider: 'gemini',
+    provider: 'groq',
     updatedAt: new Date().toISOString(),
   });
 
@@ -145,8 +145,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     ctx.database.close();
   });
 
-  // 1. Gemini éxito + pipeline completo éxito
-  it('1. Gemini éxito + pipeline completo registra telemetría paso a paso y entrega AI_RESPONSE', async () => {
+  // 1. Groq éxito + pipeline completo éxito
+  it('1. Groq éxito + pipeline completo registra telemetría paso a paso y entrega AI_RESPONSE', async () => {
     const result = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
 
     expect(result.code).toBe('AI_RESPONSE');
@@ -166,13 +166,13 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     const providerSuccessEvent = events.find((e) => e.event_type === 'AI_PROVIDER_CALL_SUCCEEDED');
     expect(providerSuccessEvent).toBeDefined();
     expect(providerSuccessEvent?.result).toBe('SUCCESS');
-    expect(providerSuccessEvent?.source).toBe('gemini-3.8-flash');
+    expect(providerSuccessEvent?.source).toBe('openai/gpt-oss-120b');
     expect(providerSuccessEvent?.item_count).toBe(150);
   });
 
-  // 2. Gemini error real 500
-  it('2. Gemini error real 500 se clasifica como error del proveedor y registra AI_CALL_FAILED sin prometer "1 minuto"', async () => {
-    ctx.provider.failure = new AIProviderError('AI_TEMPORARY_ERROR', 'Gemini server error', true);
+  // 2. Groq error real 500
+  it('2. Groq error real 500 se clasifica como error del proveedor y registra AI_CALL_FAILED sin prometer "1 minuto"', async () => {
+    ctx.provider.failure = new AIProviderError('AI_TEMPORARY_ERROR', 'Groq server error', true);
     ctx.database.saveAIQueueSettings('neurobot', {
       ...ctx.database.getAIQueueSettings('neurobot'),
       maxRetries: 0,
@@ -194,8 +194,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     ).toBe(true);
   });
 
-  // 3. Gemini timeout real
-  it('3. Gemini timeout reintenta según configuración de la cola', async () => {
+  // 3. Groq timeout real
+  it('3. Groq timeout reintenta según configuración de la cola', async () => {
     ctx.provider.failure = new AIProviderError('AI_TIMEOUT', 'Timeout en solicitud', true);
     ctx.database.saveAIQueueSettings('neurobot', {
       ...ctx.database.getAIQueueSettings('neurobot'),
@@ -210,8 +210,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     expect(ctx.provider.calls).toBe(2);
   });
 
-  // 4. Gemini 429 con Retry-After < 60 segundos
-  it('4. Gemini 429 con Retry-After < 60s devuelve el tiempo exacto en segundos', async () => {
+  // 4. Groq 429 con Retry-After < 60 segundos
+  it('4. Groq 429 con Retry-After < 60s devuelve el tiempo exacto en segundos', async () => {
     ctx.provider.failure = new AIProviderError(
       'AI_PROVIDER_RATE_LIMITED',
       'Rate limit exceeded',
@@ -231,8 +231,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     );
   });
 
-  // 5. Gemini 429 con Retry-After >= 60 segundos
-  it('5. Gemini 429 con Retry-After >= 60s devuelve el tiempo en minutos', async () => {
+  // 5. Groq 429 con Retry-After >= 60 segundos
+  it('5. Groq 429 con Retry-After >= 60s devuelve el tiempo en minutos', async () => {
     ctx.provider.failure = new AIProviderError(
       'AI_PROVIDER_RATE_LIMITED',
       'Rate limit exceeded',
@@ -252,8 +252,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     );
   });
 
-  // 6. Gemini 429 sin Retry-After
-  it('6. Gemini 429 sin Retry-After devuelve "más tarde" sin inventar tiempo arbitrario', async () => {
+  // 6. Groq 429 sin Retry-After
+  it('6. Groq 429 sin Retry-After devuelve "más tarde" sin inventar tiempo arbitrario', async () => {
     ctx.provider.failure = new AIProviderError(
       'AI_PROVIDER_RATE_LIMITED',
       'Rate limit exceeded',
@@ -274,8 +274,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     expect(result.text).not.toContain('1 minuto');
   });
 
-  // 7. Gemini success + respuesta rechazada por validación de seguridad
-  it('7. Gemini success + respuesta rechazada clasifica como AI_RESPONSE_REJECTED sin reintentar Gemini', async () => {
+  // 7. Groq success + respuesta rechazada por validación de seguridad
+  it('7. Groq success + respuesta rechazada clasifica como AI_RESPONSE_REJECTED sin reintentar Groq', async () => {
     ctx.provider.responseText = 'Debes tomar 50mg de este medicamento diariamente.';
 
     const result = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
@@ -292,8 +292,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     expect(eventTypes).not.toContain('AI_QUOTA_CONFIRMED');
   });
 
-  // 8. Gemini success + excepción inesperada en validación
-  it('8. Gemini success + excepción en validación clasifica como AI_INTERNAL_ERROR (no AI_RESPONSE_REJECTED, no retry)', async () => {
+  // 8. Groq success + excepción inesperada en validación
+  it('8. Groq success + excepción en validación clasifica como AI_INTERNAL_ERROR (no AI_RESPONSE_REJECTED, no retry)', async () => {
     ctx.provider.responseText = 'Texto para forzar error en validador';
     const originalReplace = String.prototype.replace;
     let thrown = false;
@@ -324,8 +324,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     }
   });
 
-  // 9. ESCENARIO EXACTO DE LAS 08:43 (Gemini success HTTP 200 + completeAIUsageReservation falla)
-  it('9. Escenario 08:43: Gemini responde 200 pero completeAIUsageReservation lanza SQLITE_BUSY', async () => {
+  // 9. ESCENARIO EXACTO DE LAS 08:43 (Groq success HTTP 200 + completeAIUsageReservation falla)
+  it('9. Escenario 08:43: Groq responde 200 pero completeAIUsageReservation lanza SQLITE_BUSY', async () => {
     const originalComplete = ctx.database.completeAIUsageReservation.bind(ctx.database);
     ctx.database.completeAIUsageReservation = () => {
       throw new Error('SQLITE_BUSY: database is locked');
@@ -333,7 +333,7 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
 
     const result = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
 
-    // Gemini fue llamado exactamente UNA vez
+    // Groq fue llamado exactamente UNA vez
     expect(ctx.provider.calls).toBe(1);
 
     // El resultado refleja fallo interno, no error de proveedor
@@ -360,8 +360,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     ctx.database.completeAIUsageReservation = originalComplete;
   });
 
-  // 10. Gemini success + releaseAIUsageReservation lanza excepción
-  it('10. Gemini success + fallo en release de compensación no rompe el retorno de error interno', async () => {
+  // 10. Groq success + releaseAIUsageReservation lanza excepción
+  it('10. Groq success + fallo en release de compensación no rompe el retorno de error interno', async () => {
     const originalComplete = ctx.database.completeAIUsageReservation.bind(ctx.database);
     const originalRelease = ctx.database.releaseAIUsageReservation.bind(ctx.database);
 
@@ -384,8 +384,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     ctx.database.releaseAIUsageReservation = originalRelease;
   });
 
-  // 11. Gemini success + fallo en telemetría de AI_PROVIDER_CALL_SUCCEEDED
-  it('11. Gemini success + fallo al escribir evento de telemetría entrega AI_RESPONSE normalmente', async () => {
+  // 11. Groq success + fallo en telemetría de AI_PROVIDER_CALL_SUCCEEDED
+  it('11. Groq success + fallo al escribir evento de telemetría entrega AI_RESPONSE normalmente', async () => {
     const originalRecord = ctx.database.recordTechnicalEvent.bind(ctx.database);
     let failedOnce = false;
     ctx.database.recordTechnicalEvent = (event) => {
@@ -406,8 +406,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     ctx.database.recordTechnicalEvent = originalRecord;
   });
 
-  // 12. Gemini success + cache write falla
-  it('12. Gemini success + fallo al escribir en caché entrega respuesta AI_RESPONSE y registra AI_CACHE_WRITE_FAILED', async () => {
+  // 12. Groq success + cache write falla
+  it('12. Groq success + fallo al escribir en caché entrega respuesta AI_RESPONSE y registra AI_CACHE_WRITE_FAILED', async () => {
     const originalSave = ctx.database.saveCachedAnswer.bind(ctx.database);
     ctx.database.saveCachedAnswer = () => {
       throw new Error('SQLITE_READONLY: attempt to write a readonly database');
@@ -426,8 +426,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     ctx.database.saveCachedAnswer = originalSave;
   });
 
-  // 13. Gemini success + cache throw Y telemetry throw
-  it('13. Gemini success + cache AND telemetry throw entrega AI_RESPONSE sin lanzar', async () => {
+  // 13. Groq success + cache throw Y telemetry throw
+  it('13. Groq success + cache AND telemetry throw entrega AI_RESPONSE sin lanzar', async () => {
     const originalSave = ctx.database.saveCachedAnswer.bind(ctx.database);
     const originalRecord = ctx.database.recordTechnicalEvent.bind(ctx.database);
 
@@ -467,7 +467,7 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
 
     const result = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
 
-    // Gemini fue llamado exactamente 1 vez (no reintentos a pesar de la caída de SQLite)
+    // Groq fue llamado exactamente 1 vez (no reintentos a pesar de la caída de SQLite)
     expect(ctx.provider.calls).toBe(1);
     expect(result.code).toBe('AI_INTERNAL_ERROR');
     expect(result.text).toBe(
@@ -481,7 +481,7 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
   });
 
   // 15. SQLite bloqueado pre-provider (reserva falla)
-  it('15. SQLite bloqueado pre-provider no llama a Gemini y retorna AI_INTERNAL_ERROR', async () => {
+  it('15. SQLite bloqueado pre-provider no llama a Groq y retorna AI_INTERNAL_ERROR', async () => {
     const originalReserve = ctx.database.reserveAIUsage.bind(ctx.database);
     ctx.database.reserveAIUsage = () => {
       throw new Error('SQLITE_CORRUPT: database disk image is malformed');
@@ -509,7 +509,7 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
       throw new Error('SQLITE_BUSY: database is locked');
     };
 
-    // Ejecutar 5 consultas consecutivas que fallan en SQLite tras éxito de Gemini
+    // Ejecutar 5 consultas consecutivas que fallan en SQLite tras éxito de Groq
     for (let i = 0; i < 5; i += 1) {
       const result = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
       expect(result.code).toBe('AI_INTERNAL_ERROR');
@@ -517,7 +517,7 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
 
     expect(ctx.provider.calls).toBe(5);
 
-    // Comprobar que una 6ta llamada sigue pudiendo consultar a Gemini (el circuito NO se abrió)
+    // Comprobar que una 6ta llamada sigue pudiendo consultar a Groq (el circuito NO se abrió)
     ctx.database.completeAIUsageReservation = originalComplete;
     const recoveredResult = await ctx.service.answerQuestion(
       TEST_QUESTION,
@@ -557,14 +557,14 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
 
     await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
 
-    expect(ctx.provider.getModelInformation().model).toBe('gemini-3.8-flash');
+    expect(ctx.provider.getModelInformation().model).toBe('openai/gpt-oss-120b');
 
     ctx.database.completeAIUsageReservation = originalComplete;
   });
 
   // 20. Mensajes al usuario: verificación exhaustiva de strings según causa real
   it('20. Mensajes de usuario clasifican según causa real (temporal, rate limit, configuración, permanente, respuesta inválida, modelo no disponible)', async () => {
-    // A. Error interno post-Gemini
+    // A. Error interno post-Groq
     const originalComplete = ctx.database.completeAIUsageReservation.bind(ctx.database);
     ctx.database.completeAIUsageReservation = () => {
       throw new Error('SQLITE_BUSY');
@@ -592,7 +592,7 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
       ctx.service['queue']['circuitOpenedAt'] = null;
     };
 
-    // B. Error temporal Gemini (AI_TEMPORARY_ERROR, AI_TIMEOUT, AI_NETWORK_ERROR)
+    // B. Error temporal Groq (AI_TEMPORARY_ERROR, AI_TIMEOUT, AI_NETWORK_ERROR)
     resetQueueHealth();
     ctx.provider.failure = new AIProviderError('AI_TEMPORARY_ERROR', 'Temporary fail', true);
     const tempResult = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
@@ -748,7 +748,7 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
   });
 
   // 21. getAIQueueSettings lanza SQLITE_BUSY al resolver timeout (PRE-PROVEEDOR)
-  it('21. getAIQueueSettings lanza SQLITE_BUSY en PRE-PROVEEDOR: Gemini no es llamado y no degrada el proveedor', async () => {
+  it('21. getAIQueueSettings lanza SQLITE_BUSY en PRE-PROVEEDOR: Groq no es llamado y no degrada el proveedor', async () => {
     const originalGet = ctx.database.getAIQueueSettings.bind(ctx.database);
     let getAttempts = 0;
     ctx.database.getAIQueueSettings = () => {
@@ -758,7 +758,7 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
 
     const result = await ctx.service.answerQuestion(TEST_QUESTION, ctx.groupHash, ctx.userHash);
 
-    // Gemini NUNCA fue llamado
+    // Groq NUNCA fue llamado
     expect(getAttempts).toBeGreaterThanOrEqual(1);
     expect(ctx.provider.calls).toBe(0);
     expect(result.code).toBe('AI_INTERNAL_ERROR');
@@ -774,8 +774,8 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     ctx.database.getAIQueueSettings = originalGet;
   });
 
-  // 22. AI_QUEUE_CANCELLED durante shutdown no clasifica como fallo Gemini
-  it('22. AI_QUEUE_CANCELLED devuelve mensaje de reinicio sin clasificar como fallo Gemini ni degradar salud', async () => {
+  // 22. AI_QUEUE_CANCELLED durante shutdown no clasifica como fallo Groq
+  it('22. AI_QUEUE_CANCELLED devuelve mensaje de reinicio sin clasificar como fallo Groq ni degradar salud', async () => {
     // Simular que la cola lanza AI_QUEUE_CANCELLED (por ejemplo durante shutdown)
     const queue = ctx.service['queue'];
     const originalRun = queue.run.bind(queue);
@@ -803,10 +803,10 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
   // 21. Requerimiento #29: resolución de modelos y aislamiento multibot intactos
   it('21-23. Requerimiento #29: resolución de modelos, fallbacks y aislamiento multibot intactos', async () => {
     const vault = new SecretVault('test-secret-key-32-chars-long-vault');
-    const factory = new AIProviderFactory(ctx.database, vault, 'AIza_global_key_test_12345678');
+    const factory = new AIProviderFactory(ctx.database, vault, 'gsk_global_key_test_12345678');
 
     const botProvider = factory.forBot('neurobot');
-    expect(botProvider.getModelInformation().model).toBe('gemini-3.8-flash');
+    expect(botProvider.getModelInformation().model).toBe('openai/gpt-oss-120b');
     expect(botProvider.isConfigured()).toBe(true);
 
     // Multibot isolation
@@ -824,7 +824,7 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     });
 
     const secondProvider = factory.forBot('bot-secundario');
-    expect(secondProvider.getModelInformation().model).toBe('gemini-3.8-flash');
+    expect(secondProvider.getModelInformation().model).toBe('openai/gpt-oss-120b');
   });
 
   // 23. Códigos individuales de proveedor y mensajes específicos
@@ -955,7 +955,7 @@ describe('Diagnóstico y Observabilidad de IA — Separación de Límites y Esce
     const events = ctx.database.getTechnicalEvents();
     for (const event of events) {
       const serialized = JSON.stringify(event);
-      expect(serialized).not.toContain('AIza_');
+      expect(serialized).not.toContain('gsk_');
       expect(serialized).not.toContain('DATOS DE CONTEXTO');
       expect(serialized).not.toContain('UNTRUSTED_DATA_ONLY');
       expect(serialized).not.toContain('56912345678');

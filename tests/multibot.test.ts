@@ -110,12 +110,12 @@ describe('aislamiento multibot', () => {
 
   it('cifra claves por bot con autenticación de ámbito', () => {
     const vault = new SecretVault('k'.repeat(32));
-    const encrypted = vault.encrypt('clave-de-prueba-no-real', 'bot:tienda-uno:gemini');
+    const encrypted = vault.encrypt('clave-de-prueba-no-real', 'bot:tienda-uno:groq');
     expect(encrypted.encrypted).not.toContain('clave-de-prueba-no-real');
-    expect(vault.decrypt(encrypted.encrypted, 'bot:tienda-uno:gemini')).toBe(
+    expect(vault.decrypt(encrypted.encrypted, 'bot:tienda-uno:groq')).toBe(
       'clave-de-prueba-no-real',
     );
-    expect(() => vault.decrypt(encrypted.encrypted, 'bot:tienda-dos:gemini')).toThrow();
+    expect(() => vault.decrypt(encrypted.encrypted, 'bot:tienda-dos:groq')).toThrow();
   });
 
   it('selecciona opciones por número, nombre y alias', () => {
