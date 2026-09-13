@@ -11,6 +11,7 @@ let panelRuntimeStarted = false;
 
 window.__neurobotLoginBootstrap = true;
 window.__neurobotAuthenticated = false;
+window.__neurobotPanelRuntimeLoaded = false;
 
 function setAuthenticatedView(authenticated) {
   document.body.classList.toggle('login-mode', !authenticated);
@@ -73,6 +74,88 @@ async function fetchSession() {
   return payload;
 }
 
+function repairAutomaticMessagesMarkup() {
+  const section = document.querySelector('#section-automatic-messages');
+  const automaticForm = document.querySelector('#automatic-messages-form');
+  const pollCard = section?.querySelector('.poll-weekly-schedule');
+  if (!(section instanceof HTMLElement) || !(automaticForm instanceof HTMLFormElement)) return;
+
+  let pollPanel = section.querySelector('#poll-automation-form');
+  if (!(pollPanel instanceof HTMLElement) && pollCard instanceof HTMLElement) {
+    const fields = pollCard.querySelector('.poll-automation-fields');
+    const actions = pollCard.querySelector('.actions');
+    const support = pollCard.querySelector('#poll-automation-support');
+    const status = pollCard.querySelector('#poll-automation-status');
+    if (fields && actions && support) {
+      pollPanel = document.createElement('div');
+      pollPanel.id = 'poll-automation-form';
+      pollPanel.className = 'poll-automation-form';
+      if (status) pollCard.insertBefore(pollPanel, status);
+      else pollCard.append(pollPanel);
+      pollPanel.append(fields, actions, support);
+    }
+  }
+
+  if (pollPanel instanceof HTMLElement && !(pollPanel instanceof HTMLFormElement)) {
+    const startTime = pollPanel.querySelector('[name="poll_start_time"]');
+    const intervalHours = pollPanel.querySelector('[name="poll_interval_hours"]');
+    if (startTime instanceof HTMLInputElement && intervalHours instanceof HTMLSelectElement) {
+      Object.defineProperty(pollPanel, 'elements', {
+        configurable: true,
+        value: {
+          poll_start_time: startTime,
+          poll_interval_hours: intervalHours,
+        },
+      });
+    }
+    pollPanel.querySelectorAll('input, select, textarea, button').forEach((control) => {
+      control.setAttribute('form', 'poll-automation-detached');
+    });
+    const saveButton = pollPanel.querySelector('#save-poll-automation');
+    if (saveButton instanceof HTMLButtonElement) {
+      saveButton.type = 'button';
+      if (saveButton.dataset.pollSubmitShim !== 'true') {
+        saveButton.dataset.pollSubmitShim = 'true';
+        saveButton.addEventListener('click', (event) => {
+          event.preventDefault();
+          pollPanel.dispatchEvent(new Event('submit', { cancelable: true }));
+        });
+      }
+    }
+  }
+
+  section.querySelectorAll('input, select, textarea, button').forEach((control) => {
+    if (pollPanel instanceof HTMLElement && pollPanel.contains(control)) return;
+    control.setAttribute('form', 'automatic-messages-form');
+  });
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function importPanelRuntime() {
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const moduleUrl = attempt === 1 ? '/app-panel.js' : `/app-panel.js?retry=${Date.now()}`;
+      await import(moduleUrl);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) {
+        console.warn('ADMIN_PANEL_RUNTIME_LOAD_RETRY', {
+          attempt,
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+        await wait(1000);
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function startPanelRuntime(session) {
   if (panelRuntimeStarted) return;
   panelRuntimeStarted = true;
@@ -82,16 +165,22 @@ async function startPanelRuntime(session) {
   window.dispatchEvent(new CustomEvent('neurobot-authenticated', { detail: session }));
 
   try {
-    await import('/app-panel.js');
+    repairAutomaticMessagesMarkup();
+    await importPanelRuntime();
     window.__neurobotPanelRuntimeLoaded = true;
   } catch (error) {
+    panelRuntimeStarted = false;
     window.__neurobotPanelRuntimeLoaded = false;
     const notice = document.querySelector('#notice');
     if (notice) {
       notice.textContent = 'La sesión está iniciada, pero el panel no pudo cargar sus módulos. Recarga la página.';
       notice.classList.remove('hidden');
     }
-    console.error('ADMIN_PANEL_RUNTIME_LOAD_FAILED', error);
+    console.error('ADMIN_PANEL_RUNTIME_LOAD_FAILED', {
+      module: '/app-panel.js',
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
