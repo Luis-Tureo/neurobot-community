@@ -25,6 +25,7 @@ class FakeWhatsAppClient extends EventEmitter {
       userIds.some((identifier) => identifier === mapping.lid || identifier === mapping.pn),
     ),
   );
+  public pupBrowser: (EventEmitter & { isConnected: () => boolean }) | undefined;
   public pupPage:
     | {
         evaluate: ReturnType<typeof vi.fn>;
@@ -67,6 +68,9 @@ function createSubject(
     groupAdministratorStaleTtlMs?: number;
     groupAdministratorTimeoutMs?: number;
     groupAdministratorRetryCooldownMs?: number;
+    livenessCheckIntervalMs?: number;
+    livenessCheckTimeoutMs?: number;
+    livenessFailureThreshold?: number;
   } = {},
 ) {
   const fake = new FakeWhatsAppClient();
@@ -98,6 +102,15 @@ function createSubject(
       ...(options.groupAdministratorRetryCooldownMs === undefined
         ? {}
         : { groupAdministratorRetryCooldownMs: options.groupAdministratorRetryCooldownMs }),
+      ...(options.livenessCheckIntervalMs === undefined
+        ? {}
+        : { livenessCheckIntervalMs: options.livenessCheckIntervalMs }),
+      ...(options.livenessCheckTimeoutMs === undefined
+        ? {}
+        : { livenessCheckTimeoutMs: options.livenessCheckTimeoutMs }),
+      ...(options.livenessFailureThreshold === undefined
+        ? {}
+        : { livenessFailureThreshold: options.livenessFailureThreshold }),
     },
     options.logger ?? createLogger('silent'),
     new Anonymizer('x'.repeat(32)),
@@ -1245,5 +1258,101 @@ describe('adaptador de WhatsApp', () => {
         { groupId: 'grupo-normal@g.us', type: 'UPDATE', botAffected: false },
       ]),
     );
+  });
+});
+
+describe('vigilancia del navegador (whatsapp-web.js no informa cuando Chromium muere)', () => {
+  it('un crash de Chromium se informa como desconexión transitoria una sola vez', async () => {
+    const { adapter, fake, states } = createSubject();
+    const browser = Object.assign(new EventEmitter(), { isConnected: () => true });
+    fake.pupBrowser = browser;
+    await adapter.initialize();
+    fake.emit('ready');
+    await vi.waitFor(() => expect(adapter.isReady()).toBe(true));
+
+    browser.emit('disconnected');
+    browser.emit('disconnected');
+
+    expect(adapter.isReady()).toBe(false);
+    expect(states.filter((state) => state === 'disconnected')).toHaveLength(1);
+  });
+
+  it('un cierre iniciado por destroy() no genera una desconexión espuria', async () => {
+    const { adapter, fake, states } = createSubject();
+    let connected = true;
+    const browser = Object.assign(new EventEmitter(), { isConnected: () => connected });
+    fake.pupBrowser = browser;
+    fake.destroy.mockImplementation(async () => {
+      connected = false;
+      browser.emit('disconnected');
+    });
+    await adapter.initialize();
+    fake.emit('ready');
+    await vi.waitFor(() => expect(adapter.isReady()).toBe(true));
+
+    await adapter.destroy();
+
+    expect(states.filter((state) => state === 'disconnected')).toHaveLength(0);
+  });
+
+  it('una desconexión informada por la librería suprime la del navegador', async () => {
+    const { adapter, fake, states } = createSubject();
+    const browser = Object.assign(new EventEmitter(), { isConnected: () => true });
+    fake.pupBrowser = browser;
+    await adapter.initialize();
+    fake.emit('ready');
+    await vi.waitFor(() => expect(adapter.isReady()).toBe(true));
+
+    fake.emit('disconnected', 'CONFLICT');
+    browser.emit('disconnected');
+
+    expect(states.filter((state) => state === 'disconnected')).toHaveLength(1);
+  });
+
+  it('el watchdog detecta un navegador que no responde tras fallos consecutivos', async () => {
+    vi.useFakeTimers();
+    try {
+      const { adapter, fake, states } = createSubject({
+        livenessCheckIntervalMs: 50,
+        livenessCheckTimeoutMs: 20,
+        livenessFailureThreshold: 2,
+      });
+      fake.pupBrowser = Object.assign(new EventEmitter(), { isConnected: () => true });
+      fake.getState.mockImplementation(() => new Promise(() => undefined));
+      await adapter.initialize();
+      fake.emit('ready');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(adapter.isReady()).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(75);
+      expect(states.filter((state) => state === 'disconnected')).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(80);
+      expect(adapter.isReady()).toBe(false);
+      expect(states.filter((state) => state === 'disconnected')).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(states.filter((state) => state === 'disconnected')).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('el watchdog no interviene mientras WhatsApp responde', async () => {
+    vi.useFakeTimers();
+    try {
+      const { adapter, fake, states } = createSubject({
+        livenessCheckIntervalMs: 50,
+        livenessCheckTimeoutMs: 20,
+        livenessFailureThreshold: 2,
+      });
+      fake.pupBrowser = Object.assign(new EventEmitter(), { isConnected: () => true });
+      await adapter.initialize();
+      fake.emit('ready');
+      await vi.advanceTimersByTimeAsync(300);
+      expect(fake.getState).toHaveBeenCalled();
+      expect(adapter.isReady()).toBe(true);
+      expect(states.filter((state) => state === 'disconnected')).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

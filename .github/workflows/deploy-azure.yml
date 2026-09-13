@@ -140,11 +140,17 @@ jobs:
             --https-only true \
             >/dev/null
 
+          # WEBSITES_CONTAINER_STOP_TIME_LIMIT: Azure espera este tiempo (segundos, máx. 120)
+          # entre SIGTERM y SIGKILL. El valor predeterminado (5 s) no permite que Chromium cierre
+          # el perfil LocalAuth de forma limpia y puede corromper la sesión de WhatsApp.
+          # SHUTDOWN_TIMEOUT_SECONDS debe ser menor para que Neurobot salga por sí mismo antes.
           bash "$AZ_RETRY" webapp config appsettings set \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_WEBAPP_NAME" \
             --settings \
               WEBSITES_ENABLE_APP_SERVICE_STORAGE=true \
+              WEBSITES_CONTAINER_STOP_TIME_LIMIT=120 \
+              SHUTDOWN_TIMEOUT_SECONDS=90 \
               WEBSITES_PORT=8080 \
               PORT=8080 \
               PANEL_HOST=0.0.0.0 \
@@ -153,6 +159,28 @@ jobs:
               CHROME_EXECUTABLE_PATH=/usr/local/bin/neurobot-chrome \
               AI_PROVIDER=gemini \
             >/dev/null
+
+          # LocalAuth/Chromium exige un único escritor por perfil: la Web App debe ejecutarse
+          # con una sola instancia. Se valida el plan y la configuración antes de arrancar.
+          PLAN_ID=$(bash "$AZ_RETRY" webapp show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            --query appServicePlanId \
+            --output tsv)
+          PLAN_CAPACITY=$(bash "$AZ_RETRY" appservice plan show \
+            --ids "$PLAN_ID" \
+            --query sku.capacity \
+            --output tsv)
+          WORKERS=$(bash "$AZ_RETRY" webapp show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            --query siteConfig.numberOfWorkers \
+            --output tsv)
+          echo "Instancias del plan: ${PLAN_CAPACITY:-desconocido}; workers de la app: ${WORKERS:-desconocido}"
+          if [ "${PLAN_CAPACITY:-1}" != "1" ] || [ "${WORKERS:-1}" != "1" ]; then
+            echo "ERROR: Neurobot requiere exactamente una instancia (LocalAuth single-writer)." >&2
+            exit 1
+          fi
 
           bash "$AZ_RETRY" webapp config container set \
             --resource-group "$AZURE_RESOURCE_GROUP" \

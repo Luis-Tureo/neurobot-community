@@ -32,6 +32,17 @@ const botConnectionLabels = {
   resetting: 'Restableciendo',
 };
 
+const LINK_REQUIRED_LABEL = 'Requiere volver a vincularse';
+
+function whatsappStatusLabel(state, connection) {
+  if (connection && connection.linkRequired) return LINK_REQUIRED_LABEL;
+  const label = botConnectionLabels[state] || state;
+  if (connection && connection.reconnectScheduled && state !== 'connected') {
+    const reason = connection.lastDisconnectReason ? ` (${connection.lastDisconnectReason})` : '';
+    return `${label}${reason}`;
+  }
+  return label;
+}
 const dayLabels = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 const lifecycleLabels = {
@@ -254,7 +265,7 @@ async function loadBots() {
     const info = node('table', undefined, 'bot-facts');
     const infoBody = node('tbody');
     const phoneText = bot.phoneNumber || 'Sin vincular';
-    const statusText = botConnectionLabels[bot.whatsappStatus] || bot.whatsappStatus;
+    const statusText = whatsappStatusLabel(bot.whatsappStatus, bot.whatsapp);
     const facts = [
       ['Número', phoneText],
       ['WhatsApp', statusText],
@@ -364,7 +375,7 @@ async function loadBotSummary(refreshForms = true) {
   });
   const cards = [
     ['Número', result.bot.phoneNumber || 'Sin vincular'],
-    ['WhatsApp', botConnectionLabels[connection.state] || connection.state],
+    ['WhatsApp', whatsappStatusLabel(connection.state, connection)],
     ['Última conexión', safeDate(connection.lastConnectedAt)],
     ['Sesión', result.runtime ? 'Instancia preparada' : 'Detenida'],
     [

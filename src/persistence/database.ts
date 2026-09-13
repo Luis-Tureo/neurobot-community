@@ -244,6 +244,141 @@ export type AuditEvent = {
   errorCode?: string;
 };
 
+export type CommunityDigestJobStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'RETRY_WAIT'
+  | 'SEND_PENDING'
+  | 'SEND_RETRY_WAIT'
+  | 'SENT'
+  | 'SKIPPED'
+  | 'FAILED_FINAL';
+
+export type CommunityDigestJobKind = 'digest' | 'rollup';
+
+export type CommunityDigestJobRecord = {
+  id: number;
+  botId: string;
+  period: 'daily' | 'weekly' | 'monthly';
+  periodKey: string;
+  groupId: string;
+  groupHash: string;
+  kind: CommunityDigestJobKind;
+  timezone: string;
+  scheduledDate: string;
+  scheduledAt: string;
+  windowStart: string;
+  windowEnd: string;
+  expiresAt: string;
+  status: CommunityDigestJobStatus;
+  attempts: number;
+  sendAttempts: number;
+  lastAttemptAt: string | null;
+  nextAttemptAt: string | null;
+  lastErrorCode: string | null;
+  lastCauseCode: string | null;
+  messageCount: number | null;
+  historyComplete: boolean | null;
+  blockCount: number | null;
+  aiCallCount: number;
+  retryCount: number;
+  tokenEstimate: number | null;
+  coverageDays: number | null;
+  expectedDays: number | null;
+  generatedAt: string | null;
+  sentAt: string | null;
+  summaryEncrypted: string | null;
+  checkpointEncrypted: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CommunityDigestJobInsert = Pick<
+  CommunityDigestJobRecord,
+  | 'botId'
+  | 'period'
+  | 'periodKey'
+  | 'groupId'
+  | 'groupHash'
+  | 'kind'
+  | 'timezone'
+  | 'scheduledDate'
+  | 'scheduledAt'
+  | 'windowStart'
+  | 'windowEnd'
+  | 'expiresAt'
+> & { expectedDays?: number | null };
+
+export type CommunityDigestJobPatch = Partial<
+  Pick<
+    CommunityDigestJobRecord,
+    | 'status'
+    | 'attempts'
+    | 'sendAttempts'
+    | 'nextAttemptAt'
+    | 'lastErrorCode'
+    | 'lastCauseCode'
+    | 'messageCount'
+    | 'historyComplete'
+    | 'blockCount'
+    | 'aiCallCount'
+    | 'retryCount'
+    | 'tokenEstimate'
+    | 'coverageDays'
+    | 'expectedDays'
+    | 'generatedAt'
+    | 'sentAt'
+    | 'summaryEncrypted'
+    | 'checkpointEncrypted'
+  >
+>;
+
+export type CommunityDigestMessageRow = {
+  id: number;
+  messageKey: string;
+  timestampMs: number;
+  participantToken: string | null;
+  bodyEncrypted: string;
+  source: 'live' | 'history';
+};
+
+export type CommunityDigestRollupRow = {
+  dayKey: string;
+  windowStart: string;
+  windowEnd: string;
+  messageCount: number;
+  historyComplete: boolean;
+  payloadEncrypted: string;
+  createdAt: string;
+};
+
+const COMMUNITY_DIGEST_ACTIVE_STATUSES = [
+  'PENDING',
+  'RETRY_WAIT',
+  'SEND_PENDING',
+  'SEND_RETRY_WAIT',
+];
+const COMMUNITY_DIGEST_JOB_PATCH_COLUMNS: Record<keyof CommunityDigestJobPatch, string> = {
+  status: 'status',
+  attempts: 'attempts',
+  sendAttempts: 'send_attempts',
+  nextAttemptAt: 'next_attempt_at',
+  lastErrorCode: 'last_error_code',
+  lastCauseCode: 'last_cause_code',
+  messageCount: 'message_count',
+  historyComplete: 'history_complete',
+  blockCount: 'block_count',
+  aiCallCount: 'ai_call_count',
+  retryCount: 'retry_count',
+  tokenEstimate: 'token_estimate',
+  coverageDays: 'coverage_days',
+  expectedDays: 'expected_days',
+  generatedAt: 'generated_at',
+  sentAt: 'sent_at',
+  summaryEncrypted: 'summary_encrypted',
+  checkpointEncrypted: 'checkpoint_encrypted',
+};
+
 export class AppDatabase {
   private db: BetterSqlite3.Database;
   private closed = false;
@@ -2147,6 +2282,93 @@ export class AppDatabase {
           DROP TABLE bot_ai_provider_history_legacy;
           CREATE INDEX idx_bot_ai_provider_history
             ON bot_ai_provider_history(bot_id, created_at DESC, id DESC);
+        `,
+      },
+      {
+        version: 35,
+        sql: `
+          -- Resúmenes comunitarios durables: estado persistente de cada trabajo
+          -- (bot + grupo + período + clave de período), buffer temporal cifrado de
+          -- mensajes de texto y rollups diarios anonimizados para semanal/mensual.
+          CREATE TABLE community_digest_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_id TEXT NOT NULL,
+            period TEXT NOT NULL CHECK (period IN ('daily', 'weekly', 'monthly')),
+            period_key TEXT NOT NULL,
+            group_id TEXT NOT NULL,
+            group_hash TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'digest' CHECK (kind IN ('digest', 'rollup')),
+            timezone TEXT NOT NULL,
+            scheduled_date TEXT NOT NULL,
+            scheduled_at TEXT NOT NULL,
+            window_start TEXT NOT NULL,
+            window_end TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN (
+              'PENDING', 'PROCESSING', 'RETRY_WAIT', 'SEND_PENDING', 'SEND_RETRY_WAIT',
+              'SENT', 'SKIPPED', 'FAILED_FINAL'
+            )),
+            attempts INTEGER NOT NULL DEFAULT 0,
+            send_attempts INTEGER NOT NULL DEFAULT 0,
+            last_attempt_at TEXT,
+            next_attempt_at TEXT,
+            last_error_code TEXT,
+            last_cause_code TEXT,
+            message_count INTEGER,
+            history_complete INTEGER,
+            block_count INTEGER,
+            ai_call_count INTEGER NOT NULL DEFAULT 0,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            token_estimate INTEGER,
+            coverage_days INTEGER,
+            expected_days INTEGER,
+            generated_at TEXT,
+            sent_at TEXT,
+            summary_encrypted TEXT,
+            checkpoint_encrypted TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (bot_id, period, period_key, group_id)
+          );
+          CREATE INDEX idx_community_digest_jobs_due
+            ON community_digest_jobs(bot_id, status, next_attempt_at);
+          CREATE INDEX idx_community_digest_jobs_recent
+            ON community_digest_jobs(bot_id, period, scheduled_at DESC);
+
+          CREATE TABLE community_digest_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_id TEXT NOT NULL,
+            group_hash TEXT NOT NULL,
+            message_key TEXT NOT NULL,
+            timestamp_ms INTEGER NOT NULL,
+            participant_token TEXT,
+            body_encrypted TEXT NOT NULL,
+            source TEXT NOT NULL CHECK (source IN ('live', 'history')),
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE (bot_id, group_hash, message_key)
+          );
+          CREATE INDEX idx_community_digest_messages_window
+            ON community_digest_messages(bot_id, group_hash, timestamp_ms);
+          CREATE INDEX idx_community_digest_messages_expiry
+            ON community_digest_messages(expires_at);
+
+          CREATE TABLE community_digest_rollups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_id TEXT NOT NULL,
+            group_hash TEXT NOT NULL,
+            day_key TEXT NOT NULL,
+            window_start TEXT NOT NULL,
+            window_end TEXT NOT NULL,
+            message_count INTEGER NOT NULL,
+            history_complete INTEGER NOT NULL,
+            payload_encrypted TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE (bot_id, group_hash, day_key)
+          );
+          CREATE INDEX idx_community_digest_rollups_expiry
+            ON community_digest_rollups(expires_at);
         `,
       },
     ];
@@ -4287,6 +4509,9 @@ export class AppDatabase {
         )
         .run(botId);
       this.db.prepare('DELETE FROM bot_poll_send_history WHERE bot_id=?').run(botId);
+      this.db.prepare('DELETE FROM community_digest_jobs WHERE bot_id=?').run(botId);
+      this.db.prepare('DELETE FROM community_digest_messages WHERE bot_id=?').run(botId);
+      this.db.prepare('DELETE FROM community_digest_rollups WHERE bot_id=?').run(botId);
       this.db
         .prepare(
           `UPDATE assistant_connectors
@@ -8233,6 +8458,484 @@ export class AppDatabase {
       )
       .run(username, passwordHash, now, now);
   }
+
+  // ---------------------------------------------------------------------------
+  // Resúmenes comunitarios durables: trabajos, buffer temporal cifrado y rollups.
+  // ---------------------------------------------------------------------------
+
+  public createCommunityDigestJob(
+    input: CommunityDigestJobInsert,
+    now = new Date(),
+  ): { job: CommunityDigestJobRecord; created: boolean } {
+    const nowIso = now.toISOString();
+    const inserted = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO community_digest_jobs(
+           bot_id, period, period_key, group_id, group_hash, kind, timezone, scheduled_date,
+           scheduled_at, window_start, window_end, expires_at, status, expected_days,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)`,
+      )
+      .run(
+        input.botId,
+        input.period,
+        input.periodKey,
+        input.groupId,
+        input.groupHash,
+        input.kind,
+        input.timezone,
+        input.scheduledDate,
+        input.scheduledAt,
+        input.windowStart,
+        input.windowEnd,
+        input.expiresAt,
+        input.expectedDays ?? null,
+        nowIso,
+        nowIso,
+      );
+    const job = this.findCommunityDigestJob(
+      input.botId,
+      input.period,
+      input.periodKey,
+      input.groupId,
+    );
+    if (job === null) throw new Error('COMMUNITY_DIGEST_JOB_NOT_PERSISTED');
+    return { job, created: inserted.changes === 1 };
+  }
+
+  public findCommunityDigestJob(
+    botId: string,
+    period: CommunityDigestJobRecord['period'],
+    periodKey: string,
+    groupId: string,
+  ): CommunityDigestJobRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM community_digest_jobs
+         WHERE bot_id = ? AND period = ? AND period_key = ? AND group_id = ?`,
+      )
+      .get(botId, period, periodKey, groupId) as CommunityDigestJobRow | undefined;
+    return row === undefined ? null : mapCommunityDigestJob(row);
+  }
+
+  public getCommunityDigestJob(id: number): CommunityDigestJobRecord | null {
+    const row = this.db.prepare('SELECT * FROM community_digest_jobs WHERE id = ?').get(id) as
+      CommunityDigestJobRow | undefined;
+    return row === undefined ? null : mapCommunityDigestJob(row);
+  }
+
+  /**
+   * Trabajos listos para ejecutarse: pendientes/en espera cuyo próximo intento ya venció, o
+   * en PROCESSING abandonados (proceso reiniciado) cuyo último intento es más antiguo que
+   * `staleProcessingBefore`. Los diarios se ordenan antes que semanales y mensuales.
+   */
+  public listDueCommunityDigestJobs(
+    botId: string,
+    now: Date,
+    staleProcessingBefore: Date,
+  ): CommunityDigestJobRecord[] {
+    const nowIso = now.toISOString();
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM community_digest_jobs
+           WHERE bot_id = ?
+             AND (
+               (status IN ('PENDING', 'RETRY_WAIT', 'SEND_PENDING', 'SEND_RETRY_WAIT')
+                 AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
+               OR (status = 'PROCESSING' AND (last_attempt_at IS NULL OR last_attempt_at <= ?))
+             )
+           ORDER BY CASE period WHEN 'daily' THEN 0 WHEN 'weekly' THEN 1 ELSE 2 END,
+             scheduled_at ASC, id ASC`,
+        )
+        .all(botId, nowIso, staleProcessingBefore.toISOString()) as CommunityDigestJobRow[]
+    ).map(mapCommunityDigestJob);
+  }
+
+  /** Reclama atómicamente un trabajo para procesarlo. Devuelve false si otro ejecutor ya lo tomó. */
+  public claimCommunityDigestJob(id: number, now: Date, staleProcessingBefore: Date): boolean {
+    const nowIso = now.toISOString();
+    const result = this.db
+      .prepare(
+        `UPDATE community_digest_jobs
+         SET status = 'PROCESSING', attempts = attempts + 1, last_attempt_at = ?,
+             next_attempt_at = NULL, updated_at = ?
+         WHERE id = ?
+           AND (
+             (status IN ('PENDING', 'RETRY_WAIT', 'SEND_PENDING', 'SEND_RETRY_WAIT')
+               AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
+             OR (status = 'PROCESSING' AND (last_attempt_at IS NULL OR last_attempt_at <= ?))
+           )`,
+      )
+      .run(nowIso, nowIso, id, nowIso, staleProcessingBefore.toISOString());
+    return result.changes === 1;
+  }
+
+  public updateCommunityDigestJob(
+    id: number,
+    patch: CommunityDigestJobPatch,
+    now = new Date(),
+  ): CommunityDigestJobRecord | null {
+    const assignments: string[] = [];
+    const values: unknown[] = [];
+    for (const [key, column] of Object.entries(COMMUNITY_DIGEST_JOB_PATCH_COLUMNS) as Array<
+      [keyof CommunityDigestJobPatch, string]
+    >) {
+      if (!(key in patch)) continue;
+      const value = patch[key];
+      assignments.push(`${column} = ?`);
+      values.push(
+        typeof value === 'boolean' ? (value ? 1 : 0) : value === undefined ? null : value,
+      );
+    }
+    assignments.push('updated_at = ?');
+    values.push(now.toISOString(), id);
+    this.db
+      .prepare(`UPDATE community_digest_jobs SET ${assignments.join(', ')} WHERE id = ?`)
+      .run(...values);
+    return this.getCommunityDigestJob(id);
+  }
+
+  public listCommunityDigestJobs(
+    botId: string,
+    options: { period?: CommunityDigestJobRecord['period']; limit?: number } = {},
+  ): CommunityDigestJobRecord[] {
+    const limit = Math.max(1, Math.min(500, Math.trunc(options.limit ?? 100)));
+    const rows = (
+      options.period === undefined
+        ? this.db
+            .prepare(
+              `SELECT * FROM community_digest_jobs WHERE bot_id = ?
+               ORDER BY scheduled_at DESC, id DESC LIMIT ?`,
+            )
+            .all(botId, limit)
+        : this.db
+            .prepare(
+              `SELECT * FROM community_digest_jobs WHERE bot_id = ? AND period = ?
+               ORDER BY scheduled_at DESC, id DESC LIMIT ?`,
+            )
+            .all(botId, options.period, limit)
+    ) as CommunityDigestJobRow[];
+    return rows.map(mapCommunityDigestJob);
+  }
+
+  /** Trabajos de la ocurrencia más reciente de cada frecuencia (todos los grupos). */
+  public listLatestCommunityDigestJobsByPeriod(
+    botId: string,
+  ): Record<CommunityDigestJobRecord['period'], CommunityDigestJobRecord[]> {
+    const result: Record<CommunityDigestJobRecord['period'], CommunityDigestJobRecord[]> = {
+      daily: [],
+      weekly: [],
+      monthly: [],
+    };
+    for (const period of ['daily', 'weekly', 'monthly'] as const) {
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM community_digest_jobs
+           WHERE bot_id = ? AND period = ? AND kind = 'digest'
+             AND scheduled_at = (
+               SELECT MAX(scheduled_at) FROM community_digest_jobs
+               WHERE bot_id = ? AND period = ? AND kind = 'digest'
+             )
+           ORDER BY group_hash ASC`,
+        )
+        .all(botId, period, botId, period) as CommunityDigestJobRow[];
+      result[period] = rows.map(mapCommunityDigestJob);
+    }
+    return result;
+  }
+
+  public hasActiveCommunityDigestDayJobs(
+    botId: string,
+    groupId: string,
+    dayKeys: string[],
+  ): boolean {
+    if (dayKeys.length === 0) return false;
+    const placeholders = dayKeys.map(() => '?').join(', ');
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM community_digest_jobs
+         WHERE bot_id = ? AND group_id = ? AND period = 'daily'
+           AND status IN ('PENDING', 'PROCESSING', 'RETRY_WAIT', 'SEND_PENDING', 'SEND_RETRY_WAIT')
+           AND period_key IN (${placeholders})`,
+      )
+      .get(botId, groupId, ...dayKeys) as { count: number };
+    return row.count > 0;
+  }
+
+  public purgeCommunityDigestJobsBefore(botId: string, before: Date): number {
+    const activeStatuses = COMMUNITY_DIGEST_ACTIVE_STATUSES.map(() => '?').join(', ');
+    return this.db
+      .prepare(
+        `DELETE FROM community_digest_jobs
+         WHERE bot_id = ? AND scheduled_at < ? AND status NOT IN (${activeStatuses}, 'PROCESSING')`,
+      )
+      .run(botId, before.toISOString(), ...COMMUNITY_DIGEST_ACTIVE_STATUSES).changes;
+  }
+
+  public insertCommunityDigestMessage(input: {
+    botId: string;
+    groupHash: string;
+    messageKey: string;
+    timestampMs: number;
+    participantToken: string | null;
+    bodyEncrypted: string;
+    source: 'live' | 'history';
+    expiresAt: string;
+  }): boolean {
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO community_digest_messages(
+           bot_id, group_hash, message_key, timestamp_ms, participant_token, body_encrypted,
+           source, expires_at, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.botId,
+        input.groupHash,
+        input.messageKey,
+        Math.trunc(input.timestampMs),
+        input.participantToken,
+        input.bodyEncrypted,
+        input.source,
+        input.expiresAt,
+        new Date().toISOString(),
+      );
+    return result.changes === 1;
+  }
+
+  public listCommunityDigestMessages(
+    botId: string,
+    groupHash: string,
+    startMs: number,
+    endMs: number,
+  ): CommunityDigestMessageRow[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT id, message_key, timestamp_ms, participant_token, body_encrypted, source
+           FROM community_digest_messages
+           WHERE bot_id = ? AND group_hash = ? AND timestamp_ms > ? AND timestamp_ms <= ?
+           ORDER BY timestamp_ms ASC, id ASC`,
+        )
+        .all(botId, groupHash, Math.trunc(startMs), Math.trunc(endMs)) as Array<{
+        id: number;
+        message_key: string;
+        timestamp_ms: number;
+        participant_token: string | null;
+        body_encrypted: string;
+        source: 'live' | 'history';
+      }>
+    ).map((row) => ({
+      id: row.id,
+      messageKey: row.message_key,
+      timestampMs: row.timestamp_ms,
+      participantToken: row.participant_token,
+      bodyEncrypted: row.body_encrypted,
+      source: row.source,
+    }));
+  }
+
+  public countCommunityDigestMessages(botId: string, groupHash?: string): number {
+    const row = (
+      groupHash === undefined
+        ? this.db
+            .prepare('SELECT COUNT(*) AS count FROM community_digest_messages WHERE bot_id = ?')
+            .get(botId)
+        : this.db
+            .prepare(
+              'SELECT COUNT(*) AS count FROM community_digest_messages WHERE bot_id = ? AND group_hash = ?',
+            )
+            .get(botId, groupHash)
+    ) as { count: number };
+    return row.count;
+  }
+
+  public deleteExpiredCommunityDigestData(now = new Date()): {
+    messages: number;
+    rollups: number;
+  } {
+    const nowIso = now.toISOString();
+    const messages = this.db
+      .prepare('DELETE FROM community_digest_messages WHERE expires_at <= ?')
+      .run(nowIso).changes;
+    const rollups = this.db
+      .prepare('DELETE FROM community_digest_rollups WHERE expires_at <= ?')
+      .run(nowIso).changes;
+    return { messages, rollups };
+  }
+
+  public deleteCommunityDigestMessages(botId: string, groupHash?: string): number {
+    if (groupHash === undefined) {
+      return this.db.prepare('DELETE FROM community_digest_messages WHERE bot_id = ?').run(botId)
+        .changes;
+    }
+    return this.db
+      .prepare('DELETE FROM community_digest_messages WHERE bot_id = ? AND group_hash = ?')
+      .run(botId, groupHash).changes;
+  }
+
+  public saveCommunityDigestRollup(input: {
+    botId: string;
+    groupHash: string;
+    dayKey: string;
+    windowStart: string;
+    windowEnd: string;
+    messageCount: number;
+    historyComplete: boolean;
+    payloadEncrypted: string;
+    expiresAt: string;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO community_digest_rollups(
+           bot_id, group_hash, day_key, window_start, window_end, message_count,
+           history_complete, payload_encrypted, expires_at, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(bot_id, group_hash, day_key) DO UPDATE SET
+           window_start = excluded.window_start,
+           window_end = excluded.window_end,
+           message_count = excluded.message_count,
+           history_complete = excluded.history_complete,
+           payload_encrypted = excluded.payload_encrypted,
+           expires_at = excluded.expires_at,
+           created_at = excluded.created_at`,
+      )
+      .run(
+        input.botId,
+        input.groupHash,
+        input.dayKey,
+        input.windowStart,
+        input.windowEnd,
+        input.messageCount,
+        input.historyComplete ? 1 : 0,
+        input.payloadEncrypted,
+        input.expiresAt,
+        new Date().toISOString(),
+      );
+  }
+
+  public listCommunityDigestRollups(
+    botId: string,
+    groupHash: string,
+    dayKeys: string[],
+  ): CommunityDigestRollupRow[] {
+    if (dayKeys.length === 0) return [];
+    const placeholders = dayKeys.map(() => '?').join(', ');
+    return (
+      this.db
+        .prepare(
+          `SELECT day_key, window_start, window_end, message_count, history_complete,
+                  payload_encrypted, created_at
+           FROM community_digest_rollups
+           WHERE bot_id = ? AND group_hash = ? AND day_key IN (${placeholders})
+           ORDER BY day_key ASC`,
+        )
+        .all(botId, groupHash, ...dayKeys) as Array<{
+        day_key: string;
+        window_start: string;
+        window_end: string;
+        message_count: number;
+        history_complete: number;
+        payload_encrypted: string;
+        created_at: string;
+      }>
+    ).map((row) => ({
+      dayKey: row.day_key,
+      windowStart: row.window_start,
+      windowEnd: row.window_end,
+      messageCount: row.message_count,
+      historyComplete: row.history_complete === 1,
+      payloadEncrypted: row.payload_encrypted,
+      createdAt: row.created_at,
+    }));
+  }
+
+  public deleteCommunityDigestRollups(botId: string, groupHash?: string): number {
+    if (groupHash === undefined) {
+      return this.db.prepare('DELETE FROM community_digest_rollups WHERE bot_id = ?').run(botId)
+        .changes;
+    }
+    return this.db
+      .prepare('DELETE FROM community_digest_rollups WHERE bot_id = ? AND group_hash = ?')
+      .run(botId, groupHash).changes;
+  }
+}
+
+type CommunityDigestJobRow = {
+  id: number;
+  bot_id: string;
+  period: 'daily' | 'weekly' | 'monthly';
+  period_key: string;
+  group_id: string;
+  group_hash: string;
+  kind: CommunityDigestJobKind;
+  timezone: string;
+  scheduled_date: string;
+  scheduled_at: string;
+  window_start: string;
+  window_end: string;
+  expires_at: string;
+  status: CommunityDigestJobStatus;
+  attempts: number;
+  send_attempts: number;
+  last_attempt_at: string | null;
+  next_attempt_at: string | null;
+  last_error_code: string | null;
+  last_cause_code: string | null;
+  message_count: number | null;
+  history_complete: number | null;
+  block_count: number | null;
+  ai_call_count: number;
+  retry_count: number;
+  token_estimate: number | null;
+  coverage_days: number | null;
+  expected_days: number | null;
+  generated_at: string | null;
+  sent_at: string | null;
+  summary_encrypted: string | null;
+  checkpoint_encrypted: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function mapCommunityDigestJob(row: CommunityDigestJobRow): CommunityDigestJobRecord {
+  return {
+    id: row.id,
+    botId: row.bot_id,
+    period: row.period,
+    periodKey: row.period_key,
+    groupId: row.group_id,
+    groupHash: row.group_hash,
+    kind: row.kind,
+    timezone: row.timezone,
+    scheduledDate: row.scheduled_date,
+    scheduledAt: row.scheduled_at,
+    windowStart: row.window_start,
+    windowEnd: row.window_end,
+    expiresAt: row.expires_at,
+    status: row.status,
+    attempts: row.attempts,
+    sendAttempts: row.send_attempts,
+    lastAttemptAt: row.last_attempt_at,
+    nextAttemptAt: row.next_attempt_at,
+    lastErrorCode: row.last_error_code,
+    lastCauseCode: row.last_cause_code,
+    messageCount: row.message_count,
+    historyComplete: row.history_complete === null ? null : row.history_complete === 1,
+    blockCount: row.block_count,
+    aiCallCount: row.ai_call_count,
+    retryCount: row.retry_count,
+    tokenEstimate: row.token_estimate,
+    coverageDays: row.coverage_days,
+    expectedDays: row.expected_days,
+    generatedAt: row.generated_at,
+    sentAt: row.sent_at,
+    summaryEncrypted: row.summary_encrypted,
+    checkpointEncrypted: row.checkpoint_encrypted,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 function mapCommand(row: CommandRow): CommandRecord {

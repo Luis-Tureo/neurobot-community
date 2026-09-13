@@ -218,10 +218,13 @@ export class MultiBotManager {
     else await instance.stop();
     this.instances.delete(botId);
     this.started.delete(botId);
+    // El lease del perfil LocalAuth se libera sólo después de que Chromium cerró limpiamente.
+    await this.sessions.releaseLease(instance.bot).catch(() => undefined);
   }
 
   public async stopAll(): Promise<void> {
     await Promise.all([...this.instances.keys()].map(async (botId) => this.stop(botId)));
+    await this.sessions.releaseAllLeases().catch(() => undefined);
   }
 
   public linkNewNumber(botId: string): Promise<LinkNewNumberResult> {

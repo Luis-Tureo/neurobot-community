@@ -187,6 +187,16 @@ export type ConnectionSnapshot = {
   lastConnectedAt: string | null;
   reconnectAttempt: number;
   lastErrorCode: string | null;
+  /** WhatsApp Web autenticó la sesión almacenada (independiente de `ready`). */
+  authenticated: boolean;
+  /** El cliente está listo para enviar y recibir mensajes. */
+  ready: boolean;
+  /** La autenticación quedó invalidada (logout, unpaired, auth_failure): hay que vincular de nuevo. */
+  linkRequired: boolean;
+  lastDisconnectedAt: string | null;
+  lastDisconnectReason: string | null;
+  lastDisconnectCategory: 'TRANSIENT' | 'CONFLICT' | 'LOGOUT' | 'AUTH_FAILURE' | 'BLOCKED' | null;
+  reconnectScheduled: boolean;
 };
 
 export type GroupDiscoveryState = 'idle' | 'waiting' | 'loading' | 'ready' | 'failed';

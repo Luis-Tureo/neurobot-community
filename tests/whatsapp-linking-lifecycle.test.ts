@@ -93,7 +93,8 @@ describe('ciclo de vida de una vinculación WhatsApp nueva', () => {
     expect(clients[0]?.destroyCalls).toBe(1);
     expect(clients[1]?.initializeCalls).toBe(1);
     expect(creationModes).toEqual([false, true]);
-    await expect(readdir(sessionPath)).resolves.toEqual([]);
+    // La carpeta activa solo contiene el lease del proceso vivo; el perfil quedó en el respaldo.
+    await expect(readdir(sessionPath)).resolves.toEqual(['neurobot-session.lease.json']);
     await expect(
       readFile(join(first.backupPath as string, 'session-comunidad', 'identidad-local'), 'utf8'),
     ).resolves.toBe('identidad-inconsistente');

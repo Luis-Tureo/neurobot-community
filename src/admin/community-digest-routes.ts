@@ -104,17 +104,35 @@ export function registerCommunityDigestRoutes(
       const groups = context.database.listBotGroups(botId, (identifier) =>
         context.anonymizer.identifier(identifier),
       );
+      const status = service.status();
       return {
         configuration: service.configuration(),
         schedulerStarted: service.isStarted(),
+        status,
         authorizedGroups: groups
           .filter((group) => group.active && !group.blocked && group.botIsMember === true)
           .map((group) => ({ key: group.groupHash, name: group.name })),
         privacy: {
           rawMessagesStored: false,
+          temporaryEncryptedBuffer: true,
+          bufferRetentionHours: status.capture.retentionHours,
           identifiersIncludedInExport: false,
         },
       };
+    },
+  );
+
+  app.get(
+    '/api/automatic-messages/digests/status',
+    { preHandler: requireSession },
+    async (request, reply) => {
+      const botId = readBotId(request.query);
+      const service = getCommunityDigestService(botId);
+      if (service === null) return unavailable(reply);
+      return reply.header('cache-control', 'no-store, max-age=0').send({
+        status: service.status(),
+        jobs: service.listJobs({ limit: 60 }),
+      });
     },
   );
 
@@ -189,12 +207,10 @@ export function registerCommunityDigestRoutes(
       const { jobId } = jobParamsSchema.parse(request.params);
       const run = service.getManualTest(jobId);
       if (run === null) {
-        return reply
-          .code(404)
-          .send({
-            error: 'No se encontró la ejecución solicitada.',
-            code: 'DIGEST_TEST_NOT_FOUND',
-          });
+        return reply.code(404).send({
+          error: 'No se encontró la ejecución solicitada.',
+          code: 'DIGEST_TEST_NOT_FOUND',
+        });
       }
       return reply.header('cache-control', 'no-store, max-age=0').send(run);
     },

@@ -2,7 +2,12 @@ import type { Logger } from 'pino';
 import type { AIProvider } from '../ai/ai-provider.js';
 import { AssistantQueryService } from '../ai/assistant-query-service.js';
 import { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
-import type { BotRecord, ConnectionSnapshot, GroupJoinEvent } from '../domain/types.js';
+import type {
+  BotRecord,
+  ConnectionSnapshot,
+  GroupJoinEvent,
+  IncomingMessage,
+} from '../domain/types.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import { canonicalPhoneIdentity, normalizeWhatsAppIdentity } from '../messaging/identifiers.js';
 import type { AppDatabase } from '../persistence/database.js';
@@ -29,6 +34,8 @@ export type BotInstanceOptions = {
   onDuplicateIdentity?: (botId: string) => Promise<void>;
   onGroupJoin?: (botId: string, event: GroupJoinEvent) => Promise<void>;
   qrMaxAgeMs?: number;
+  /** Secreto para cifrar el buffer temporal de resúmenes comunitarios. */
+  digestBufferSecret?: string;
 };
 
 export type ActiveQr = {
@@ -56,6 +63,7 @@ export class BotInstance {
   private lastQrFingerprint: string | null = null;
   private qrRefreshOperation: Promise<number> | null = null;
   private adminPhone: string | null = null;
+  protected incomingMessageObserver: ((message: IncomingMessage) => void) | null = null;
   private readonly communityServicesEnabled: boolean;
   private readonly qrMaxAgeMs: number;
 
@@ -74,6 +82,49 @@ export class BotInstance {
       maxAttempts: options.maxReconnectAttempts,
       maxDelayMs: options.maxReconnectDelayMs,
       developmentMode: options.developmentMode,
+      onEvent: (event) => {
+        // Observabilidad segura del ciclo de vida: nunca incluye QR, cookies ni números.
+        try {
+          database.recordTechnicalEvent({
+            botId: bot.id,
+            eventType: event.eventType,
+            result: event.result,
+            source: `${event.previousState}>${event.state}`,
+            attempt: event.reconnectAttempt,
+            ...(event.category === null ? {} : { category: event.category }),
+            ...(event.errorCode === undefined
+              ? event.reason === null
+                ? {}
+                : { errorCode: event.reason }
+              : { errorCode: event.errorCode }),
+            ...(event.delayMs === undefined ? {} : { durationMs: event.delayMs }),
+          });
+        } catch {
+          // La telemetría es best-effort.
+        }
+        logger[
+          event.eventType === 'WHATSAPP_RECONNECT_FAILED' ||
+          event.eventType === 'WHATSAPP_AUTH_FAILURE'
+            ? 'error'
+            : event.eventType === 'WHATSAPP_RECONNECT_SUCCEEDED' ||
+                event.eventType === 'WHATSAPP_SESSION_RECOVERY_SUCCEEDED'
+              ? 'info'
+              : 'warn'
+        ](
+          {
+            operation: event.eventType,
+            botId: bot.id,
+            previousState: event.previousState,
+            state: event.state,
+            reason: event.reason,
+            category: event.category,
+            reconnectAttempt: event.reconnectAttempt,
+            ...(event.delayMs === undefined ? {} : { delayMs: event.delayMs }),
+            ...(event.errorCode === undefined ? {} : { errorCode: event.errorCode }),
+          },
+          connectionEventMessage(event.eventType),
+        );
+      },
     });
     this.discovery = new GroupDiscoveryService(
       client,
@@ -146,6 +197,8 @@ export class BotInstance {
     );
     client.setEvents({
       onMessage: async (message) => {
+        // La captura para resúmenes es best-effort y nunca bloquea la respuesta.
+        this.incomingMessageObserver?.(message);
         await this.processor.process(message);
       },
       onStateChange: (state, reason) => {
@@ -190,6 +243,11 @@ export class BotInstance {
         database.recordTechnicalEvent({
           botId: bot.id,
           eventType: 'WHATSAPP_LINK_READY',
+          result: 'ready',
+        });
+        database.recordTechnicalEvent({
+          botId: bot.id,
+          eventType: 'WHATSAPP_READY',
           result: 'ready',
         });
         const ownIdentifier = client.getOwnIdentifier?.() ?? null;
@@ -493,4 +551,23 @@ function maskOwnIdentifier(identifier: string | null): string | null {
   const digits = identifier.split('@')[0]?.replace(/\D/gu, '') ?? '';
   if (digits.length < 6) return null;
   return `+${digits.slice(0, 2)}••••${digits.slice(-4)}`;
+}
+
+function connectionEventMessage(eventType: string): string {
+  const messages: Record<string, string> = {
+    WHATSAPP_DISCONNECTED: 'WhatsApp se desconectó',
+    WHATSAPP_RECONNECT_SCHEDULED: 'Reconexión de WhatsApp programada',
+    WHATSAPP_RECONNECT_STARTED: 'Reconexión de WhatsApp iniciada',
+    WHATSAPP_RECONNECT_SUCCEEDED: 'WhatsApp volvió a conectarse',
+    WHATSAPP_RECONNECT_FAILED: 'La reconexión de WhatsApp falló',
+    WHATSAPP_AUTH_FAILURE: 'WhatsApp requiere volver a vincularse (autenticación inválida)',
+    WHATSAPP_LOGOUT_DETECTED: 'WhatsApp cerró la sesión; requiere volver a vincularse',
+    WHATSAPP_CONFLICT_DETECTED: 'WhatsApp detectó otra sesión usando el mismo perfil',
+    WHATSAPP_CONFLICT_REPEATED:
+      'Conflicto de sesión repetido: revisa si existe otra instancia con el mismo perfil',
+    WHATSAPP_SESSION_RECOVERY_STARTED: 'Comenzó la recuperación de la sesión de WhatsApp',
+    WHATSAPP_SESSION_RECOVERY_SUCCEEDED: 'La sesión de WhatsApp se recuperó correctamente',
+    WHATSAPP_RECONNECT_SUSPENDED: 'Reconexión suspendida hasta vincular WhatsApp nuevamente',
+  };
+  return messages[eventType] ?? 'Evento del ciclo de vida de WhatsApp';
 }

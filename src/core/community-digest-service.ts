@@ -1,26 +1,64 @@
+import { randomBytes } from 'node:crypto';
 import type { Logger } from 'pino';
-import type { AIProvider, AIProviderErrorCode } from '../ai/ai-provider.js';
+import { AIProviderError, type AIProvider, type AIProviderErrorCode } from '../ai/ai-provider.js';
 import { AIRequestQueueService, type AIQueueRetryNotice } from '../ai/ai-request-queue-service.js';
+import type { IncomingMessage } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import {
   GroupMessageHistoryError,
   MAX_GROUP_MESSAGE_HISTORY,
   type GroupMessageHistory,
   type MessagingClient,
-  type RecentGroupMessage,
 } from '../messaging/messaging-client.js';
-import type { AppDatabase } from '../persistence/database.js';
+import type { AppDatabase, CommunityDigestJobRecord } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
-import { toLocalDateTime } from './automatic-message-service.js';
+import {
+  DIGEST_ANALYSIS_JSON_SCHEMA,
+  digestOutputContainsPrivateData,
+  emptyDigestAnalysis,
+  isNoiseMessage,
+  mergeDigestAnalyses,
+  renderDigestMessage,
+  sanitizeDigestOutput,
+  type DigestAnalysis,
+} from './community-digest-analysis.js';
+import {
+  emptyDigestCheckpoint,
+  generateDigestAnalysis,
+  isDigestCheckpoint,
+  type DigestCheckpoint,
+  type DigestGenerationLimits,
+  type DigestGenerationRequest,
+} from './community-digest-generator.js';
+import {
+  CommunityDigestMessageBuffer,
+  DEFAULT_DIGEST_MESSAGE_RETENTION_MS,
+  isTextMessage,
+  sanitizeDigestText,
+  type BufferedDigestMessage,
+} from './community-digest-message-buffer.js';
+import {
+  dailyWindowFor,
+  dayKeyForInstant,
+  isValidTimezone,
+  latestOccurrence,
+  localDateOf,
+  addCalendarDays,
+  periodKeyFor,
+  rollingWindow,
+  type CommunityDigestMonthDay,
+  type CommunityDigestPeriod,
+  type CommunityDigestWeekday,
+  type DigestOccurrence,
+} from './community-digest-schedule.js';
 import {
   CommunityDigestTestRunStore,
   type CommunityDigestTestRun,
   type CommunityDigestTestStatus,
 } from './community-digest-test-run-store.js';
+import { toLocalDateTime } from './automatic-message-service.js';
 
-export type CommunityDigestPeriod = 'daily' | 'weekly' | 'monthly';
-export type CommunityDigestWeekday = 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun';
-export type CommunityDigestMonthDay = number | 'last';
+export type { CommunityDigestMonthDay, CommunityDigestPeriod, CommunityDigestWeekday };
 
 export type CommunityDigestConfiguration = {
   timezone: string;
@@ -36,6 +74,7 @@ export type CommunityDigestConfiguration = {
     sendTime: string;
   };
   maxMessages: number;
+  /** Compatibilidad: límite histórico de caracteres por llamada; hoy el troceado es por tokens. */
   maxCharacters: number;
 };
 
@@ -46,6 +85,12 @@ export type CommunityDigestResult = {
   summary: string | null;
   errorCode: string | null;
   causeCode: string | null;
+  historyComplete?: boolean;
+  window?: { startIso: string; endIso: string; periodKey: string };
+  blockCount?: number;
+  aiCallCount?: number;
+  retryCount?: number;
+  tokenEstimate?: number;
 };
 
 type CommunityDigestProgress = {
@@ -60,6 +105,10 @@ type CommunityDigestProgress = {
   retryAfterSeconds?: number | null;
   retryAt?: string | null;
   generationStage?: CommunityDigestTestRun['generationStage'];
+  windowStart?: string | null;
+  windowEnd?: string | null;
+  historyComplete?: boolean | null;
+  tokenEstimate?: number | null;
 };
 
 type CommunityDigestProgressReporter = (progress: CommunityDigestProgress) => void;
@@ -82,39 +131,99 @@ export type CommunityDigestProcessingBudget = {
   maxRetries: number;
 };
 
-type CommunityDigestServiceOptions = {
+/**
+ * Ventanas de recuperación: cuánto tiempo después del horario programado sigue siendo válido
+ * generar y enviar un resumen que no pudo ejecutarse a tiempo. Un diario vencido hace más de
+ * 8 horas ya no se envía automáticamente para no publicar resúmenes obsoletos.
+ */
+export type CommunityDigestRecoveryWindows = Record<CommunityDigestPeriod, number>;
+
+export const DEFAULT_COMMUNITY_DIGEST_RECOVERY_WINDOWS: CommunityDigestRecoveryWindows = {
+  daily: 8 * 60 * 60 * 1000,
+  weekly: 24 * 60 * 60 * 1000,
+  monthly: 48 * 60 * 60 * 1000,
+};
+
+export type CommunityDigestServiceOptions = {
   botId: string;
   tickIntervalMs?: number;
   now?: () => Date;
   aiQueue?: AIRequestQueueService;
   processingBudget?: Partial<CommunityDigestProcessingBudget>;
+  /** Secreto para cifrar el buffer temporal, checkpoints y rollups. */
+  bufferSecret?: string;
+  messageRetentionMs?: number;
+  recoveryWindows?: Partial<CommunityDigestRecoveryWindows>;
+  generationLimits?: Partial<DigestGenerationLimits>;
 };
 
-type DueDigest = {
+export type CommunityDigestJobSummary = {
+  id: number;
   period: CommunityDigestPeriod;
-  scheduledDate: string;
   periodKey: string;
-};
-
-type DigestWindow = {
-  startMs: number;
-  endMs: number;
-  startIso: string;
-  endIso: string;
-  periodKey: string;
-};
-
-type DigestRunRecord = {
-  periodKey: string;
-  scheduledDate: string;
-  status: CommunityDigestResult['status'] | 'PENDING';
-  messageCount: number;
+  groupKey: string;
+  groupName: string;
+  status: CommunityDigestJobRecord['status'];
+  scheduledAt: string;
+  windowStart: string;
+  windowEnd: string;
+  attempts: number;
+  sendAttempts: number;
+  lastAttemptAt: string | null;
+  nextAttemptAt: string | null;
+  sentAt: string | null;
+  messageCount: number | null;
+  historyComplete: boolean | null;
+  blockCount: number | null;
+  aiCallCount: number;
+  retryCount: number;
   errorCode: string | null;
-  causeCode?: string | null;
-  updatedAt: string;
+  causeCode: string | null;
+  expiresAt: string;
 };
 
-type DigestRunState = Record<string, string | DigestRunRecord>;
+export type CommunityDigestPeriodStatus = {
+  enabled: boolean;
+  sendTime: string;
+  nextScheduledAt: string | null;
+  lastOccurrenceAt: string | null;
+  summary: 'SENT' | 'PENDING' | 'RETRYING' | 'FAILED' | 'NO_ACTIVITY' | 'PARTIAL' | 'NONE';
+  lastSentAt: string | null;
+  jobs: CommunityDigestJobSummary[];
+};
+
+export type CommunityDigestStatus = {
+  timezone: string;
+  schedulerStarted: boolean;
+  whatsappReady: boolean;
+  capture: {
+    bufferedMessages: number;
+    lastHeartbeatAt: string | null;
+    recentGaps: number;
+    retentionHours: number;
+  };
+  periods: Record<CommunityDigestPeriod, CommunityDigestPeriodStatus>;
+};
+
+type StoredCommunityDigestConfiguration = Partial<CommunityDigestConfiguration> & {
+  daily?: Partial<CommunityDigestConfiguration['daily']> & { toleranceMinutes?: unknown };
+  weekly?: Partial<CommunityDigestConfiguration['weekly']> & { toleranceMinutes?: unknown };
+  monthly?: Partial<CommunityDigestConfiguration['monthly']> & { toleranceMinutes?: unknown };
+};
+
+type ScheduleState = Partial<Record<CommunityDigestPeriod, { enabledSince: string }>>;
+
+type CaptureCoverageState = {
+  heartbeatAt: string | null;
+  gaps: Array<{ startMs: number; endMs: number }>;
+};
+
+type LoadedWindowMessages = {
+  messages: BufferedDigestMessage[];
+  historyComplete: boolean;
+  history: GroupMessageHistory | null;
+  historyError: string | null;
+};
 
 type DigestEventContext = {
   result: string;
@@ -136,31 +245,33 @@ type DigestEventContext = {
   estimatedTokenCount?: number;
   usedTokenCount?: number;
   elapsedMs?: number;
-  window?: DigestWindow;
+  attempt?: number;
+  nextAttemptAt?: string | null;
+  strategy?: string;
+  historyComplete?: boolean | null;
+  window?: { startIso: string; endIso: string; periodKey: string };
   at?: Date;
 };
 
-type LoadedDigestMessages = {
-  messages: RecentGroupMessage[];
-  history: GroupMessageHistory;
-};
-
-type StoredCommunityDigestConfiguration = Partial<CommunityDigestConfiguration> & {
-  daily?: Partial<CommunityDigestConfiguration['daily']> & { toleranceMinutes?: unknown };
-  weekly?: Partial<CommunityDigestConfiguration['weekly']> & { toleranceMinutes?: unknown };
-  monthly?: Partial<CommunityDigestConfiguration['monthly']> & { toleranceMinutes?: unknown };
-};
-
-const DIGEST_CONTEXT_TARGET_CHARACTERS = 18_000;
-const DIGEST_MESSAGE_MAX_CHARACTERS = 600;
-const DIGEST_INTERMEDIATE_MAX_CHARACTERS = 1_200;
-const DIGEST_MAX_REDUCTION_LEVELS = 8;
+const DIGEST_LATE_THRESHOLD_MS = 2 * 60_000;
+const DIGEST_STALE_PROCESSING_MS = 20 * 60_000;
+const DIGEST_NOT_READY_RETRY_MS = 60_000;
+const DIGEST_WAIT_FOR_DAILY_RETRY_MS = 2 * 60_000;
+const DIGEST_ROLLUP_RETENTION_MS = 40 * 24 * 60 * 60 * 1000;
+const DIGEST_JOB_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+const DIGEST_CAPTURE_GAP_THRESHOLD_MS = 90_000;
+const DIGEST_RECONCILE_TAIL_MS = 2 * 60 * 60 * 1000;
+const DIGEST_RECONCILE_GAP_MARGIN_MS = 5 * 60_000;
+const DIGEST_RETRY_BACKOFF_MS = [60_000, 120_000, 300_000, 600_000, 900_000, 1_800_000];
+const DIGEST_SEND_BACKOFF_MS = [60_000, 120_000, 300_000, 600_000, 900_000];
+const DIGEST_MAX_SEND_ATTEMPTS = 12;
+const DIGEST_MAX_MESSAGE_LENGTH = 4_000;
 const DEFAULT_DIGEST_PROCESSING_BUDGET: CommunityDigestProcessingBudget = {
-  maxBlocks: 384,
-  maxProviderCalls: 512,
-  maxEstimatedTokens: 500_000,
-  maxUsedTokens: 500_000,
-  maxDurationMs: 5 * 60_000,
+  maxBlocks: 64,
+  maxProviderCalls: 96,
+  maxEstimatedTokens: 2_000_000,
+  maxUsedTokens: 2_000_000,
+  maxDurationMs: 15 * 60_000,
   maxRetries: 8,
 };
 const SAFE_AI_CAUSE_CODES = new Set<string>([
@@ -181,10 +292,14 @@ const SAFE_AI_CAUSE_CODES = new Set<string>([
   'AI_PROCESSING_BUDGET_EXCEEDED',
   'CONTEXT_TOO_LARGE',
 ]);
-const FINAL_DIGEST_SYSTEM_INSTRUCTION =
-  'Resume conversaciones comunitarias de forma breve, cálida, respetuosa y fiel para una comunidad neurodivergente. Usa lenguaje claro, directo, inclusivo y no infantilizante. Sintetiza por temas: explica de qué se conversó, qué acuerdos o conclusiones surgieron y qué asuntos relevantes quedaron pendientes. Agrupa mensajes repetidos y omite saludos, respuestas breves al bot y detalles operativos que no aporten al tema. No redactes una cronología ni describas cada mensaje por separado. No incluyas fechas, días, horas, horarios ni marcas de tiempo, aunque aparezcan en el contexto; si se coordinó una actividad, menciona solo que se coordinó. No inventes datos. No incluyas nombres, teléfonos, correos, identificadores ni citas textuales extensas. Devuelve exactamente un solo párrafo continuo, sin listas, viñetas, títulos ni saltos de línea. Empieza directamente con el contenido, sin frases introductorias. Integra entre tres y cinco emojis relevantes y variados de forma natural, por ejemplo 💬, 🧩, 💡, 🌱 o 📌. No uses asteriscos, negritas ni ningún formato Markdown. Finaliza el mismo párrafo con una frase breve iniciada con “🤝 Convivencia:” indicando si hubo posibles incumplimientos generales que deban revisar los administradores, sin acusar ni sancionar a nadie.';
-const INTERMEDIATE_DIGEST_SYSTEM_INSTRUCTION =
-  'Resume únicamente el contexto entregado de forma factual y muy compacta. Conserva temas, acuerdos, pendientes y posibles alertas generales de convivencia. Agrupa repeticiones, omite saludos y detalles operativos. No incluyas nombres, teléfonos, correos, identificadores, URLs, fechas, horas ni citas extensas. No inventes datos y no agregues introducciones.';
+const FINAL_FAILURE_CODES = new Set<string>([
+  'AI_NOT_CONFIGURED',
+  'AI_INVALID_KEY',
+  'AI_MODEL_UNAVAILABLE',
+  'AI_PERMANENT_ERROR',
+  'CONTEXT_TOO_LARGE',
+  'GROUP_NOT_AUTHORIZED',
+]);
 
 class DigestProcessingBudgetError extends Error {
   public readonly code = 'AI_PROCESSING_BUDGET_EXCEEDED';
@@ -210,7 +325,7 @@ class DigestProcessingBudget {
   }
 
   public registerBlocks(count: number): void {
-    this.blocks = count;
+    this.blocks = Math.max(this.blocks, count);
     if (count > this.limits.maxBlocks) throw codedError('CONTEXT_TOO_LARGE');
     this.assertActive();
   }
@@ -267,18 +382,33 @@ class DigestProcessingBudget {
   }
 }
 
+type GenerationOutcome = {
+  analysis: DigestAnalysis;
+  messageCount: number;
+  substantiveMessageCount: number;
+  blockCount: number;
+  tokenEstimate: number;
+  strategy: string;
+};
+
 export class CommunityDigestService {
   private readonly botId: string;
   private readonly tickIntervalMs: number;
   private readonly now: () => Date;
   private readonly aiQueue: AIRequestQueueService;
   private readonly processingBudget: CommunityDigestProcessingBudget;
+  private readonly recoveryWindows: CommunityDigestRecoveryWindows;
+  private readonly generationLimits: Partial<DigestGenerationLimits>;
   private readonly testRuns: CommunityDigestTestRunStore;
+  private readonly buffer: CommunityDigestMessageBuffer;
   private readonly activeSends = new Map<string, Promise<CommunityDigestResult>>();
   private readonly activeManualTests = new Map<string, Promise<void>>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running: Promise<void> | null = null;
   private started = false;
+  private automationGroupCache: { at: number; ids: Set<string> } | null = null;
+  private runClock: (() => Date) | null = null;
+  private runReference: Date | null = null;
 
   public constructor(
     private readonly database: AppDatabase,
@@ -293,8 +423,25 @@ export class CommunityDigestService {
     this.now = options.now ?? (() => new Date());
     this.aiQueue = options.aiQueue ?? new AIRequestQueueService(database, logger, options.botId);
     this.processingBudget = normalizeProcessingBudget(options.processingBudget);
+    this.recoveryWindows = {
+      ...DEFAULT_COMMUNITY_DIGEST_RECOVERY_WINDOWS,
+      ...(options.recoveryWindows ?? {}),
+    };
+    this.generationLimits = options.generationLimits ?? {};
     this.testRuns = new CommunityDigestTestRunStore(database, options.botId, this.now);
+    this.buffer = new CommunityDigestMessageBuffer(database, anonymizer, {
+      botId: options.botId,
+      // Sin secreto explícito (pruebas) el buffer solo es legible dentro del proceso actual.
+      secret: options.bufferSecret ?? randomBytes(32).toString('base64url'),
+      retentionMs: options.messageRetentionMs ?? DEFAULT_DIGEST_MESSAGE_RETENTION_MS,
+      now: () => this.clock(),
+      dayKeyForInstant: (instantMs) => dayKeyForInstant(instantMs, this.configuration()),
+    });
   }
+
+  // ---------------------------------------------------------------------------
+  // Ciclo de vida
+  // ---------------------------------------------------------------------------
 
   public start(): void {
     if (this.started) return;
@@ -311,6 +458,7 @@ export class CommunityDigestService {
   }
 
   public reconfigure(): void {
+    this.automationGroupCache = null;
     if (!this.started) return;
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;
@@ -321,6 +469,10 @@ export class CommunityDigestService {
   public isStarted(): boolean {
     return this.started;
   }
+
+  // ---------------------------------------------------------------------------
+  // Configuración
+  // ---------------------------------------------------------------------------
 
   public configuration(): CommunityDigestConfiguration {
     const botTimezone = this.database.getBot(this.botId)?.timezone;
@@ -352,10 +504,67 @@ export class CommunityDigestService {
 
   public saveConfiguration(configuration: CommunityDigestConfiguration): void {
     assertValidConfiguration(configuration);
+    const previous = this.configuration();
     this.database.setSetting(this.configurationKey(), configuration);
+    const state = this.scheduleState();
+    const nowIso = this.now().toISOString();
+    for (const period of ['daily', 'weekly', 'monthly'] as const) {
+      if (
+        configuration[period].enabled &&
+        (!previous[period].enabled || state[period] === undefined)
+      ) {
+        state[period] = { enabledSince: nowIso };
+      }
+      if (!configuration[period].enabled) delete state[period];
+    }
+    this.database.setSetting(this.scheduleStateKey(), state);
+    if (!anyPeriodEnabled(configuration)) {
+      const purged = this.buffer.purgeAll();
+      this.database.deleteCommunityDigestRollups(this.botId);
+      if (purged > 0) {
+        this.event('DIGEST_BUFFER_PURGED', { result: 'disabled', itemCount: purged });
+      }
+    }
     this.reconfigure();
     this.event('COMMUNITY_DIGEST_CONFIGURATION_UPDATED', { result: 'updated' });
   }
+
+  // ---------------------------------------------------------------------------
+  // Captura de mensajes (fuente principal)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Captura un mensaje de texto de un grupo autorizado con resúmenes activos. Nunca lanza:
+   * un fallo de captura no debe interrumpir la respuesta del asistente.
+   */
+  public captureIncomingMessage(message: IncomingMessage): boolean {
+    try {
+      if (!message.isGroup || message.fromMe) return false;
+      const configuration = this.configuration();
+      if (!anyPeriodEnabled(configuration)) return false;
+      if (!this.automationGroupIds().has(message.chatId)) return false;
+      return this.buffer.captureIncoming(message);
+    } catch (error) {
+      this.logger.warn(
+        {
+          module: 'Resumen',
+          operation: 'captureIncomingMessage',
+          botId: this.botId,
+          ...serializeError(error, 'DIGEST_CAPTURE_FAILED', false),
+        },
+        'No fue posible capturar un mensaje para el resumen comunitario',
+      );
+      return false;
+    }
+  }
+
+  public bufferedMessageCount(groupId?: string): number {
+    return this.buffer.count(groupId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Planificador durable
+  // ---------------------------------------------------------------------------
 
   public runDueTasks(now = this.now()): Promise<void> {
     if (this.running !== null) return this.running;
@@ -367,129 +576,1264 @@ export class CommunityDigestService {
   }
 
   private async executeDueTasks(now: Date): Promise<void> {
-    if (!this.client.isReady()) return;
-    const configuration = this.configuration();
-    const local = toLocalDateTime(now, configuration.timezone);
-    const due: DueDigest[] = [];
-
-    if (configuration.daily.enabled) {
-      const scheduledDate = scheduledDateAtMinute(
-        local.date,
-        local.minuteOfDay,
-        configuration.daily.sendTime,
-      );
-      if (scheduledDate !== null) {
-        due.push({ period: 'daily', scheduledDate, periodKey: scheduledDate });
-      }
+    // Todas las decisiones y marcas de tiempo de una ejecución del planificador se derivan del
+    // instante de referencia `now` más el tiempo real transcurrido, para que los reintentos y
+    // la ventana de recuperación sean deterministas aunque el reloj se inyecte en pruebas.
+    const startedRealMs = Date.now();
+    this.runClock = () => new Date(now.getTime() + Math.max(0, Date.now() - startedRealMs));
+    this.runReference = now;
+    try {
+      this.maintainCaptureCoverage(now);
+      this.purgeExpiredData(now);
+      const configuration = this.configuration();
+      if (anyPeriodEnabled(configuration)) this.enqueueDueOccurrences(now, configuration);
+      await this.processDueJobs(now);
+    } finally {
+      this.runClock = null;
+      this.runReference = null;
     }
+  }
 
-    if (configuration.weekly.enabled) {
-      const scheduledDate = scheduledDateAtMinute(
-        local.date,
-        local.minuteOfDay,
-        configuration.weekly.sendTime,
-      );
-      if (
-        scheduledDate !== null &&
-        weekdayForCalendarDate(scheduledDate) === configuration.weekly.weekday
-      ) {
-        due.push({
-          period: 'weekly',
-          scheduledDate,
-          periodKey: isoWeekKey(scheduledDate),
+  private clock(): Date {
+    return this.runClock === null ? this.now() : this.runClock();
+  }
+
+  private enqueueDueOccurrences(now: Date, configuration: CommunityDigestConfiguration): void {
+    const state = this.scheduleState();
+    const groupIds = this.database.listAutomationGroupIds(this.botId);
+    const enabledSince = (period: CommunityDigestPeriod): number => {
+      const stored = state[period]?.enabledSince;
+      if (stored !== undefined) return Date.parse(stored);
+      // Instalaciones que ya tenían la frecuencia activa antes de esta versión.
+      state[period] = { enabledSince: now.toISOString() };
+      this.database.setSetting(this.scheduleStateKey(), state);
+      return now.getTime();
+    };
+    const composedEnabled = configuration.weekly.enabled || configuration.monthly.enabled;
+    for (const period of ['daily', 'weekly', 'monthly'] as const) {
+      const digestEnabled = configuration[period].enabled;
+      const rollupOnly = period === 'daily' && !digestEnabled && composedEnabled;
+      if (!digestEnabled && !rollupOnly) continue;
+      let occurrence: DigestOccurrence;
+      try {
+        occurrence = latestOccurrence(period, now, configuration);
+      } catch (error) {
+        this.event('DIGEST_FAILED', {
+          result: 'schedule_error',
+          period,
+          errorCode: safeErrorCode(error, 'DIGEST_SCHEDULE_FAILED'),
+          at: now,
         });
+        continue;
       }
-    }
-
-    if (configuration.monthly.enabled) {
-      const scheduledDate = scheduledDateAtMinute(
-        local.date,
-        local.minuteOfDay,
-        configuration.monthly.sendTime,
-      );
-      if (
-        scheduledDate !== null &&
-        isMonthlyScheduledDate(scheduledDate, configuration.monthly.dayOfMonth)
-      ) {
-        due.push({
-          period: 'monthly',
-          scheduledDate,
-          periodKey: scheduledDate.slice(0, 7),
-        });
-      }
-    }
-
-    if (due.length === 0) return;
-
-    const runState = this.database.getSetting<DigestRunState>(this.runStateKey(), {});
-    for (const { period, scheduledDate, periodKey } of due) {
-      const window = digestWindow(period, now, configuration.timezone, periodKey);
-      this.event('COMMUNITY_DIGEST_SCHEDULE_TRIGGERED', {
-        result: 'due',
-        period,
-        window,
-        at: now,
-      });
-      for (const groupId of this.database.listAutomationGroupIds(this.botId)) {
+      const since = rollupOnly
+        ? Math.min(
+            configuration.weekly.enabled ? enabledSince('weekly') : Number.POSITIVE_INFINITY,
+            configuration.monthly.enabled ? enabledSince('monthly') : Number.POSITIVE_INFINITY,
+          )
+        : enabledSince(period);
+      // Una marca de activación posterior al instante evaluado (reloj ajustado o ejecución con
+      // fecha inyectada) no debe bloquear la ocurrencia.
+      if (since <= now.getTime() && occurrence.scheduledAtMs < since) continue;
+      const lateness = now.getTime() - occurrence.scheduledAtMs;
+      const recoveryWindowMs = this.recoveryWindows[period];
+      const expired = lateness > recoveryWindowMs;
+      const window = occurrenceWindow(occurrence);
+      for (const groupId of groupIds) {
         const groupHash = this.anonymizer.identifier(groupId);
-        if (!this.database.canBotSendToGroup(this.botId, groupId)) {
-          this.event('COMMUNITY_DIGEST_GROUP_SKIPPED', {
-            result: 'skipped',
+        const { job, created } = this.database.createCommunityDigestJob(
+          {
+            botId: this.botId,
+            period,
+            periodKey: occurrence.periodKey,
+            groupId,
+            groupHash,
+            kind: rollupOnly ? 'rollup' : 'digest',
+            timezone: configuration.timezone,
+            scheduledDate: occurrence.scheduledDate,
+            scheduledAt: new Date(occurrence.scheduledAtMs).toISOString(),
+            windowStart: window.startIso,
+            windowEnd: window.endIso,
+            expiresAt: new Date(occurrence.scheduledAtMs + recoveryWindowMs).toISOString(),
+            expectedDays: period === 'daily' ? null : occurrence.dayKeys.length,
+          },
+          now,
+        );
+        if (!created) continue;
+        if (expired) {
+          this.database.updateCommunityDigestJob(
+            job.id,
+            { status: 'SKIPPED', lastErrorCode: 'RECOVERY_WINDOW_EXPIRED' },
+            now,
+          );
+          this.event('DIGEST_SKIPPED', {
+            result: 'recovery_window_expired',
             period,
             groupHash,
-            errorCode: 'GROUP_CHAT_NOT_AVAILABLE',
+            errorCode: 'RECOVERY_WINDOW_EXPIRED',
             window,
             at: now,
           });
           continue;
         }
-        const marker = `${period}:${groupHash}`;
-        if (hasClaimedRun(runState[marker], periodKey, scheduledDate)) {
-          this.event('COMMUNITY_DIGEST_DUPLICATE_BLOCKED', {
-            result: 'skipped',
+        this.event(
+          lateness > DIGEST_LATE_THRESHOLD_MS ? 'DIGEST_RECOVERED_LATE' : 'DIGEST_SCHEDULED',
+          {
+            result: rollupOnly ? 'rollup_scheduled' : 'scheduled',
             period,
             groupHash,
-            errorCode: 'DUPLICATE_PERIOD',
+            elapsedMs: Math.max(0, lateness),
             window,
             at: now,
-          });
-          continue;
-        }
-        try {
-          runState[marker] = {
-            periodKey,
-            scheduledDate,
-            status: 'PENDING',
-            messageCount: 0,
-            errorCode: null,
-            causeCode: null,
-            updatedAt: now.toISOString(),
-          };
-          this.database.setSetting(this.runStateKey(), runState);
-          const result = await this.send(period, groupId, now, periodKey);
-          runState[marker] = {
-            periodKey,
-            scheduledDate,
-            status: result.status,
-            messageCount: result.messageCount,
-            errorCode: result.errorCode,
-            causeCode: result.causeCode,
-            updatedAt: this.now().toISOString(),
-          };
-          this.database.setSetting(this.runStateKey(), runState);
-        } catch (error) {
-          this.event('COMMUNITY_DIGEST_GROUP_FAILED', {
-            result: 'failed',
-            period,
-            groupHash,
-            errorCode: safeErrorCode(error, 'COMMUNITY_DIGEST_GROUP_FAILED'),
-            window,
-            at: now,
-          });
-        }
+          },
+        );
       }
     }
   }
+
+  private async processDueJobs(now: Date): Promise<void> {
+    const staleBefore = new Date(now.getTime() - DIGEST_STALE_PROCESSING_MS);
+    const due = this.database.listDueCommunityDigestJobs(this.botId, now, staleBefore);
+    for (const candidate of due) {
+      const claimedAt = this.clock();
+      if (!this.database.claimCommunityDigestJob(candidate.id, claimedAt, staleBefore)) {
+        this.event('COMMUNITY_DIGEST_DUPLICATE_BLOCKED', {
+          result: 'already_claimed',
+          period: candidate.period,
+          groupHash: candidate.groupHash,
+          errorCode: 'DUPLICATE_IN_FLIGHT',
+          at: claimedAt,
+        });
+        continue;
+      }
+      const job = this.database.getCommunityDigestJob(candidate.id);
+      if (job === null) continue;
+      try {
+        await this.processJob(job, claimedAt);
+      } catch (error) {
+        const errorCode = safeErrorCode(error, 'DIGEST_JOB_FAILED');
+        this.scheduleJobRetry(job, errorCode, null, this.clock());
+      }
+    }
+  }
+
+  private async processJob(job: CommunityDigestJobRecord, now: Date): Promise<void> {
+    const window = jobWindow(job);
+    if (now.getTime() > Date.parse(job.expiresAt)) {
+      this.finalizeJob(job, 'FAILED_FINAL', 'RECOVERY_WINDOW_EXPIRED', job.lastCauseCode, now);
+      return;
+    }
+    if (!this.database.canBotSendToGroup(this.botId, job.groupId)) {
+      this.finalizeJob(job, 'FAILED_FINAL', 'GROUP_NOT_AUTHORIZED', null, now);
+      return;
+    }
+    if (job.summaryEncrypted !== null) {
+      await this.sendJobSummary(job, now);
+      return;
+    }
+    if (!this.client.isReady()) {
+      this.event('DIGEST_WAITING_WHATSAPP', {
+        result: 'not_ready',
+        period: job.period,
+        groupHash: job.groupHash,
+        errorCode: 'WHATSAPP_NOT_CONNECTED',
+        attempt: job.attempts,
+        window,
+        at: now,
+      });
+      this.setJobRetryWait(
+        job,
+        'RETRY_WAIT',
+        'WHATSAPP_NOT_CONNECTED',
+        null,
+        now,
+        DIGEST_NOT_READY_RETRY_MS,
+      );
+      return;
+    }
+    if (
+      job.period !== 'daily' &&
+      this.database.hasActiveCommunityDigestDayJobs(this.botId, job.groupId, composedDayKeys(job))
+    ) {
+      this.setJobRetryWait(
+        job,
+        'RETRY_WAIT',
+        'WAITING_DAILY_ROLLUPS',
+        null,
+        now,
+        DIGEST_WAIT_FOR_DAILY_RETRY_MS,
+      );
+      return;
+    }
+
+    this.event('DIGEST_GENERATION_STARTED', {
+      result: 'started',
+      period: job.period,
+      groupHash: job.groupHash,
+      attempt: job.attempts,
+      window,
+      at: now,
+    });
+    const budget = new DigestProcessingBudget(this.processingBudget);
+    const checkpoint = this.readCheckpoint(job);
+    let outcome: GenerationOutcome & {
+      historyComplete: boolean;
+      coverage?: { coveredDays: number; expectedDays: number };
+    };
+    try {
+      outcome =
+        job.period === 'daily'
+          ? await this.generateDailyJob(job, budget, checkpoint)
+          : await this.generateComposedJob(job, budget, checkpoint);
+    } catch (error) {
+      const errorCode = this.aiErrorCode(error);
+      const processing = budget.snapshot();
+      this.event('DIGEST_FAILED', {
+        result: 'generation_failed',
+        period: job.period,
+        groupHash: job.groupHash,
+        errorCode,
+        ...processing,
+        attempt: job.attempts,
+        window,
+        at: this.clock(),
+      });
+      this.database.updateCommunityDigestJob(job.id, {
+        aiCallCount: job.aiCallCount + processing.aiCallCount,
+        retryCount: job.retryCount + processing.retryCount,
+      });
+      this.scheduleJobRetry(job, errorCode, errorCode, this.clock(), error);
+      return;
+    }
+    const processing = budget.snapshot();
+    const metrics = {
+      messageCount: outcome.messageCount,
+      historyComplete: outcome.historyComplete,
+      blockCount: outcome.blockCount,
+      aiCallCount: job.aiCallCount + processing.aiCallCount,
+      retryCount: job.retryCount + processing.retryCount,
+      tokenEstimate: outcome.tokenEstimate,
+      ...(outcome.coverage === undefined
+        ? {}
+        : {
+            coverageDays: outcome.coverage.coveredDays,
+            expectedDays: outcome.coverage.expectedDays,
+          }),
+    };
+
+    if (job.kind === 'rollup') {
+      this.database.updateCommunityDigestJob(
+        job.id,
+        {
+          ...metrics,
+          status: 'SKIPPED',
+          lastErrorCode: 'ROLLUP_STORED',
+          checkpointEncrypted: null,
+          generatedAt: this.clock().toISOString(),
+        },
+        this.clock(),
+      );
+      this.event('DIGEST_ROLLUP_STORED', {
+        result: 'stored',
+        period: job.period,
+        groupHash: job.groupHash,
+        itemCount: outcome.messageCount,
+        window,
+        at: this.clock(),
+      });
+      return;
+    }
+
+    if (outcome.messageCount === 0) {
+      this.database.updateCommunityDigestJob(
+        job.id,
+        {
+          ...metrics,
+          status: 'SKIPPED',
+          lastErrorCode: 'NO_MESSAGES_IN_PERIOD',
+          checkpointEncrypted: null,
+        },
+        this.clock(),
+      );
+      this.event('DIGEST_SKIPPED', {
+        result: 'no_messages',
+        period: job.period,
+        groupHash: job.groupHash,
+        itemCount: 0,
+        errorCode: 'NO_MESSAGES_IN_PERIOD',
+        window,
+        at: this.clock(),
+      });
+      return;
+    }
+
+    const text = this.renderFinalMessage(job.period, outcome, job.groupHash);
+    const generatedAt = this.clock();
+    this.database.updateCommunityDigestJob(
+      job.id,
+      {
+        ...metrics,
+        status: 'SEND_PENDING',
+        summaryEncrypted: this.buffer.encryptPayload(text, this.summaryScope(job)),
+        checkpointEncrypted: null,
+        generatedAt: generatedAt.toISOString(),
+        lastErrorCode: null,
+        lastCauseCode: null,
+      },
+      generatedAt,
+    );
+    this.event('DIGEST_GENERATED', {
+      result: 'generated',
+      period: job.period,
+      groupHash: job.groupHash,
+      itemCount: outcome.messageCount,
+      ...processing,
+      blockCount: outcome.blockCount,
+      estimatedTokenCount: outcome.tokenEstimate,
+      strategy: outcome.strategy,
+      historyComplete: outcome.historyComplete,
+      window,
+      at: generatedAt,
+    });
+    const refreshed = this.database.getCommunityDigestJob(job.id);
+    if (refreshed !== null) await this.sendJobSummary(refreshed, generatedAt);
+  }
+
+  private async sendJobSummary(job: CommunityDigestJobRecord, now: Date): Promise<void> {
+    const window = jobWindow(job);
+    if (job.summaryEncrypted === null) {
+      this.finalizeJob(job, 'FAILED_FINAL', 'SUMMARY_MISSING', null, now);
+      return;
+    }
+    let text: string;
+    try {
+      text = this.buffer.decryptPayload(job.summaryEncrypted, this.summaryScope(job));
+    } catch {
+      // El secreto cambió: se descarta el texto y se regenera en el siguiente intento.
+      this.database.updateCommunityDigestJob(job.id, { summaryEncrypted: null }, now);
+      this.setJobRetryWait(
+        job,
+        'RETRY_WAIT',
+        'SUMMARY_UNREADABLE',
+        null,
+        now,
+        DIGEST_NOT_READY_RETRY_MS,
+      );
+      return;
+    }
+    if (!this.client.isReady()) {
+      this.event('DIGEST_SEND_RETRY', {
+        result: 'not_ready',
+        period: job.period,
+        groupHash: job.groupHash,
+        errorCode: 'WHATSAPP_NOT_CONNECTED',
+        attempt: job.sendAttempts,
+        window,
+        at: now,
+      });
+      this.setJobRetryWait(
+        job,
+        'SEND_RETRY_WAIT',
+        'WHATSAPP_NOT_CONNECTED',
+        null,
+        now,
+        DIGEST_NOT_READY_RETRY_MS,
+      );
+      return;
+    }
+    this.event('DIGEST_SEND_STARTED', {
+      result: 'started',
+      period: job.period,
+      groupHash: job.groupHash,
+      attempt: job.sendAttempts + 1,
+      window,
+      at: now,
+    });
+    const sendAttempts = job.sendAttempts + 1;
+    try {
+      await this.client.sendMessage(job.groupId, text.slice(0, DIGEST_MAX_MESSAGE_LENGTH));
+    } catch (error) {
+      const causeCode = safeErrorCode(error, 'WHATSAPP_SEND_FAILED');
+      const details = digestErrorDetails(error, job.groupId);
+      const failedAt = this.clock();
+      this.database.updateCommunityDigestJob(job.id, { sendAttempts }, failedAt);
+      if (
+        sendAttempts >= DIGEST_MAX_SEND_ATTEMPTS ||
+        failedAt.getTime() > Date.parse(job.expiresAt)
+      ) {
+        this.finalizeJob(
+          { ...job, sendAttempts },
+          'FAILED_FINAL',
+          'SUMMARY_SEND_FAILED',
+          causeCode,
+          failedAt,
+        );
+        return;
+      }
+      const delayMs = DIGEST_SEND_BACKOFF_MS[
+        Math.min(sendAttempts - 1, DIGEST_SEND_BACKOFF_MS.length - 1)
+      ] as number;
+      this.event('DIGEST_SEND_RETRY', {
+        result: 'retry_scheduled',
+        period: job.period,
+        groupHash: job.groupHash,
+        errorCode: 'SUMMARY_SEND_FAILED',
+        causeCode,
+        reason: details.message,
+        errorName: details.name,
+        attempt: sendAttempts,
+        nextAttemptAt: new Date(failedAt.getTime() + delayMs).toISOString(),
+        window,
+        at: failedAt,
+      });
+      this.setJobRetryWait(
+        { ...job, sendAttempts },
+        'SEND_RETRY_WAIT',
+        'SUMMARY_SEND_FAILED',
+        causeCode,
+        failedAt,
+        delayMs,
+      );
+      return;
+    }
+    const sentAt = this.clock();
+    this.database.updateCommunityDigestJob(
+      job.id,
+      {
+        status: 'SENT',
+        sendAttempts,
+        sentAt: sentAt.toISOString(),
+        summaryEncrypted: null,
+        checkpointEncrypted: null,
+        lastErrorCode: null,
+        lastCauseCode: null,
+        nextAttemptAt: null,
+      },
+      sentAt,
+    );
+    this.event('DIGEST_SENT', {
+      result: 'sent',
+      period: job.period,
+      groupHash: job.groupHash,
+      ...(job.messageCount === null ? {} : { itemCount: job.messageCount }),
+      attempt: sendAttempts,
+      window,
+      at: sentAt,
+    });
+  }
+
+  private scheduleJobRetry(
+    job: CommunityDigestJobRecord,
+    errorCode: string,
+    causeCode: string | null,
+    now: Date,
+    error?: unknown,
+  ): void {
+    if (FINAL_FAILURE_CODES.has(errorCode)) {
+      this.finalizeJob(job, 'FAILED_FINAL', errorCode, causeCode, now);
+      return;
+    }
+    const retryAfterMs =
+      error instanceof AIProviderError && error.retryAfterSeconds !== null
+        ? error.retryAfterSeconds * 1000
+        : 0;
+    const backoff = DIGEST_RETRY_BACKOFF_MS[
+      Math.min(Math.max(0, job.attempts - 1), DIGEST_RETRY_BACKOFF_MS.length - 1)
+    ] as number;
+    const delayMs = Math.max(backoff, retryAfterMs);
+    if (now.getTime() + delayMs > Date.parse(job.expiresAt)) {
+      this.finalizeJob(job, 'FAILED_FINAL', errorCode, causeCode, now);
+      return;
+    }
+    this.setJobRetryWait(job, 'RETRY_WAIT', errorCode, causeCode, now, delayMs);
+  }
+
+  private setJobRetryWait(
+    job: CommunityDigestJobRecord,
+    status: 'RETRY_WAIT' | 'SEND_RETRY_WAIT',
+    errorCode: string,
+    causeCode: string | null,
+    now: Date,
+    delayMs: number,
+  ): void {
+    // El próximo intento se ancla al instante de referencia del tick (sin deriva de milisegundos)
+    // para que dos ticks consecutivos evalúen la misma frontera de forma determinista.
+    const base = (this.runReference ?? now).getTime();
+    const nextAttemptAt = new Date(base + delayMs).toISOString();
+    const waitingOnly =
+      errorCode === 'WHATSAPP_NOT_CONNECTED' || errorCode === 'WAITING_DAILY_ROLLUPS';
+    this.database.updateCommunityDigestJob(
+      job.id,
+      {
+        status,
+        lastErrorCode: errorCode,
+        lastCauseCode: causeCode,
+        nextAttemptAt,
+        // Esperar a WhatsApp o a los rollups diarios no consume intentos reales.
+        ...(waitingOnly ? { attempts: Math.max(0, job.attempts - 1) } : {}),
+      },
+      now,
+    );
+    if (!waitingOnly) {
+      this.event('DIGEST_RETRY_SCHEDULED', {
+        result: status.toLowerCase(),
+        period: job.period,
+        groupHash: job.groupHash,
+        errorCode,
+        causeCode,
+        attempt: job.attempts,
+        nextAttemptAt,
+        window: jobWindow(job),
+        at: now,
+      });
+    }
+  }
+
+  private finalizeJob(
+    job: CommunityDigestJobRecord,
+    status: 'FAILED_FINAL' | 'SKIPPED',
+    errorCode: string,
+    causeCode: string | null,
+    now: Date,
+  ): void {
+    this.database.updateCommunityDigestJob(
+      job.id,
+      {
+        status,
+        lastErrorCode: errorCode,
+        lastCauseCode: causeCode,
+        nextAttemptAt: null,
+        summaryEncrypted: null,
+        checkpointEncrypted: null,
+      },
+      now,
+    );
+    this.event(status === 'SKIPPED' ? 'DIGEST_SKIPPED' : 'DIGEST_FAILED', {
+      result: status === 'SKIPPED' ? 'skipped' : 'final',
+      period: job.period,
+      groupHash: job.groupHash,
+      errorCode,
+      causeCode,
+      attempt: job.attempts,
+      ...(job.messageCount === null ? {} : { itemCount: job.messageCount }),
+      window: jobWindow(job),
+      at: now,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Generación (diaria y compuesta) con checkpoints
+  // ---------------------------------------------------------------------------
+
+  private async generateDailyJob(
+    job: CommunityDigestJobRecord,
+    budget: DigestProcessingBudget,
+    checkpoint: DigestCheckpoint,
+  ): Promise<GenerationOutcome & { historyComplete: boolean }> {
+    const window = jobWindow(job);
+    const loaded = await this.loadWindowMessages(
+      job.groupId,
+      window.startMs,
+      window.endMs,
+      job.period,
+    );
+    if (loaded.messages.length === 0 && loaded.historyError !== null && !loaded.historyComplete) {
+      throw codedError(loaded.historyError);
+    }
+    if (!loaded.historyComplete) {
+      this.event('DIGEST_COVERAGE_INCOMPLETE', {
+        result: 'partial',
+        period: job.period,
+        groupHash: job.groupHash,
+        itemCount: loaded.messages.length,
+        errorCode: loaded.historyError ?? 'CHAT_HISTORY_INCOMPLETE',
+        window,
+        at: this.clock(),
+      });
+    }
+    const outcome = await this.analyzeMessages(loaded.messages, budget, checkpoint, {
+      period: job.period,
+      periodKey: job.periodKey,
+      groupHash: job.groupHash,
+      checkpointScope: `day:${job.periodKey}`,
+      persistCheckpoint: (state) => this.persistCheckpoint(job, state),
+    });
+    this.storeRollup(job.groupHash, job.periodKey, window, outcome, loaded.historyComplete);
+    return { ...outcome, historyComplete: loaded.historyComplete };
+  }
+
+  private async generateComposedJob(
+    job: CommunityDigestJobRecord,
+    budget: DigestProcessingBudget,
+    checkpoint: DigestCheckpoint,
+  ): Promise<
+    GenerationOutcome & {
+      historyComplete: boolean;
+      coverage: { coveredDays: number; expectedDays: number };
+    }
+  > {
+    const configuration = this.configuration();
+    const dayKeys = composedDayKeys(job);
+    const rollups = new Map(
+      this.database
+        .listCommunityDigestRollups(this.botId, job.groupHash, dayKeys)
+        .map((rollup) => [rollup.dayKey, rollup] as const),
+    );
+    const dayAnalyses: Array<{
+      dayKey: string;
+      analysis: DigestAnalysis;
+      messageCount: number;
+      substantive: number;
+      complete: boolean;
+    }> = [];
+    const missing: string[] = [];
+    for (const dayKey of dayKeys) {
+      const rollup = rollups.get(dayKey);
+      if (rollup === undefined) {
+        missing.push(dayKey);
+        continue;
+      }
+      try {
+        const payload = JSON.parse(
+          this.buffer.decryptPayload(
+            rollup.payloadEncrypted,
+            this.rollupScope(job.groupHash, dayKey),
+          ),
+        ) as { analysis: DigestAnalysis; substantiveMessageCount?: number };
+        dayAnalyses.push({
+          dayKey,
+          analysis: payload.analysis,
+          messageCount: rollup.messageCount,
+          substantive: payload.substantiveMessageCount ?? rollup.messageCount,
+          complete: rollup.historyComplete,
+        });
+      } catch {
+        missing.push(dayKey);
+      }
+    }
+
+    // Reconstrucción de días sin rollup: buffer (72 h) y, si hace falta, historial de WhatsApp.
+    let reconstructionHistory: LoadedWindowMessages | null = null;
+    for (const dayKey of missing) {
+      const dayWindow = dailyWindowFor(dayKey, {
+        timezone: job.timezone,
+        daily: configuration.daily,
+      });
+      if (reconstructionHistory === null) {
+        const spanStart = Math.min(
+          ...missing.map(
+            (key) =>
+              dailyWindowFor(key, { timezone: job.timezone, daily: configuration.daily }).startMs,
+          ),
+        );
+        const spanEnd = Math.max(
+          ...missing.map(
+            (key) =>
+              dailyWindowFor(key, { timezone: job.timezone, daily: configuration.daily }).endMs,
+          ),
+        );
+        reconstructionHistory = await this.loadWindowMessages(
+          job.groupId,
+          spanStart,
+          spanEnd,
+          job.period,
+        );
+      }
+      const messages = this.buffer.load(job.groupId, dayWindow.startMs, dayWindow.endMs);
+      const reachable =
+        reconstructionHistory.historyComplete ||
+        (reconstructionHistory.history !== null &&
+          reconstructionHistory.history.messages.some(
+            (message) => message.timestampMs <= dayWindow.startMs,
+          ));
+      if (messages.length === 0 && !reachable) continue;
+      const outcome = await this.analyzeMessages(messages, budget, checkpoint, {
+        period: job.period,
+        periodKey: job.periodKey,
+        groupHash: job.groupHash,
+        checkpointScope: `day:${dayKey}`,
+        persistCheckpoint: (state) => this.persistCheckpoint(job, state),
+      });
+      const windowIso = {
+        startIso: new Date(dayWindow.startMs).toISOString(),
+        endIso: new Date(dayWindow.endMs).toISOString(),
+        periodKey: dayKey,
+        startMs: dayWindow.startMs,
+        endMs: dayWindow.endMs,
+      };
+      this.storeRollup(job.groupHash, dayKey, windowIso, outcome, reachable);
+      dayAnalyses.push({
+        dayKey,
+        analysis: outcome.analysis,
+        messageCount: outcome.messageCount,
+        substantive: outcome.substantiveMessageCount,
+        complete: reachable,
+      });
+    }
+
+    const coveredDays = dayAnalyses.length;
+    const expectedDays = dayKeys.length;
+    const messageCount = dayAnalyses.reduce((sum, day) => sum + day.messageCount, 0);
+    const substantive = dayAnalyses.reduce((sum, day) => sum + day.substantive, 0);
+    const nonEmpty = dayAnalyses.filter(
+      (day) =>
+        day.analysis.topics.length > 0 ||
+        day.analysis.agreements.length > 0 ||
+        day.analysis.pending.length > 0,
+    );
+    let analysis: DigestAnalysis;
+    let blockCount = nonEmpty.length;
+    let tokenEstimate = 0;
+    let strategy = 'rollups';
+    if (nonEmpty.length === 0) {
+      analysis = emptyDigestAnalysis();
+    } else if (nonEmpty.length === 1) {
+      analysis = nonEmpty[0]?.analysis ?? emptyDigestAnalysis();
+    } else {
+      const lines = nonEmpty.map(
+        (day, index) => `Análisis parcial ${index + 1}:\n${JSON.stringify(day.analysis)}`,
+      );
+      const reduced = await generateDigestAnalysis({
+        lines,
+        request: (request) =>
+          this.requestAnalysis(request, budget, {
+            period: job.period,
+            periodKey: job.periodKey,
+            groupHash: job.groupHash,
+            checkpointScope: 'composed',
+          }),
+        checkpoint,
+        onCheckpoint: (state) => this.persistCheckpoint(job, state),
+        limits: { ...this.generationLimits, singlePassMaxTokens: 0 },
+      }).catch(async (error: unknown) => {
+        if (safeErrorCode(error, 'UNKNOWN') === 'CONTEXT_TOO_LARGE') {
+          return {
+            analysis: mergeDigestAnalyses(nonEmpty.map((day) => day.analysis)),
+            blockCount: nonEmpty.length,
+            tokenEstimate: 0,
+            strategy: 'local-merge' as const,
+            aiCallCount: 0,
+            reusedBlocks: 0,
+          };
+        }
+        throw error;
+      });
+      analysis = reduced.analysis;
+      blockCount = reduced.blockCount;
+      tokenEstimate = reduced.tokenEstimate;
+      strategy = reduced.strategy;
+      this.event('DIGEST_REDUCE_COMPLETED', {
+        result: 'completed',
+        period: job.period,
+        groupHash: job.groupHash,
+        blockCount,
+        estimatedTokenCount: tokenEstimate,
+        strategy,
+        window: jobWindow(job),
+        at: this.clock(),
+      });
+    }
+    const historyComplete =
+      coveredDays === expectedDays && dayAnalyses.every((day) => day.complete);
+    if (!historyComplete) {
+      this.event('DIGEST_COVERAGE_INCOMPLETE', {
+        result: 'partial',
+        period: job.period,
+        groupHash: job.groupHash,
+        itemCount: messageCount,
+        errorCode: 'ROLLUPS_INCOMPLETE',
+        window: jobWindow(job),
+        at: this.clock(),
+      });
+    }
+    return {
+      analysis,
+      messageCount,
+      substantiveMessageCount: substantive,
+      blockCount,
+      tokenEstimate,
+      strategy,
+      historyComplete,
+      coverage: { coveredDays, expectedDays },
+    };
+  }
+
+  private async analyzeMessages(
+    messages: BufferedDigestMessage[],
+    budget: DigestProcessingBudget,
+    checkpoint: DigestCheckpoint,
+    scope: {
+      period: CommunityDigestPeriod;
+      periodKey: string;
+      groupHash: string;
+      checkpointScope: string;
+      persistCheckpoint: (state: DigestCheckpoint) => void;
+      onProgress?: (progress: {
+        stage: string;
+        completedBlocks: number;
+        totalBlocks: number;
+        aiCallCount: number;
+      }) => void;
+      onRetry?: (notice: AIQueueRetryNotice, phase: 'scheduled' | 'started' | 'succeeded') => void;
+    },
+  ): Promise<GenerationOutcome> {
+    const context = buildContextLines(messages);
+    if (context.lines.length === 0) {
+      return {
+        analysis: emptyDigestAnalysis(),
+        messageCount: messages.length,
+        substantiveMessageCount: context.substantiveMessageCount,
+        blockCount: 0,
+        tokenEstimate: 0,
+        strategy: 'none',
+      };
+    }
+    if (!this.provider.isConfigured()) throw codedError('AI_NOT_CONFIGURED');
+    const view = scopedCheckpointView(checkpoint, scope.checkpointScope);
+    const result = await generateDigestAnalysis({
+      lines: context.lines,
+      request: (request) => this.requestAnalysis(request, budget, scope),
+      checkpoint: view,
+      onCheckpoint: (state) => {
+        mergeScopedCheckpoint(checkpoint, scope.checkpointScope, state);
+        scope.persistCheckpoint(checkpoint);
+      },
+      onProgress: (progress) => {
+        budget.registerBlocks(progress.totalBlocks);
+        scope.onProgress?.(progress);
+      },
+      limits: this.generationLimits,
+    });
+    return {
+      analysis: result.analysis,
+      messageCount: messages.length,
+      substantiveMessageCount: context.substantiveMessageCount,
+      blockCount: result.blockCount,
+      tokenEstimate: result.tokenEstimate,
+      strategy: result.strategy,
+    };
+  }
+
+  private async requestAnalysis(
+    request: DigestGenerationRequest,
+    budget: DigestProcessingBudget,
+    scope: {
+      period: CommunityDigestPeriod;
+      periodKey: string;
+      groupHash: string;
+      checkpointScope: string;
+      onRetry?: (notice: AIQueueRetryNotice, phase: 'scheduled' | 'started' | 'succeeded') => void;
+    },
+  ): Promise<string> {
+    budget.assertActive();
+    const timeoutMs = budget.providerTimeoutMs(
+      providerTimeoutFor(
+        request.estimatedTokens,
+        this.database.getAIQueueSettings(this.botId).providerTimeoutSeconds,
+      ),
+    );
+    const flight = await this.aiQueue.run({
+      flightKey: `${this.botId}:digest:${scope.period}:${scope.periodKey}:${scope.groupHash}:${scope.checkpointScope}:${request.stageKey}`,
+      classifyError: (error) =>
+        error instanceof DigestProcessingBudgetError
+          ? 'AI_PERMANENT_ERROR'
+          : this.provider.classifyProviderError(error),
+      deadlineAtMs: budget.deadlineAtMs,
+      consumeRetryBudget: () => budget.consumeRetry(),
+      onRetryScheduled: (notice) => scope.onRetry?.(notice, 'scheduled'),
+      onRetryStarted: (notice) => scope.onRetry?.(notice, 'started'),
+      onRetrySucceeded: (notice) =>
+        scope.onRetry?.({ ...notice, retryAfterSeconds: 0, retryAt: '' }, 'succeeded'),
+      operation: async () => {
+        budget.beginProviderCall(request.estimatedTokens);
+        const response = await this.provider.generateGroundedResponse({
+          systemInstruction: request.systemInstruction,
+          question: request.question,
+          context: request.context,
+          maximumOutputTokens: request.maximumOutputTokens,
+          timeoutMs,
+          thinkingLevel: 'low',
+          responseJsonSchema: DIGEST_ANALYSIS_JSON_SCHEMA,
+        });
+        budget.recordUsage(response.usage.totalTokens);
+        return response.text;
+      },
+    });
+    const text = flight.value.trim();
+    if (text === '') throw codedError('AI_EMPTY_RESPONSE');
+    if (request.stage === 'map') {
+      this.event('DIGEST_MAP_COMPLETED', {
+        result: 'completed',
+        period: scope.period,
+        groupHash: scope.groupHash,
+        ...budget.snapshot(),
+        blockCount: request.totalStages,
+        estimatedTokenCount: request.estimatedTokens,
+        at: this.clock(),
+      });
+    }
+    return text;
+  }
+
+  private renderFinalMessage(
+    period: CommunityDigestPeriod,
+    outcome: GenerationOutcome & {
+      historyComplete: boolean;
+      coverage?: { coveredDays: number; expectedDays: number };
+    },
+    groupHash: string,
+  ): string {
+    const rendered = renderDigestMessage({
+      period,
+      analysis: outcome.analysis,
+      messageCount: outcome.messageCount,
+      substantiveMessageCount: outcome.substantiveMessageCount,
+      coverage: outcome.coverage,
+      historyComplete: outcome.historyComplete,
+    });
+    if (digestOutputContainsPrivateData(rendered)) {
+      this.event('DIGEST_OUTPUT_SANITIZED', {
+        result: 'sanitized',
+        period,
+        groupHash,
+        at: this.clock(),
+      });
+      return rendered
+        .split('\n')
+        .map((line) => (line.trim() === '' ? '' : sanitizeDigestOutput(line)))
+        .join('\n');
+    }
+    return rendered;
+  }
+
+  private storeRollup(
+    groupHash: string,
+    dayKey: string,
+    window: { startIso: string; endIso: string },
+    outcome: GenerationOutcome,
+    historyComplete: boolean,
+  ): void {
+    const configuration = this.configuration();
+    if (!configuration.weekly.enabled && !configuration.monthly.enabled) return;
+    try {
+      this.database.saveCommunityDigestRollup({
+        botId: this.botId,
+        groupHash,
+        dayKey,
+        windowStart: window.startIso,
+        windowEnd: window.endIso,
+        messageCount: outcome.messageCount,
+        historyComplete,
+        payloadEncrypted: this.buffer.encryptPayload(
+          JSON.stringify({
+            analysis: outcome.analysis,
+            substantiveMessageCount: outcome.substantiveMessageCount,
+          }),
+          this.rollupScope(groupHash, dayKey),
+        ),
+        expiresAt: new Date(this.clock().getTime() + DIGEST_ROLLUP_RETENTION_MS).toISOString(),
+      });
+    } catch (error) {
+      this.logger.warn(
+        {
+          module: 'Resumen',
+          operation: 'storeRollup',
+          botId: this.botId,
+          ...serializeError(error, 'DIGEST_ROLLUP_FAILED', false),
+        },
+        'No fue posible guardar el rollup diario del resumen',
+      );
+    }
+  }
+
+  private readCheckpoint(job: CommunityDigestJobRecord): DigestCheckpoint {
+    if (job.checkpointEncrypted === null) return emptyDigestCheckpoint();
+    try {
+      const parsed = JSON.parse(
+        this.buffer.decryptPayload(job.checkpointEncrypted, this.checkpointScope(job)),
+      ) as unknown;
+      return isDigestCheckpoint(parsed) ? parsed : emptyDigestCheckpoint();
+    } catch {
+      return emptyDigestCheckpoint();
+    }
+  }
+
+  private persistCheckpoint(job: CommunityDigestJobRecord, checkpoint: DigestCheckpoint): void {
+    try {
+      this.database.updateCommunityDigestJob(job.id, {
+        checkpointEncrypted: this.buffer.encryptPayload(
+          JSON.stringify(checkpoint),
+          this.checkpointScope(job),
+        ),
+      });
+    } catch (error) {
+      this.logger.warn(
+        {
+          module: 'Resumen',
+          operation: 'persistCheckpoint',
+          botId: this.botId,
+          ...serializeError(error, 'DIGEST_CHECKPOINT_FAILED', false),
+        },
+        'No fue posible guardar el checkpoint del resumen',
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Carga de mensajes: buffer + reconciliación con WhatsApp
+  // ---------------------------------------------------------------------------
+
+  private async loadWindowMessages(
+    groupId: string,
+    startMs: number,
+    endMs: number,
+    period: CommunityDigestPeriod,
+    persist = true,
+  ): Promise<LoadedWindowMessages> {
+    const groupHash = this.anonymizer.identifier(groupId);
+    const buffered = this.buffer.load(groupId, startMs, endMs);
+    let transient: BufferedDigestMessage[] = [];
+    const coverage = this.captureCoverage();
+    const gapStart = earliestGapWithin(
+      coverage,
+      startMs,
+      endMs,
+      this.clock().getTime(),
+      this.client.isReady(),
+    );
+    const hasGap = gapStart !== null;
+    this.event('DIGEST_CAPTURE_COMPLETE', {
+      result: hasGap ? 'gaps_detected' : 'continuous',
+      period,
+      groupHash,
+      itemCount: buffered.length,
+      at: this.clock(),
+    });
+    const reconcileFrom =
+      hasGap || buffered.length === 0
+        ? Math.max(startMs, (gapStart ?? startMs) - DIGEST_RECONCILE_GAP_MARGIN_MS)
+        : Math.max(startMs, endMs - DIGEST_RECONCILE_TAIL_MS);
+    let history: GroupMessageHistory | null = null;
+    let historyError: string | null = null;
+    if (this.client.fetchGroupMessageHistory !== undefined && this.client.isReady()) {
+      try {
+        history = await this.client.fetchGroupMessageHistory({
+          groupId,
+          periodStartMs: reconcileFrom,
+          periodEndMs: endMs,
+          maxMessages: this.configuration().maxMessages,
+        });
+        const inWindow = history.messages.filter(
+          (message) =>
+            message.timestampMs > startMs &&
+            message.timestampMs <= endMs &&
+            !message.fromMe &&
+            isTextMessage(message),
+        );
+        let inserted = 0;
+        if (persist) {
+          inserted = this.buffer.storeHistory(groupId, inWindow);
+        } else {
+          transient = this.buffer.toBuffered(groupId, inWindow);
+          inserted = transient.length;
+        }
+        this.event('DIGEST_HISTORY_RECONCILED', {
+          result: history.reachedPeriodStart || history.historyExhausted ? 'complete' : 'partial',
+          period,
+          groupHash,
+          itemCount: inserted,
+          historyItemCount: history.messages.length,
+          pageCount: history.pageCount,
+          operation: 'fetchGroupMessageHistory',
+          at: this.clock(),
+        });
+      } catch (error) {
+        historyError =
+          error instanceof GroupMessageHistoryError ? error.code : 'CHAT_HISTORY_FAILED';
+        const details = digestErrorDetails(error, groupId);
+        this.event('COMMUNITY_DIGEST_HISTORY_FAILED', {
+          result: 'failed',
+          period,
+          groupHash,
+          errorCode: historyError,
+          operation:
+            error instanceof GroupMessageHistoryError
+              ? error.operation
+              : 'fetchGroupMessageHistory',
+          reason: details.message,
+          errorName: details.name,
+          ...(details.stack === undefined ? {} : { errorStack: details.stack }),
+          at: this.clock(),
+        });
+      }
+    } else if (!this.client.isReady()) {
+      historyError = 'WHATSAPP_NOT_CONNECTED';
+    }
+    const stored = this.buffer.load(groupId, startMs, endMs);
+    const known = new Set(stored.map((message) => message.messageKey));
+    const messages = [
+      ...stored,
+      ...transient.filter((message) => !known.has(message.messageKey)),
+    ].sort((left, right) => left.timestampMs - right.timestampMs);
+    const reconciledToStart =
+      history !== null &&
+      (history.reachedPeriodStart || history.historyExhausted) &&
+      reconcileFrom <= startMs;
+    const historyComplete = !hasGap || reconciledToStart;
+    return { messages, historyComplete, history, historyError };
+  }
+
+  private captureCoverage(): CaptureCoverageState {
+    const stored = this.database.getSetting<Partial<CaptureCoverageState> | null>(
+      this.captureKey(),
+      null,
+    );
+    return {
+      heartbeatAt: typeof stored?.heartbeatAt === 'string' ? stored.heartbeatAt : null,
+      gaps: Array.isArray(stored?.gaps)
+        ? stored.gaps.filter(
+            (gap): gap is { startMs: number; endMs: number } =>
+              typeof gap === 'object' &&
+              gap !== null &&
+              Number.isFinite((gap as { startMs?: unknown }).startMs) &&
+              Number.isFinite((gap as { endMs?: unknown }).endMs),
+          )
+        : [],
+    };
+  }
+
+  private maintainCaptureCoverage(now: Date): void {
+    try {
+      const state = this.captureCoverage();
+      const retentionMs = DEFAULT_DIGEST_MESSAGE_RETENTION_MS;
+      if (this.client.isReady()) {
+        if (state.heartbeatAt !== null) {
+          const lastBeat = Date.parse(state.heartbeatAt);
+          if (now.getTime() - lastBeat > DIGEST_CAPTURE_GAP_THRESHOLD_MS) {
+            state.gaps.push({ startMs: lastBeat, endMs: now.getTime() });
+          }
+        }
+        state.heartbeatAt = now.toISOString();
+      }
+      state.gaps = state.gaps.filter((gap) => gap.endMs >= now.getTime() - retentionMs).slice(-200);
+      this.database.setSetting(this.captureKey(), state);
+    } catch (error) {
+      this.logger.warn(
+        {
+          module: 'Resumen',
+          operation: 'maintainCaptureCoverage',
+          botId: this.botId,
+          ...serializeError(error, 'DIGEST_COVERAGE_FAILED', false),
+        },
+        'No fue posible actualizar la cobertura de captura del resumen',
+      );
+    }
+  }
+
+  private purgeExpiredData(now: Date): void {
+    try {
+      const purged = this.buffer.purgeExpired();
+      if (purged.messages > 0 || purged.rollups > 0) {
+        this.event('DIGEST_BUFFER_PURGED', {
+          result: 'expired',
+          itemCount: purged.messages + purged.rollups,
+          at: now,
+        });
+      }
+      this.database.purgeCommunityDigestJobsBefore(
+        this.botId,
+        new Date(now.getTime() - DIGEST_JOB_RETENTION_MS),
+      );
+    } catch (error) {
+      this.logger.warn(
+        {
+          module: 'Resumen',
+          operation: 'purgeExpiredData',
+          botId: this.botId,
+          ...serializeError(error, 'DIGEST_PURGE_FAILED', false),
+        },
+        'No fue posible depurar los datos temporales del resumen',
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Estado para el panel
+  // ---------------------------------------------------------------------------
+
+  public status(now = this.now()): CommunityDigestStatus {
+    const configuration = this.configuration();
+    const coverage = this.captureCoverage();
+    const groupNames = new Map(
+      this.database
+        .listBotGroups(this.botId, (identifier) => this.anonymizer.identifier(identifier))
+        .map((group) => [group.groupHash, group.name] as const),
+    );
+    const latest = this.database.listLatestCommunityDigestJobsByPeriod(this.botId);
+    const periods = {} as Record<CommunityDigestPeriod, CommunityDigestPeriodStatus>;
+    for (const period of ['daily', 'weekly', 'monthly'] as const) {
+      const jobs = latest[period].map((job) =>
+        summarizeJob(job, groupNames.get(job.groupHash) ?? 'Grupo sin nombre'),
+      );
+      let nextScheduledAt: string | null = null;
+      if (configuration[period].enabled) {
+        try {
+          const occurrence = latestOccurrence(period, now, configuration);
+          nextScheduledAt = new Date(
+            nextOccurrenceAfter(period, occurrence, configuration),
+          ).toISOString();
+        } catch {
+          nextScheduledAt = null;
+        }
+      }
+      const lastSent =
+        this.database
+          .listCommunityDigestJobs(this.botId, { period, limit: 200 })
+          .filter((job) => job.kind === 'digest' && job.status === 'SENT' && job.sentAt !== null)
+          .map((job) => job.sentAt as string)
+          .sort()
+          .at(-1) ?? null;
+      periods[period] = {
+        enabled: configuration[period].enabled,
+        sendTime: configuration[period].sendTime,
+        nextScheduledAt,
+        lastOccurrenceAt: jobs[0]?.scheduledAt ?? null,
+        summary: summarizePeriod(jobs),
+        lastSentAt: lastSent,
+        jobs,
+      };
+    }
+    return {
+      timezone: configuration.timezone,
+      schedulerStarted: this.started,
+      whatsappReady: this.client.isReady(),
+      capture: {
+        bufferedMessages: this.buffer.count(),
+        lastHeartbeatAt: coverage.heartbeatAt,
+        recentGaps: coverage.gaps.length,
+        retentionHours: Math.round(DEFAULT_DIGEST_MESSAGE_RETENTION_MS / 3_600_000),
+      },
+      periods,
+    };
+  }
+
+  public listJobs(
+    options: { period?: CommunityDigestPeriod; limit?: number } = {},
+  ): CommunityDigestJobSummary[] {
+    const groupNames = new Map(
+      this.database
+        .listBotGroups(this.botId, (identifier) => this.anonymizer.identifier(identifier))
+        .map((group) => [group.groupHash, group.name] as const),
+    );
+    return this.database
+      .listCommunityDigestJobs(this.botId, options)
+      .filter((job) => job.kind === 'digest')
+      .map((job) => summarizeJob(job, groupNames.get(job.groupHash) ?? 'Grupo sin nombre'));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Centro de pruebas (ejecución manual)
+  // ---------------------------------------------------------------------------
 
   public startManualTest(
     period: CommunityDigestPeriod,
@@ -506,7 +1850,6 @@ export class CommunityDigestService {
       });
       return started;
     }
-
     this.event('COMMUNITY_DIGEST_TEST_STARTED', {
       result: 'queued',
       period,
@@ -562,6 +1905,14 @@ export class CommunityDigestService {
           completedSends: run.completedSends + (result.status === 'SENT' ? 1 : 0),
           failedSends: run.failedSends + (result.status === 'SENT' ? 0 : 1),
           processedGroups: run.processedGroups + 1,
+          messageCount: result.messageCount,
+          historyComplete: result.historyComplete ?? run.historyComplete,
+          windowStart: result.window?.startIso ?? run.windowStart,
+          windowEnd: result.window?.endIso ?? run.windowEnd,
+          totalBlocks: result.blockCount ?? run.totalBlocks,
+          aiCallCount: result.aiCallCount ?? run.aiCallCount,
+          retryCount: result.retryCount ?? run.retryCount,
+          tokenEstimate: result.tokenEstimate ?? run.tokenEstimate,
           errorCode:
             result.status === 'SENT' ? run.errorCode : (result.causeCode ?? result.errorCode),
           errorMessage:
@@ -654,6 +2005,12 @@ export class CommunityDigestService {
           : progress.retryAt,
       generationStage:
         progress.generationStage === undefined ? run.generationStage : progress.generationStage,
+      windowStart: progress.windowStart === undefined ? run.windowStart : progress.windowStart,
+      windowEnd: progress.windowEnd === undefined ? run.windowEnd : progress.windowEnd,
+      historyComplete:
+        progress.historyComplete === undefined ? run.historyComplete : progress.historyComplete,
+      tokenEstimate:
+        progress.tokenEstimate === undefined ? run.tokenEstimate : progress.tokenEstimate,
     }));
   }
 
@@ -677,13 +2034,7 @@ export class CommunityDigestService {
       .find((candidate) => candidate.groupHash === groupId);
     const groupName = group?.name ?? 'Grupo sin nombre';
     const configuration = this.configuration();
-    const local = toLocalDateTime(now, configuration.timezone);
-    const window = digestWindow(
-      period,
-      now,
-      configuration.timezone,
-      periodKeyForDate(period, local.date),
-    );
+    const window = manualWindow(period, now, configuration.timezone);
     this.event('COMMUNITY_DIGEST_MANUAL_STARTED', {
       result: 'started',
       period,
@@ -692,43 +2043,23 @@ export class CommunityDigestService {
       window,
       at: now,
     });
-    if (!this.client.isReady()) {
+    const fail = (errorCode: string): CommunityDigestResult => {
       this.event('COMMUNITY_DIGEST_MANUAL_FAILED', {
         result: 'failed',
         period,
         groupHash,
         groupName,
-        errorCode: 'WHATSAPP_NOT_CONNECTED',
+        errorCode,
         window,
         at: now,
       });
-      return failed(period, 'WHATSAPP_NOT_CONNECTED');
-    }
-    if (group === undefined) {
-      this.event('COMMUNITY_DIGEST_MANUAL_FAILED', {
-        result: 'failed',
-        period,
-        groupHash,
-        groupName,
-        errorCode: 'GROUP_NOT_FOUND',
-        window,
-        at: now,
-      });
-      return failed(period, 'GROUP_NOT_FOUND');
-    }
-    if (!this.database.canBotSendToGroup(this.botId, groupId)) {
-      this.event('COMMUNITY_DIGEST_MANUAL_FAILED', {
-        result: 'failed',
-        period,
-        groupHash,
-        groupName,
-        errorCode: 'GROUP_CHAT_NOT_AVAILABLE',
-        window,
-        at: now,
-      });
-      return failed(period, 'GROUP_CHAT_NOT_AVAILABLE');
-    }
-    const result = await this.send(period, groupId, now, undefined, reportProgress);
+      return { ...failed(period, errorCode), window: windowSummary(window) };
+    };
+    if (!this.client.isReady()) return fail('WHATSAPP_NOT_CONNECTED');
+    if (group === undefined) return fail('GROUP_NOT_FOUND');
+    if (!this.database.canBotSendToGroup(this.botId, groupId))
+      return fail('GROUP_CHAT_NOT_AVAILABLE');
+    const result = await this.send(period, groupId, now, window, reportProgress);
     this.event(
       result.status === 'SENT'
         ? 'COMMUNITY_DIGEST_MANUAL_SENT'
@@ -756,23 +2087,25 @@ export class CommunityDigestService {
     now = this.now(),
   ): Promise<string> {
     const configuration = this.configuration();
-    const local = toLocalDateTime(now, configuration.timezone);
-    const window = digestWindow(
+    const window = manualWindow(period, now, configuration.timezone);
+    const loaded = await this.loadWindowMessages(
+      groupId,
+      window.startMs,
+      window.endMs,
       period,
-      now,
-      configuration.timezone,
-      periodKeyForDate(period, local.date),
+      anyPeriodEnabled(configuration),
     );
-    const { messages } = await this.loadMessages(groupId, window);
     const title = `Historial ${periodLabel(period)} anonimizado`;
-    const lines = messages.map((message) => {
+    const lines = loaded.messages.map((message) => {
       const timestamp = new Date(message.timestampMs).toISOString();
-      return `[${timestamp}] ${digestMessageText(message)}`;
+      return `[${timestamp}] ${sanitizeDigestText(message.text)}`;
     });
     return [
       title,
       `Asistente: ${this.botId}`,
       `Grupo: ${this.anonymizer.identifier(groupId)}`,
+      `Período: ${window.startIso} → ${window.endIso}`,
+      `Historial completo: ${loaded.historyComplete ? 'sí' : 'no'}`,
       `Generado: ${now.toISOString()}`,
       'Los nombres, números, correos y otros identificadores no se incluyen.',
       '',
@@ -803,14 +2136,11 @@ export class CommunityDigestService {
     period: CommunityDigestPeriod,
     groupId: string,
     now: Date,
-    periodKey?: string,
+    window: ManualWindow,
     reportProgress?: CommunityDigestProgressReporter,
   ): Promise<CommunityDigestResult> {
-    const configuration = this.configuration();
-    const local = toLocalDateTime(now, configuration.timezone);
-    const runKey = periodKey ?? periodKeyForDate(period, local.date);
     const groupHash = this.anonymizer.identifier(groupId);
-    const flightKey = `${period}:${runKey}:${groupHash}`;
+    const flightKey = `${period}:${window.periodKey}:${groupHash}`;
     const active = this.activeSends.get(flightKey);
     if (active !== undefined) {
       this.event('COMMUNITY_DIGEST_DUPLICATE_BLOCKED', {
@@ -822,7 +2152,7 @@ export class CommunityDigestService {
       });
       return active;
     }
-    const operation = this.executeSend(period, groupId, now, periodKey, reportProgress).finally(
+    const operation = this.executeManualSend(period, groupId, now, window, reportProgress).finally(
       () => {
         if (this.activeSends.get(flightKey) === operation) this.activeSends.delete(flightKey);
       },
@@ -831,11 +2161,11 @@ export class CommunityDigestService {
     return operation;
   }
 
-  private async executeSend(
+  private async executeManualSend(
     period: CommunityDigestPeriod,
     groupId: string,
     now: Date,
-    periodKey?: string,
+    window: ManualWindow,
     reportProgress?: CommunityDigestProgressReporter,
   ): Promise<CommunityDigestResult> {
     const groupHash = this.anonymizer.identifier(groupId);
@@ -843,15 +2173,8 @@ export class CommunityDigestService {
       this.database
         .listBotGroups(this.botId, (identifier) => identifier)
         .find((candidate) => candidate.groupHash === groupId)?.name ?? 'Grupo sin nombre';
-    const configuration = this.configuration();
-    const local = toLocalDateTime(now, configuration.timezone);
-    const window = digestWindow(
-      period,
-      now,
-      configuration.timezone,
-      periodKey ?? periodKeyForDate(period, local.date),
-    );
     const budget = new DigestProcessingBudget(this.processingBudget);
+    const windowInfo = windowSummary(window);
     this.event('COMMUNITY_DIGEST_GROUP_STARTED', {
       result: 'started',
       period,
@@ -868,9 +2191,11 @@ export class CommunityDigestService {
       currentBlock: null,
       totalBlocks: null,
       generationStage: null,
+      windowStart: window.startIso,
+      windowEnd: window.endIso,
+      historyComplete: null,
+      tokenEstimate: null,
     });
-
-    let messages: RecentGroupMessage[];
     this.event('COMMUNITY_DIGEST_CHAT_RESOLUTION_STARTED', {
       result: 'started',
       period,
@@ -889,52 +2214,46 @@ export class CommunityDigestService {
       window,
       at: now,
     });
-    try {
-      const loaded = await this.loadMessages(groupId, window);
-      messages = loaded.messages;
-      this.event('COMMUNITY_DIGEST_MESSAGES_LOADED', {
-        result: 'loaded',
-        period,
-        groupHash,
-        groupName: loaded.history.groupName ?? groupName,
-        itemCount: messages.length,
-        historyItemCount: loaded.history.messages.length,
-        pageCount: loaded.history.pageCount,
-        operation: 'fetchGroupMessageHistory',
-        window,
-        at: now,
-      });
-      reportProgress?.({
-        status: 'generating',
-        phasePercent: 30,
-        messageCount: messages.length,
-        pageCount: loaded.history.pageCount,
-        currentBlock: 0,
-        totalBlocks: null,
-        generationStage: 'blocks',
-      });
-    } catch (error) {
-      const errorCode =
-        error instanceof GroupMessageHistoryError ? error.code : 'CHAT_HISTORY_FAILED';
-      const details = digestErrorDetails(error, groupId);
-      this.event('COMMUNITY_DIGEST_HISTORY_FAILED', {
-        result: 'failed',
-        period,
-        groupHash,
-        groupName,
-        errorCode,
-        operation:
-          error instanceof GroupMessageHistoryError ? error.operation : 'fetchGroupMessageHistory',
-        reason: details.message,
-        errorName: details.name,
-        ...(details.stack === undefined ? {} : { errorStack: details.stack }),
-        window,
-        at: now,
-      });
-      return this.complete(period, groupHash, window, now, failed(period, errorCode));
-    }
 
-    if (messages.length === 0) {
+    const loaded = await this.loadWindowMessages(
+      groupId,
+      window.startMs,
+      window.endMs,
+      period,
+      anyPeriodEnabled(this.configuration()),
+    );
+    if (loaded.messages.length === 0 && loaded.historyError !== null && !loaded.historyComplete) {
+      return this.complete(period, groupHash, window, now, {
+        ...failed(period, loaded.historyError),
+        window: windowInfo,
+        historyComplete: false,
+      });
+    }
+    this.event('COMMUNITY_DIGEST_MESSAGES_LOADED', {
+      result: 'loaded',
+      period,
+      groupHash,
+      groupName: loaded.history?.groupName ?? groupName,
+      itemCount: loaded.messages.length,
+      historyItemCount: loaded.history?.messages.length ?? 0,
+      pageCount: loaded.history?.pageCount ?? 0,
+      operation: 'fetchGroupMessageHistory',
+      historyComplete: loaded.historyComplete,
+      window,
+      at: now,
+    });
+    reportProgress?.({
+      status: 'generating',
+      phasePercent: 30,
+      messageCount: loaded.messages.length,
+      pageCount: loaded.history?.pageCount ?? 0,
+      currentBlock: 0,
+      totalBlocks: null,
+      generationStage: 'blocks',
+      historyComplete: loaded.historyComplete,
+    });
+
+    if (loaded.messages.length === 0) {
       this.event('COMMUNITY_DIGEST_SKIPPED_NO_MESSAGES', {
         result: 'skipped',
         period,
@@ -952,6 +2271,8 @@ export class CommunityDigestService {
         summary: null,
         errorCode: 'NO_MESSAGES_IN_PERIOD',
         causeCode: null,
+        window: windowInfo,
+        historyComplete: loaded.historyComplete,
       });
     }
 
@@ -961,7 +2282,7 @@ export class CommunityDigestService {
         period,
         groupHash,
         groupName,
-        itemCount: messages.length,
+        itemCount: loaded.messages.length,
         errorCode: 'AI_SUMMARY_FAILED',
         causeCode: 'AI_NOT_CONFIGURED',
         operation: 'generateCommunityDigest',
@@ -969,13 +2290,10 @@ export class CommunityDigestService {
         window,
         at: now,
       });
-      return this.complete(
-        period,
-        groupHash,
-        window,
-        now,
-        failed(period, 'AI_SUMMARY_FAILED', messages.length, 'AI_NOT_CONFIGURED'),
-      );
+      return this.complete(period, groupHash, window, now, {
+        ...failed(period, 'AI_SUMMARY_FAILED', loaded.messages.length, 'AI_NOT_CONFIGURED'),
+        window: windowInfo,
+      });
     }
 
     this.event('COMMUNITY_DIGEST_AI_STARTED', {
@@ -983,29 +2301,74 @@ export class CommunityDigestService {
       period,
       groupHash,
       groupName,
-      itemCount: messages.length,
+      itemCount: loaded.messages.length,
       operation: 'generateCommunityDigest',
       window,
       at: now,
     });
-    let summary: string;
+    let outcome: GenerationOutcome;
+    let retryAttemptActive = false;
     try {
-      summary = await this.generate(
+      const checkpoint = emptyDigestCheckpoint();
+      outcome = await this.analyzeMessages(loaded.messages, budget, checkpoint, {
         period,
-        messages,
+        periodKey: `manual:${window.periodKey}:${now.getTime()}`,
         groupHash,
-        window.periodKey,
-        budget,
-        reportProgress,
-      );
+        checkpointScope: 'manual',
+        persistCheckpoint: () => undefined,
+        onRetry: (notice, phase) => {
+          if (phase === 'scheduled') {
+            reportProgress?.(
+              retryProgress(
+                notice.code === 'AI_PROVIDER_RATE_LIMITED' ? 'waiting_provider' : 'retrying',
+                notice,
+                budget,
+              ),
+            );
+            return;
+          }
+          if (phase === 'started') {
+            retryAttemptActive = true;
+            reportProgress?.(retryProgress('retrying', notice, budget));
+            return;
+          }
+          retryAttemptActive = false;
+          reportProgress?.({
+            status: 'generating',
+            retryAfterSeconds: null,
+            retryAt: null,
+            ...budget.snapshot(),
+          });
+        },
+        onProgress: (progress) => {
+          reportProgress?.({
+            status: retryAttemptActive ? 'retrying' : 'generating',
+            phasePercent:
+              progress.stage === 'reduce'
+                ? 85
+                : 35 +
+                  Math.round((progress.completedBlocks / Math.max(1, progress.totalBlocks)) * 45),
+            currentBlock:
+              progress.stage === 'reduce'
+                ? null
+                : Math.min(progress.totalBlocks, progress.completedBlocks + 1),
+            totalBlocks: progress.totalBlocks,
+            generationStage: progress.stage === 'reduce' ? 'finalizing' : 'blocks',
+            ...budget.snapshot(),
+          });
+        },
+      });
       const processing = budget.snapshot();
       this.event('COMMUNITY_DIGEST_AI_SUCCEEDED', {
         result: 'generated',
         period,
         groupHash,
         groupName,
-        itemCount: messages.length,
+        itemCount: loaded.messages.length,
         ...processing,
+        blockCount: outcome.blockCount,
+        estimatedTokenCount: outcome.tokenEstimate,
+        strategy: outcome.strategy,
         operation: 'generateCommunityDigest',
         window,
         at: now,
@@ -1018,7 +2381,7 @@ export class CommunityDigestService {
         period,
         groupHash,
         groupName,
-        itemCount: messages.length,
+        itemCount: loaded.messages.length,
         errorCode: 'AI_SUMMARY_FAILED',
         causeCode,
         ...processing,
@@ -1027,21 +2390,27 @@ export class CommunityDigestService {
         window,
         at: now,
       });
-      return this.complete(
-        period,
-        groupHash,
-        window,
-        now,
-        failed(period, 'AI_SUMMARY_FAILED', messages.length, causeCode),
-      );
+      return this.complete(period, groupHash, window, now, {
+        ...failed(period, 'AI_SUMMARY_FAILED', loaded.messages.length, causeCode),
+        window: windowInfo,
+        ...processing,
+      });
     }
+    retryAttemptActive = false;
 
+    const text = this.renderFinalMessage(
+      period,
+      { ...outcome, historyComplete: loaded.historyComplete },
+      groupHash,
+    );
+    const summary = text.split('\n').slice(2).join('\n').trim();
+    const processing = budget.snapshot();
     this.event('COMMUNITY_DIGEST_WHATSAPP_SEND_STARTED', {
       result: 'started',
       period,
       groupHash,
       groupName,
-      itemCount: messages.length,
+      itemCount: loaded.messages.length,
       operation: 'sendMessage',
       window,
       at: now,
@@ -1052,10 +2421,10 @@ export class CommunityDigestService {
       retryAfterSeconds: null,
       retryAt: null,
       generationStage: 'finalizing',
+      tokenEstimate: outcome.tokenEstimate,
     });
     try {
-      const heading = digestHeading(period);
-      await this.client.sendMessage(groupId, `${heading}\n\n${summary}`.slice(0, 4000));
+      await this.client.sendMessage(groupId, text.slice(0, DIGEST_MAX_MESSAGE_LENGTH));
     } catch (error) {
       const causeCode = safeErrorCode(error, 'WHATSAPP_SEND_FAILED');
       const details = digestErrorDetails(error, groupId);
@@ -1064,7 +2433,7 @@ export class CommunityDigestService {
         period,
         groupHash,
         groupName,
-        itemCount: messages.length,
+        itemCount: loaded.messages.length,
         errorCode: 'SUMMARY_SEND_FAILED',
         causeCode,
         operation: 'sendMessage',
@@ -1074,21 +2443,21 @@ export class CommunityDigestService {
         window,
         at: now,
       });
-      return this.complete(
-        period,
-        groupHash,
-        window,
-        now,
-        failed(period, 'SUMMARY_SEND_FAILED', messages.length),
-      );
+      return this.complete(period, groupHash, window, now, {
+        ...failed(period, 'SUMMARY_SEND_FAILED', loaded.messages.length),
+        window: windowInfo,
+        blockCount: outcome.blockCount,
+        aiCallCount: processing.aiCallCount,
+        retryCount: processing.retryCount,
+        tokenEstimate: outcome.tokenEstimate,
+      });
     }
-
     this.event('COMMUNITY_DIGEST_WHATSAPP_SEND_SUCCEEDED', {
       result: 'sent',
       period,
       groupHash,
       groupName,
-      itemCount: messages.length,
+      itemCount: loaded.messages.length,
       operation: 'sendMessage',
       window,
       at: now,
@@ -1096,217 +2465,29 @@ export class CommunityDigestService {
     return this.complete(period, groupHash, window, now, {
       period,
       status: 'SENT',
-      messageCount: messages.length,
+      messageCount: loaded.messages.length,
       summary,
       errorCode: null,
       causeCode: null,
+      window: windowInfo,
+      historyComplete: loaded.historyComplete,
+      blockCount: outcome.blockCount,
+      aiCallCount: processing.aiCallCount,
+      retryCount: processing.retryCount,
+      tokenEstimate: outcome.tokenEstimate,
     });
-  }
-
-  private async loadMessages(groupId: string, window: DigestWindow): Promise<LoadedDigestMessages> {
-    if (this.client.fetchGroupMessageHistory === undefined) {
-      throw new GroupMessageHistoryError(
-        'CHAT_HISTORY_FAILED',
-        'fetchGroupMessageHistory',
-        new Error('CHAT_HISTORY_UNAVAILABLE'),
-      );
-    }
-    const configuration = this.configuration();
-    const history = await this.client.fetchGroupMessageHistory({
-      groupId,
-      periodStartMs: window.startMs,
-      periodEndMs: window.endMs,
-      maxMessages: configuration.maxMessages,
-    });
-    if (history.safetyLimitReached && !history.reachedPeriodStart && !history.historyExhausted) {
-      throw new GroupMessageHistoryError(
-        'CHAT_HISTORY_FAILED',
-        'verifyCompleteHistoryPeriod',
-        new Error('CHAT_HISTORY_INCOMPLETE'),
-      );
-    }
-    const messages = history.messages
-      .filter(
-        (message) =>
-          !message.fromMe &&
-          message.timestampMs >= window.startMs &&
-          message.timestampMs <= window.endMs &&
-          isTextDigestMessage(message) &&
-          digestMessageText(message) !== '',
-      )
-      .sort((left, right) => left.timestampMs - right.timestampMs);
-    return { messages, history };
-  }
-
-  private async generate(
-    period: CommunityDigestPeriod,
-    messages: RecentGroupMessage[],
-    groupHash: string,
-    runKey: string,
-    budget: DigestProcessingBudget,
-    reportProgress?: CommunityDigestProgressReporter,
-  ): Promise<string> {
-    const configuration = this.configuration();
-    // La ventana temporal ya fue aplicada al recuperar el historial. No exponemos
-    // marcas de tiempo a la IA para evitar que convierta el resumen en una cronología.
-    const contextLines = compactRepeatedContextLines(
-      messages.map(digestMessageText).filter((text) => text !== ''),
-    ).map((text) => `- ${text}`);
-    const contextLimit = Math.min(configuration.maxCharacters, DIGEST_CONTEXT_TARGET_CHARACTERS);
-    const originalChunks = packContextChunks(contextLines, contextLimit);
-    if (originalChunks.length === 0) throw codedError('AI_EMPTY_RESPONSE');
-    budget.registerBlocks(originalChunks.length);
-    reportProgress?.({
-      status: 'generating',
-      phasePercent: 35,
-      currentBlock: 0,
-      totalBlocks: originalChunks.length,
-      generationStage: 'blocks',
-      ...budget.snapshot(),
-    });
-
-    const request = async (
-      stage: string,
-      stageIndex: number,
-      systemInstruction: string,
-      question: string,
-      context: string,
-      maximumOutputTokens: number,
-    ): Promise<string> => {
-      budget.assertActive();
-      const isOriginalBlock = stage === 'map';
-      reportProgress?.({
-        status: 'generating',
-        phasePercent: isOriginalBlock
-          ? 35 + Math.round((stageIndex / Math.max(1, originalChunks.length)) * 45)
-          : 85,
-        currentBlock: isOriginalBlock ? stageIndex + 1 : null,
-        totalBlocks: originalChunks.length,
-        generationStage: isOriginalBlock ? 'blocks' : 'finalizing',
-        ...budget.snapshot(),
-      });
-      const estimatedTokens = estimateDigestTokens(
-        `${systemInstruction}\n${context}\n${question}`,
-        maximumOutputTokens,
-      );
-      let retryAttemptActive = false;
-      const flight = await this.aiQueue.run({
-        flightKey: `${this.botId}:digest:${period}:${runKey}:${groupHash}:${stage}:${stageIndex}`,
-        classifyError: (error) =>
-          error instanceof DigestProcessingBudgetError
-            ? 'AI_PERMANENT_ERROR'
-            : this.provider.classifyProviderError(error),
-        deadlineAtMs: budget.deadlineAtMs,
-        consumeRetryBudget: () => budget.consumeRetry(),
-        onRetryScheduled: (notice) =>
-          reportProgress?.(
-            retryProgress(
-              notice.code === 'AI_PROVIDER_RATE_LIMITED' ? 'waiting_provider' : 'retrying',
-              notice,
-              budget,
-            ),
-          ),
-        onRetryStarted: (notice) => {
-          retryAttemptActive = true;
-          reportProgress?.(retryProgress('retrying', notice, budget));
-        },
-        onRetrySucceeded: () => {
-          retryAttemptActive = false;
-          reportProgress?.({
-            status: 'generating',
-            retryAfterSeconds: null,
-            retryAt: null,
-            ...budget.snapshot(),
-          });
-        },
-        operation: async () => {
-          budget.beginProviderCall(estimatedTokens);
-          reportProgress?.({
-            status: retryAttemptActive ? 'retrying' : 'generating',
-            aiCallCount: budget.snapshot().aiCallCount,
-          });
-          const response = await this.provider.generateGroundedResponse({
-            systemInstruction,
-            question,
-            context,
-            maximumOutputTokens,
-            temperature: 0.1,
-            timeoutMs: budget.providerTimeoutMs(
-              this.database.getAIQueueSettings(this.botId).providerTimeoutSeconds * 1000,
-            ),
-          });
-          budget.recordUsage(response.usage.totalTokens);
-          return response.text;
-        },
-      });
-      const text = flight.value.trim();
-      if (text === '') throw codedError('AI_EMPTY_RESPONSE');
-      return text;
-    };
-
-    let finalContext = originalChunks[0] as string;
-    if (originalChunks.length > 1) {
-      let summaries: string[] = [];
-      for (const [index, chunk] of originalChunks.entries()) {
-        const mapped = await request(
-          'map',
-          index,
-          INTERMEDIATE_DIGEST_SYSTEM_INSTRUCTION,
-          'Condensa este bloque por temas, acuerdos, pendientes y posibles alertas generales. Omite saludos y repeticiones. No inventes información.',
-          chunk,
-          300,
-        );
-        summaries.push(limitIntermediateSummary(mapped));
-      }
-
-      for (let level = 0; level < DIGEST_MAX_REDUCTION_LEVELS; level += 1) {
-        const reductionChunks = packContextChunks(
-          summaries.map((summary, index) => `- Bloque ${index + 1}: ${summary}`),
-          contextLimit,
-        );
-        if (reductionChunks.length === 1) {
-          finalContext = reductionChunks[0] as string;
-          break;
-        }
-        if (level + 1 >= DIGEST_MAX_REDUCTION_LEVELS) {
-          throw codedError('CONTEXT_TOO_LARGE');
-        }
-        const reduced: string[] = [];
-        for (const [index, chunk] of reductionChunks.entries()) {
-          const mapped = await request(
-            `reduce-${level}`,
-            index,
-            INTERMEDIATE_DIGEST_SYSTEM_INSTRUCTION,
-            'Fusiona estos resúmenes parciales sin perder temas, acuerdos, pendientes ni alertas generales. Elimina duplicados y no inventes información.',
-            chunk,
-            300,
-          );
-          reduced.push(limitIntermediateSummary(mapped));
-        }
-        summaries = reduced;
-      }
-    }
-
-    const responseText = await request(
-      'final',
-      0,
-      FINAL_DIGEST_SYSTEM_INSTRUCTION,
-      digestQuestion(period),
-      finalContext,
-      400,
-    );
-    const summary = formatDigestSummary(responseText).slice(0, 2000);
-    if (summary === '') {
-      const error = new Error('AI_EMPTY_RESPONSE');
-      (error as Error & { code: string }).code = 'AI_EMPTY_RESPONSE';
-      throw error;
-    }
-    return summary;
   }
 
   private aiErrorCode(error: unknown): string {
     const explicitCode = safeErrorCode(error, 'AI_TEMPORARY_ERROR');
     if (SAFE_AI_CAUSE_CODES.has(explicitCode)) return explicitCode;
+    if (
+      ['CHAT_HISTORY_FAILED', 'GROUP_CHAT_NOT_AVAILABLE', 'WHATSAPP_NOT_CONNECTED'].includes(
+        explicitCode,
+      )
+    ) {
+      return explicitCode;
+    }
     try {
       const classified: AIProviderErrorCode = this.provider.classifyProviderError(error);
       return SAFE_AI_CAUSE_CODES.has(classified) ? classified : 'AI_TEMPORARY_ERROR';
@@ -1318,7 +2499,7 @@ export class CommunityDigestService {
   private complete(
     period: CommunityDigestPeriod,
     groupHash: string,
-    window: DigestWindow,
+    window: ManualWindow,
     at: Date,
     result: CommunityDigestResult,
   ): CommunityDigestResult {
@@ -1335,12 +2516,45 @@ export class CommunityDigestService {
     return result;
   }
 
+  private automationGroupIds(): Set<string> {
+    const nowMs = Date.now();
+    if (this.automationGroupCache !== null && nowMs - this.automationGroupCache.at < 30_000) {
+      return this.automationGroupCache.ids;
+    }
+    const ids = new Set(this.database.listAutomationGroupIds(this.botId));
+    this.automationGroupCache = { at: nowMs, ids };
+    return ids;
+  }
+
+  private scheduleState(): ScheduleState {
+    const stored = this.database.getSetting<ScheduleState | null>(this.scheduleStateKey(), null);
+    return stored !== null && typeof stored === 'object' && !Array.isArray(stored)
+      ? { ...stored }
+      : {};
+  }
+
   private configurationKey(): string {
     return `community_digest_configuration:${this.botId}`;
   }
 
-  private runStateKey(): string {
-    return `community_digest_runs:${this.botId}`;
+  private scheduleStateKey(): string {
+    return `community_digest_schedule_state:${this.botId}`;
+  }
+
+  private captureKey(): string {
+    return `community_digest_capture:${this.botId}`;
+  }
+
+  private summaryScope(job: CommunityDigestJobRecord): string {
+    return `digest-summary:${this.botId}:${job.period}:${job.periodKey}:${job.groupHash}`;
+  }
+
+  private checkpointScope(job: CommunityDigestJobRecord): string {
+    return `digest-checkpoint:${this.botId}:${job.period}:${job.periodKey}:${job.groupHash}`;
+  }
+
+  private rollupScope(groupHash: string, dayKey: string): string {
+    return `digest-rollup:${this.botId}:${groupHash}:${dayKey}`;
   }
 
   private event(eventType: string, context: DigestEventContext): void {
@@ -1369,6 +2583,11 @@ export class CommunityDigestService {
         ...(periodRange === undefined ? {} : { source: periodRange }),
         ...(context.window === undefined ? {} : { commandName: context.window.periodKey }),
         ...(local === null ? {} : { localDate: local.date, localTime: local.time }),
+        ...(context.attempt === undefined ? {} : { attempt: context.attempt }),
+        ...(context.elapsedMs === undefined ? {} : { durationMs: context.elapsedMs }),
+        ...(context.causeCode === undefined || context.causeCode === null
+          ? {}
+          : { category: context.causeCode }),
       });
     } catch (error) {
       this.logger.warn(
@@ -1403,6 +2622,10 @@ export class CommunityDigestService {
       estimatedTokenCount: context.estimatedTokenCount ?? null,
       usedTokenCount: context.usedTokenCount ?? null,
       elapsedMs: context.elapsedMs ?? null,
+      attempt: context.attempt ?? null,
+      nextAttemptAt: context.nextAttemptAt ?? null,
+      strategy: context.strategy ?? null,
+      historyComplete: context.historyComplete ?? null,
       reason: context.reason ?? null,
       errorName: context.errorName ?? null,
     };
@@ -1426,6 +2649,226 @@ export class CommunityDigestService {
     }
     this.logger.info(logContext, descriptor.message);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers internos
+// ---------------------------------------------------------------------------
+
+type ManualWindow = {
+  startMs: number;
+  endMs: number;
+  startIso: string;
+  endIso: string;
+  periodKey: string;
+};
+
+function manualWindow(period: CommunityDigestPeriod, now: Date, timezone: string): ManualWindow {
+  const rolling = rollingWindow(period, now, timezone);
+  return {
+    startMs: rolling.startMs,
+    endMs: rolling.endMs,
+    startIso: new Date(rolling.startMs).toISOString(),
+    endIso: new Date(rolling.endMs).toISOString(),
+    periodKey: rolling.periodKey,
+  };
+}
+
+function windowSummary(window: ManualWindow): {
+  startIso: string;
+  endIso: string;
+  periodKey: string;
+} {
+  return { startIso: window.startIso, endIso: window.endIso, periodKey: window.periodKey };
+}
+
+function occurrenceWindow(occurrence: DigestOccurrence): ManualWindow {
+  return {
+    startMs: occurrence.windowStartMs,
+    endMs: occurrence.windowEndMs,
+    startIso: new Date(occurrence.windowStartMs).toISOString(),
+    endIso: new Date(occurrence.windowEndMs).toISOString(),
+    periodKey: occurrence.periodKey,
+  };
+}
+
+function jobWindow(job: CommunityDigestJobRecord): ManualWindow {
+  return {
+    startMs: Date.parse(job.windowStart),
+    endMs: Date.parse(job.windowEnd),
+    startIso: job.windowStart,
+    endIso: job.windowEnd,
+    periodKey: job.periodKey,
+  };
+}
+
+/** Cierres diarios (fechas locales) que componen la ventana de un trabajo semanal o mensual. */
+function composedDayKeys(job: CommunityDigestJobRecord): string[] {
+  const startKey = localDateOf(new Date(Date.parse(job.windowStart)), job.timezone);
+  const endKey = localDateOf(new Date(Date.parse(job.windowEnd)), job.timezone);
+  const keys: string[] = [];
+  for (let key = addCalendarDays(startKey, 1); key <= endKey; key = addCalendarDays(key, 1)) {
+    keys.push(key);
+  }
+  return keys;
+}
+
+function nextOccurrenceAfter(
+  period: CommunityDigestPeriod,
+  latest: DigestOccurrence,
+  configuration: CommunityDigestConfiguration,
+): number {
+  // La siguiente ocurrencia es la más reciente evaluada desde un instante posterior a la
+  // actual pero anterior a la subsiguiente (36 h, 8 días o 45 días después).
+  const probeMs =
+    latest.scheduledAtMs +
+    (period === 'daily' ? 36 : period === 'weekly' ? 8 * 24 : 45 * 24) * 60 * 60 * 1000;
+  return latestOccurrence(period, new Date(probeMs), configuration).scheduledAtMs;
+}
+
+function summarizeJob(job: CommunityDigestJobRecord, groupName: string): CommunityDigestJobSummary {
+  return {
+    id: job.id,
+    period: job.period,
+    periodKey: job.periodKey,
+    groupKey: job.groupHash,
+    groupName,
+    status: job.status,
+    scheduledAt: job.scheduledAt,
+    windowStart: job.windowStart,
+    windowEnd: job.windowEnd,
+    attempts: job.attempts,
+    sendAttempts: job.sendAttempts,
+    lastAttemptAt: job.lastAttemptAt,
+    nextAttemptAt: job.nextAttemptAt,
+    sentAt: job.sentAt,
+    messageCount: job.messageCount,
+    historyComplete: job.historyComplete,
+    blockCount: job.blockCount,
+    aiCallCount: job.aiCallCount,
+    retryCount: job.retryCount,
+    errorCode: job.lastErrorCode,
+    causeCode: job.lastCauseCode,
+    expiresAt: job.expiresAt,
+  };
+}
+
+function summarizePeriod(
+  jobs: CommunityDigestJobSummary[],
+): CommunityDigestPeriodStatus['summary'] {
+  if (jobs.length === 0) return 'NONE';
+  const statuses = new Set(jobs.map((job) => job.status));
+  if (statuses.has('PROCESSING') || statuses.has('PENDING') || statuses.has('SEND_PENDING'))
+    return 'PENDING';
+  if (statuses.has('RETRY_WAIT') || statuses.has('SEND_RETRY_WAIT')) return 'RETRYING';
+  const sent = jobs.filter((job) => job.status === 'SENT').length;
+  const failed = jobs.filter((job) => job.status === 'FAILED_FINAL').length;
+  if (failed > 0) return sent > 0 ? 'PARTIAL' : 'FAILED';
+  if (sent > 0) return 'SENT';
+  return 'NO_ACTIVITY';
+}
+
+function anyPeriodEnabled(configuration: CommunityDigestConfiguration): boolean {
+  return (
+    configuration.daily.enabled || configuration.weekly.enabled || configuration.monthly.enabled
+  );
+}
+
+function providerTimeoutFor(estimatedTokens: number, configuredSeconds: number): number {
+  // Contextos grandes necesitan más tiempo, siempre acotado: 45 s + 1 ms por token estimado,
+  // nunca menos que el timeout configurado de la cola ni más de 3 minutos.
+  const scaled = 45_000 + Math.max(0, estimatedTokens);
+  return Math.min(180_000, Math.max(configuredSeconds * 1000, scaled));
+}
+
+/** Vista del checkpoint compartido con claves prefijadas por ámbito (día o etapa compuesta). */
+function scopedCheckpointView(checkpoint: DigestCheckpoint, scope: string): DigestCheckpoint {
+  const view: DigestCheckpoint = { version: 1, results: {} };
+  const prefix = `${scope}|`;
+  for (const [key, value] of Object.entries(checkpoint.results)) {
+    if (key.startsWith(prefix)) view.results[key.slice(prefix.length)] = value;
+  }
+  return view;
+}
+
+function mergeScopedCheckpoint(
+  checkpoint: DigestCheckpoint,
+  scope: string,
+  view: DigestCheckpoint,
+): void {
+  const prefix = `${scope}|`;
+  for (const [key, value] of Object.entries(view.results)) {
+    checkpoint.results[`${prefix}${key}`] = value;
+  }
+}
+
+/** Construye las líneas de contexto con etiquetas efímeras P1, P2… y filtra ruido evidente. */
+export function buildContextLines(messages: BufferedDigestMessage[]): {
+  lines: string[];
+  substantiveMessageCount: number;
+} {
+  const participants = new Map<string, string>();
+  const label = (token: string | null): string => {
+    if (token === null) return 'P?';
+    const existing = participants.get(token);
+    if (existing !== undefined) return existing;
+    const created = `P${participants.size + 1}`;
+    participants.set(token, created);
+    return created;
+  };
+  const entries: Array<{ key: string; line: string; count: number; participants: Set<string> }> =
+    [];
+  const index = new Map<string, number>();
+  let substantiveMessageCount = 0;
+  for (const message of [...messages].sort((left, right) => left.timestampMs - right.timestampMs)) {
+    const text = sanitizeDigestText(message.text);
+    if (text === '' || isNoiseMessage(text)) continue;
+    substantiveMessageCount += 1;
+    const participant = label(message.participantToken);
+    const key = text.toLocaleLowerCase('es-CL');
+    const existingIndex = index.get(key);
+    if (existingIndex !== undefined) {
+      const entry = entries[existingIndex] as (typeof entries)[number];
+      entry.count += 1;
+      entry.participants.add(participant);
+      continue;
+    }
+    index.set(key, entries.length);
+    entries.push({ key, line: text, count: 1, participants: new Set([participant]) });
+  }
+  const lines = entries.map((entry) => {
+    const who = [...entry.participants].slice(0, 3).join(', ');
+    const suffix =
+      entry.count > 1
+        ? ` (${entry.count} mensajes similares${entry.participants.size > 1 ? ' de distintas personas' : ''})`
+        : '';
+    return `${who}: ${entry.line}${suffix}`;
+  });
+  return { lines, substantiveMessageCount };
+}
+
+function earliestGapWithin(
+  coverage: CaptureCoverageState,
+  startMs: number,
+  endMs: number,
+  nowMs: number,
+  ready: boolean,
+): number | null {
+  if (coverage.heartbeatAt === null) return startMs;
+  const heartbeatMs = Date.parse(coverage.heartbeatAt);
+  let earliest: number | null = null;
+  const consider = (gapStart: number, gapEnd: number): void => {
+    if (gapEnd < startMs || gapStart > endMs) return;
+    const clipped = Math.max(startMs, gapStart);
+    earliest = earliest === null ? clipped : Math.min(earliest, clipped);
+  };
+  for (const gap of coverage.gaps) consider(gap.startMs, gap.endMs);
+  if (!ready || nowMs - heartbeatMs > DIGEST_CAPTURE_GAP_THRESHOLD_MS) consider(heartbeatMs, nowMs);
+  if (heartbeatMs < startMs && coverage.gaps.length === 0 && ready) {
+    // El latido es anterior al inicio de la ventana: la captura estuvo inactiva al comienzo.
+    consider(startMs, heartbeatMs + DIGEST_CAPTURE_GAP_THRESHOLD_MS);
+  }
+  return earliest;
 }
 
 function retryProgress(
@@ -1480,10 +2923,76 @@ function digestLogDescriptor(
       module: 'Resumen',
       level: 'info',
     },
-    COMMUNITY_DIGEST_SCHEDULE_TRIGGERED: {
-      message: `Programación de resumen ${label} activada`,
+    DIGEST_SCHEDULED: { message: `Resumen ${label} programado`, module: 'Resumen', level: 'info' },
+    DIGEST_RECOVERED_LATE: {
+      message: `Resumen ${label} recuperado fuera de hora`,
+      module: 'Resumen',
+      level: 'warn',
+    },
+    DIGEST_WAITING_WHATSAPP: {
+      message: `Resumen ${label} en espera de WhatsApp`,
+      module: 'WhatsApp',
+      level: 'warn',
+    },
+    DIGEST_CAPTURE_COMPLETE: {
+      message: 'Mensajes capturados durante el período',
       module: 'Resumen',
       level: 'info',
+    },
+    DIGEST_HISTORY_RECONCILED: {
+      message: 'Historial reconciliado con WhatsApp',
+      module: 'Resumen',
+      level: 'info',
+    },
+    DIGEST_COVERAGE_INCOMPLETE: {
+      message: 'El período no pudo recuperarse por completo',
+      module: 'Resumen',
+      level: 'warn',
+    },
+    DIGEST_GENERATION_STARTED: {
+      message: `Generando resumen ${label}`,
+      module: 'IA',
+      level: 'info',
+    },
+    DIGEST_MAP_COMPLETED: { message: 'Bloque analizado', module: 'IA', level: 'debug' },
+    DIGEST_REDUCE_COMPLETED: { message: 'Análisis consolidado', module: 'IA', level: 'info' },
+    DIGEST_GENERATED: { message: `Resumen ${label} generado`, module: 'IA', level: 'info' },
+    DIGEST_ROLLUP_STORED: {
+      message: 'Rollup diario anonimizado guardado',
+      module: 'Resumen',
+      level: 'info',
+    },
+    DIGEST_SEND_STARTED: {
+      message: `Enviando resumen ${label}`,
+      module: 'WhatsApp',
+      level: 'info',
+    },
+    DIGEST_SEND_RETRY: {
+      message: `Reintento de envío del resumen ${label} programado`,
+      module: 'WhatsApp',
+      level: 'warn',
+    },
+    DIGEST_SENT: {
+      message: `Resumen ${label} enviado correctamente`,
+      module: 'Resumen',
+      level: 'info',
+    },
+    DIGEST_SKIPPED: { message: `Resumen ${label} omitido`, module: 'Resumen', level: 'info' },
+    DIGEST_RETRY_SCHEDULED: {
+      message: `Reintento del resumen ${label} programado`,
+      module: 'Resumen',
+      level: 'warn',
+    },
+    DIGEST_FAILED: { message: `Resumen ${label} fallido`, module: 'Resumen', level: 'error' },
+    DIGEST_OUTPUT_SANITIZED: {
+      message: 'El texto final del resumen fue sanitizado',
+      module: 'Resumen',
+      level: 'warn',
+    },
+    DIGEST_BUFFER_PURGED: {
+      message: 'Datos temporales del resumen eliminados',
+      module: 'Resumen',
+      level: 'debug',
     },
     COMMUNITY_DIGEST_MANUAL_STARTED: {
       message: `Iniciando prueba de resumen ${label}`,
@@ -1540,16 +3049,8 @@ function digestLogDescriptor(
       module: 'Resumen',
       level: 'info',
     },
-    COMMUNITY_DIGEST_AI_STARTED: {
-      message: 'Generando resumen',
-      module: 'IA',
-      level: 'info',
-    },
-    COMMUNITY_DIGEST_AI_SUCCEEDED: {
-      message: 'Resumen generado',
-      module: 'IA',
-      level: 'info',
-    },
+    COMMUNITY_DIGEST_AI_STARTED: { message: 'Generando resumen', module: 'IA', level: 'info' },
+    COMMUNITY_DIGEST_AI_SUCCEEDED: { message: 'Resumen generado', module: 'IA', level: 'info' },
     COMMUNITY_DIGEST_AI_FAILED: {
       message: 'No fue posible generar el resumen',
       module: 'IA',
@@ -1585,20 +3086,10 @@ function digestLogDescriptor(
       module: 'Resumen',
       level: 'error',
     },
-    COMMUNITY_DIGEST_GROUP_FAILED: {
-      message: `Falló el procesamiento del resumen ${label}`,
-      module: 'Resumen',
-      level: 'error',
-    },
     COMMUNITY_DIGEST_TICK_FAILED: {
       message: 'Falló una ejecución del programador de resúmenes',
       module: 'Resumen',
       level: 'error',
-    },
-    COMMUNITY_DIGEST_GROUP_SKIPPED: {
-      message: 'Grupo omitido porque el chat no está disponible',
-      module: 'Resumen',
-      level: 'warn',
     },
     COMMUNITY_DIGEST_DUPLICATE_BLOCKED: {
       message: 'Ejecución duplicada de resumen bloqueada',
@@ -1691,10 +3182,6 @@ function normalizeProcessingBudget(
   };
 }
 
-function estimateDigestTokens(value: string, maximumOutputTokens: number): number {
-  return Math.max(1, Math.ceil(value.length / 4)) + Math.max(0, Math.trunc(maximumOutputTokens));
-}
-
 function positiveInteger(value: number | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 1
     ? Math.trunc(value)
@@ -1784,12 +3271,9 @@ function assertValidConfiguration(configuration: CommunityDigestConfiguration): 
   assertValidSchedule(configuration.daily);
   assertValidSchedule(configuration.weekly);
   assertValidSchedule(configuration.monthly);
-  if (!COMMUNITY_DIGEST_WEEKDAYS.includes(configuration.weekly.weekday)) {
+  if (!COMMUNITY_DIGEST_WEEKDAYS.includes(configuration.weekly.weekday))
     throw codedError('INVALID_WEEKDAY');
-  }
-  if (!isValidMonthDay(configuration.monthly.dayOfMonth)) {
-    throw codedError('INVALID_MONTH_DAY');
-  }
+  if (!isValidMonthDay(configuration.monthly.dayOfMonth)) throw codedError('INVALID_MONTH_DAY');
   if (
     !Number.isInteger(configuration.maxMessages) ||
     configuration.maxMessages < 20 ||
@@ -1839,146 +3323,6 @@ function isValidMonthDay(value: CommunityDigestMonthDay): boolean {
   return value === 'last' || (Number.isInteger(value) && value >= 1 && value <= 31);
 }
 
-function periodKeyForDate(period: CommunityDigestPeriod, localDate: string): string {
-  if (period === 'daily') return localDate;
-  if (period === 'weekly') return isoWeekKey(localDate);
-  return localDate.slice(0, 7);
-}
-
-function isoWeekKey(localDate: string): string {
-  const [year = 0, month = 1, day = 1] = localDate.split('-').map(Number);
-  const target = new Date(Date.UTC(year, month - 1, day));
-  const weekday = target.getUTCDay() || 7;
-  target.setUTCDate(target.getUTCDate() + 4 - weekday);
-  const isoYear = target.getUTCFullYear();
-  const yearStart = new Date(Date.UTC(isoYear, 0, 1));
-  const week = Math.ceil(((target.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
-  return `${isoYear}-W${String(week).padStart(2, '0')}`;
-}
-
-function isMonthlyScheduledDate(
-  scheduledDate: string,
-  configuredDay: CommunityDigestMonthDay,
-): boolean {
-  const [year = 0, month = 1, day = 1] = scheduledDate.split('-').map(Number);
-  const lastDay = daysInMonth(year, month);
-  const expectedDay = configuredDay === 'last' ? lastDay : Math.min(configuredDay, lastDay);
-  return day === expectedDay;
-}
-
-function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
-function digestWindow(
-  period: CommunityDigestPeriod,
-  now: Date,
-  timezone: string,
-  periodKey: string,
-): DigestWindow {
-  const endMs = now.getTime();
-  const startMs =
-    period === 'daily'
-      ? endMs - 24 * 60 * 60 * 1000
-      : period === 'weekly'
-        ? endMs - 7 * 24 * 60 * 60 * 1000
-        : previousLocalMonthInstant(now, timezone);
-  return {
-    startMs,
-    endMs,
-    startIso: new Date(startMs).toISOString(),
-    endIso: now.toISOString(),
-    periodKey,
-  };
-}
-
-function previousLocalMonthInstant(now: Date, timezone: string): number {
-  const local = localDateTimeParts(now, timezone);
-  const targetMonth = local.month === 1 ? 12 : local.month - 1;
-  const targetYear = local.month === 1 ? local.year - 1 : local.year;
-  return zonedDateTimeToInstant(
-    {
-      ...local,
-      year: targetYear,
-      month: targetMonth,
-      day: Math.min(local.day, daysInMonth(targetYear, targetMonth)),
-    },
-    timezone,
-  );
-}
-
-type CalendarDateTimeParts = {
-  year: number;
-  month: number;
-  day: number;
-  hour: number;
-  minute: number;
-  second: number;
-  millisecond: number;
-};
-
-function localDateTimeParts(date: Date, timezone: string): CalendarDateTimeParts {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date);
-  const values = new Map(parts.map((part) => [part.type, part.value]));
-  const read = (key: Intl.DateTimeFormatPartTypes): number => Number(values.get(key) ?? '0');
-  return {
-    year: read('year'),
-    month: read('month'),
-    day: read('day'),
-    hour: read('hour'),
-    minute: read('minute'),
-    second: read('second'),
-    millisecond: date.getUTCMilliseconds(),
-  };
-}
-
-function zonedDateTimeToInstant(parts: CalendarDateTimeParts, timezone: string): number {
-  const desiredAsUtc = Date.UTC(
-    parts.year,
-    parts.month - 1,
-    parts.day,
-    parts.hour,
-    parts.minute,
-    parts.second,
-    parts.millisecond,
-  );
-  let candidate = desiredAsUtc;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const actual = localDateTimeParts(new Date(candidate), timezone);
-    const actualAsUtc = Date.UTC(
-      actual.year,
-      actual.month - 1,
-      actual.day,
-      actual.hour,
-      actual.minute,
-      actual.second,
-      actual.millisecond,
-    );
-    const adjustment = desiredAsUtc - actualAsUtc;
-    if (adjustment === 0) break;
-    candidate += adjustment;
-  }
-  return candidate;
-}
-
-function hasClaimedRun(
-  value: string | DigestRunRecord | undefined,
-  periodKey: string,
-  scheduledDate: string,
-): boolean {
-  if (typeof value === 'string') return value === scheduledDate;
-  return typeof value === 'object' && value !== null && value.periodKey === periodKey;
-}
-
 function safeErrorCode(error: unknown, fallback: string): string {
   const details = serializeError(error, fallback, false);
   if (details.errorCode !== fallback) return details.errorCode;
@@ -1986,151 +3330,13 @@ function safeErrorCode(error: unknown, fallback: string): string {
   return /^[A-Z][A-Z0-9_-]{2,79}$/u.test(message) ? message : fallback;
 }
 
-function periodLabel(period: CommunityDigestPeriod): string {
+export function periodLabel(period: CommunityDigestPeriod): string {
   if (period === 'daily') return 'diario';
   if (period === 'weekly') return 'semanal';
   return 'mensual';
 }
 
-function digestHeading(period: CommunityDigestPeriod): string {
-  if (period === 'daily') return '📝 Resumen del día';
-  if (period === 'weekly') return '🗓️ Resumen semanal';
-  return '📅 Resumen mensual';
-}
-
-const DIGEST_TOPIC_EMOJIS = ['💬', '🧩', '💡', '🌱', '📌'] as const;
-
-function formatDigestSummary(value: string): string {
-  let topicIndex = 0;
-  return value
-    .replace(/\*/gu, '')
-    .split(/\r?\n/gu)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const content = line.replace(/^(?:[-•·]|\d+[.)])\s*/u, '').trim();
-      if (/^(?:🤝\s*)?Convivencia\s*:/iu.test(content)) {
-        return `🤝 ${content.replace(/^🤝\s*/u, '')}`;
-      }
-      if (/^[\p{Extended_Pictographic}\p{Emoji_Presentation}]/u.test(content)) return content;
-      const emoji = DIGEST_TOPIC_EMOJIS[topicIndex % DIGEST_TOPIC_EMOJIS.length];
-      topicIndex += 1;
-      return `${emoji} ${content}`;
-    })
-    .join(' ')
-    .replace(/\s+/gu, ' ')
-    .trim();
-}
-
-function digestMessageText(message: RecentGroupMessage): string {
-  return sanitizeDigestText(message.body);
-}
-
-function isTextDigestMessage(message: RecentGroupMessage): boolean {
-  const messageType = message.messageType?.trim().toLowerCase();
-  return messageType === undefined || messageType === '' || messageType === 'chat';
-}
-
-function sanitizeDigestText(value: string, limit = DIGEST_MESSAGE_MAX_CHARACTERS): string {
-  return value
-    .normalize('NFKC')
-    .replace(/data:[^\s<>'"]+/giu, '[contenido multimedia omitido]')
-    .replace(/blob:[^\s<>'"]+/giu, '[contenido multimedia omitido]')
-    .replace(/(?:https?|ftp):\/\/[^\s<>'"]+|\bwww\.[^\s<>'"]+/giu, '[enlace omitido]')
-    .replace(/\b[A-Za-z0-9+/=_-]{80,}\b/gu, '[contenido multimedia omitido]')
-    .replace(/\b[A-Z0-9._%+-]{2,64}@[A-Z0-9.-]+\.[A-Z]{2,24}\b/giu, '[correo omitido]')
-    .replace(/(?:\+?\d[\s().-]*){7,15}/gu, '[número omitido]')
-    .replace(
-      /[\w.-]{2,160}@(g\.us|c\.us|s\.whatsapp\.net|lid|newsletter|broadcast)/giu,
-      '[identificador omitido]',
-    )
-    .replace(
-      /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu,
-      '[identificador omitido]',
-    )
-    .replace(/[\p{Cc}\u202a-\u202e\u2066-\u2069]/gu, ' ')
-    .replace(/\s+/gu, ' ')
-    .trim()
-    .slice(0, limit);
-}
-
-function compactRepeatedContextLines(values: string[]): string[] {
-  const entries = new Map<string, { text: string; count: number }>();
-  for (const text of values) {
-    const key = text.toLocaleLowerCase('es-CL');
-    const existing = entries.get(key);
-    if (existing === undefined) entries.set(key, { text, count: 1 });
-    else existing.count += 1;
-  }
-  return [...entries.values()].map(({ text, count }) =>
-    count === 1 ? text : `${text} (${count} mensajes similares)`,
-  );
-}
-
-function packContextChunks(lines: string[], characterLimit: number): string[] {
-  const chunks: string[] = [];
-  let current: string[] = [];
-  let characterCount = 0;
-  for (const line of lines) {
-    const additionalCharacters = line.length + (current.length === 0 ? 0 : 1);
-    if (line.length > characterLimit) throw codedError('CONTEXT_TOO_LARGE');
-    if (current.length > 0 && characterCount + additionalCharacters > characterLimit) {
-      chunks.push(current.join('\n'));
-      current = [];
-      characterCount = 0;
-    }
-    current.push(line);
-    characterCount += line.length + (current.length === 1 ? 0 : 1);
-  }
-  if (current.length > 0) chunks.push(current.join('\n'));
-  return chunks;
-}
-
-function limitIntermediateSummary(value: string): string {
-  return value
-    .replace(/(?:https?|ftp):\/\/[^\s<>'"]+|\bwww\.[^\s<>'"]+/giu, '[enlace omitido]')
-    .replace(/[\p{Cc}\u202a-\u202e\u2066-\u2069]/gu, ' ')
-    .replace(/\s+/gu, ' ')
-    .trim()
-    .slice(0, DIGEST_INTERMEDIATE_MAX_CHARACTERS);
-}
-
-function digestQuestion(period: CommunityDigestPeriod): string {
-  if (period === 'daily') {
-    return 'Genera un único párrafo temático muy breve de hasta cuatro oraciones, incluida la frase de Convivencia.';
-  }
-  if (period === 'weekly') {
-    return 'Genera un único párrafo temático muy breve de hasta cinco oraciones, incluida la frase de Convivencia.';
-  }
-  return 'Genera un único párrafo temático muy breve de hasta seis oraciones, incluida la frase de Convivencia.';
-}
-
-function scheduledDateAtMinute(
-  localDate: string,
-  minuteOfDay: number,
-  sendTime: string,
-): string | null {
-  const match = /^(\d{2}):(\d{2})$/u.exec(sendTime);
-  if (match === null) return null;
-  const target = Number(match[1]) * 60 + Number(match[2]);
-  return minuteOfDay === target ? localDate : null;
-}
-
-function weekdayForCalendarDate(value: string): CommunityDigestWeekday {
-  const weekdays: CommunityDigestWeekday[] = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const weekday = weekdays[new Date(`${value}T00:00:00.000Z`).getUTCDay()];
-  if (weekday === undefined) throw new Error('INVALID_CALENDAR_DATE');
-  return weekday;
-}
-
-function isValidTimezone(value: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-CA', { timeZone: value }).format(new Date());
-    return true;
-  } catch {
-    return false;
-  }
-}
+export { periodKeyFor };
 
 function digestTestErrorMessage(errorCode: string | null): string {
   const messages: Record<string, string> = {
@@ -2151,6 +3357,7 @@ function digestTestErrorMessage(errorCode: string | null): string {
     AI_INVALID_RESPONSE: 'La IA devolvió una respuesta inválida.',
     AI_TEMPORARY_ERROR: 'La IA no pudo recuperarse de un error temporal.',
     AI_PERMANENT_ERROR: 'La IA rechazó definitivamente la solicitud.',
+    AI_NOT_CONFIGURED: 'La IA no está configurada para este asistente.',
     AI_QUEUE_FULL: 'Hay demasiadas solicitudes de IA en espera.',
     AI_QUEUE_EXPIRED: 'El resumen esperó demasiado tiempo para acceder a la IA.',
     AI_CIRCUIT_OPEN: 'La IA está temporalmente protegida por fallos recientes.',
@@ -2171,12 +3378,5 @@ function failed(
   messageCount = 0,
   causeCode: string | null = null,
 ): CommunityDigestResult {
-  return {
-    period,
-    status: 'FAILED',
-    messageCount,
-    summary: null,
-    errorCode,
-    causeCode,
-  };
+  return { period, status: 'FAILED', messageCount, summary: null, errorCode, causeCode };
 }

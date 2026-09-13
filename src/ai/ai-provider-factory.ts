@@ -95,14 +95,14 @@ class ScopedBotAIProvider implements AIProvider {
   }
 
   public async testConnection(timeoutMs?: number): Promise<AIProviderConnectionResult> {
-    const provider = this.createProvider(false);
+    const provider = this.createProvider();
     return provider.testConnection(timeoutMs);
   }
 
   public async generateGroundedResponse(
     request: GroundedResponseRequest,
   ): Promise<GroundedResponseResult> {
-    const provider = this.createProvider(true);
+    const provider = this.createProvider();
     const result = await provider.generateGroundedResponse(request);
     this.recordModelEvent('AI_MODEL_RESPONSE_SUCCEEDED');
     return result;
@@ -113,15 +113,15 @@ class ScopedBotAIProvider implements AIProvider {
   }
 
   public normalizeUsage(value: unknown) {
-    return this.createProvider(false).normalizeUsage(value);
+    return this.createProvider().normalizeUsage(value);
   }
 
   public classifyProviderError(error: unknown): AIProviderErrorCode {
-    return this.createProvider(false).classifyProviderError(error);
+    return this.createProvider().classifyProviderError(error);
   }
 
-  private createProvider(retryTransientRequests: boolean): GeminiAIProvider {
-    return new GeminiAIProvider(this.resolveApiKey(), this.clientFactory, retryTransientRequests);
+  private createProvider(): GeminiAIProvider {
+    return new GeminiAIProvider(this.resolveApiKey(), this.clientFactory);
   }
 
   private resolveApiKey(): string | undefined {

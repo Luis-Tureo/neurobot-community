@@ -16,6 +16,7 @@ import { Anonymizer } from '../src/security/anonymizer.js';
 
 const GROUP_ID = 'grupo-resumen@g.us';
 const NOW = new Date('2026-08-06T22:00:00.000Z');
+const SECRET = 'secreto-de-prueba-para-el-buffer-cifrado';
 
 type CapturedDigestLog = {
   level: string;
@@ -46,12 +47,38 @@ function createCapturedLogger(): { logger: Logger; entries: CapturedDigestLog[] 
   return { logger, entries };
 }
 
+export function analysisJson(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    topics: [
+      {
+        title: 'Actividades de la comunidad',
+        summary: 'Se conversó sobre actividades de la comunidad y cómo organizarlas.',
+        importance: 0.8,
+        kind: 'coordination',
+        hasQuestions: true,
+        hasAnswers: true,
+        messageShare: 0.6,
+      },
+    ],
+    agreements: [],
+    pending: [],
+    communitySignals: {
+      supportive: ['El grupo respondió con apoyo.'],
+      confusion: [],
+      friction: [],
+      repair: [],
+    },
+    activityLevel: 'medium',
+    ...overrides,
+  });
+}
+
 function createProvider(): AIProvider {
   return {
     isConfigured: () => true,
     testConnection: async () => ({ successful: true }),
     generateGroundedResponse: async () => ({
-      text: '• Se conversó sobre actividades de la comunidad.\n• Convivencia: sin alertas generales.',
+      text: analysisJson(),
       usage: { inputTokens: 20, outputTokens: 15, totalTokens: 35 },
     }),
     getModelInformation: () => ({ provider: 'test', model: 'test' }),
@@ -88,7 +115,7 @@ function createSubject(
     provider,
     logger,
     new Anonymizer('x'.repeat(32)),
-    { botId: 'neurobot' },
+    { botId: 'neurobot', bufferSecret: SECRET },
   );
   return { database, client, service };
 }
@@ -98,6 +125,11 @@ function createQueuedSubject(
   options: {
     maxRetries?: number;
     processingBudget?: Partial<CommunityDigestProcessingBudget>;
+    generationLimits?: {
+      singlePassMaxTokens?: number;
+      blockTargetTokens?: number;
+      maxBlocks?: number;
+    };
   } = {},
 ) {
   const database = new AppDatabase(':memory:');
@@ -134,12 +166,27 @@ function createQueuedSubject(
     {
       botId: 'neurobot',
       aiQueue: queue,
+      bufferSecret: SECRET,
       ...(options.processingBudget === undefined
         ? {}
         : { processingBudget: options.processingBudget }),
+      ...(options.generationLimits === undefined
+        ? {}
+        : { generationLimits: options.generationLimits }),
     },
   );
   return { database, client, service, waits };
+}
+
+function largeMessages(count: number, reference = NOW) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `resilient-${index}`,
+    body: `Tema ${index} ${'detalle relevante '.repeat(45)}`,
+    timestampMs: reference.getTime() - (count - index) * 1_000,
+    fromMe: false,
+    participantId: null,
+    messageType: 'chat',
+  }));
 }
 
 describe('resúmenes comunitarios', () => {
@@ -147,10 +194,11 @@ describe('resúmenes comunitarios', () => {
     const { database, client, service } = createSubject();
     try {
       const result = await service.sendManual('daily', GROUP_ID, NOW);
-      expect(result).toMatchObject({ status: 'SENT', messageCount: 1 });
+      expect(result).toMatchObject({ status: 'SENT', messageCount: 1, historyComplete: true });
       expect(client.sentMessages).toHaveLength(1);
-      expect(client.sentMessages[0]?.text).toContain('Resumen del día');
-      expect(client.sentMessages[0]?.text).toContain('Convivencia');
+      expect(client.sentMessages[0]?.text).toContain('📝 Resumen del día');
+      expect(client.sentMessages[0]?.text).toContain('🤝 Convivencia:');
+      expect(client.sentMessages[0]?.text.length).toBeLessThanOrEqual(1_000);
     } finally {
       database.close();
     }
@@ -168,6 +216,7 @@ describe('resúmenes comunitarios', () => {
           'Iniciando prueba de resumen diario',
           'Resolviendo chat del grupo',
           'Recuperando historial',
+          'Historial reconciliado con WhatsApp',
           'Historial recuperado',
           'Generando resumen',
           'Resumen generado',
@@ -186,9 +235,7 @@ describe('resúmenes comunitarios', () => {
       );
       expect(JSON.stringify(captured.entries)).not.toContain('persona@example.com');
       expect(JSON.stringify(captured.entries)).not.toContain('+56 9 1234 5678');
-      expect(JSON.stringify(captured.entries)).not.toContain(
-        'Evento seguro del resumen comunitario',
-      );
+      expect(JSON.stringify(captured.entries)).not.toContain('56911111111');
     } finally {
       database.close();
     }
@@ -200,15 +247,18 @@ describe('resúmenes comunitarios', () => {
       const history = await service.exportHistory('daily', GROUP_ID, NOW);
       expect(history).toContain('[correo omitido]');
       expect(history).toContain('[número omitido]');
+      expect(history).toContain('Historial completo: sí');
       expect(history).not.toContain('persona@example.com');
       expect(history).not.toContain('+56 9 1234 5678');
       expect(history).not.toContain('56911111111@c.us');
+      // La exportación no persiste mensajes cuando ningún resumen está activo.
+      expect(database.countCommunityDigestMessages('neurobot')).toBe(0);
     } finally {
       database.close();
     }
   });
 
-  it('filtra el resumen diario a las últimas 24 horas', async () => {
+  it('filtra la prueba diaria a la misma hora local del día anterior', async () => {
     let context = '';
     const provider: AIProvider = {
       ...createProvider(),
@@ -246,6 +296,11 @@ describe('resúmenes comunitarios', () => {
       const result = await service.sendManual('daily', GROUP_ID, NOW);
 
       expect(result).toMatchObject({ status: 'SENT', messageCount: 2 });
+      expect(result.window).toEqual({
+        startIso: '2026-08-05T22:00:00.000Z',
+        endIso: NOW.toISOString(),
+        periodKey: '2026-08-06',
+      });
       expect(context).not.toContain('Fuera de diario');
       expect(context).toContain('Dentro diario veinte');
       expect(context).toContain('Dentro diario cinco');
@@ -254,7 +309,7 @@ describe('resúmenes comunitarios', () => {
     }
   });
 
-  it('filtra el resumen semanal a los últimos siete días', async () => {
+  it('filtra la prueba semanal a los últimos siete días', async () => {
     let context = '';
     const provider: AIProvider = {
       ...createProvider(),
@@ -300,7 +355,7 @@ describe('resúmenes comunitarios', () => {
     }
   });
 
-  it('pide a la IA un resumen temático breve sin fechas ni horarios', async () => {
+  it('pide a la IA un análisis JSON por temas con etiquetas efímeras y sin fechas', async () => {
     let request: Parameters<AIProvider['generateGroundedResponse']>[0] | undefined;
     const provider: AIProvider = {
       ...createProvider(),
@@ -317,62 +372,78 @@ describe('resúmenes comunitarios', () => {
           body: 'Se conversó sobre mejorar las reglas del grupo.',
           timestampMs: NOW.getTime() - 60_000,
           fromMe: false,
-          participantId: null,
+          participantId: '56911111111@c.us',
         },
       ]);
 
       await service.sendManual('weekly', GROUP_ID, NOW);
 
       expect(request).toBeDefined();
-      expect(request?.systemInstruction).toContain(
-        'No incluyas fechas, días, horas, horarios ni marcas de tiempo',
-      );
-      expect(request?.systemInstruction).toContain('Sintetiza por temas');
-      expect(request?.systemInstruction).toContain('exactamente un solo párrafo continuo');
-      expect(request?.systemInstruction).toContain('entre tres y cinco emojis relevantes');
-      expect(request?.systemInstruction).toContain('No uses asteriscos');
-      expect(request?.question).toContain('un único párrafo temático');
-      expect(request?.context).toBe('- Se conversó sobre mejorar las reglas del grupo.');
+      expect(request?.systemInstruction).toContain('devuelves únicamente JSON válido');
+      expect(request?.systemInstruction).toContain('No incluyas fechas, horas ni marcas de tiempo');
+      expect(request?.systemInstruction).toContain('nunca incluyas nombres');
+      expect(request?.systemInstruction).toContain('neurodivergencias');
+      expect(request?.responseJsonSchema).toBeDefined();
+      expect(request?.thinkingLevel).toBe('low');
+      expect(request?.temperature).toBeUndefined();
+      expect(request?.context).toBe('P1: Se conversó sobre mejorar las reglas del grupo.');
       expect(request?.context).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
-      expect(request?.maximumOutputTokens).toBe(400);
+      expect(request?.context).not.toContain('56911111111');
     } finally {
       database.close();
     }
   });
 
-  it('elimina asteriscos y agrega emojis antes de enviar el resumen', async () => {
+  it('renderiza el formato corto para WhatsApp con emojis, acuerdo y convivencia', async () => {
     const provider: AIProvider = {
       ...createProvider(),
       generateGroundedResponse: async () => ({
-        text: [
-          '· *Bienvenida y preguntas*: Se conversó sobre el propósito del grupo.',
-          '- *Acuerdos*: Se propuso aclarar las reglas.',
-          '*Convivencia*: No se observaron alertas generales.',
-        ].join('\n'),
+        text: analysisJson({
+          topics: [
+            {
+              title: 'Bienvenida y preguntas',
+              summary: '*Se conversó* sobre el propósito del grupo y cómo participar.',
+              importance: 0.9,
+              kind: 'question',
+              hasQuestions: true,
+              hasAnswers: true,
+              messageShare: 0.5,
+            },
+            {
+              title: 'Reglas',
+              summary: 'Se propuso aclarar las reglas de convivencia del grupo.',
+              importance: 0.6,
+              kind: 'discussion',
+              hasQuestions: false,
+              hasAnswers: false,
+              messageShare: 0.3,
+            },
+          ],
+          agreements: ['Actualizar las reglas fijadas del grupo.'],
+        }),
         usage: { inputTokens: 20, outputTokens: 15, totalTokens: 35 },
       }),
     };
     const { database, client, service } = createSubject(NOW, provider);
     try {
+      client.recentGroupMessages.set(GROUP_ID, largeMessages(10));
       const result = await service.sendManual('weekly', GROUP_ID, NOW);
       const sentText = client.sentMessages[0]?.text ?? '';
 
       expect(result.status).toBe('SENT');
-      expect(result.summary).not.toContain('*');
-      expect(result.summary).not.toContain('\n');
       expect(sentText).not.toContain('*');
-      expect(sentText).toContain('💬 Bienvenida y preguntas:');
-      expect(sentText).toContain('🧩 Acuerdos:');
-      expect(sentText).toContain('🤝 Convivencia:');
-      expect(sentText).toContain(
-        '💬 Bienvenida y preguntas: Se conversó sobre el propósito del grupo. 🧩 Acuerdos:',
-      );
+      expect(sentText.startsWith('🗓️ Resumen semanal\n\n')).toBe(true);
+      expect(sentText).toContain('💬 Se conversó sobre el propósito del grupo y cómo participar.');
+      expect(sentText).toContain('🧩 Se propuso aclarar las reglas de convivencia del grupo.');
+      expect(sentText).toContain('📌 Acuerdo: Actualizar las reglas fijadas del grupo.');
+      expect(sentText).toContain('🤝 Convivencia: Ambiente respetuoso y colaborativo');
+      expect(result.summary).not.toContain('Resumen semanal');
     } finally {
       database.close();
     }
   });
 
-  it('no envía un resumen antes de la hora configurada', async () => {
+  it('no envía un resumen antes de la hora y lo envía al llegar', async () => {
     const scheduled = new Date('2026-08-06T19:00:00.000Z');
     const { database, client, service } = createSubject(scheduled);
     try {
@@ -386,6 +457,7 @@ describe('resúmenes comunitarios', () => {
 
       await service.runDueTasks(scheduled);
       expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]?.text).toContain('Resumen del día');
     } finally {
       database.close();
     }
@@ -423,7 +495,7 @@ describe('resúmenes comunitarios', () => {
     }
   });
 
-  it('ejecuta solo en el minuto configurado y deduplica ese minuto', async () => {
+  it('deduplica el período aunque el planificador se ejecute varias veces', async () => {
     const scheduled = new Date('2026-08-06T23:50:00.000Z');
     const { database, client, service } = createSubject(scheduled);
     try {
@@ -435,6 +507,7 @@ describe('resúmenes comunitarios', () => {
       await service.runDueTasks(new Date('2026-08-06T23:49:00.000Z'));
       await service.runDueTasks(scheduled);
       await service.runDueTasks(new Date('2026-08-06T23:50:30.000Z'));
+      await service.runDueTasks(new Date('2026-08-07T01:10:00.000Z'));
 
       expect(client.sentMessages).toHaveLength(1);
     } finally {
@@ -463,6 +536,8 @@ describe('resumen diario — centro de pruebas', () => {
       expect(result.messageCount).toBe(1);
       expect(result.summary).toBeTruthy();
       expect(result.errorCode).toBeNull();
+      expect(result.blockCount).toBe(1);
+      expect(result.aiCallCount).toBe(1);
       expect(client.sentMessages).toHaveLength(1);
       expect(client.sentMessages[0]?.chatId).toBe(GROUP_ID);
       expect(client.sentMessages[0]?.text).toContain('Resumen del día');
@@ -478,9 +553,6 @@ describe('resumen diario — centro de pruebas', () => {
       expect(result.status).toBe('SENT');
       expect(result.period).toBe('weekly');
       expect(result.messageCount).toBe(1);
-      expect(result.summary).toBeTruthy();
-      expect(result.errorCode).toBeNull();
-      expect(client.sentMessages).toHaveLength(1);
       expect(client.sentMessages[0]?.text).toContain('Resumen semanal');
     } finally {
       database.close();
@@ -554,93 +626,47 @@ describe('resumen diario — centro de pruebas', () => {
   });
 
   it('caso 4: IA falla no intenta enviar a WhatsApp', async () => {
-    const database = new AppDatabase(':memory:');
-    database.migrate();
-    database.saveAIQueueSettings('neurobot', {
-      ...database.getAIQueueSettings('neurobot'),
-      maxRetries: 0,
-    });
-    database.synchronizeBotGroup('neurobot', {
-      id: GROUP_ID,
-      name: 'Grupo de resumen',
-      botIsMember: true,
-    });
-    const client = new SimulatedMessagingClient();
-    client.recentGroupMessages.set(GROUP_ID, [
-      {
-        id: 'msg-1',
-        body: 'Conversación activa.',
-        timestampMs: NOW.getTime() - 60_000,
-        fromMe: false,
-        participantId: '56911111111@c.us',
-      },
-    ]);
-    const failingProvider: AIProvider = {
+    const provider: AIProvider = {
       ...createProvider(),
       generateGroundedResponse: async () => {
-        throw new Error('AI_TEMPORARY_ERROR');
+        throw new AIProviderError('AI_TIMEOUT', 'timeout interno', true);
       },
+      classifyProviderError: () => 'AI_TIMEOUT',
     };
-    const service = new CommunityDigestService(
-      database,
-      client,
-      failingProvider,
-      createLogger('silent'),
-      new Anonymizer('x'.repeat(32)),
-      { botId: 'neurobot' },
-    );
+    const { database, client, service } = createQueuedSubject(provider, { maxRetries: 0 });
     try {
+      client.recentGroupMessages.set(GROUP_ID, largeMessages(2));
       const result = await service.sendManual('daily', GROUP_ID, NOW);
-      expect(result.status).toBe('FAILED');
-      expect(result.errorCode).toBe('AI_SUMMARY_FAILED');
-      expect(result.causeCode).toBe('AI_TEMPORARY_ERROR');
+      expect(result).toMatchObject({
+        status: 'FAILED',
+        errorCode: 'AI_SUMMARY_FAILED',
+        causeCode: 'AI_TIMEOUT',
+      });
       expect(client.sentMessages).toHaveLength(0);
     } finally {
       database.close();
     }
   });
 
-  it('caso 5: IA devuelve respuesta vacía produce FAILED', async () => {
-    const database = new AppDatabase(':memory:');
-    database.migrate();
-    database.synchronizeBotGroup('neurobot', {
-      id: GROUP_ID,
-      name: 'Grupo de resumen',
-      botIsMember: true,
-    });
-    const client = new SimulatedMessagingClient();
-    client.recentGroupMessages.set(GROUP_ID, [
-      {
-        id: 'msg-1',
-        body: 'Conversación activa.',
-        timestampMs: NOW.getTime() - 60_000,
-        fromMe: false,
-        participantId: '56911111111@c.us',
-      },
-    ]);
-    const emptyProvider: AIProvider = {
-      ...createProvider(),
-      generateGroundedResponse: async () => ({
-        text: '',
-        usage: { inputTokens: 10, outputTokens: 0, totalTokens: 10 },
-      }),
-    };
-    const service = new CommunityDigestService(
-      database,
-      client,
-      emptyProvider,
-      createLogger('silent'),
-      new Anonymizer('x'.repeat(32)),
-      { botId: 'neurobot' },
-    );
-    try {
-      const result = await service.sendManual('daily', GROUP_ID, NOW);
-      expect(result.status).toBe('FAILED');
-      expect(result.errorCode).toBe('AI_SUMMARY_FAILED');
-      expect(result.causeCode).toBe('AI_EMPTY_RESPONSE');
-      expect(client.sentMessages).toHaveLength(0);
-    } finally {
-      database.close();
+  it('caso 5: IA devuelve respuesta vacía o no JSON produce FAILED sin enviar', async () => {
+    for (const text of ['', 'Esto no es JSON']) {
+      const provider: AIProvider = {
+        ...createProvider(),
+        generateGroundedResponse: async () => ({
+          text,
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        }),
+      };
+      const { database, client, service } = createQueuedSubject(provider, { maxRetries: 0 });
+      try {
+        client.recentGroupMessages.set(GROUP_ID, largeMessages(2));
+        const result = await service.sendManual('daily', GROUP_ID, NOW);
+        expect(result.status).toBe('FAILED');
+        expect(['AI_EMPTY_RESPONSE', 'AI_INVALID_RESPONSE']).toContain(result.causeCode);
+        expect(client.sentMessages).toHaveLength(0);
+      } finally {
+        database.close();
+      }
     }
   });
 
@@ -664,6 +690,7 @@ describe('resumen diario — centro de pruebas', () => {
       const result = await service.sendManual('daily', GROUP_ID, NOW);
       expect(result.status).toBe('FAILED');
       expect(result.errorCode).toBe('SUMMARY_SEND_FAILED');
+      expect(result.aiCallCount).toBe(1);
     } finally {
       database.close();
     }
@@ -693,7 +720,7 @@ describe('resumen diario — centro de pruebas', () => {
       createProvider(),
       createLogger('silent'),
       new Anonymizer('x'.repeat(32)),
-      { botId: 'neurobot' },
+      { botId: 'neurobot', bufferSecret: SECRET },
     );
     try {
       const resultA = await service.sendManual('daily', GROUP_A, NOW);
@@ -718,89 +745,64 @@ describe('resumen diario — centro de pruebas', () => {
     const client = new SimulatedMessagingClient();
     client.recentGroupMessages.set(GROUP_A, [
       {
-        id: 'a-1',
-        body: 'Mensaje exclusivo del grupo A.',
+        id: 'a',
+        body: 'Contenido exclusivo del grupo A.',
         timestampMs: NOW.getTime() - 60_000,
         fromMe: false,
         participantId: '56900000001@c.us',
       },
+    ]);
+    client.recentGroupMessages.set(GROUP_B, [
       {
-        id: 'a-2',
-        body: 'Segundo mensaje del grupo A.',
-        timestampMs: NOW.getTime() - 30_000,
+        id: 'b',
+        body: 'Contenido exclusivo del grupo B.',
+        timestampMs: NOW.getTime() - 60_000,
         fromMe: false,
         participantId: '56900000002@c.us',
       },
     ]);
-    client.recentGroupMessages.set(GROUP_B, [
-      {
-        id: 'b-1',
-        body: 'Mensaje exclusivo del grupo B.',
-        timestampMs: NOW.getTime() - 60_000,
-        fromMe: false,
-        participantId: '56900000003@c.us',
-      },
-      {
-        id: 'b-2',
-        body: 'Segundo mensaje del grupo B.',
-        timestampMs: NOW.getTime() - 30_000,
-        fromMe: false,
-        participantId: '56900000004@c.us',
-      },
-    ]);
-    let capturedContextA = '';
-    let capturedContextB = '';
-    let callCount = 0;
-    const capturingProvider: AIProvider = {
+    const contexts: string[] = [];
+    const provider: AIProvider = {
       ...createProvider(),
       generateGroundedResponse: async (request) => {
-        callCount += 1;
-        if (callCount === 1) capturedContextA = request.context;
-        else capturedContextB = request.context;
-        return {
-          text: '• Resumen de prueba.\n• Convivencia: sin alertas.',
-          usage: { inputTokens: 20, outputTokens: 15, totalTokens: 35 },
-        };
+        contexts.push(request.context);
+        return createProvider().generateGroundedResponse(request);
       },
     };
     const service = new CommunityDigestService(
       database,
       client,
-      capturingProvider,
+      provider,
       createLogger('silent'),
       new Anonymizer('x'.repeat(32)),
-      { botId: 'neurobot' },
+      { botId: 'neurobot', bufferSecret: SECRET },
     );
     try {
       await service.sendManual('daily', GROUP_A, NOW);
       await service.sendManual('daily', GROUP_B, NOW);
-      expect(capturedContextA).toContain('Mensaje exclusivo del grupo A');
-      expect(capturedContextA).toContain('Segundo mensaje del grupo A');
-      expect(capturedContextA).not.toContain('Mensaje exclusivo del grupo B');
-      expect(capturedContextA).not.toContain('Segundo mensaje del grupo B');
-      expect(capturedContextB).toContain('Mensaje exclusivo del grupo B');
-      expect(capturedContextB).toContain('Segundo mensaje del grupo B');
-      expect(capturedContextB).not.toContain('Mensaje exclusivo del grupo A');
-      expect(capturedContextB).not.toContain('Segundo mensaje del grupo A');
-      expect(client.sentMessages[0]?.chatId).toBe(GROUP_A);
-      expect(client.sentMessages[1]?.chatId).toBe(GROUP_B);
+      expect(contexts).toHaveLength(2);
+      expect(contexts[0]).toContain('exclusivo del grupo A');
+      expect(contexts[0]).not.toContain('exclusivo del grupo B');
+      expect(contexts[1]).toContain('exclusivo del grupo B');
+      expect(contexts[1]).not.toContain('exclusivo del grupo A');
+      expect(client.sentMessages.map((message) => message.chatId)).toEqual([GROUP_A, GROUP_B]);
     } finally {
       database.close();
     }
   });
 
-  it('caso 10: ejecución de prueba no consume la automatización programada', async () => {
-    const { database, client, service } = createSubject();
+  it('caso 10: la prueba manual no consume la automatización programada', async () => {
+    const scheduled = new Date('2026-08-06T19:00:00.000Z');
+    const { database, client, service } = createSubject(scheduled);
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.daily = { enabled: true, sendTime: '22:00' };
+      configuration.daily = { enabled: true, sendTime: '19:00' };
       service.saveConfiguration(configuration);
 
-      await service.sendManual('daily', GROUP_ID, NOW);
-      expect(client.sentMessages).toHaveLength(1);
+      await service.sendManual('daily', GROUP_ID, new Date('2026-08-06T19:30:00.000Z'));
+      await service.runDueTasks(scheduled);
 
-      await service.runDueTasks(NOW);
       expect(client.sentMessages).toHaveLength(2);
     } finally {
       database.close();
@@ -808,95 +810,55 @@ describe('resumen diario — centro de pruebas', () => {
   });
 
   it('caso 11: timezone clasifica correctamente mensajes en el borde del período', async () => {
-    const santiagoPeriod = new Date('2026-08-06T03:30:00.000Z');
-    const database = new AppDatabase(':memory:');
-    database.migrate();
-    database.synchronizeBotGroup('neurobot', {
-      id: GROUP_ID,
-      name: 'Grupo de resumen',
-      botIsMember: true,
-    });
-    const client = new SimulatedMessagingClient();
-    client.recentGroupMessages.set(GROUP_ID, [
-      {
-        id: 'old-message',
-        body: 'Mensaje de hace más de 24 horas.',
-        timestampMs: santiagoPeriod.getTime() - 25 * 60 * 60 * 1000,
-        fromMe: false,
-        participantId: '56911111111@c.us',
+    let context = '';
+    const provider: AIProvider = {
+      ...createProvider(),
+      generateGroundedResponse: async (request) => {
+        context = request.context;
+        return createProvider().generateGroundedResponse(request);
       },
-      {
-        id: 'recent-message',
-        body: 'Mensaje reciente dentro de las 24 horas.',
-        timestampMs: santiagoPeriod.getTime() - 60_000,
-        fromMe: false,
-        participantId: '56922222222@c.us',
-      },
-    ]);
-    const service = new CommunityDigestService(
-      database,
-      client,
-      createProvider(),
-      createLogger('silent'),
-      new Anonymizer('x'.repeat(32)),
-      { botId: 'neurobot' },
-    );
+    };
+    const now = new Date('2026-08-06T22:00:00.000Z');
+    const { database, client, service } = createSubject(now, provider);
     try {
-      const result = await service.sendManual('daily', GROUP_ID, santiagoPeriod);
-      expect(result.status).toBe('SENT');
-      expect(result.messageCount).toBe(1);
-    } finally {
-      database.close();
-    }
-  });
-
-  it('caso 3b: sin mensajes en resumen semanal devuelve SKIPPED', async () => {
-    const { database, client, service } = createSubject();
-    try {
-      client.recentGroupMessages.set(GROUP_ID, []);
-      const result = await service.sendManual('weekly', GROUP_ID, NOW);
-      expect(result.status).toBe('SKIPPED');
-      expect(result.errorCode).toBe('NO_MESSAGES_IN_PERIOD');
+      const configuration = service.configuration();
+      configuration.timezone = 'America/Santiago';
+      service.saveConfiguration(configuration);
+      client.recentGroupMessages.set(GROUP_ID, [
+        {
+          id: 'justo-antes',
+          body: 'Mensaje justo antes del inicio.',
+          timestampMs: now.getTime() - 24 * 60 * 60 * 1000 - 1,
+          fromMe: false,
+          participantId: null,
+        },
+        {
+          id: 'justo-despues',
+          body: 'Mensaje justo después del inicio.',
+          timestampMs: now.getTime() - 24 * 60 * 60 * 1000 + 1,
+          fromMe: false,
+          participantId: null,
+        },
+      ]);
+      const result = await service.sendManual('daily', GROUP_ID, now);
+      expect(result).toMatchObject({ status: 'SENT', messageCount: 1 });
+      expect(context).toContain('justo después');
+      expect(context).not.toContain('justo antes');
     } finally {
       database.close();
     }
   });
 
   it('caso 4b: IA no configurada devuelve AI_SUMMARY_FAILED sin enviar', async () => {
-    const database = new AppDatabase(':memory:');
-    database.migrate();
-    database.synchronizeBotGroup('neurobot', {
-      id: GROUP_ID,
-      name: 'Grupo de resumen',
-      botIsMember: true,
-    });
-    const client = new SimulatedMessagingClient();
-    client.recentGroupMessages.set(GROUP_ID, [
-      {
-        id: 'msg-1',
-        body: 'Conversación activa.',
-        timestampMs: NOW.getTime() - 60_000,
-        fromMe: false,
-        participantId: '56911111111@c.us',
-      },
-    ]);
-    const unconfiguredProvider: AIProvider = {
-      ...createProvider(),
-      isConfigured: () => false,
-    };
-    const service = new CommunityDigestService(
-      database,
-      client,
-      unconfiguredProvider,
-      createLogger('silent'),
-      new Anonymizer('x'.repeat(32)),
-      { botId: 'neurobot' },
-    );
+    const provider: AIProvider = { ...createProvider(), isConfigured: () => false };
+    const { database, client, service } = createSubject(NOW, provider);
     try {
       const result = await service.sendManual('daily', GROUP_ID, NOW);
-      expect(result.status).toBe('FAILED');
-      expect(result.errorCode).toBe('AI_SUMMARY_FAILED');
-      expect(result.causeCode).toBe('AI_NOT_CONFIGURED');
+      expect(result).toMatchObject({
+        status: 'FAILED',
+        errorCode: 'AI_SUMMARY_FAILED',
+        causeCode: 'AI_NOT_CONFIGURED',
+      });
       expect(client.sentMessages).toHaveLength(0);
     } finally {
       database.close();
@@ -905,7 +867,7 @@ describe('resumen diario — centro de pruebas', () => {
 });
 
 describe('sanitización y contexto grande de resúmenes', () => {
-  it('incluye todos los mensajes de texto de las últimas 24 horas aunque superen el límite antiguo', async () => {
+  it('incluye 2.500 mensajes de un día activo en una sola llamada por tokens', async () => {
     const requests: Array<Parameters<AIProvider['generateGroundedResponse']>[0]> = [];
     const provider: AIProvider = {
       ...createProvider(),
@@ -938,8 +900,8 @@ describe('sanitización y contexto grande de resúmenes', () => {
       const allContexts = requests.map((request) => request.context).join('\n');
 
       expect(requestedLimit).toBe(10_000);
-      expect(result).toMatchObject({ status: 'SENT', messageCount: 2_500 });
-      expect(requests.length).toBeGreaterThan(2);
+      expect(result).toMatchObject({ status: 'SENT', messageCount: 2_500, blockCount: 1 });
+      expect(requests).toHaveLength(1);
       expect(allContexts).toContain('Mensaje completo del día 0');
       expect(allContexts).toContain('Mensaje completo del día 1250');
       expect(allContexts).toContain('Mensaje completo del día 2499');
@@ -949,7 +911,7 @@ describe('sanitización y contexto grande de resúmenes', () => {
     }
   });
 
-  it('no genera un resumen parcial si WhatsApp no alcanzó el inicio de las 24 horas', async () => {
+  it('avisa en el resumen cuando WhatsApp no alcanzó el inicio del período', async () => {
     const generate = vi.fn(createProvider().generateGroundedResponse);
     const provider: AIProvider = { ...createProvider(), generateGroundedResponse: generate };
     const { database, client, service } = createSubject(NOW, provider);
@@ -978,19 +940,17 @@ describe('sanitización y contexto grande de resúmenes', () => {
     try {
       const result = await service.sendManual('daily', GROUP_ID, NOW);
 
-      expect(result).toMatchObject({
-        status: 'FAILED',
-        messageCount: 0,
-        errorCode: 'CHAT_HISTORY_FAILED',
-      });
-      expect(generate).not.toHaveBeenCalled();
-      expect(client.sentMessages).toHaveLength(0);
+      expect(result).toMatchObject({ status: 'SENT', messageCount: 1, historyComplete: false });
+      expect(generate).toHaveBeenCalledTimes(1);
+      expect(client.sentMessages[0]?.text).toContain(
+        'ℹ️ Este resumen cubre solo parte del período',
+      );
     } finally {
       database.close();
     }
   });
 
-  it('elimina URLs largas y compacta enlaces repetidos antes de llamar a la IA', async () => {
+  it('elimina URLs largas y compacta mensajes repetidos antes de llamar a la IA', async () => {
     const contexts: string[] = [];
     const provider: AIProvider = {
       ...createProvider(),
@@ -1001,26 +961,33 @@ describe('sanitización y contexto grande de resúmenes', () => {
     };
     const { database, client, service } = createSubject(NOW, provider);
     try {
-      client.recentGroupMessages.set(
-        GROUP_ID,
-        Array.from({ length: 80 }, (_, index) => ({
-          id: `url-${index}`,
-          body: `https://cdn.example.com/download/${'a'.repeat(500)}?token=secreto-${index}`,
-          timestampMs: NOW.getTime() - index * 1_000,
+      const link =
+        'https://ejemplo.org/ruta/muy/larga/con/token/abcdefghijklmnopqrstuvwxyz0123456789';
+      client.recentGroupMessages.set(GROUP_ID, [
+        ...Array.from({ length: 5 }, (_, index) => ({
+          id: `repetido-${index}`,
+          body: `Miren esto ${link}`,
+          timestampMs: NOW.getTime() - (10 - index) * 1_000,
           fromMe: false,
-          participantId: null,
-          messageType: 'chat',
+          participantId: `5691100000${index}@c.us`,
         })),
-      );
-
+        {
+          id: 'distinto',
+          body: 'Tema real: coordinemos la reunión del sábado.',
+          timestampMs: NOW.getTime() - 1_000,
+          fromMe: false,
+          participantId: '56911000009@c.us',
+        },
+      ]);
       const result = await service.sendManual('daily', GROUP_ID, NOW);
-
       expect(result.status).toBe('SENT');
       expect(contexts).toHaveLength(1);
-      expect(contexts[0]).toContain('[enlace omitido] (80 mensajes similares)');
-      expect(contexts[0]).not.toContain('https://');
-      expect(contexts[0]).not.toContain('token=');
-      expect(contexts[0]?.length).toBeLessThan(2_000);
+      const context = contexts[0] as string;
+      expect(context).not.toContain('ejemplo.org');
+      expect(context).toContain('[enlace omitido]');
+      expect(context).toContain('(5 mensajes similares de distintas personas)');
+      expect(context).toContain('coordinemos la reunión del sábado');
+      expect(context.split('\n')).toHaveLength(2);
     } finally {
       database.close();
     }
@@ -1029,11 +996,11 @@ describe('sanitización y contexto grande de resúmenes', () => {
   it.each(['daily', 'weekly', 'monthly'] as const)(
     'incluye solo mensajes de texto en el resumen %s y excluye todo adjunto',
     async (period) => {
-      const contexts: string[] = [];
+      let context = '';
       const provider: AIProvider = {
         ...createProvider(),
         generateGroundedResponse: async (request) => {
-          contexts.push(request.context);
+          context = request.context;
           return createProvider().generateGroundedResponse(request);
         },
       };
@@ -1041,69 +1008,37 @@ describe('sanitización y contexto grande de resúmenes', () => {
       try {
         client.recentGroupMessages.set(GROUP_ID, [
           {
-            id: 'text-message',
+            id: 'texto',
             body: 'Único mensaje de texto que debe resumirse.',
-            timestampMs: NOW.getTime() - 7_000,
+            timestampMs: NOW.getTime() - 5_000,
             fromMe: false,
             participantId: null,
             messageType: 'chat',
           },
+          ...['image', 'video', 'ptt', 'audio', 'document', 'sticker'].map(
+            (messageType, index) => ({
+              id: `adjunto-${index}`,
+              body: `Descripción del adjunto ${messageType}`,
+              timestampMs: NOW.getTime() - 4_000 + index,
+              fromMe: false,
+              participantId: null,
+              messageType,
+            }),
+          ),
           {
-            id: 'image-caption',
-            body: 'Texto secreto de la imagen que no debe resumirse.',
-            timestampMs: NOW.getTime() - 6_000,
-            fromMe: false,
-            participantId: null,
-            messageType: 'image',
-          },
-          {
-            id: 'audio-transcript',
-            body: 'Transcripción secreta del audio que no debe resumirse.',
-            timestampMs: NOW.getTime() - 5_000,
-            fromMe: false,
-            participantId: null,
-            messageType: 'audio',
-          },
-          {
-            id: 'voice-note',
-            body: 'Texto secreto de la nota de voz que no debe resumirse.',
-            timestampMs: NOW.getTime() - 4_000,
-            fromMe: false,
-            participantId: null,
-            messageType: 'ptt',
-          },
-          {
-            id: 'video-caption',
-            body: 'Texto secreto del video que no debe resumirse.',
+            id: 'propio',
+            body: 'Mensaje del propio bot que no debe contarse.',
             timestampMs: NOW.getTime() - 3_000,
-            fromMe: false,
+            fromMe: true,
             participantId: null,
-            messageType: 'video',
-          },
-          {
-            id: 'document-caption',
-            body: 'Texto secreto del documento que no debe resumirse.',
-            timestampMs: NOW.getTime() - 2_000,
-            fromMe: false,
-            participantId: null,
-            messageType: 'document',
-          },
-          {
-            id: 'sticker-body',
-            body: 'Texto secreto del sticker que no debe resumirse.',
-            timestampMs: NOW.getTime() - 1_000,
-            fromMe: false,
-            participantId: null,
-            messageType: 'sticker',
+            messageType: 'chat',
           },
         ]);
-
         const result = await service.sendManual(period, GROUP_ID, NOW);
-
         expect(result).toMatchObject({ period, status: 'SENT', messageCount: 1 });
-        expect(contexts).toHaveLength(1);
-        expect(contexts[0]).toBe('- Único mensaje de texto que debe resumirse.');
-        expect(contexts[0]).not.toMatch(/imagen|audio|nota de voz|video|documento|sticker/iu);
+        expect(context).toBe('P?: Único mensaje de texto que debe resumirse.');
+        expect(context).not.toContain('adjunto');
+        expect(context).not.toContain('propio bot');
       } finally {
         database.close();
       }
@@ -1112,47 +1047,21 @@ describe('sanitización y contexto grande de resúmenes', () => {
 
   it('omite el resumen cuando el período contiene únicamente adjuntos', async () => {
     const generate = vi.fn(createProvider().generateGroundedResponse);
-    const provider: AIProvider = {
-      ...createProvider(),
-      generateGroundedResponse: generate,
-    };
+    const provider: AIProvider = { ...createProvider(), generateGroundedResponse: generate };
     const { database, client, service } = createSubject(NOW, provider);
     try {
       client.recentGroupMessages.set(GROUP_ID, [
         {
-          id: 'image-only',
-          body: 'Descripción de una imagen.',
-          timestampMs: NOW.getTime() - 3_000,
+          id: 'solo-imagen',
+          body: 'Foto',
+          timestampMs: NOW.getTime() - 1_000,
           fromMe: false,
           participantId: null,
           messageType: 'image',
         },
-        {
-          id: 'audio-only',
-          body: 'Transcripción de un audio.',
-          timestampMs: NOW.getTime() - 2_000,
-          fromMe: false,
-          participantId: null,
-          messageType: 'audio',
-        },
-        {
-          id: 'document-only',
-          body: 'Descripción de un documento.',
-          timestampMs: NOW.getTime() - 1_000,
-          fromMe: false,
-          participantId: null,
-          messageType: 'document',
-        },
       ]);
-
-      const result = await service.sendManual('monthly', GROUP_ID, NOW);
-
-      expect(result).toMatchObject({
-        period: 'monthly',
-        status: 'SKIPPED',
-        messageCount: 0,
-        errorCode: 'NO_MESSAGES_IN_PERIOD',
-      });
+      const result = await service.sendManual('daily', GROUP_ID, NOW);
+      expect(result).toMatchObject({ status: 'SKIPPED', errorCode: 'NO_MESSAGES_IN_PERIOD' });
       expect(generate).not.toHaveBeenCalled();
       expect(client.sentMessages).toHaveLength(0);
     } finally {
@@ -1160,7 +1069,7 @@ describe('sanitización y contexto grande de resúmenes', () => {
     }
   });
 
-  it('resume todos los bloques con map-reduce cuando se supera el límite configurado', async () => {
+  it('usa map/reduce por tokens cuando el volumen supera el paso único', async () => {
     const requests: Array<Parameters<AIProvider['generateGroundedResponse']>[0]> = [];
     const provider: AIProvider = {
       ...createProvider(),
@@ -1169,11 +1078,10 @@ describe('sanitización y contexto grande de resúmenes', () => {
         return createProvider().generateGroundedResponse(request);
       },
     };
-    const { database, client, service } = createSubject(NOW, provider);
+    const { database, client, service } = createQueuedSubject(provider, {
+      generationLimits: { singlePassMaxTokens: 1_500, blockTargetTokens: 700 },
+    });
     try {
-      const configuration = service.configuration();
-      configuration.maxCharacters = 2_000;
-      service.saveConfiguration(configuration);
       client.recentGroupMessages.set(
         GROUP_ID,
         Array.from({ length: 12 }, (_, index) => ({
@@ -1189,11 +1097,16 @@ describe('sanitización y contexto grande de resúmenes', () => {
       const result = await service.sendManual('weekly', GROUP_ID, NOW);
 
       expect(result.status).toBe('SENT');
-      expect(requests.length).toBeGreaterThan(2);
-      expect(requests.every((request) => request.context.length <= 2_000)).toBe(true);
-      expect(requests.some((request) => request.context.includes('Tema único 0'))).toBe(true);
-      expect(requests.some((request) => request.context.includes('Tema único 11'))).toBe(true);
-      expect(requests.at(-1)?.question).toContain('cinco oraciones');
+      expect(result.blockCount).toBeGreaterThan(1);
+      expect(requests.length).toBe((result.blockCount as number) + 1);
+      const mapRequests = requests.slice(0, -1);
+      expect(mapRequests.every((request) => request.question.startsWith('Analiza el bloque'))).toBe(
+        true,
+      );
+      expect(requests.at(-1)?.question).toContain('Fusiona estos análisis parciales');
+      expect(mapRequests.some((request) => request.context.includes('Tema único 0'))).toBe(true);
+      expect(mapRequests.some((request) => request.context.includes('Tema único 11'))).toBe(true);
+      expect(client.sentMessages).toHaveLength(1);
     } finally {
       database.close();
     }
@@ -1235,22 +1148,11 @@ describe('sanitización y contexto grande de resúmenes', () => {
   it('devuelve CONTEXT_TOO_LARGE de forma segura si el número de bloques excede el límite', async () => {
     const generate = vi.fn(createProvider().generateGroundedResponse);
     const provider: AIProvider = { ...createProvider(), generateGroundedResponse: generate };
-    const { database, client, service } = createSubject(NOW, provider);
+    const { database, client, service } = createQueuedSubject(provider, {
+      generationLimits: { singlePassMaxTokens: 500, blockTargetTokens: 500, maxBlocks: 2 },
+    });
     try {
-      const configuration = service.configuration();
-      configuration.maxCharacters = 2_000;
-      service.saveConfiguration(configuration);
-      client.recentGroupMessages.set(
-        GROUP_ID,
-        Array.from({ length: 2_000 }, (_, index) => ({
-          id: `huge-${index}`,
-          body: `Mensaje ${index} ${Array.from({ length: 90 }, (_, word) => `contenido-${index}-${word}`).join(' ')}`,
-          timestampMs: NOW.getTime() - index,
-          fromMe: false,
-          participantId: null,
-          messageType: 'chat',
-        })),
-      );
+      client.recentGroupMessages.set(GROUP_ID, largeMessages(20));
 
       const result = await service.sendManual('monthly', GROUP_ID, NOW);
 
@@ -1260,6 +1162,7 @@ describe('sanitización y contexto grande de resúmenes', () => {
         causeCode: 'CONTEXT_TOO_LARGE',
       });
       expect(generate).not.toHaveBeenCalled();
+      expect(client.sentMessages).toHaveLength(0);
     } finally {
       database.close();
     }
@@ -1267,17 +1170,6 @@ describe('sanitización y contexto grande de resúmenes', () => {
 });
 
 describe('resiliencia del procesamiento de resúmenes', () => {
-  function largeMessages(count: number) {
-    return Array.from({ length: count }, (_, index) => ({
-      id: `resilient-${index}`,
-      body: `Tema ${index} ${'detalle relevante '.repeat(45)}`,
-      timestampMs: NOW.getTime() - (count - index) * 1_000,
-      fromMe: false,
-      participantId: null,
-      messageType: 'chat',
-    }));
-  }
-
   it('reanuda el bloque limitado sin repetir los bloques anteriores y envía una sola vez', async () => {
     const attempts = new Map<string, number>();
     const provider: AIProvider = {
@@ -1285,7 +1177,7 @@ describe('resiliencia del procesamiento de resúmenes', () => {
       classifyProviderError: (error) =>
         error instanceof AIProviderError ? error.code : 'AI_TEMPORARY_ERROR',
       generateGroundedResponse: async (request) => {
-        if (request.question.startsWith('Condensa')) {
+        if (request.question.startsWith('Analiza el bloque')) {
           const count = (attempts.get(request.context) ?? 0) + 1;
           attempts.set(request.context, count);
           if (attempts.size === 2 && count === 1) {
@@ -1296,19 +1188,14 @@ describe('resiliencia del procesamiento de resúmenes', () => {
               3,
             );
           }
-          return {
-            text: `Resumen parcial seguro ${attempts.size}.`,
-            usage: { inputTokens: 300, outputTokens: 30, totalTokens: 330 },
-          };
         }
         return createProvider().generateGroundedResponse(request);
       },
     };
-    const { database, client, service, waits } = createQueuedSubject(provider);
+    const { database, client, service, waits } = createQueuedSubject(provider, {
+      generationLimits: { singlePassMaxTokens: 1_000, blockTargetTokens: 600 },
+    });
     try {
-      const configuration = service.configuration();
-      configuration.maxCharacters = 2_000;
-      service.saveConfiguration(configuration);
       client.recentGroupMessages.set(GROUP_ID, largeMessages(8));
 
       const result = await service.sendManual('weekly', GROUP_ID, NOW);
@@ -1366,11 +1253,9 @@ describe('resiliencia del procesamiento de resúmenes', () => {
     };
     const { database, client, service } = createQueuedSubject(provider, {
       processingBudget: { maxProviderCalls: 1 },
+      generationLimits: { singlePassMaxTokens: 1_000, blockTargetTokens: 600 },
     });
     try {
-      const configuration = service.configuration();
-      configuration.maxCharacters = 2_000;
-      service.saveConfiguration(configuration);
       client.recentGroupMessages.set(GROUP_ID, largeMessages(8));
 
       const result = await service.sendManual('monthly', GROUP_ID, NOW);
@@ -1454,7 +1339,7 @@ describe('resiliencia del procesamiento de resúmenes', () => {
       classifyProviderError: (error) =>
         error instanceof AIProviderError ? error.code : 'AI_TEMPORARY_ERROR',
       generateGroundedResponse: async (request) => {
-        if (request.question.startsWith('Condensa')) {
+        if (request.question.startsWith('Analiza el bloque')) {
           const attempt = (blockAttempts.get(request.context) ?? 0) + 1;
           blockAttempts.set(request.context, attempt);
           if (blockAttempts.size === 2 && attempt <= 2) {
@@ -1465,10 +1350,6 @@ describe('resiliencia del procesamiento de resúmenes', () => {
               attempt === 1 ? 58 : 2,
             );
           }
-          return {
-            text: `Resumen parcial seguro ${blockAttempts.size}.`,
-            usage: { inputTokens: 300, outputTokens: 30, totalTokens: 330 },
-          };
         }
         return createProvider().generateGroundedResponse(request);
       },
@@ -1479,13 +1360,15 @@ describe('resiliencia del procesamiento de resúmenes', () => {
       provider,
       createLogger('silent'),
       new Anonymizer('x'.repeat(32)),
-      { botId: 'neurobot', aiQueue: queue, now: () => NOW },
+      {
+        botId: 'neurobot',
+        aiQueue: queue,
+        now: () => NOW,
+        bufferSecret: SECRET,
+        generationLimits: { singlePassMaxTokens: 1_000, blockTargetTokens: 600 },
+      },
     );
     try {
-      const configuration = service.configuration();
-      configuration.maxCharacters = 2_000;
-      service.saveConfiguration(configuration);
-
       const started = service.startManualTest('daily', [GROUP_ID]);
       const duplicate = service.startManualTest('daily', [GROUP_ID]);
       expect(started).toMatchObject({ reused: false, run: { status: 'queued', totalSends: 1 } });
@@ -1535,7 +1418,10 @@ describe('resiliencia del procesamiento de resúmenes', () => {
         completedSends: 1,
         failedSends: 0,
         progressPercent: 100,
+        historyComplete: true,
       });
+      expect(completed?.windowStart).toBe('2026-08-05T22:00:00.000Z');
+      expect(completed?.windowEnd).toBe(NOW.toISOString());
       expect(retryWaits).toEqual([58_000, 2_000]);
       expect(client.sentMessages).toHaveLength(1);
       expect(JSON.stringify(completed)).not.toContain('Detalle privado');
@@ -1573,7 +1459,7 @@ describe('resiliencia del procesamiento de resúmenes', () => {
         createProvider(),
         createLogger('silent'),
         new Anonymizer('x'.repeat(32)),
-        { botId: 'neurobot', now: () => current },
+        { botId: 'neurobot', now: () => current, bufferSecret: SECRET },
       );
       try {
         const { run } = service.startManualTest(period, [GROUP_ID]);
@@ -1582,6 +1468,7 @@ describe('resiliencia del procesamiento de resúmenes', () => {
           period,
           completedSends: 1,
           totalSends: 1,
+          windowEnd: current.toISOString(),
         });
         expect(client.sentMessages).toHaveLength(1);
       } finally {
@@ -1602,31 +1489,22 @@ describe('resiliencia del procesamiento de resúmenes', () => {
     const client = new SimulatedMessagingClient();
     client.recentGroupMessages.set(GROUP_ID, [
       {
-        id: 'mensaje-progreso',
-        body: 'Conversación con progreso observable.',
+        id: 'metricas',
+        body: 'Mensaje para medir el progreso real.',
         timestampMs: current.getTime() - 1_000,
         fromMe: false,
         participantId: null,
         messageType: 'chat',
       },
     ]);
-    let releaseHistory!: () => void;
-    let releaseAI!: () => void;
-    const historyGate = new Promise<void>((resolve) => {
-      releaseHistory = resolve;
+    let releaseGeneration!: () => void;
+    const generationGate = new Promise<void>((resolve) => {
+      releaseGeneration = resolve;
     });
-    const aiGate = new Promise<void>((resolve) => {
-      releaseAI = resolve;
-    });
-    const originalFetch = client.fetchGroupMessageHistory.bind(client);
-    client.fetchGroupMessageHistory = async (request) => {
-      await historyGate;
-      return originalFetch(request);
-    };
     const provider: AIProvider = {
       ...createProvider(),
       generateGroundedResponse: async (request) => {
-        await aiGate;
+        await generationGate;
         return createProvider().generateGroundedResponse(request);
       },
     };
@@ -1636,28 +1514,26 @@ describe('resiliencia del procesamiento de resúmenes', () => {
       provider,
       createLogger('silent'),
       new Anonymizer('x'.repeat(32)),
-      { botId: 'neurobot', now: () => current },
+      { botId: 'neurobot', now: () => current, bufferSecret: SECRET },
     );
     try {
-      const { run } = service.startManualTest('weekly', [GROUP_ID]);
-      await vi.waitFor(() =>
-        expect(service.getManualTest(run.jobId)?.status).toBe('loading_history'),
-      );
-      expect(service.getManualTest(run.jobId)?.progressPercent).toBeNull();
-
-      releaseHistory();
+      const { run } = service.startManualTest('daily', [GROUP_ID]);
       await vi.waitFor(() => expect(service.getManualTest(run.jobId)?.status).toBe('generating'));
       expect(service.getManualTest(run.jobId)).toMatchObject({
         messageCount: 1,
         totalBlocks: 1,
-        aiCallCount: 1,
+        generationStage: 'blocks',
+        historyComplete: true,
       });
-
-      releaseAI();
+      releaseGeneration();
       await vi.waitFor(() => expect(service.getManualTest(run.jobId)?.status).toBe('completed'));
+      expect(service.getManualTest(run.jobId)).toMatchObject({
+        aiCallCount: 1,
+        completedSends: 1,
+        progressPercent: 100,
+      });
     } finally {
-      releaseHistory();
-      releaseAI();
+      releaseGeneration();
       database.close();
     }
   });
@@ -1672,24 +1548,15 @@ describe('resiliencia del procesamiento de resúmenes', () => {
       botIsMember: true,
     });
     const client = new SimulatedMessagingClient();
-    client.recentGroupMessages.set(GROUP_ID, [
-      {
-        id: 'mensaje-envio',
-        body: 'Conversación lista para enviar.',
-        timestampMs: current.getTime() - 1_000,
-        fromMe: false,
-        participantId: null,
-        messageType: 'chat',
-      },
-    ]);
-    let confirmSend!: () => void;
+    client.recentGroupMessages.set(GROUP_ID, largeMessages(1, current));
+    let releaseSend!: () => void;
     const sendGate = new Promise<void>((resolve) => {
-      confirmSend = resolve;
+      releaseSend = resolve;
     });
     const originalSend = client.sendMessage.bind(client);
-    client.sendMessage = async (chatId, text) => {
+    client.sendMessage = async (chatId, text, replyTo) => {
       await sendGate;
-      await originalSend(chatId, text);
+      await originalSend(chatId, text, replyTo);
     };
     const service = new CommunityDigestService(
       database,
@@ -1697,67 +1564,53 @@ describe('resiliencia del procesamiento de resúmenes', () => {
       createProvider(),
       createLogger('silent'),
       new Anonymizer('x'.repeat(32)),
-      { botId: 'neurobot', now: () => current },
+      { botId: 'neurobot', now: () => current, bufferSecret: SECRET },
     );
     try {
       const { run } = service.startManualTest('daily', [GROUP_ID]);
       await vi.waitFor(() => expect(service.getManualTest(run.jobId)?.status).toBe('sending'));
-      expect(service.getManualTest(run.jobId)).toMatchObject({
-        completedSends: 0,
-        progressPercent: 95,
-      });
-      confirmSend();
+      expect(client.sentMessages).toHaveLength(0);
+      releaseSend();
       await vi.waitFor(() => expect(service.getManualTest(run.jobId)?.status).toBe('completed'));
       expect(client.sentMessages).toHaveLength(1);
     } finally {
-      confirmSend();
+      releaseSend();
       database.close();
     }
   });
 
   it('con varios grupos conserva éxitos parciales y termina fallido solo al concluir', async () => {
-    const GROUP_B = 'grupo-resumen-sin-mensajes@g.us';
     const current = new Date();
+    const GROUP_OK = 'grupo-ok@g.us';
+    const GROUP_FAIL = 'grupo-fail@g.us';
     const database = new AppDatabase(':memory:');
     database.migrate();
-    database.synchronizeBotGroup('neurobot', {
-      id: GROUP_ID,
-      name: 'Grupo A',
-      botIsMember: true,
-    });
-    database.synchronizeBotGroup('neurobot', {
-      id: GROUP_B,
-      name: 'Grupo B',
-      botIsMember: true,
-    });
+    database.synchronizeBotGroup('neurobot', { id: GROUP_OK, name: 'OK', botIsMember: true });
+    database.synchronizeBotGroup('neurobot', { id: GROUP_FAIL, name: 'Fail', botIsMember: true });
     const client = new SimulatedMessagingClient();
-    client.recentGroupMessages.set(GROUP_ID, [
-      {
-        id: 'mensaje-a',
-        body: 'Conversación válida del grupo A.',
-        timestampMs: current.getTime() - 1_000,
-        fromMe: false,
-        participantId: null,
-        messageType: 'chat',
-      },
-    ]);
-    client.recentGroupMessages.set(GROUP_B, []);
+    client.recentGroupMessages.set(GROUP_OK, largeMessages(1, current));
+    client.recentGroupMessages.set(GROUP_FAIL, largeMessages(1, current));
+    const originalSend = client.sendMessage.bind(client);
+    client.sendMessage = async (chatId, text, replyTo) => {
+      if (chatId === GROUP_FAIL) throw new Error('Fallo simulado');
+      await originalSend(chatId, text, replyTo);
+    };
     const service = new CommunityDigestService(
       database,
       client,
       createProvider(),
       createLogger('silent'),
       new Anonymizer('x'.repeat(32)),
-      { botId: 'neurobot', now: () => current },
+      { botId: 'neurobot', now: () => current, bufferSecret: SECRET },
     );
     try {
-      const { run } = service.startManualTest('daily', [GROUP_ID, GROUP_B]);
+      const { run } = service.startManualTest('daily', [GROUP_OK, GROUP_FAIL]);
       await vi.waitFor(() => expect(service.getManualTest(run.jobId)?.status).toBe('failed'));
       expect(service.getManualTest(run.jobId)).toMatchObject({
         totalSends: 2,
         completedSends: 1,
         failedSends: 1,
-        errorCode: 'NO_MESSAGES_IN_PERIOD',
+        errorCode: 'SUMMARY_SEND_FAILED',
       });
       expect(client.sentMessages).toHaveLength(1);
     } finally {
@@ -1767,27 +1620,25 @@ describe('resiliencia del procesamiento de resúmenes', () => {
 });
 
 describe('automatización de resúmenes diario, semanal y mensual', () => {
-  it('caso 2: ejecuta el resumen semanal únicamente en el día y hora configurados', async () => {
+  it('caso 2: ejecuta el resumen semanal en el día configurado y lo recupera si llega tarde', async () => {
     const scheduled = new Date('2026-08-09T19:00:00.000Z');
     const { database, client, service } = createSubject(scheduled);
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.weekly = {
-        enabled: true,
-        weekday: 'Sun',
-        sendTime: '19:00',
-      };
+      configuration.daily = { enabled: false, sendTime: '19:00' };
+      configuration.weekly = { enabled: true, weekday: 'Sun', sendTime: '19:00' };
       service.saveConfiguration(configuration);
 
       await service.runDueTasks(new Date('2026-08-08T19:00:00.000Z'));
       await service.runDueTasks(new Date('2026-08-09T18:59:00.000Z'));
-      await service.runDueTasks(new Date('2026-08-09T19:01:00.000Z'));
       expect(client.sentMessages).toHaveLength(0);
-      await service.runDueTasks(scheduled);
-
+      // Llega un minuto tarde: antes se perdía, ahora se recupera dentro de la ventana.
+      await service.runDueTasks(new Date('2026-08-09T19:01:00.000Z'));
       expect(client.sentMessages).toHaveLength(1);
       expect(client.sentMessages[0]?.text).toContain('Resumen semanal');
+      await service.runDueTasks(scheduled);
+      expect(client.sentMessages).toHaveLength(1);
     } finally {
       database.close();
     }
@@ -1799,14 +1650,10 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.monthly = {
-        enabled: true,
-        dayOfMonth: 'last',
-        sendTime: '19:00',
-      };
+      configuration.monthly = { enabled: true, dayOfMonth: 'last', sendTime: '19:00' };
       service.saveConfiguration(configuration);
 
-      await service.runDueTasks(new Date('2026-08-31T19:01:00.000Z'));
+      await service.runDueTasks(new Date('2026-08-30T19:00:00.000Z'));
       expect(client.sentMessages).toHaveLength(0);
       await service.runDueTasks(scheduled);
 
@@ -1824,16 +1671,8 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
       configuration.daily = { enabled: true, sendTime: '19:00' };
-      configuration.weekly = {
-        enabled: true,
-        weekday: 'Sun',
-        sendTime: '19:00',
-      };
-      configuration.monthly = {
-        enabled: true,
-        dayOfMonth: 'last',
-        sendTime: '19:00',
-      };
+      configuration.weekly = { enabled: true, weekday: 'Sun', sendTime: '19:00' };
+      configuration.monthly = { enabled: true, dayOfMonth: 'last', sendTime: '19:00' };
       service.saveConfiguration(configuration);
 
       await service.runDueTasks(scheduled);
@@ -1868,16 +1707,12 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
   });
 
   it('reactiva una frecuencia con el mismo día y hora', async () => {
-    const scheduled = new Date('2026-08-07T20:15:00.000Z');
+    const scheduled = new Date('2026-08-07T19:00:00.000Z');
     const { database, client, service } = createSubject(scheduled);
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.weekly = {
-        enabled: false,
-        weekday: 'Fri',
-        sendTime: '20:15',
-      };
+      configuration.weekly = { enabled: false, weekday: 'Fri', sendTime: '19:00' };
       service.saveConfiguration(configuration);
       const reactivated = service.configuration();
       reactivated.weekly.enabled = true;
@@ -1886,7 +1721,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
       expect(service.configuration().weekly).toEqual({
         enabled: true,
         weekday: 'Fri',
-        sendTime: '20:15',
+        sendTime: '19:00',
       });
       await service.runDueTasks(scheduled);
       expect(client.sentMessages).toHaveLength(1);
@@ -1928,10 +1763,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
       ...createProvider(),
       generateGroundedResponse: async (request) => {
         contexts.push(request.context);
-        return {
-          text: '• Resumen aislado.\n• Convivencia: sin alertas.',
-          usage: { inputTokens: 20, outputTokens: 15, totalTokens: 35 },
-        };
+        return createProvider().generateGroundedResponse(request);
       },
     };
     const service = new CommunityDigestService(
@@ -1940,7 +1772,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
       provider,
       createLogger('silent'),
       new Anonymizer('x'.repeat(32)),
-      { botId: 'neurobot' },
+      { botId: 'neurobot', bufferSecret: SECRET },
     );
     try {
       const configuration = service.configuration();
@@ -1977,55 +1809,60 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
 
       expect(generate).not.toHaveBeenCalled();
       expect(client.sentMessages).toHaveLength(0);
-      expect(database.getTechnicalEvents()).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            event_type: 'COMMUNITY_DIGEST_SKIPPED_NO_MESSAGES',
-            result: 'skipped',
-          }),
-        ]),
-      );
+      expect(
+        database
+          .getTechnicalEvents()
+          .some(
+            (event) =>
+              event.event_type === 'DIGEST_SKIPPED' && event.error_code === 'NO_MESSAGES_IN_PERIOD',
+          ),
+      ).toBe(true);
+      expect(service.status(scheduled).periods.daily.summary).toBe('NO_ACTIVITY');
     } finally {
       database.close();
     }
   });
 
-  it('caso 9: un fallo de IA en A no impide procesar B', async () => {
+  it('caso 9: un fallo definitivo de IA en A no impide procesar B', async () => {
     const scheduled = new Date('2026-08-31T19:00:00.000Z');
     const GROUP_A = 'falla-ia-a@g.us';
     const GROUP_B = 'continua-ia-b@g.us';
     const database = new AppDatabase(':memory:');
     database.migrate();
+    database.synchronizeBotGroup('neurobot', { id: GROUP_A, name: 'A', botIsMember: true });
+    database.synchronizeBotGroup('neurobot', { id: GROUP_B, name: 'B', botIsMember: true });
+    database.replaceAutomationGroupIds('neurobot', [GROUP_A, GROUP_B]);
     database.saveAIQueueSettings('neurobot', {
       ...database.getAIQueueSettings('neurobot'),
       maxRetries: 0,
     });
-    database.synchronizeBotGroup('neurobot', { id: GROUP_A, name: 'Grupo A', botIsMember: true });
-    database.synchronizeBotGroup('neurobot', { id: GROUP_B, name: 'Grupo B', botIsMember: true });
-    database.replaceAutomationGroupIds('neurobot', [GROUP_A, GROUP_B]);
     const client = new SimulatedMessagingClient();
     client.recentGroupMessages.set(GROUP_A, [
       {
         id: 'a',
-        body: 'Provocar falla IA A.',
-        timestampMs: scheduled.getTime(),
+        body: 'Contenido del grupo que falla.',
+        timestampMs: scheduled.getTime() - 60_000,
         fromMe: false,
-        participantId: '56900000003@c.us',
+        participantId: null,
       },
     ]);
     client.recentGroupMessages.set(GROUP_B, [
       {
         id: 'b',
-        body: 'Continuar con IA B.',
-        timestampMs: scheduled.getTime(),
+        body: 'Contenido del grupo que continúa.',
+        timestampMs: scheduled.getTime() - 60_000,
         fromMe: false,
-        participantId: '56900000004@c.us',
+        participantId: null,
       },
     ]);
     const provider: AIProvider = {
       ...createProvider(),
+      classifyProviderError: (error) =>
+        error instanceof AIProviderError ? error.code : 'AI_TEMPORARY_ERROR',
       generateGroundedResponse: async (request) => {
-        if (request.context.includes('falla IA A')) throw new Error('AI_TEMPORARY_ERROR');
+        if (request.context.includes('grupo que falla')) {
+          throw new AIProviderError('AI_PERMANENT_ERROR', 'rechazo definitivo', false);
+        }
         return createProvider().generateGroundedResponse(request);
       },
     };
@@ -2035,59 +1872,45 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
       provider,
       createLogger('silent'),
       new Anonymizer('x'.repeat(32)),
-      { botId: 'neurobot' },
+      { botId: 'neurobot', bufferSecret: SECRET },
     );
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
       configuration.daily = { enabled: true, sendTime: '19:00' };
       service.saveConfiguration(configuration);
+
       await service.runDueTasks(scheduled);
 
       expect(client.sentMessages.map((message) => message.chatId)).toEqual([GROUP_B]);
-      expect(database.getTechnicalEvents()).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ event_type: 'COMMUNITY_DIGEST_AI_FAILED' }),
-          expect.objectContaining({ event_type: 'COMMUNITY_DIGEST_COMPLETED' }),
-        ]),
-      );
+      const jobs = service.status(scheduled).periods.daily.jobs;
+      expect(jobs.find((job) => job.groupName === 'A')).toMatchObject({
+        status: 'FAILED_FINAL',
+        errorCode: 'AI_PERMANENT_ERROR',
+      });
+      expect(jobs.find((job) => job.groupName === 'B')).toMatchObject({ status: 'SENT' });
+      expect(service.status(scheduled).periods.daily.summary).toBe('PARTIAL');
     } finally {
       database.close();
     }
   });
 
-  it('caso 10: un fallo de WhatsApp en A no impide procesar B', async () => {
+  it('caso 10: un fallo de WhatsApp en A no impide procesar B y deja A en reintento', async () => {
     const scheduled = new Date('2026-08-31T19:00:00.000Z');
     const GROUP_A = 'falla-whatsapp-a@g.us';
     const GROUP_B = 'continua-whatsapp-b@g.us';
     const database = new AppDatabase(':memory:');
     database.migrate();
-    database.synchronizeBotGroup('neurobot', { id: GROUP_A, name: 'Grupo A', botIsMember: true });
-    database.synchronizeBotGroup('neurobot', { id: GROUP_B, name: 'Grupo B', botIsMember: true });
+    database.synchronizeBotGroup('neurobot', { id: GROUP_A, name: 'A', botIsMember: true });
+    database.synchronizeBotGroup('neurobot', { id: GROUP_B, name: 'B', botIsMember: true });
     database.replaceAutomationGroupIds('neurobot', [GROUP_A, GROUP_B]);
     const client = new SimulatedMessagingClient();
-    client.recentGroupMessages.set(GROUP_A, [
-      {
-        id: 'a',
-        body: 'Mensaje para A.',
-        timestampMs: scheduled.getTime(),
-        fromMe: false,
-        participantId: '56900000005@c.us',
-      },
-    ]);
-    client.recentGroupMessages.set(GROUP_B, [
-      {
-        id: 'b',
-        body: 'Mensaje para B.',
-        timestampMs: scheduled.getTime(),
-        fromMe: false,
-        participantId: '56900000006@c.us',
-      },
-    ]);
+    client.recentGroupMessages.set(GROUP_A, largeMessages(1, scheduled));
+    client.recentGroupMessages.set(GROUP_B, largeMessages(1, scheduled));
     const originalSend = client.sendMessage.bind(client);
-    client.sendMessage = async (chatId, text, replyToMessageId) => {
-      if (chatId === GROUP_A) throw new Error('Fallo simulado del grupo A');
-      await originalSend(chatId, text, replyToMessageId);
+    client.sendMessage = async (chatId, text, replyTo) => {
+      if (chatId === GROUP_A) throw new Error('Fallo simulado');
+      await originalSend(chatId, text, replyTo);
     };
     const service = new CommunityDigestService(
       database,
@@ -2095,31 +1918,28 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
       createProvider(),
       createLogger('silent'),
       new Anonymizer('x'.repeat(32)),
-      { botId: 'neurobot' },
+      { botId: 'neurobot', bufferSecret: SECRET },
     );
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
       configuration.daily = { enabled: true, sendTime: '19:00' };
       service.saveConfiguration(configuration);
+
       await service.runDueTasks(scheduled);
 
       expect(client.sentMessages.map((message) => message.chatId)).toEqual([GROUP_B]);
-      expect(database.getTechnicalEvents()).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            event_type: 'COMMUNITY_DIGEST_WHATSAPP_SEND_FAILED',
-            error_code: 'SUMMARY_SEND_FAILED',
-          }),
-          expect.objectContaining({ event_type: 'COMMUNITY_DIGEST_COMPLETED' }),
-        ]),
-      );
+      const jobs = service.status(scheduled).periods.daily.jobs;
+      expect(jobs.find((job) => job.groupName === 'A')).toMatchObject({
+        status: 'SEND_RETRY_WAIT',
+        errorCode: 'SUMMARY_SEND_FAILED',
+      });
     } finally {
       database.close();
     }
   });
 
-  it('caso 11: bloquea duplicados incluso después de recrear el servicio', async () => {
+  it('caso 11: no duplica el envío aunque se recree el servicio', async () => {
     const scheduled = new Date('2026-08-31T19:00:00.000Z');
     const { database, client, service } = createSubject(scheduled);
     const createRestartedService = () =>
@@ -2129,7 +1949,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
         createProvider(),
         createLogger('silent'),
         new Anonymizer('x'.repeat(32)),
-        { botId: 'neurobot' },
+        { botId: 'neurobot', bufferSecret: SECRET },
       );
     try {
       const configuration = service.configuration();
@@ -2138,13 +1958,11 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
       service.saveConfiguration(configuration);
       await Promise.all([service.runDueTasks(scheduled), service.runDueTasks(scheduled)]);
       await createRestartedService().runDueTasks(new Date('2026-08-31T19:00:30.000Z'));
+      await createRestartedService().runDueTasks(new Date('2026-08-31T20:30:00.000Z'));
 
       expect(client.sentMessages).toHaveLength(1);
-      expect(
-        database
-          .getTechnicalEvents()
-          .some((event) => event.event_type === 'COMMUNITY_DIGEST_DUPLICATE_BLOCKED'),
-      ).toBe(true);
+      expect(database.listCommunityDigestJobs('neurobot')).toHaveLength(1);
+      expect(database.listCommunityDigestJobs('neurobot')[0]?.status).toBe('SENT');
     } finally {
       database.close();
     }
@@ -2171,7 +1989,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
         createProvider(),
         createLogger('silent'),
         new Anonymizer('x'.repeat(32)),
-        { botId: 'neurobot' },
+        { botId: 'neurobot', bufferSecret: SECRET },
       );
 
     const first = new AppDatabase(path);
@@ -2230,11 +2048,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.monthly = {
-        enabled: true,
-        dayOfMonth: 'last',
-        sendTime: '19:00',
-      };
+      configuration.monthly = { enabled: true, dayOfMonth: 'last', sendTime: '19:00' };
       service.saveConfiguration(configuration);
       await service.runDueTasks(new Date(scheduled.getTime() - 24 * 60 * 60 * 1000));
       await service.runDueTasks(scheduled);
@@ -2250,11 +2064,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.monthly = {
-        enabled: true,
-        dayOfMonth: 'last',
-        sendTime: '19:00',
-      };
+      configuration.monthly = { enabled: true, dayOfMonth: 'last', sendTime: '19:00' };
       service.saveConfiguration(configuration);
       await service.runDueTasks(new Date('2028-02-28T19:00:00.000Z'));
       await service.runDueTasks(scheduled);
@@ -2270,11 +2080,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     try {
       const configuration = service.configuration();
       configuration.timezone = 'UTC';
-      configuration.monthly = {
-        enabled: true,
-        dayOfMonth: 31,
-        sendTime: '19:00',
-      };
+      configuration.monthly = { enabled: true, dayOfMonth: 31, sendTime: '19:00' };
       service.saveConfiguration(configuration);
       await service.runDueTasks(scheduled);
       expect(client.sentMessages).toHaveLength(1);
@@ -2292,8 +2098,17 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
       configuration.daily = { enabled: true, sendTime: '19:00' };
       service.saveConfiguration(configuration);
       await service.runDueTasks(new Date('2026-08-31T22:59:00.000Z'));
+      expect(client.sentMessages).toHaveLength(0);
       await service.runDueTasks(scheduled);
       expect(client.sentMessages).toHaveLength(1);
+      const job = database
+        .listCommunityDigestJobs('neurobot')
+        .find((candidate) => candidate.status === 'SENT');
+      expect(job).toMatchObject({
+        windowStart: '2026-08-30T23:00:00.000Z',
+        windowEnd: '2026-08-31T23:00:00.000Z',
+        periodKey: '2026-08-31',
+      });
     } finally {
       database.close();
     }
@@ -2314,32 +2129,29 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     );
     const configuration = firstService.configuration();
     configuration.timezone = 'UTC';
-    configuration.daily = { enabled: true, sendTime: '20:01' };
-    configuration.weekly = {
-      enabled: true,
-      weekday: 'Fri',
-      sendTime: '20:02',
-    };
-    configuration.monthly = {
-      enabled: true,
-      dayOfMonth: 15,
-      sendTime: '20:03',
-    };
+    configuration.daily = { enabled: true, sendTime: '08:15' };
+    configuration.weekly = { enabled: true, weekday: 'Wed', sendTime: '09:30' };
+    configuration.monthly = { enabled: true, dayOfMonth: 15, sendTime: '10:45' };
     firstService.saveConfiguration(configuration);
     first.close();
 
     const second = new AppDatabase(path);
     second.migrate();
-    const secondService = new CommunityDigestService(
-      second,
-      new SimulatedMessagingClient(),
-      createProvider(),
-      createLogger('silent'),
-      new Anonymizer('x'.repeat(32)),
-      { botId: 'neurobot' },
-    );
     try {
-      expect(secondService.configuration()).toEqual(configuration);
+      const secondService = new CommunityDigestService(
+        second,
+        new SimulatedMessagingClient(),
+        createProvider(),
+        createLogger('silent'),
+        new Anonymizer('x'.repeat(32)),
+        { botId: 'neurobot' },
+      );
+      expect(secondService.configuration()).toMatchObject({
+        timezone: 'UTC',
+        daily: { enabled: true, sendTime: '08:15' },
+        weekly: { enabled: true, weekday: 'Wed', sendTime: '09:30' },
+        monthly: { enabled: true, dayOfMonth: 15, sendTime: '10:45' },
+      });
     } finally {
       second.close();
       rmSync(directory, { recursive: true, force: true });
@@ -2351,34 +2163,16 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     try {
       database.setSetting('community_digest_configuration:neurobot', {
         timezone: 'UTC',
-        daily: { enabled: true, sendTime: '21:00', toleranceMinutes: 0 },
-        weekly: {
-          enabled: true,
-          weekday: 'Sun',
-          sendTime: '14:00',
-          toleranceMinutes: 5,
-        },
-        monthly: {
-          enabled: true,
-          dayOfMonth: 'last',
-          sendTime: '21:00',
-          toleranceMinutes: 5,
-        },
+        daily: { enabled: true, sendTime: '19:00', toleranceMinutes: 30 },
+        weekly: { enabled: false, weekday: 'Sun', sendTime: '19:00', toleranceMinutes: 30 },
+        monthly: { enabled: false, dayOfMonth: 'last', sendTime: '19:00', toleranceMinutes: 30 },
         maxMessages: 500,
         maxCharacters: 24_000,
       });
-
       const configuration = service.configuration();
-
-      expect(configuration).toMatchObject({
-        daily: { enabled: true, sendTime: '21:00' },
-        weekly: { enabled: true, weekday: 'Sun', sendTime: '14:00' },
-        monthly: { enabled: true, dayOfMonth: 'last', sendTime: '21:00' },
-        maxMessages: 10_000,
-      });
-      expect(configuration.daily).not.toHaveProperty('toleranceMinutes');
-      expect(configuration.weekly).not.toHaveProperty('toleranceMinutes');
-      expect(configuration.monthly).not.toHaveProperty('toleranceMinutes');
+      expect(configuration.daily).toEqual({ enabled: true, sendTime: '19:00' });
+      expect(JSON.stringify(configuration)).not.toContain('toleranceMinutes');
+      expect(configuration.maxMessages).toBe(10_000);
     } finally {
       database.close();
     }
@@ -2395,7 +2189,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     }
   });
 
-  it('calcula el período mensual como un mes calendario móvil en la zona configurada', async () => {
+  it('calcula el período mensual manual como un mes calendario móvil en la zona configurada', async () => {
     const scheduled = new Date('2026-03-31T19:00:00.000Z');
     const { database, client, service } = createSubject(scheduled);
     try {
@@ -2404,24 +2198,23 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
       service.saveConfiguration(configuration);
       client.recentGroupMessages.set(GROUP_ID, [
         {
-          id: 'outside',
-          body: 'Fuera del mes calendario móvil.',
-          timestampMs: new Date('2026-02-28T18:59:59.000Z').getTime(),
+          id: 'inside',
+          body: 'Dentro del mes.',
+          timestampMs: Date.parse('2026-03-01T00:00:00.000Z'),
           fromMe: false,
-          participantId: '56900000007@c.us',
+          participantId: null,
         },
         {
-          id: 'inside',
-          body: 'Dentro del mes calendario móvil.',
-          timestampMs: new Date('2026-02-28T19:00:01.000Z').getTime(),
+          id: 'outside',
+          body: 'Fuera del mes.',
+          timestampMs: Date.parse('2026-02-27T12:00:00.000Z'),
           fromMe: false,
-          participantId: '56900000008@c.us',
+          participantId: null,
         },
       ]);
-
       const result = await service.sendManual('monthly', GROUP_ID, scheduled);
-
       expect(result).toMatchObject({ status: 'SENT', messageCount: 1 });
+      expect(result.window?.startIso).toBe('2026-02-28T19:00:00.000Z');
     } finally {
       database.close();
     }
@@ -2431,7 +2224,7 @@ describe('automatización de resúmenes diario, semanal y mensual', () => {
     const { database, service } = createSubject();
     try {
       const configuration = service.configuration();
-      configuration.monthly.dayOfMonth = 32;
+      configuration.monthly = { enabled: true, dayOfMonth: 32, sendTime: '19:00' };
       expect(() => service.saveConfiguration(configuration)).toThrow('INVALID_MONTH_DAY');
     } finally {
       database.close();

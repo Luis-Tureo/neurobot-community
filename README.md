@@ -9,6 +9,8 @@ Documentación operativa:
 - [Papelera y eliminación segura](docs/ELIMINAR_ASISTENTES.md)
 - [Módulos por tipo de asistente](docs/MODULOS_POR_TIPO_DE_ASISTENTE.md)
 - [Deprecación de identidad y Moderación con IA](docs/REQUERIMIENTO_30.md)
+- [Resúmenes comunitarios durables](docs/RESUMENES_COMUNITARIOS.md)
+- [Sesión de WhatsApp en Azure: persistencia, reconexión y cierre](docs/SESION_WHATSAPP_AZURE.md)
 
 Aplicación local para crear, vincular y administrar varios asistentes de WhatsApp independientes desde la pantalla **Mis asistentes**. La instalación conserva a **Neurobot** como primer asistente y permite agregar asistentes de comunidad, negocio o uso mixto.
 

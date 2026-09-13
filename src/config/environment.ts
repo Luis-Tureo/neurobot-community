@@ -35,6 +35,7 @@ const environmentSchema = z.object({
   MAX_MESSAGE_LENGTH: z.coerce.number().int().min(100).max(10_000).default(2000),
   MAX_RECONNECT_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(8),
   MAX_RECONNECT_DELAY_SECONDS: z.coerce.number().int().min(5).max(3600).default(300),
+  SHUTDOWN_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(600).default(90),
   DEVELOPMENT_MODE: z
     .enum(['true', 'false'])
     .default('false')
@@ -58,6 +59,7 @@ export type Environment = {
   maxMessageLength: number;
   maxReconnectAttempts: number;
   maxReconnectDelayMs: number;
+  shutdownTimeoutMs: number;
   developmentMode: boolean;
   chromeExecutablePath?: string;
   aiProvider: 'gemini' | 'disabled';
@@ -107,6 +109,7 @@ export function loadEnvironment(
     maxMessageLength: value.MAX_MESSAGE_LENGTH,
     maxReconnectAttempts: value.MAX_RECONNECT_ATTEMPTS,
     maxReconnectDelayMs: value.MAX_RECONNECT_DELAY_SECONDS * 1000,
+    shutdownTimeoutMs: value.SHUTDOWN_TIMEOUT_SECONDS * 1000,
     developmentMode: value.DEVELOPMENT_MODE,
     aiProvider: value.AI_PROVIDER,
     ...(value.GEMINI_API_KEY === undefined ? {} : { geminiApiKey: value.GEMINI_API_KEY }),

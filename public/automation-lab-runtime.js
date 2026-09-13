@@ -655,8 +655,21 @@ function digestStatusTitle(run) {
 
 function digestStatusDetails(run, networkWarning) {
   const details = [];
+  if (run.windowStart && run.windowEnd) {
+    details.push(
+      `Período analizado: ${formatDigestInstant(run.windowStart)} → ${formatDigestInstant(run.windowEnd)}.`,
+    );
+  }
   if (run.messageCount > 0 && run.status !== 'loading_history') {
-    details.push(`${run.messageCount.toLocaleString('es-CL')} mensajes recuperados.`);
+    details.push(
+      `${run.messageCount.toLocaleString('es-CL')} mensajes encontrados${
+        run.historyComplete === false
+          ? ' (historial incompleto)'
+          : run.historyComplete === true
+            ? ' (historial completo)'
+            : ''
+      }.`,
+    );
   }
   if (
     run.status === 'generating' &&
@@ -677,10 +690,32 @@ function digestStatusDetails(run, networkWarning) {
       `${run.retryCount} reintento${run.retryCount === 1 ? '' : 's'} realizado${run.retryCount === 1 ? '' : 's'}.`,
     );
   }
+  if (!activeDigestStatuses.has(run.status)) {
+    const technical = [];
+    if (Number.isInteger(run.totalBlocks) && run.totalBlocks > 0) {
+      technical.push(`${run.totalBlocks} bloque${run.totalBlocks === 1 ? '' : 's'}`);
+    }
+    if (Number.isInteger(run.aiCallCount)) {
+      technical.push(`${run.aiCallCount} llamada${run.aiCallCount === 1 ? '' : 's'} a la IA`);
+    }
+    if (Number.isInteger(run.retryCount)) {
+      technical.push(`${run.retryCount} reintento${run.retryCount === 1 ? '' : 's'}`);
+    }
+    if (Number.isInteger(run.tokenEstimate) && run.tokenEstimate > 0) {
+      technical.push(`~${run.tokenEstimate.toLocaleString('es-CL')} tokens estimados`);
+    }
+    if (technical.length > 0) details.push(`${technical.join(' · ')}.`);
+  }
   details.push(`${run.completedSends} de ${run.totalSends} envíos completados`);
   if (run.status === 'failed' && run.errorMessage) details.push(run.errorMessage);
   if (networkWarning) details.push(networkWarning);
   return details;
+}
+
+function formatDigestInstant(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' });
 }
 
 function refreshDigestClock(tracker) {

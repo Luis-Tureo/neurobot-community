@@ -35,13 +35,24 @@ export type AIRateLimitDiagnostic = {
   tokenReset: string | null;
 };
 
+/** Niveles de razonamiento admitidos por Gemini 3.8 Flash (`minimal` no está soportado). */
+export type AIThinkingLevel = 'low' | 'medium' | 'high';
+
 export type GroundedResponseRequest = {
   systemInstruction: string;
   question: string;
   context: string;
   maximumOutputTokens: number;
-  temperature: number;
+  /**
+   * Temperatura de muestreo. Gemini 3 recomienda conservar el valor predeterminado (1.0);
+   * cuando se omite no se envía ningún valor al proveedor.
+   */
+  temperature?: number;
   timeoutMs: number;
+  /** Nivel de razonamiento. Si se omite, el proveedor usa `low` para reducir latencia y tokens. */
+  thinkingLevel?: AIThinkingLevel;
+  /** Esquema JSON para salida estructurada (`application/json`). */
+  responseJsonSchema?: Record<string, unknown>;
 };
 
 export type GroundedResponseResult = {
@@ -71,4 +82,16 @@ export class AIProviderError extends Error {
     super(message);
     this.name = 'AIProviderError';
   }
+}
+
+/** Códigos que admiten un reintento posterior (misma solicitud lógica). */
+export const RETRYABLE_AI_ERROR_CODES: ReadonlySet<AIProviderErrorCode> = new Set([
+  'AI_TIMEOUT',
+  'AI_NETWORK_ERROR',
+  'AI_PROVIDER_RATE_LIMITED',
+  'AI_TEMPORARY_ERROR',
+]);
+
+export function isRetryableAIErrorCode(code: string): boolean {
+  return RETRYABLE_AI_ERROR_CODES.has(code as AIProviderErrorCode);
 }

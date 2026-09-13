@@ -709,7 +709,25 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       .send({ error: statusCode >= 500 ? 'Error interno.' : details.errorMessage });
   });
 
-  app.get('/api/health', async () => ({ ok: true }));
+  app.get('/api/health', async () => {
+    // Salud HTTP (para Azure) separada del estado real de WhatsApp: el proceso puede estar vivo
+    // con la sesión desconectada. Solo agregados, sin identificadores ni datos privados.
+    const snapshots = context.multiBotManager?.snapshots() ?? [];
+    const runtimes = snapshots
+      .filter(({ bot }) => bot.enabled && bot.connectorType === 'WHATSAPP_WEB')
+      .map(({ runtime }) => runtime?.connection ?? null);
+    return {
+      ok: true,
+      whatsapp: {
+        total: runtimes.length,
+        ready: runtimes.filter((connection) => connection?.ready === true).length,
+        authenticated: runtimes.filter((connection) => connection?.authenticated === true).length,
+        linkRequired: runtimes.filter((connection) => connection?.linkRequired === true).length,
+        reconnecting: runtimes.filter((connection) => connection?.reconnectScheduled === true)
+          .length,
+      },
+    };
+  });
 
   app.post(
     '/api/panel-events',
@@ -778,6 +796,21 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
           maskedNumber: bot.maskedNumber,
           phoneNumber: adminPhoneNumberFor(context, bot.id),
           whatsappStatus: runtime?.connection.state ?? bot.whatsappStatus,
+          whatsapp:
+            runtime === null
+              ? null
+              : {
+                  state: runtime.connection.state,
+                  authenticated: runtime.connection.authenticated,
+                  ready: runtime.connection.ready,
+                  linkRequired: runtime.connection.linkRequired,
+                  lastConnectedAt: runtime.connection.lastConnectedAt,
+                  lastDisconnectedAt: runtime.connection.lastDisconnectedAt,
+                  lastDisconnectReason: runtime.connection.lastDisconnectReason,
+                  lastDisconnectCategory: runtime.connection.lastDisconnectCategory,
+                  reconnectAttempt: runtime.connection.reconnectAttempt,
+                  reconnectScheduled: runtime.connection.reconnectScheduled,
+                },
           aiConfigured: provider?.isConfigured() ?? false,
           aiEnabled: aiSettings.enabled,
           activeGroups: context.database

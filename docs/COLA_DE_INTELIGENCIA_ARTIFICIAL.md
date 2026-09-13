@@ -1,6 +1,6 @@
 # Cola de inteligencia artificial
 
-Cada asistente dispone de una cola independiente para impedir que varias consultas simultáneas saturen Gemini. Las respuestas locales, preguntas frecuentes, caché, conocimiento directo y mensajes de seguridad se resuelven antes de la cola y no consumen su capacidad.
+Cada asistente dispone de una cola independiente para impedir que varias consultas simultáneas saturen Gemini. La cola es la **única autoridad de reintentos**: ni el SDK (`retryOptions.attempts = 1`) ni el proveedor reintentan por su cuenta. Las respuestas locales, preguntas frecuentes, caché, conocimiento directo y mensajes de seguridad se resuelven antes de la cola y no consumen su capacidad.
 
 ## Configuración recomendada
 

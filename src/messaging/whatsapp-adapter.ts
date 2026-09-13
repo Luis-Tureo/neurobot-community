@@ -45,6 +45,9 @@ const DEFAULT_GROUP_ADMINISTRATOR_CACHE_TTL_MS = 5 * 60_000;
 const DEFAULT_GROUP_ADMINISTRATOR_STALE_TTL_MS = 15 * 60_000;
 const DEFAULT_GROUP_ADMINISTRATOR_TIMEOUT_MS = 3_000;
 const DEFAULT_GROUP_ADMINISTRATOR_RETRY_COOLDOWN_MS = 30_000;
+const DEFAULT_LIVENESS_CHECK_INTERVAL_MS = 60_000;
+const DEFAULT_LIVENESS_CHECK_TIMEOUT_MS = 15_000;
+const DEFAULT_LIVENESS_FAILURE_THRESHOLD = 2;
 let nextClientGeneration = 0;
 
 type GroupAdministratorCacheEntry = {
@@ -385,6 +388,10 @@ export type WhatsAppAdapterOptions = {
   groupAdministratorStaleTtlMs?: number;
   groupAdministratorTimeoutMs?: number;
   groupAdministratorRetryCooldownMs?: number;
+  /** Vigilancia del navegador: whatsapp-web.js no informa cuando Chromium muere o se cuelga. */
+  livenessCheckIntervalMs?: number;
+  livenessCheckTimeoutMs?: number;
+  livenessFailureThreshold?: number;
 };
 
 type ClientFactory = () => WhatsAppClient;
@@ -430,6 +437,10 @@ export class WhatsAppWebAdapter implements MessagingClient {
   private readonly groupAdministratorRetryAt = new Map<string, number>();
   private readonly groupAdministratorVersions = new Map<string, number>();
   private botIdentityResolution: Promise<void> = Promise.resolve();
+  private livenessTimer: ReturnType<typeof setInterval> | null = null;
+  private livenessFailures = 0;
+  private livenessCheckActive = false;
+  private disconnectEmitted = false;
 
   public constructor(
     private readonly options: WhatsAppAdapterOptions,
@@ -1126,12 +1137,16 @@ export class WhatsAppWebAdapter implements MessagingClient {
       this.ready = false;
       this.botIdentifiers.clear();
       this.botIdentityResolution = Promise.resolve();
+      this.disconnectEmitted = false;
+      this.livenessFailures = 0;
     }
     const operationGeneration = this.generation;
     this.registerHandlers(client, operationGeneration);
     try {
       await client.initialize();
       if (this.isCurrent(client, operationGeneration)) {
+        this.watchBrowser(client, operationGeneration);
+        this.startLivenessWatchdog(client, operationGeneration);
         await this.detectRuntimeVersions(client, operationGeneration);
       }
     } catch (error) {
@@ -1140,9 +1155,93 @@ export class WhatsAppWebAdapter implements MessagingClient {
     }
   }
 
+  /**
+   * whatsapp-web.js no escucha `browser.disconnected`: si Chromium muere (OOM, crash) el
+   * cliente quedaría "ready" para siempre. Aquí se detecta y se informa como desconexión
+   * transitoria para que la máquina de conexión reinicie el cliente.
+   */
+  private watchBrowser(client: WhatsAppClient, generation: number): void {
+    const browser = client.pupBrowser;
+    if (browser === undefined || typeof browser.on !== 'function') return;
+    browser.on('disconnected', () => {
+      this.handleBrowserGone(client, generation, 'BROWSER_DISCONNECTED');
+    });
+  }
+
+  private startLivenessWatchdog(client: WhatsAppClient, generation: number): void {
+    this.stopLivenessWatchdog();
+    const intervalMs = positiveDuration(
+      this.options.livenessCheckIntervalMs,
+      DEFAULT_LIVENESS_CHECK_INTERVAL_MS,
+    );
+    const timeoutMs = positiveDuration(
+      this.options.livenessCheckTimeoutMs,
+      DEFAULT_LIVENESS_CHECK_TIMEOUT_MS,
+    );
+    const threshold = positiveDuration(
+      this.options.livenessFailureThreshold,
+      DEFAULT_LIVENESS_FAILURE_THRESHOLD,
+    );
+    this.livenessTimer = setInterval(() => {
+      void this.checkLiveness(client, generation, timeoutMs, threshold);
+    }, intervalMs);
+    this.livenessTimer.unref?.();
+  }
+
+  private stopLivenessWatchdog(): void {
+    if (this.livenessTimer !== null) clearInterval(this.livenessTimer);
+    this.livenessTimer = null;
+    this.livenessCheckActive = false;
+  }
+
+  private async checkLiveness(
+    client: WhatsAppClient,
+    generation: number,
+    timeoutMs: number,
+    threshold: number,
+  ): Promise<void> {
+    if (!this.ready || !this.isCurrent(client, generation) || this.livenessCheckActive) return;
+    this.livenessCheckActive = true;
+    try {
+      const browserConnected = client.pupBrowser?.isConnected?.();
+      if (browserConnected === false) throw codedAdapterError('BROWSER_DISCONNECTED');
+      await withTimeout(client.getState(), timeoutMs, 'LIVENESS_CHECK_TIMEOUT');
+      this.livenessFailures = 0;
+    } catch (error) {
+      this.livenessFailures += 1;
+      this.logger.warn(
+        {
+          ...serializeError(error, 'LIVENESS_CHECK_FAILED', false),
+          operation: 'whatsappLivenessCheck',
+          clientGeneration: generation,
+          consecutiveFailures: this.livenessFailures,
+          threshold,
+        },
+        'WhatsApp Web no respondió a la comprobación de vida',
+      );
+      if (this.livenessFailures >= threshold) {
+        this.handleBrowserGone(client, generation, 'BROWSER_UNRESPONSIVE');
+      }
+    } finally {
+      this.livenessCheckActive = false;
+    }
+  }
+
+  private handleBrowserGone(client: WhatsAppClient, generation: number, reason: string): void {
+    if (!this.isCurrent(client, generation) || this.disconnectEmitted) return;
+    this.disconnectEmitted = true;
+    this.ready = false;
+    this.stopLivenessWatchdog();
+    this.logger.error(
+      { errorCode: reason, operation: 'WHATSAPP_BROWSER_LOST', clientGeneration: generation },
+      'Chromium dejó de responder; se informará una desconexión transitoria',
+    );
+    this.events?.onStateChange('disconnected', reason);
+  }
   private async destroyOnce(): Promise<void> {
     const initialization = this.initialization;
     if (initialization !== null) await initialization.catch(() => undefined);
+    this.stopLivenessWatchdog();
     const client = this.client;
     this.generation = allocateClientGeneration();
     this.client = null;
@@ -1319,6 +1418,8 @@ export class WhatsAppWebAdapter implements MessagingClient {
     client.on('disconnected', (reason: string) => {
       if (!this.isCurrent(client, generation)) return;
       this.ready = false;
+      this.disconnectEmitted = true;
+      this.stopLivenessWatchdog();
       this.events?.onStateChange('disconnected', reason);
       this.logger.warn(
         {

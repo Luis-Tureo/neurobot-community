@@ -344,6 +344,30 @@
     opacity: 0.58;
   }
 
+  .digest-schedule-status {
+    @apply mt-3 grid gap-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-700;
+  }
+
+  .digest-schedule-status.is-sent {
+    @apply border-emerald-200 bg-emerald-50/70 text-emerald-950;
+  }
+
+  .digest-schedule-status.is-pending {
+    @apply border-indigo-200 bg-indigo-50/60 text-indigo-950;
+  }
+
+  .digest-schedule-status.is-failed {
+    @apply border-red-200 bg-red-50/70 text-red-950;
+  }
+
+  .digest-schedule-status-title {
+    @apply text-sm font-bold leading-snug;
+  }
+
+  .digest-schedule-status-group {
+    @apply mt-1 border-t border-slate-200/70 pt-1;
+  }
+
   #automatic-messages-form {
     @apply grid gap-4;
   }

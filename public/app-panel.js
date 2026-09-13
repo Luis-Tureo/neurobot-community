@@ -749,6 +749,7 @@ async function loadAutomaticMessages() {
   );
   automaticMessagesForm.elements.digest_monthly_time.value = digestConfiguration.monthly.sendTime;
   updateDigestControlStates();
+  renderDigestScheduleStatus(digestResult.status);
 
   const deliveries = document.querySelector('#automatic-deliveries');
   deliveries.replaceChildren();
@@ -927,6 +928,101 @@ function updateDigestControlStates() {
   }
 }
 
+const digestScheduleSummaryLabels = {
+  SENT: 'Enviado',
+  PENDING: 'Pendiente',
+  RETRYING: 'Reintentando',
+  FAILED: 'Falló',
+  PARTIAL: 'Enviado parcialmente',
+  NO_ACTIVITY: 'Sin actividad',
+  NONE: 'Sin ejecuciones todavía',
+};
+
+const digestJobStatusLabels = {
+  PENDING: 'pendiente',
+  PROCESSING: 'procesando',
+  RETRY_WAIT: 'esperando reintento',
+  SEND_PENDING: 'generado, pendiente de envío',
+  SEND_RETRY_WAIT: 'reintentando envío',
+  SENT: 'enviado',
+  SKIPPED: 'sin actividad',
+  FAILED_FINAL: 'falló',
+};
+
+function formatDigestInstant(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function renderDigestScheduleStatus(status) {
+  for (const frequency of ['daily', 'weekly', 'monthly']) {
+    const container = document.querySelector(`[data-digest-status="${frequency}"]`);
+    if (!container) continue;
+    const period = status?.periods?.[frequency];
+    container.replaceChildren();
+    if (!period || !period.enabled) {
+      container.hidden = true;
+      container.className = 'digest-schedule-status';
+      continue;
+    }
+    container.hidden = false;
+    const summary = period.summary || 'NONE';
+    const tone =
+      summary === 'SENT'
+        ? 'is-sent'
+        : summary === 'FAILED' || summary === 'PARTIAL'
+          ? 'is-failed'
+          : summary === 'PENDING' || summary === 'RETRYING'
+            ? 'is-pending'
+            : '';
+    container.className = `digest-schedule-status ${tone}`.trim();
+    const title = document.createElement('p');
+    title.className = 'digest-schedule-status-title';
+    title.textContent = `Último resumen: ${digestScheduleSummaryLabels[summary] || summary}`;
+    container.append(title);
+    const lines = [
+      `Hora programada: ${period.sendTime} · Próximo: ${formatDigestInstant(period.nextScheduledAt)}`,
+      `Último envío correcto: ${formatDigestInstant(period.lastSentAt)}`,
+    ];
+    if (status?.whatsappReady === false) lines.push('WhatsApp no está conectado ahora.');
+    for (const text of lines) {
+      const line = document.createElement('p');
+      line.textContent = text;
+      container.append(line);
+    }
+    for (const job of period.jobs || []) {
+      const block = document.createElement('div');
+      block.className = 'digest-schedule-status-group';
+      const details = [
+        `${job.groupName}: ${digestJobStatusLabels[job.status] || job.status}`,
+        `Programado ${formatDigestInstant(job.scheduledAt)} · Último intento ${formatDigestInstant(job.lastAttemptAt)}`,
+      ];
+      if (job.nextAttemptAt && ['RETRY_WAIT', 'SEND_RETRY_WAIT'].includes(job.status)) {
+        details.push(`Próximo intento ${formatDigestInstant(job.nextAttemptAt)}`);
+      }
+      if (Number.isInteger(job.messageCount)) {
+        details.push(
+          `Mensajes analizados: ${job.messageCount.toLocaleString('es-CL')}${
+            job.historyComplete === false ? ' (historial incompleto)' : ''
+          }`,
+        );
+      }
+      if (job.sentAt) details.push(`Enviado ${formatDigestInstant(job.sentAt)}`);
+      if (job.errorCode && job.status !== 'SENT' && job.errorCode !== 'NO_MESSAGES_IN_PERIOD') {
+        details.push(`Error: ${job.errorCode}${job.causeCode ? ` (${job.causeCode})` : ''}`);
+      }
+      for (const text of details) {
+        const line = document.createElement('p');
+        line.textContent = text;
+        block.append(line);
+      }
+      container.append(block);
+    }
+  }
+}
+
 function renderAutomationGroupSelector() {
   const options = document.querySelector('#automation-group-options');
   const chips = document.querySelector('#automation-group-chips');
@@ -1066,9 +1162,7 @@ automaticMessagesForm.addEventListener('submit', async (event) => {
         method: 'PATCH',
         body: JSON.stringify({
           enabled:
-            pollConfiguration !== undefined
-              ? pollConfiguration.enabled
-              : weeklySchedule.length > 0,
+            pollConfiguration !== undefined ? pollConfiguration.enabled : weeklySchedule.length > 0,
           sendTime: pollConfiguration?.sendTime || '13:00',
           timezone: state.selectedBotTimezone,
           toleranceMinutes: pollConfiguration?.toleranceMinutes ?? 30,
@@ -1333,7 +1427,16 @@ function renderWeeklyPollSchedule(schedule, templates) {
         [...list.querySelectorAll('[data-weekly-time]')].map((input) => input.value),
       );
       let defaultTime = '13:00';
-      const fallbackTimes = ['09:00', '13:00', '16:00', '19:00', '21:00', '10:00', '14:00', '18:00'];
+      const fallbackTimes = [
+        '09:00',
+        '13:00',
+        '16:00',
+        '19:00',
+        '21:00',
+        '10:00',
+        '14:00',
+        '18:00',
+      ];
       for (const t of fallbackTimes) {
         if (!existingTimes.has(t)) {
           defaultTime = t;
@@ -1508,8 +1611,8 @@ function collectWeeklyPollSchedule() {
         }
         seenTimes.add(sendTime);
 
-        const templateIds = [...row.querySelectorAll('[data-weekly-template]:checked')].map((input) =>
-          Number(input.value),
+        const templateIds = [...row.querySelectorAll('[data-weekly-template]:checked')].map(
+          (input) => Number(input.value),
         );
         if (templateIds.length === 0) {
           throw new Error(

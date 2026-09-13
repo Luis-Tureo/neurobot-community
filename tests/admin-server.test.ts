@@ -270,6 +270,111 @@ describe('API administrativa', () => {
     }
   });
 
+  it('expone el estado durable de los resúmenes y la salud de WhatsApp sin datos privados', async () => {
+    const groupId = 'grupo-estado@g.us';
+    database.synchronizeBotGroup('neurobot', {
+      id: groupId,
+      name: 'Grupo de estado',
+      botIsMember: true,
+    });
+    client.recentGroupMessages.set(groupId, [
+      {
+        id: 'estado-1',
+        body: 'Coordinemos la reunión del sábado en la plaza.',
+        timestampMs: Date.parse('2026-08-06T18:00:00.000Z'),
+        fromMe: false,
+        participantId: '56911111111@c.us',
+        messageType: 'chat',
+      },
+    ]);
+    const provider: AIProvider = {
+      isConfigured: () => true,
+      testConnection: async () => ({ successful: true }),
+      generateGroundedResponse: async () => ({
+        text: JSON.stringify({
+          topics: [
+            {
+              title: 'Reunión',
+              summary: 'Se coordinó la reunión del sábado.',
+              importance: 0.9,
+              kind: 'coordination',
+              hasQuestions: false,
+              hasAnswers: false,
+              messageShare: 1,
+            },
+          ],
+          agreements: [],
+          pending: [],
+          communitySignals: { supportive: [], confusion: [], friction: [], repair: [] },
+          activityLevel: 'low',
+        }),
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      }),
+      getModelInformation: () => ({ provider: 'test', model: 'test' }),
+      normalizeUsage: () => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
+      classifyProviderError: () => 'AI_TEMPORARY_ERROR',
+    };
+    const service = new CommunityDigestService(
+      database,
+      client,
+      provider,
+      createLogger('silent'),
+      new Anonymizer('x'.repeat(32)),
+      { botId: 'neurobot', bufferSecret: 'secreto-de-pruebas-del-panel-digest' },
+    );
+    registerCommunityDigestService('neurobot', service);
+    try {
+      const configuration = service.configuration();
+      configuration.timezone = 'UTC';
+      configuration.daily = { enabled: true, sendTime: '19:00' };
+      service.saveConfiguration(configuration);
+      await service.runDueTasks(new Date('2026-08-06T19:00:00.000Z'));
+
+      const auth = await login(app);
+      const status = await app.inject({
+        method: 'GET',
+        url: '/api/automatic-messages/digests/status',
+        headers: { cookie: auth.cookie },
+      });
+      expect(status.statusCode).toBe(200);
+      expect(status.json().status.periods.daily).toMatchObject({
+        enabled: true,
+        sendTime: '19:00',
+        summary: 'SENT',
+      });
+      expect(status.json().jobs[0]).toMatchObject({
+        groupName: 'Grupo de estado',
+        status: 'SENT',
+        messageCount: 1,
+        historyComplete: true,
+      });
+      expect(status.body).not.toContain(groupId);
+      expect(status.body).not.toContain('56911111111');
+      expect(status.body).not.toContain('plaza');
+
+      const overview = await app.inject({
+        method: 'GET',
+        url: '/api/automatic-messages/digests',
+        headers: { cookie: auth.cookie },
+      });
+      expect(overview.json().status.periods.daily.summary).toBe('SENT');
+      expect(overview.json().privacy).toMatchObject({
+        rawMessagesStored: false,
+        temporaryEncryptedBuffer: true,
+        bufferRetentionHours: 72,
+      });
+
+      const health = await app.inject({ method: 'GET', url: '/api/health' });
+      expect(health.statusCode).toBe(200);
+      expect(health.json()).toMatchObject({
+        ok: true,
+        whatsapp: { total: 0, ready: 0, authenticated: 0, linkRequired: 0, reconnecting: 0 },
+      });
+    } finally {
+      unregisterCommunityDigestService('neurobot', service);
+    }
+  });
+
   it('detecta, autoriza y desautoriza grupos mediante identificadores anónimos', async () => {
     client.groups = [
       {

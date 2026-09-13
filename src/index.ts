@@ -79,6 +79,9 @@ async function main(): Promise<void> {
       maxReconnectDelayMs: environment.maxReconnectDelayMs,
       developmentMode: environment.developmentMode,
       mediaRoot: resolve(environment.dataRoot, 'data', 'media'),
+      // El buffer temporal de resúmenes se cifra con APP_ENCRYPTION_KEY cuando existe; si no,
+      // con una clave derivada (HKDF) del secreto de anonimización obligatorio.
+      digestBufferSecret: environment.appEncryptionKey ?? environment.anonymizationSecret,
       ...(environment.chromeExecutablePath === undefined
         ? {}
         : { chromeExecutablePath: environment.chromeExecutablePath }),
@@ -148,11 +151,43 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     if (closing) return;
     closing = true;
-    logger.info({ signal }, 'Cierre controlado iniciado');
-    await server.close();
-    await multiBotManager.stopAll();
-    database.close();
-    logger.info('Aplicación cerrada correctamente');
+    const startedAt = Date.now();
+    logger.info(
+      { signal, shutdownDeadlineMs: environment.shutdownTimeoutMs },
+      'Cierre controlado iniciado',
+    );
+    // Azure envía SIGTERM y, transcurrido WEBSITES_CONTAINER_STOP_TIME_LIMIT, SIGKILL. Chromium
+    // debe cerrar el perfil LocalAuth antes de ese límite; si algo se cuelga, salimos igual
+    // para no quedar a merced del SIGKILL con el perfil a medio escribir.
+    const deadline = setTimeout(() => {
+      logger.error(
+        { signal, elapsedMs: Date.now() - startedAt },
+        'El cierre controlado excedió el tiempo máximo; se fuerza la salida del proceso',
+      );
+      process.exit(1);
+    }, environment.shutdownTimeoutMs);
+    deadline.unref();
+    try {
+      await server.close();
+      await multiBotManager.stopAll();
+      database.close();
+      logger.info(
+        { signal, elapsedMs: Date.now() - startedAt },
+        'Aplicación cerrada correctamente',
+      );
+    } catch (error) {
+      logger.error(
+        {
+          signal,
+          elapsedMs: Date.now() - startedAt,
+          ...serializeError(error, 'SHUTDOWN_FAILED', false),
+        },
+        'El cierre controlado terminó con errores',
+      );
+      process.exitCode = 1;
+    } finally {
+      clearTimeout(deadline);
+    }
   };
   process.once('SIGINT', () => void shutdown('SIGINT'));
   process.once('SIGTERM', () => void shutdown('SIGTERM'));

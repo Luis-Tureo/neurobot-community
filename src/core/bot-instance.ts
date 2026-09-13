@@ -42,10 +42,17 @@ export class BotInstance extends BaseBotInstance {
       ? new CommunityDigestService(database, client, provider, logger, anonymizer, {
           botId: bot.id,
           aiQueue: this.aiRequestQueue(),
+          ...(options.digestBufferSecret === undefined
+            ? {}
+            : { bufferSecret: options.digestBufferSecret }),
         })
       : null;
     if (this.communityDigest !== null) {
       registerCommunityDigestService(bot.id, this.communityDigest);
+      const digest = this.communityDigest;
+      this.incomingMessageObserver = (message) => {
+        digest.captureIncomingMessage(message);
+      };
     }
   }
 

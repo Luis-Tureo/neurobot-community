@@ -32,6 +32,10 @@ export type CommunityDigestTestRun = {
   retryAt: string | null;
   progressPercent: number | null;
   generationStage: 'blocks' | 'finalizing' | null;
+  windowStart: string | null;
+  windowEnd: string | null;
+  historyComplete: boolean | null;
+  tokenEstimate: number | null;
   errorCode: string | null;
   errorMessage: string | null;
   startedAt: string;
@@ -95,6 +99,10 @@ export class CommunityDigestTestRunStore {
       retryAt: null,
       progressPercent: 5,
       generationStage: null,
+      windowStart: null,
+      windowEnd: null,
+      historyComplete: null,
+      tokenEstimate: null,
       errorCode: null,
       errorMessage: null,
       startedAt,
@@ -203,5 +211,12 @@ function isTestRun(value: unknown): value is CommunityDigestTestRun {
 }
 
 function cloneRun(run: CommunityDigestTestRun): CommunityDigestTestRun {
-  return { ...run, groupHashes: [...run.groupHashes] };
+  return {
+    ...run,
+    groupHashes: [...run.groupHashes],
+    windowStart: run.windowStart ?? null,
+    windowEnd: run.windowEnd ?? null,
+    historyComplete: run.historyComplete ?? null,
+    tokenEstimate: run.tokenEstimate ?? null,
+  };
 }
