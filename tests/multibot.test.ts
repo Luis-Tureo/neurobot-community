@@ -219,6 +219,9 @@ describe('aislamiento multibot', () => {
       timezone: 'America/Santiago',
       anchorLocalDate: '2026-01-05',
       activatedAt: '2026-01-05T14:00:00.000Z',
+      quietHoursEnabled: false,
+      quietHoursStart: '23:00',
+      quietHoursEnd: '08:00',
     });
     firstPolls.insert({
       question: 'Pregunta exclusiva del primer asistente',

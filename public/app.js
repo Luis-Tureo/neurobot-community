@@ -74,57 +74,40 @@ async function fetchSession() {
   return payload;
 }
 
+const POLL_FORM_ID = 'poll-automation-form';
+
+/**
+ * Salvaguarda del marcado de Automatizaciones. El HTML ya es válido (no hay <form> anidado): los
+ * controles de "Programación semanal de encuestas" viven dentro del formulario general pero
+ * pertenecen, mediante el atributo form=, al formulario propietario #poll-automation-form. Esta
+ * función solo garantiza esa asociación aunque el navegador reorganice el árbol (p. ej. si algún
+ * día volviera a anidarse un formulario) y evita que "Guardar configuración" dispare el submit de
+ * #automatic-messages-form.
+ */
 function repairAutomaticMessagesMarkup() {
   const section = document.querySelector('#section-automatic-messages');
   const automaticForm = document.querySelector('#automatic-messages-form');
-  const pollCard = section?.querySelector('.poll-weekly-schedule');
   if (!(section instanceof HTMLElement) || !(automaticForm instanceof HTMLFormElement)) return;
 
-  let pollPanel = section.querySelector('#poll-automation-form');
-  if (!(pollPanel instanceof HTMLElement) && pollCard instanceof HTMLElement) {
-    const fields = pollCard.querySelector('.poll-automation-fields');
-    const actions = pollCard.querySelector('.actions');
-    const support = pollCard.querySelector('#poll-automation-support');
-    const status = pollCard.querySelector('#poll-automation-status');
-    if (fields && actions && support) {
-      pollPanel = document.createElement('div');
-      pollPanel.id = 'poll-automation-form';
-      pollPanel.className = 'poll-automation-form';
-      if (status) pollCard.insertBefore(pollPanel, status);
-      else pollCard.append(pollPanel);
-      pollPanel.append(fields, actions, support);
-    }
+  let pollForm = document.querySelector(`#${POLL_FORM_ID}`);
+  if (!(pollForm instanceof HTMLFormElement)) {
+    // Marcado antiguo en caché: se crea el formulario propietario fuera del formulario general.
+    pollForm = document.createElement('form');
+    pollForm.id = POLL_FORM_ID;
+    pollForm.className = 'poll-automation-owner';
+    pollForm.noValidate = true;
+    automaticForm.insertAdjacentElement('afterend', pollForm);
   }
 
-  if (pollPanel instanceof HTMLElement && !(pollPanel instanceof HTMLFormElement)) {
-    const startTime = pollPanel.querySelector('[name="poll_start_time"]');
-    const intervalHours = pollPanel.querySelector('[name="poll_interval_hours"]');
-    if (startTime instanceof HTMLInputElement && intervalHours instanceof HTMLSelectElement) {
-      Object.defineProperty(pollPanel, 'elements', {
-        configurable: true,
-        value: {
-          poll_start_time: startTime,
-          poll_interval_hours: intervalHours,
-        },
-      });
-    }
+  const pollPanel = section.querySelector('[data-poll-automation-panel], .poll-automation-form');
+  if (pollPanel instanceof HTMLElement && pollPanel !== pollForm) {
     pollPanel.querySelectorAll('input, select, textarea, button').forEach((control) => {
-      control.setAttribute('form', 'poll-automation-detached');
+      if (control.getAttribute('form') !== POLL_FORM_ID) control.setAttribute('form', POLL_FORM_ID);
     });
-    const saveButton = pollPanel.querySelector('#save-poll-automation');
-    if (saveButton instanceof HTMLButtonElement) {
-      saveButton.type = 'button';
-      if (saveButton.dataset.pollSubmitShim !== 'true') {
-        saveButton.dataset.pollSubmitShim = 'true';
-        saveButton.addEventListener('click', (event) => {
-          event.preventDefault();
-          pollPanel.dispatchEvent(new Event('submit', { cancelable: true }));
-        });
-      }
-    }
   }
 
   section.querySelectorAll('input, select, textarea, button').forEach((control) => {
+    if (control.getAttribute('form') === POLL_FORM_ID) return;
     if (pollPanel instanceof HTMLElement && pollPanel.contains(control)) return;
     control.setAttribute('form', 'automatic-messages-form');
   });

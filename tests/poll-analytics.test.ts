@@ -41,6 +41,9 @@ function createFixture(now: Date): Fixture {
       timezone: TZ,
       anchorLocalDate: '2026-01-05',
       activatedAt: null,
+      quietHoursEnabled: false,
+      quietHoursStart: '23:00',
+      quietHoursEnd: '08:00',
     },
     'neurobot',
   );

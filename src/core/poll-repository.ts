@@ -74,6 +74,23 @@ export class PollRepository {
     );
   }
 
+  /** Marca un horario saltado por el descanso; false si ya estaba registrado (idempotente). */
+  public markSlotSkipped(slotKey: string, scheduledFor: string, now: Date): boolean {
+    return this.database.markPollSlotSkipped(
+      { slotKey, scheduledFor, reason: 'quiet_hours' },
+      now,
+      this.botId,
+    );
+  }
+
+  public slotSkips(filter: Parameters<AppDatabase['listPollSlotSkips']>[0] = {}) {
+    return this.database.listPollSlotSkips(filter, this.botId);
+  }
+
+  public clearFutureSlotSkips(fromIso: string): number {
+    return this.database.clearFuturePollSlotSkips(fromIso, this.botId);
+  }
+
   public claimForSending(pollId: number, now: Date): PollRecord | null {
     return this.database.claimPollForSending(pollId, now, this.botId);
   }
@@ -123,6 +140,10 @@ export class PollRepository {
 
   public deliveryByMessageId(whatsappMessageId: string) {
     return this.database.getPollDeliveryByMessageId(whatsappMessageId, this.botId);
+  }
+
+  public countDeliveriesWithMessageId(sinceIso: string): number {
+    return this.database.countPollDeliveriesWithMessageId(sinceIso, this.botId);
   }
 
   public recordVote(

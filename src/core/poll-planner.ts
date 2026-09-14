@@ -10,7 +10,13 @@ import {
   type PollContentGenerator,
 } from './poll-generator.js';
 import type { PollRepository } from './poll-repository.js';
-import { slotToleranceMs, weeklySlots, type PollSlot } from './poll-schedule.js';
+import {
+  isInsideQuietHours,
+  isSendableSlot,
+  slotToleranceMs,
+  weeklySlots,
+  type PollSlot,
+} from './poll-schedule.js';
 
 /**
  * Planificación anticipada: mantiene cubiertos los horarios de la próxima semana con encuestas
@@ -47,6 +53,8 @@ export type PollPlanResult = {
   reused: number;
   bank: number;
   pending: number;
+  /** Horarios canónicos nuevos que quedaron registrados como saltados por el descanso. */
+  quietSkipped: number;
 };
 
 export type PreparedPoll = { poll: PollRecord; generated: boolean };
@@ -86,6 +94,7 @@ export class PollPlanner {
       reused: 0,
       bank: 0,
       pending: 0,
+      quietSkipped: 0,
     };
     const configuration = this.repository.configuration();
     if (!configuration.enabled) return result;
@@ -97,11 +106,52 @@ export class PollPlanner {
       now.getTime() - slotToleranceMs(configuration.intervalHours),
       Number.isFinite(activatedAtMs) ? activatedAtMs : 0,
     );
-    const slots = weeklySlots(configuration, fromMs);
+    // La serie canónica se calcula completa (mismo ancla y recurrencia: sin drift) y después se
+    // filtra: los horarios del descanso no reciben contenido ni consumen IA, solo quedan
+    // auditados una vez como saltados. Así a la salida del descanso no se acumula backlog.
+    const canonical = weeklySlots(configuration, fromMs);
+    const slots = canonical.filter((slot) => isSendableSlot(slot, configuration));
     result.slots = slots.length;
+    for (const slot of canonical) {
+      if (isSendableSlot(slot, configuration)) continue;
+      const scheduledFor = new Date(slot.instantMs).toISOString();
+      if (!this.repository.markSlotSkipped(slot.key, scheduledFor, now)) continue;
+      result.quietSkipped += 1;
+      this.event('POLL_SLOT_SKIPPED', {
+        result: 'quiet_hours',
+        localDate: slot.localDate,
+        localTime: slot.localTime,
+      });
+    }
+    const pending = this.repository.list({ statuses: ['scheduled', 'sending'] });
+    // Encuestas que quedaron programadas dentro del descanso (p. ej. tras cambiar la franja):
+    // vuelven a la reserva y su horario queda saltado; lo enviado nunca se toca.
+    const misplaced = pending.filter(
+      (poll) =>
+        poll.status === 'scheduled' &&
+        poll.slotKey !== null &&
+        isInsideQuietHours(poll.slotKey.slice(11, 16), configuration),
+    );
+    if (misplaced.length > 0) {
+      this.repository.releaseScheduled(misplaced.map((poll) => poll.id));
+      for (const poll of misplaced) {
+        if (poll.slotKey !== null && poll.scheduledFor !== null) {
+          this.repository.markSlotSkipped(poll.slotKey, poll.scheduledFor, now);
+        }
+        this.event('POLL_SLOT_SKIPPED', {
+          result: 'quiet_hours',
+          templateId: poll.id,
+          category: poll.category,
+          ...(poll.slotKey === null
+            ? {}
+            : { localDate: poll.slotKey.slice(0, 10), localTime: poll.slotKey.slice(11, 16) }),
+        });
+      }
+    }
+    const misplacedIds = new Set(misplaced.map((poll) => poll.id));
     const occupied = new Set(
-      this.repository
-        .list({ statuses: ['scheduled', 'sending'] })
+      pending
+        .filter((poll) => !misplacedIds.has(poll.id))
         .map((poll) => poll.slotKey)
         .filter((key): key is string => key !== null),
     );

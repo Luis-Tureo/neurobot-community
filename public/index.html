@@ -1019,18 +1019,28 @@
                       </p>
                     </div>
                   </div>
-                  <form id="poll-automation-form" class="poll-automation-form">
+                  <!--
+                    Los controles de encuestas viven dentro del formulario general de
+                    Automatizaciones, pero pertenecen (atributo form=) al formulario
+                    #poll-automation-form declarado fuera de él: HTML válido sin formularios anidados y
+                    "Guardar configuración" nunca dispara el submit de #automatic-messages-form.
+                  -->
+                  <div class="poll-automation-form" data-poll-automation-panel>
                     <div class="poll-automation-fields">
                       <label
                         >Hora de inicio<input
                           name="poll_start_time"
+                          form="poll-automation-form"
                           type="time"
                           step="60"
                           value="09:00"
                           required
                       /></label>
                       <label
-                        >Enviar una nueva encuesta cada<select name="poll_interval_hours">
+                        >Enviar una nueva encuesta cada<select
+                          name="poll_interval_hours"
+                          form="poll-automation-form"
+                        >
                           <option value="1">1 hora</option>
                           <option value="2">2 horas</option>
                           <option value="3" selected>3 horas</option>
@@ -1043,11 +1053,50 @@
                         </select></label
                       >
                     </div>
+                    <fieldset class="poll-quiet-hours">
+                      <legend>Horario de descanso</legend>
+                      <label class="poll-quiet-hours-toggle"
+                        ><input
+                          name="poll_quiet_hours_enabled"
+                          form="poll-automation-form"
+                          type="checkbox"
+                          checked
+                        />
+                        No enviar encuestas durante este horario</label
+                      >
+                      <div class="poll-automation-fields poll-quiet-hours-range">
+                        <label
+                          >Desde<input
+                            name="poll_quiet_hours_start"
+                            form="poll-automation-form"
+                            type="time"
+                            step="60"
+                            value="23:00"
+                            required
+                        /></label>
+                        <label
+                          >Hasta<input
+                            name="poll_quiet_hours_end"
+                            form="poll-automation-form"
+                            type="time"
+                            step="60"
+                            value="08:00"
+                            required
+                        /></label>
+                      </div>
+                      <p class="muted poll-quiet-hours-help">
+                        Los horarios de la recurrencia que caen en esta franja se saltan (no se
+                        acumulan) y la serie continúa igual al terminar el descanso.
+                      </p>
+                      <p id="poll-quiet-hours-error" class="field-error" role="alert" hidden></p>
+                    </fieldset>
                     <div class="actions">
-                      <button id="save-poll-automation" type="submit">Guardar configuración</button>
+                      <button id="save-poll-automation" type="submit" form="poll-automation-form">
+                        Guardar configuración
+                      </button>
                     </div>
                     <p id="poll-automation-support" class="field-error" role="alert" hidden></p>
-                  </form>
+                  </div>
                   <div
                     id="poll-automation-status"
                     class="poll-automation-status"
@@ -1060,6 +1109,10 @@
                     <div>
                       <span class="muted">Recurrencia</span>
                       <strong id="poll-recurrence-label">Cada 3 horas</strong>
+                    </div>
+                    <div>
+                      <span class="muted">Horario de descanso</span>
+                      <strong id="poll-quiet-hours-label">23:00 – 08:00</strong>
                     </div>
                     <div>
                       <span class="muted">Después</span>
@@ -1333,6 +1386,14 @@
                   </button>
                 </div>
               </form>
+              <!-- Formulario propietario de los controles de "Programación semanal de encuestas"
+                   (asociados con form="poll-automation-form"); no anida formularios. -->
+              <form
+                id="poll-automation-form"
+                class="poll-automation-owner"
+                aria-label="Configuración de la programación de encuestas"
+                novalidate
+              ></form>
               <h3 class="subsection-title">Últimos resultados por grupo</h3>
               <div id="automatic-deliveries" class="list"></div>
             </section>
@@ -1367,6 +1428,11 @@
                     /></label>
                     <button id="poll-apply-range" type="button" class="secondary">Aplicar</button>
                   </div>
+                  <small
+                    id="poll-updated-ago"
+                    class="muted poll-updated-ago"
+                    aria-live="polite"
+                  ></small>
                 </div>
               </div>
               <p id="poll-dashboard-notice" class="info-callout" hidden></p>

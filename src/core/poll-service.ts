@@ -8,11 +8,12 @@ import { localDateOf } from './community-digest-schedule.js';
 import type { PollPlanner } from './poll-planner.js';
 import type { PollRepository } from './poll-repository.js';
 import {
+  assertValidQuietHours,
   describeSlot,
-  firstSlotFrom,
+  isInsideQuietHours,
   isSupportedIntervalHours,
+  sendableSlotsBetween,
   slotDeadlineMs,
-  slotsBetween,
   type PollSlot,
 } from './poll-schedule.js';
 import type { PollSender } from './poll-sender.js';
@@ -46,6 +47,9 @@ export type PollConfigurationUpdate = {
   startTime?: string | undefined;
   intervalHours?: number | undefined;
   timezone?: string | undefined;
+  quietHoursEnabled?: boolean | undefined;
+  quietHoursStart?: string | undefined;
+  quietHoursEnd?: string | undefined;
 };
 
 /**
@@ -100,24 +104,42 @@ export class PollService {
       timezone: update.timezone ?? current.timezone,
       anchorLocalDate: current.anchorLocalDate,
       activatedAt: current.activatedAt,
+      quietHoursEnabled: update.quietHoursEnabled ?? current.quietHoursEnabled,
+      quietHoursStart: update.quietHoursStart ?? current.quietHoursStart,
+      quietHoursEnd: update.quietHoursEnd ?? current.quietHoursEnd,
     };
     if (!isSupportedIntervalHours(next.intervalHours)) {
       throw new Error('POLL_INTERVAL_NOT_SUPPORTED');
     }
+    assertValidQuietHours(next);
     const scheduleChanged =
       next.startTime !== current.startTime ||
       next.intervalHours !== current.intervalHours ||
       next.timezone !== current.timezone;
+    // El descanso solo filtra la serie: cambiarlo replanifica lo pendiente sin mover el ancla.
+    const quietHoursChanged =
+      next.quietHoursEnabled !== current.quietHoursEnabled ||
+      (next.quietHoursEnabled &&
+        (next.quietHoursStart !== current.quietHoursStart ||
+          next.quietHoursEnd !== current.quietHoursEnd));
     const activated = next.enabled && !current.enabled;
     if (activated) next.activatedAt = now.toISOString();
     if (activated || scheduleChanged || next.anchorLocalDate === null) {
       next.anchorLocalDate = localDateOf(now, next.timezone);
     }
     const saved = this.repository.saveConfiguration(next);
-    if (scheduleChanged || activated || (!next.enabled && current.enabled)) {
+    if (scheduleChanged || activated || quietHoursChanged || (!next.enabled && current.enabled)) {
       const released = this.repository.releaseScheduled();
+      // Los horarios saltados futuros se reevalúan con la nueva franja; el historial se conserva.
+      this.repository.clearFutureSlotSkips(now.toISOString());
       this.event('POLL_SCHEDULE_CHANGED', {
-        result: next.enabled ? (activated ? 'activated' : 'rescheduled') : 'deactivated',
+        result: next.enabled
+          ? activated
+            ? 'activated'
+            : scheduleChanged
+              ? 'rescheduled'
+              : 'quiet_hours_changed'
+          : 'deactivated',
         itemCount: released,
         localTime: next.startTime,
       });
@@ -133,17 +155,16 @@ export class PollService {
     return this.runPromise;
   }
 
+  /** Próximo horario enviable (la serie canónica ya filtrada por el horario de descanso). */
   public nextSlot(now = this.now()): PollSlot | null {
-    const configuration = this.repository.configuration();
-    if (!configuration.enabled) return null;
-    return firstSlotFrom(configuration, this.planningStartMs(configuration, now));
+    return this.nextSlots(1, now)[0] ?? null;
   }
 
   public nextSlots(count: number, now = this.now()): PollSlot[] {
     const configuration = this.repository.configuration();
     if (!configuration.enabled) return [];
     const fromMs = this.planningStartMs(configuration, now);
-    return slotsBetween(configuration, fromMs, fromMs + 8 * 24 * 60 * 60 * 1000, count);
+    return sendableSlotsBetween(configuration, fromMs, fromMs + 8 * 24 * 60 * 60 * 1000, count);
   }
 
   public nextScheduledDescription(now = this.now()): string | null {
@@ -214,7 +235,30 @@ export class PollService {
       .list({ statuses: ['scheduled'], orderBy: 'scheduled_asc' })
       .filter(
         (poll) => poll.scheduledFor !== null && Date.parse(poll.scheduledFor) <= now.getTime(),
-      );
+      )
+      // Guardarraíl: un horario dentro del descanso nunca se envía, aunque hubiera quedado
+      // programado por una configuración anterior; vuelve a la reserva sin generar backlog.
+      .filter((poll) => {
+        if (
+          poll.slotKey === null ||
+          !isInsideQuietHours(poll.slotKey.slice(11, 16), configuration)
+        ) {
+          return true;
+        }
+        this.repository.releaseScheduled([poll.id]);
+        if (poll.scheduledFor !== null) {
+          this.repository.markSlotSkipped(poll.slotKey, poll.scheduledFor, now);
+        }
+        result.skipped += 1;
+        this.event('POLL_SLOT_SKIPPED', {
+          result: 'quiet_hours',
+          templateId: poll.id,
+          category: poll.category,
+          localDate: poll.slotKey.slice(0, 10),
+          localTime: poll.slotKey.slice(11, 16),
+        });
+        return false;
+      });
     if (due.length === 0) return result;
 
     if (!this.nativePollsSupported()) {

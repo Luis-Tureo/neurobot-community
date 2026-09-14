@@ -68,7 +68,9 @@ Estas pruebas requieren WhatsApp real y no se consideran automatizadas. Realíce
 - [ ] Guardar una hora de inicio y una recurrencia y comprobar que **Próximo envío** y **Después** muestran los horarios derivados de la configuración (p. ej. 12:00 · 15:00 · 18:00), no de la hora actual.
 - [ ] Activar con el interruptor y confirmar que la reserva de encuestas se llena progresivamente (eventos `POLL_GENERATED`/`POLL_SCHEDULED`) sin llamar a Groq en el instante del envío.
 - [ ] En **Centro de pruebas → Encuesta automática**, elegir el grupo de prueba y confirmar que llega una encuesta nativa (no texto) con alternativas únicas y respuesta única.
+- [ ] Marcar **Horario de descanso** (23:00–08:00) y guardar: **Después** debe saltar la madrugada (p. ej. 22:00 · 08:00 · 10:00) y el botón **Guardar configuración** no debe disparar "Guardar automatizaciones". Probar inicio = fin y confirmar el mensaje de error.
 - [ ] Votar, cambiar el voto y retirarlo desde un teléfono; en **Encuestas** el total debe reflejar un solo voto por persona y luego cero, nunca sumas duplicadas.
+- [ ] En los registros del servidor (`LOG_LEVEL=info`) comprobar, por cada voto, `POLL_VOTE_EVENT_RECEIVED` (adapter) y `POLL_VOTE_RECEIVED … deliveryFound=true matchedBy=exact` (servicio); si aparece `POLL_VOTE_DELIVERY_NOT_FOUND`, cruzar `pollMessageIdSegment` con `bot_poll_deliveries.whatsapp_message_id`.
 - [ ] Reiniciar la aplicación y confirmar que no se reenvía el horario ya enviado y que el siguiente se envía una sola vez.
 - [ ] Cambiar la recurrencia y verificar que solo cambian los horarios futuros; los resultados anteriores permanecen.
 - [ ] Silenciar, archivar o desautorizar el grupo de prueba y confirmar que desaparece de los destinos disponibles.

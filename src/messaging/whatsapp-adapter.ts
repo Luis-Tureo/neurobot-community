@@ -23,11 +23,13 @@ import type { Anonymizer } from '../security/anonymizer.js';
 import {
   canonicalPhoneIdentity,
   classifyWhatsAppId,
+  describeSerializedMessageId,
   getSerializedId,
   isParticipantId,
   isSupportedGroupId,
   normalizeWhatsAppGroupId,
   whatsappIdentityAliases,
+  type WhatsAppIdKind,
 } from './identifiers.js';
 import { normalizeMessageTimestamp } from './message-timestamp.js';
 import { describeMessageIdStructure, MessageIdentityResolver } from './message-identity.js';
@@ -1998,16 +2000,51 @@ export class WhatsAppWebAdapter implements MessagingClient {
 
   private async dispatchPollVote(vote: unknown, clientGeneration: number): Promise<void> {
     const handler = this.events?.onPollVote;
-    if (handler === undefined) return;
+    if (handler === undefined) {
+      this.logger.warn(
+        { operation: 'POLL_VOTE_EVENT_IGNORED', reason: 'no_handler', clientGeneration },
+        'Llegó un vote_update pero ningún servicio de encuestas está suscrito',
+      );
+      return;
+    }
     const event = parsePollVoteEvent(vote, (value) => this.hash(value));
-    if (event === null) return;
-    if (this.isOwnIdentifier(event.voterId)) return;
+    if (event === null) {
+      // Diagnóstico estructural (sin JID ni contenido): permite ver en producción por qué un
+      // vote_update de whatsapp-web.js no pudo normalizarse.
+      this.logger.warn(
+        {
+          operation: 'POLL_VOTE_EVENT_IGNORED',
+          ...describePollVoteShape(vote),
+          clientGeneration,
+        },
+        'Se recibió un vote_update que no pudo normalizarse',
+      );
+      return;
+    }
+    if (this.isOwnIdentifier(event.voterId)) {
+      this.logger.debug(
+        { operation: 'POLL_VOTE_EVENT_IGNORED', reason: 'own_vote', clientGeneration },
+        'Voto propio del asistente ignorado',
+      );
+      return;
+    }
+    // Los menús comunitarios seleccionables también son Poll nativos, pero no son encuestas del
+    // módulo: los resuelve processSelectableMenuVote.
+    if (this.selectableMenuPolls.has(event.pollMessageId)) return;
+    const structure = describeSerializedMessageId(event.pollMessageId);
     this.logger.info(
       {
         operation: 'POLL_VOTE_EVENT_RECEIVED',
         pollHash: this.hash(event.pollMessageId),
+        pollMessageIdSegment: structure.messageIdSegment,
+        pollMessageIdSegments: structure.segmentCount,
         userHash: this.hash(event.voterId),
+        voterKind: classifyWhatsAppId(event.voterId),
         selectedCount: event.selectedOptions.length,
+        selectedLocalIds: event.selectedOptions.map((option) => option.index),
+        optionNamesProvided: event.selectedOptions.every((option) => option.name !== null),
+        parentIdSource: event.parentIdSource,
+        eventKeyKind: event.eventKey.startsWith('poll-vote-id:') ? 'stable_id' : 'derived',
         clientGeneration,
       },
       'Se recibió un voto de encuesta nativa',
@@ -2461,10 +2498,11 @@ export function parsePollVoteEvent(
 ): PollVoteEvent | null {
   if (typeof vote !== 'object' || vote === null) return null;
   const parentMessage = readUnknown(vote, 'parentMessage');
-  const pollMessageId =
-    (typeof parentMessage === 'object' && parentMessage !== null
+  const fromParentMessage =
+    typeof parentMessage === 'object' && parentMessage !== null
       ? getSerializedId(readUnknown(parentMessage, 'id'))
-      : null) ?? getSerializedId(readUnknown(vote, 'parentMsgKey'));
+      : null;
+  const pollMessageId = fromParentMessage ?? getSerializedId(readUnknown(vote, 'parentMsgKey'));
   if (pollMessageId === null) return null;
   const voterId = getSerializedId(readUnknown(vote, 'voter'));
   if (!isParticipantId(voterId)) return null;
@@ -2504,6 +2542,53 @@ export function parsePollVoteEvent(
       stableId === null
         ? `poll-vote:${hash(`${pollMessageId}:${voterId}:${votedAtMs}:${indexes}`)}`
         : `poll-vote-id:${hash(stableId)}`,
+    parentIdSource: fromParentMessage === null ? 'parentMsgKey' : 'parentMessage',
+  };
+}
+
+/**
+ * Describe la forma de un `vote_update` que no pudo normalizarse, solo con datos estructurales
+ * (nunca JID, teléfonos ni texto de la encuesta), para diagnosticar cambios de whatsapp-web.js.
+ */
+export function describePollVoteShape(vote: unknown): {
+  reason: string;
+  hasParentMessage: boolean;
+  hasParentMsgKey: boolean;
+  voterKind: WhatsAppIdKind;
+  selectedOptionsType: string;
+} {
+  if (typeof vote !== 'object' || vote === null) {
+    return {
+      reason: 'not_object',
+      hasParentMessage: false,
+      hasParentMsgKey: false,
+      voterKind: 'unknown',
+      selectedOptionsType: 'undefined',
+    };
+  }
+  const parentMessage = readUnknown(vote, 'parentMessage');
+  const parentId =
+    (typeof parentMessage === 'object' && parentMessage !== null
+      ? getSerializedId(readUnknown(parentMessage, 'id'))
+      : null) ?? getSerializedId(readUnknown(vote, 'parentMsgKey'));
+  const voterId = getSerializedId(readUnknown(vote, 'voter'));
+  const rawSelected = readUnknown(vote, 'selectedOptions');
+  const reason =
+    parentId === null
+      ? 'parent_id_missing'
+      : voterId === null
+        ? 'voter_missing'
+        : !isParticipantId(voterId)
+          ? 'voter_not_participant'
+          : !Array.isArray(rawSelected)
+            ? 'selected_options_missing'
+            : 'unknown';
+  return {
+    reason,
+    hasParentMessage: typeof parentMessage === 'object' && parentMessage !== null,
+    hasParentMsgKey: readUnknown(vote, 'parentMsgKey') !== undefined,
+    voterKind: classifyWhatsAppId(voterId),
+    selectedOptionsType: Array.isArray(rawSelected) ? 'array' : typeof rawSelected,
   };
 }
 

@@ -228,8 +228,19 @@ export type PollSendReceipt = {
   messageId: string | null;
 };
 
+/**
+ * Horario de descanso: franja local (HH:MM, en la zona horaria del asistente) durante la cual no
+ * se envían encuestas. `quietHoursStart` es inclusivo y `quietHoursEnd` exclusivo; la franja puede
+ * cruzar la medianoche (23:00 → 08:00). Inicio y fin iguales no se aceptan (sería ambiguo).
+ */
+export type PollQuietHours = {
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+};
+
 /** Configuración mínima de la automatización de encuestas (hora inicial + recurrencia). */
-export type PollAutomationConfiguration = {
+export type PollAutomationConfiguration = PollQuietHours & {
   enabled: boolean;
   /** Hora local inicial (HH:MM) desde la que se calcula la recurrencia. */
   startTime: string;
@@ -314,6 +325,8 @@ export type PollVoteEvent = {
    * determinista derivada de mensaje, votante, instante y selección.
    */
   eventKey: string;
+  /** De dónde salió `pollMessageId` (solo diagnóstico). */
+  parentIdSource?: 'parentMessage' | 'parentMsgKey';
 };
 
 export type PollVoteOutcome =

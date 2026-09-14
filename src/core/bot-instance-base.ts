@@ -371,7 +371,13 @@ export class BotInstance {
         await this.discovery.handleGroupChange(event);
       },
       onPollVote: async (event) => {
-        if (!this.communityServicesEnabled) return;
+        if (!this.communityServicesEnabled) {
+          logger.warn(
+            { operation: 'POLL_VOTE_EVENT_IGNORED', botId: bot.id, reason: 'community_disabled' },
+            'Voto de encuesta ignorado: el canal de grupos del asistente está desactivado',
+          );
+          return;
+        }
         await this.pollVotes.handle(event);
       },
     });

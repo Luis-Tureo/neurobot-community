@@ -7,7 +7,11 @@
  * medianoche. Cada hora local se convierte a instante UTC con la zona horaria del asistente,
  * respetando los cambios de horario (DST) igual que los resúmenes comunitarios.
  */
-import { POLL_INTERVAL_HOURS_OPTIONS, type PollAutomationConfiguration } from '../domain/types.js';
+import {
+  POLL_INTERVAL_HOURS_OPTIONS,
+  type PollAutomationConfiguration,
+  type PollQuietHours,
+} from '../domain/types.js';
 import {
   addCalendarDays,
   localDateOf,
@@ -138,6 +142,108 @@ export function weeklySlots(definition: PollScheduleDefinition, fromMs: number):
     fromMs + WEEK_MS,
     slotsPerWeek(definition.intervalHours) + 1,
   );
+}
+
+// ----- Horario de descanso -----
+
+const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
+
+export const DEFAULT_QUIET_HOURS: PollQuietHours = {
+  quietHoursEnabled: true,
+  quietHoursStart: '23:00',
+  quietHoursEnd: '08:00',
+};
+
+export function isValidQuietHoursTime(value: string): boolean {
+  return TIME_PATTERN.test(value);
+}
+
+/**
+ * Valida la franja de descanso: ambas horas en formato HH:mm y distintas entre sí (inicio y fin
+ * iguales serían ambiguos: 0 o 24 horas). Lanza `POLL_QUIET_HOURS_INVALID`.
+ */
+export function assertValidQuietHours(quiet: PollQuietHours): void {
+  if (
+    !isValidQuietHoursTime(quiet.quietHoursStart) ||
+    !isValidQuietHoursTime(quiet.quietHoursEnd)
+  ) {
+    throw new Error('POLL_QUIET_HOURS_INVALID');
+  }
+  if (quiet.quietHoursStart === quiet.quietHoursEnd) throw new Error('POLL_QUIET_HOURS_INVALID');
+}
+
+function minutesOfDay(localTime: string): number {
+  const { hour, minute } = parseSendTime(localTime);
+  return hour * 60 + minute;
+}
+
+/**
+ * Indica si una hora local (`HH:MM`, reloj de pared en la zona horaria del asistente) cae dentro
+ * del horario de descanso. El inicio es inclusivo y el fin exclusivo, y la franja puede cruzar la
+ * medianoche: con 23:00 → 08:00 quedan bloqueadas 23:00, 00:00 … 07:59 y permitidas 08:00 y 22:00.
+ * Con el descanso desactivado (o inicio igual a fin) nunca bloquea.
+ */
+export function isInsideQuietHours(localTime: string, quiet: PollQuietHours): boolean {
+  if (!quiet.quietHoursEnabled) return false;
+  if (
+    !isValidQuietHoursTime(quiet.quietHoursStart) ||
+    !isValidQuietHoursTime(quiet.quietHoursEnd)
+  ) {
+    return false;
+  }
+  const start = minutesOfDay(quiet.quietHoursStart);
+  const end = minutesOfDay(quiet.quietHoursEnd);
+  if (start === end) return false;
+  const time = minutesOfDay(localTime);
+  return start < end ? time >= start && time < end : time >= start || time < end;
+}
+
+/** Variante para un instante UTC: se traduce a hora local del asistente y se evalúa. */
+export function isInstantInsideQuietHours(
+  instantMs: number,
+  timezone: string,
+  quiet: PollQuietHours,
+): boolean {
+  const parts = localDateTimeParts(new Date(instantMs), timezone);
+  const localTime = `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`;
+  return isInsideQuietHours(localTime, quiet);
+}
+
+/** Un horario canónico es enviable cuando no cae dentro del horario de descanso. */
+export function isSendableSlot(slot: Pick<PollSlot, 'localTime'>, quiet: PollQuietHours): boolean {
+  return !isInsideQuietHours(slot.localTime, quiet);
+}
+
+/**
+ * Horarios enviables entre `fromMs` y `toMs`: la serie canónica se calcula igual (mismo ancla,
+ * misma recurrencia, sin drift) y solo se descartan los horarios que caen en el descanso.
+ */
+export function sendableSlotsBetween(
+  definition: PollScheduleDefinition & PollQuietHours,
+  fromMs: number,
+  toMs: number,
+  limit = 400,
+): PollSlot[] {
+  const anchored: PollScheduleDefinition = {
+    ...definition,
+    anchorLocalDate:
+      definition.anchorLocalDate ?? localDateOf(new Date(fromMs), definition.timezone),
+  };
+  const slots: PollSlot[] = [];
+  let current = firstSlotFrom(anchored, fromMs);
+  // Cota de seguridad: con el descanso activo puede haber varios horarios seguidos bloqueados.
+  let guard = 0;
+  while (current.instantMs < toMs && slots.length < limit && guard < 10_000) {
+    if (isSendableSlot(current, definition)) slots.push(current);
+    current = firstSlotFrom(anchored, current.instantMs + 60_000);
+    guard += 1;
+  }
+  return slots;
+}
+
+/** Texto breve para el panel: "23:00 – 08:00" o null si el descanso está desactivado. */
+export function describeQuietHours(quiet: PollQuietHours): string | null {
+  return quiet.quietHoursEnabled ? `${quiet.quietHoursStart} – ${quiet.quietHoursEnd}` : null;
 }
 
 /** Texto breve para el panel: "Hoy · 15:00", "Mañana · 09:00" o "jueves · 09:00". */

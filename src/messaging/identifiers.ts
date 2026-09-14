@@ -115,6 +115,30 @@ export function isParticipantId(value: string | null): value is string {
   return kind === 'phone' || kind === 'lid';
 }
 
+/**
+ * Estructura de un id serializado de mensaje de WhatsApp Web: `fromMe_remote_id` y, para los
+ * mensajes de grupo, opcionalmente `_participant` como cuarto segmento (la propia librería
+ * whatsapp-web.js acepta 3 o 4 segmentos en `getMessageById`). Devuelve solo datos técnicos
+ * seguros para registrar: el número de segmentos y el segmento `id` (hexadecimal aleatorio, sin
+ * números de teléfono ni JID), más la clave canónica de 3 segmentos para buscar coincidencias.
+ */
+export function describeSerializedMessageId(serialized: string): {
+  segmentCount: number;
+  messageIdSegment: string | null;
+  canonicalKey: string | null;
+} {
+  const segments = serialized.split('_');
+  if (segments.length < 3) {
+    return { segmentCount: segments.length, messageIdSegment: null, canonicalKey: null };
+  }
+  const canonicalKey = segments.slice(0, 3).join('_');
+  return {
+    segmentCount: segments.length,
+    messageIdSegment: segments[2] ?? null,
+    canonicalKey,
+  };
+}
+
 function normalizeSerialized(value: string): string | null {
   const normalized = value.trim().toLowerCase();
   return normalized.length > 0 && normalized.length <= 200 ? normalized : null;

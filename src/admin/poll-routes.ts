@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { isValidTimezone } from '../core/community-digest-schedule.js';
-import { describeSlot } from '../core/poll-schedule.js';
+import { describeQuietHours, describeSlot } from '../core/poll-schedule.js';
 import { POLL_INTERVAL_HOURS_OPTIONS } from '../domain/types.js';
 import {
   audit,
@@ -34,6 +34,9 @@ const configurationSchema = z
       .max(80)
       .refine(isValidTimezone, 'La zona horaria no es válida.')
       .optional(),
+    quietHoursEnabled: z.boolean().optional(),
+    quietHoursStart: z.string().regex(TIME_PATTERN).optional(),
+    quietHoursEnd: z.string().regex(TIME_PATTERN).optional(),
   })
   .strict();
 
@@ -109,7 +112,18 @@ export function registerPollRoutes(app: FastifyInstance, context: AdminServerCon
           code: 'AUTOMATION_GROUP_REQUIRED',
         });
       }
-      services.service.updateConfiguration(input);
+      try {
+        services.service.updateConfiguration(input);
+      } catch (error) {
+        if (error instanceof Error && error.message === 'POLL_QUIET_HOURS_INVALID') {
+          return reply.code(400).send({
+            error:
+              'El horario de descanso no es válido: usa horas HH:mm y una hora de inicio distinta a la de fin.',
+            code: 'POLL_QUIET_HOURS_INVALID',
+          });
+        }
+        throw error;
+      }
       services.scheduler.reconfigure();
       audit(context, 'poll_configuration_update', 'poll-automation', 'ok', botId);
       return { updated: true, ...overview(context, botId, services) };
@@ -246,6 +260,7 @@ function nextSend(services: PollServices) {
   return {
     enabled: configuration.enabled,
     timezone: configuration.timezone,
+    quietHoursLabel: describeQuietHours(configuration),
     nextScheduledAt: services.service.nextScheduledDescription(now),
     nextSlots: slots.map((slot) => ({
       key: slot.key,
@@ -269,6 +284,9 @@ function overview(context: AdminServerContext, botId: string, services: PollServ
       startTime: configuration.startTime,
       intervalHours: configuration.intervalHours,
       timezone: configuration.timezone,
+      quietHoursEnabled: configuration.quietHoursEnabled,
+      quietHoursStart: configuration.quietHoursStart,
+      quietHoursEnd: configuration.quietHoursEnd,
       activatedAt: configuration.activatedAt,
       updatedAt: configuration.updatedAt,
     },

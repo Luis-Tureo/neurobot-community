@@ -4,7 +4,8 @@
  * Solo muestra datos reales recibidos desde WhatsApp: nunca inventa porcentajes ni votos. Se
  * refresca por sondeo ligero (contador de versión) mientras la sección está visible.
  */
-const REFRESH_INTERVAL_MS = 20_000;
+const REFRESH_INTERVAL_MS = 30_000;
+const UPDATED_AGO_TICK_MS = 5_000;
 const RECENT_PAGE_SIZE = 8;
 
 const numberFormatter = new Intl.NumberFormat('es-CL');
@@ -17,7 +18,9 @@ const originLabels = { ai: 'IA', reused: 'Reutilizada', legacy_bank: 'Banco here
 let dependencies = null;
 let currentPeriod = { period: '7d' };
 let lastVersion = null;
+let lastUpdatedAt = null;
 let refreshTimer = null;
+let updatedAgoTimer = null;
 let recentOffset = 0;
 let recentTotal = 0;
 let loadGeneration = 0;
@@ -53,11 +56,41 @@ export function initializePollDashboard(deps) {
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') closePollDetail();
   });
+  // Al entrar (o volver) a la sección Encuestas se recargan los datos de inmediato; el sondeo
+  // periódico moderado solo corre mientras la sección está visible.
+  window.addEventListener('panel-section-activated', (event) => {
+    if (event.detail?.name !== 'polls') return;
+    void loadPollDashboard({ force: true }).catch((error) => {
+      deps.showNotice(error.message, true);
+    });
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void refreshIfChanged();
+  });
   if (refreshTimer === null) {
     refreshTimer = window.setInterval(() => {
       void refreshIfChanged();
     }, REFRESH_INTERVAL_MS);
   }
+  if (updatedAgoTimer === null) {
+    updatedAgoTimer = window.setInterval(renderUpdatedAgo, UPDATED_AGO_TICK_MS);
+  }
+}
+
+function renderUpdatedAgo() {
+  const target = document.querySelector('#poll-updated-ago');
+  if (!target) return;
+  if (lastUpdatedAt === null) {
+    target.textContent = '';
+    return;
+  }
+  const seconds = Math.max(0, Math.round((Date.now() - lastUpdatedAt) / 1000));
+  target.textContent =
+    seconds < 5
+      ? 'Actualizado ahora'
+      : seconds < 60
+        ? `Actualizado hace ${seconds} s`
+        : `Actualizado hace ${Math.round(seconds / 60)} min`;
 }
 
 function periodQuery() {
@@ -80,6 +113,8 @@ async function refreshIfChanged() {
     const summary = await dependencies.api(
       dependencies.botScopedPath(`/api/polls/analytics?${periodQuery()}`),
     );
+    lastUpdatedAt = Date.now();
+    renderUpdatedAgo();
     if (summary.version === lastVersion) return;
     renderSummary(summary);
   } catch {
@@ -94,6 +129,8 @@ export async function loadPollDashboard({ force = false } = {}) {
     dependencies.botScopedPath(`/api/polls/analytics?${periodQuery()}`),
   );
   if (generation !== loadGeneration) return;
+  lastUpdatedAt = Date.now();
+  renderUpdatedAgo();
   if (!force && summary.version === lastVersion) return;
   renderSummary(summary);
 }

@@ -161,6 +161,9 @@ function activatePanelSection(name, scrollOnMobile = false) {
   if (scrollOnMobile && window.matchMedia('(max-width: 900px)').matches) {
     document.querySelector('.mobile-navigation')?.scrollIntoView({ behavior: 'smooth' });
   }
+  // Los módulos que muestran datos vivos (p. ej. el dashboard de encuestas) se refrescan al
+  // entrar o volver a la sección, sin depender solo del sondeo periódico.
+  window.dispatchEvent(new window.CustomEvent('panel-section-activated', { detail: { name } }));
 }
 
 document.querySelectorAll('[data-section]').forEach((button) => {
@@ -1241,12 +1244,67 @@ function recurrenceLabel(intervalHours) {
   return `Cada ${intervalHours} ${intervalHours === 1 ? 'hora' : 'horas'}`;
 }
 
+function quietHoursLabel(configuration) {
+  return configuration.quietHoursEnabled
+    ? `${configuration.quietHoursStart} – ${configuration.quietHoursEnd}`
+    : 'Desactivado';
+}
+
+function pollField(name) {
+  // Los controles pertenecen al formulario por atributo form=, así que form.elements los incluye
+  // aunque estén dentro de la tarjeta del formulario general de Automatizaciones.
+  return pollAutomationForm ? pollAutomationForm.elements.namedItem(name) : null;
+}
+
+function syncQuietHoursControls() {
+  const enabled = pollField('poll_quiet_hours_enabled');
+  const range = document.querySelector('.poll-quiet-hours-range');
+  if (!enabled || !range) return;
+  range.classList.toggle('is-disabled', !enabled.checked);
+  ['poll_quiet_hours_start', 'poll_quiet_hours_end'].forEach((name) => {
+    const field = pollField(name);
+    if (field) field.disabled = !enabled.checked;
+  });
+}
+
+function quietHoursValidationMessage() {
+  const enabled = pollField('poll_quiet_hours_enabled');
+  if (!enabled || !enabled.checked) return null;
+  const start = pollField('poll_quiet_hours_start')?.value || '';
+  const end = pollField('poll_quiet_hours_end')?.value || '';
+  const pattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
+  if (!pattern.test(start) || !pattern.test(end)) {
+    return 'Indica ambas horas del horario de descanso en formato HH:mm.';
+  }
+  if (start === end) {
+    return 'La hora de inicio y la de fin del descanso no pueden ser iguales.';
+  }
+  return null;
+}
+
+function showQuietHoursError(message) {
+  const target = document.querySelector('#poll-quiet-hours-error');
+  if (!target) return;
+  target.textContent = message || '';
+  target.hidden = !message;
+}
+
 function renderPollAutomation(data) {
   const configuration = data.configuration;
   if (pollAutomationForm) {
-    pollAutomationForm.elements.poll_start_time.value = configuration.startTime;
-    pollAutomationForm.elements.poll_interval_hours.value = String(configuration.intervalHours);
+    pollField('poll_start_time').value = configuration.startTime;
+    pollField('poll_interval_hours').value = String(configuration.intervalHours);
+    const quietEnabled = pollField('poll_quiet_hours_enabled');
+    if (quietEnabled) quietEnabled.checked = configuration.quietHoursEnabled !== false;
+    const quietStart = pollField('poll_quiet_hours_start');
+    if (quietStart) quietStart.value = configuration.quietHoursStart || '23:00';
+    const quietEnd = pollField('poll_quiet_hours_end');
+    if (quietEnd) quietEnd.value = configuration.quietHoursEnd || '08:00';
+    syncQuietHoursControls();
+    showQuietHoursError(null);
   }
+  const quietLabel = document.querySelector('#poll-quiet-hours-label');
+  if (quietLabel) quietLabel.textContent = quietHoursLabel(configuration);
   const support = document.querySelector('#poll-automation-support');
   if (support) {
     const problems = [];
@@ -1278,11 +1336,26 @@ function renderPollAutomation(data) {
   }
 }
 
+pollField('poll_quiet_hours_enabled')?.addEventListener('change', () => {
+  syncQuietHoursControls();
+  showQuietHoursError(null);
+});
+
+// El submit llega solo desde #poll-automation-form (botón y campos asociados con form=); el
+// formulario general de Automatizaciones no se ve afectado.
 pollAutomationForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
+  event.stopPropagation();
   const form = event.currentTarget;
-  const button = form.querySelector('#save-poll-automation');
-  button.disabled = true;
+  const button = document.querySelector('#save-poll-automation');
+  const quietProblem = quietHoursValidationMessage();
+  if (quietProblem) {
+    showQuietHoursError(quietProblem);
+    showNotice(quietProblem, true);
+    return;
+  }
+  showQuietHoursError(null);
+  if (button) button.disabled = true;
   try {
     const result = await api(botScopedPath('/api/polls/configuration'), {
       method: 'PATCH',
@@ -1290,15 +1363,19 @@ pollAutomationForm?.addEventListener('submit', async (event) => {
         startTime: form.elements.poll_start_time.value,
         intervalHours: Number(form.elements.poll_interval_hours.value),
         timezone: state.selectedBotTimezone,
+        quietHoursEnabled: form.elements.poll_quiet_hours_enabled.checked,
+        quietHoursStart: form.elements.poll_quiet_hours_start.value,
+        quietHoursEnd: form.elements.poll_quiet_hours_end.value,
       }),
     });
     state.pollData = result;
     renderPollAutomation(result);
     showNotice('Configuración de encuestas guardada.');
   } catch (error) {
+    if (error && error.code === 'POLL_QUIET_HOURS_INVALID') showQuietHoursError(error.message);
     showNotice(error.message, true);
   } finally {
-    button.disabled = false;
+    if (button) button.disabled = false;
   }
 });
 

@@ -2562,6 +2562,35 @@ export class AppDatabase {
             ON bot_poll_vote_events(delivery_id, voter_hash, voted_at);
         `,
       },
+      {
+        version: 38,
+        sql: `
+          -- Horario de descanso de las encuestas (franja local en la que no se envían).
+          -- Decisión: las configuraciones ya existentes quedan con el descanso DESACTIVADO
+          -- (misma convención conservadora que la migración 37: ningún cambio de comportamiento
+          -- en producción sin una acción explícita del administrador); la interfaz preselecciona
+          -- 23:00 – 08:00 y los asistentes nuevos nacen con el descanso activado.
+          ALTER TABLE bot_poll_configurations
+            ADD COLUMN quiet_hours_enabled INTEGER NOT NULL DEFAULT 0 CHECK (quiet_hours_enabled IN (0, 1));
+          ALTER TABLE bot_poll_configurations
+            ADD COLUMN quiet_hours_start TEXT NOT NULL DEFAULT '23:00';
+          ALTER TABLE bot_poll_configurations
+            ADD COLUMN quiet_hours_end TEXT NOT NULL DEFAULT '08:00';
+
+          -- Horarios canónicos saltados por el descanso: auditoría ("00:00 skipped quiet_hours")
+          -- e idempotencia entre ticks y reinicios. No contienen contenido ni consumen IA.
+          CREATE TABLE bot_poll_slot_skips (
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            slot_key TEXT NOT NULL,
+            scheduled_for TEXT NOT NULL,
+            skip_reason TEXT NOT NULL CHECK (skip_reason IN ('quiet_hours')),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (bot_id, slot_key)
+          );
+          CREATE INDEX idx_bot_poll_slot_skips_scheduled
+            ON bot_poll_slot_skips(bot_id, scheduled_for);
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -2994,8 +3023,9 @@ export class AppDatabase {
     this.db
       .prepare(
         `INSERT OR IGNORE INTO bot_poll_configurations(
-           bot_id, enabled, send_time, timezone, interval_hours, updated_at
-         ) VALUES (?, 0, '09:00', ?, 3, ?)`,
+           bot_id, enabled, send_time, timezone, interval_hours, quiet_hours_enabled,
+           quiet_hours_start, quiet_hours_end, updated_at
+         ) VALUES (?, 0, '09:00', ?, 3, 1, '23:00', '08:00', ?)`,
       )
       .run(botId, timezone, now);
     const insertTemplate = this.db.prepare(
@@ -3704,7 +3734,7 @@ export class AppDatabase {
     const row = this.db
       .prepare(
         `SELECT enabled, send_time, timezone, interval_hours, anchor_local_date, activated_at,
-                updated_at
+                quiet_hours_enabled, quiet_hours_start, quiet_hours_end, updated_at
          FROM bot_poll_configurations WHERE bot_id = ?`,
       )
       .get(botId) as
@@ -3715,6 +3745,9 @@ export class AppDatabase {
           interval_hours: number;
           anchor_local_date: string | null;
           activated_at: string | null;
+          quiet_hours_enabled: number;
+          quiet_hours_start: string;
+          quiet_hours_end: string;
           updated_at: string;
         }
       | undefined;
@@ -3725,6 +3758,10 @@ export class AppDatabase {
       timezone: row?.timezone ?? this.getBot(botId)?.timezone ?? 'America/Santiago',
       anchorLocalDate: row?.anchor_local_date ?? null,
       activatedAt: row?.activated_at ?? null,
+      // Sin fila (asistente sin sembrar) se aplican los valores recomendados: descanso activo.
+      quietHoursEnabled: row === undefined ? true : row.quiet_hours_enabled === 1,
+      quietHoursStart: row?.quiet_hours_start ?? '23:00',
+      quietHoursEnd: row?.quiet_hours_end ?? '08:00',
       updatedAt: row?.updated_at ?? null,
     };
   }
@@ -3743,17 +3780,26 @@ export class AppDatabase {
     ) {
       throw new Error('La recurrencia de las encuestas debe estar entre 1 y 24 horas.');
     }
+    if (!isTime(configuration.quietHoursStart) || !isTime(configuration.quietHoursEnd)) {
+      throw new Error('El horario de descanso de las encuestas no es válido.');
+    }
+    if (configuration.quietHoursStart === configuration.quietHoursEnd) {
+      throw new Error('El horario de descanso debe tener una hora de inicio distinta a la de fin.');
+    }
     const now = new Date().toISOString();
     this.db
       .prepare(
         `INSERT INTO bot_poll_configurations(
            bot_id, enabled, send_time, timezone, interval_hours, anchor_local_date, activated_at,
-           updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           quiet_hours_enabled, quiet_hours_start, quiet_hours_end, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(bot_id) DO UPDATE SET enabled = excluded.enabled,
            send_time = excluded.send_time, timezone = excluded.timezone,
            interval_hours = excluded.interval_hours, anchor_local_date = excluded.anchor_local_date,
-           activated_at = excluded.activated_at, updated_at = excluded.updated_at`,
+           activated_at = excluded.activated_at,
+           quiet_hours_enabled = excluded.quiet_hours_enabled,
+           quiet_hours_start = excluded.quiet_hours_start,
+           quiet_hours_end = excluded.quiet_hours_end, updated_at = excluded.updated_at`,
       )
       .run(
         botId,
@@ -3763,9 +3809,65 @@ export class AppDatabase {
         configuration.intervalHours,
         configuration.anchorLocalDate,
         configuration.activatedAt,
+        configuration.quietHoursEnabled ? 1 : 0,
+        configuration.quietHoursStart,
+        configuration.quietHoursEnd,
         now,
       );
     return this.getPollAutomationConfiguration(botId);
+  }
+
+  // ----- Horarios saltados por el descanso (auditoría + idempotencia, sin contenido) -----
+
+  /** Registra un horario canónico saltado; devuelve false si ya estaba registrado. */
+  public markPollSlotSkipped(
+    input: { slotKey: string; scheduledFor: string; reason: 'quiet_hours' },
+    now: Date,
+    botId = 'neurobot',
+  ): boolean {
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO bot_poll_slot_skips(
+           bot_id, slot_key, scheduled_for, skip_reason, created_at
+         ) VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(botId, input.slotKey, input.scheduledFor, input.reason, now.toISOString());
+    return result.changes === 1;
+  }
+
+  public listPollSlotSkips(
+    filter: { fromIso?: string; toIso?: string } = {},
+    botId = 'neurobot',
+  ): Array<{ slotKey: string; scheduledFor: string; reason: 'quiet_hours'; createdAt: string }> {
+    const clauses = ['bot_id = ?'];
+    const params: unknown[] = [botId];
+    if (filter.fromIso !== undefined) {
+      clauses.push('scheduled_for >= ?');
+      params.push(filter.fromIso);
+    }
+    if (filter.toIso !== undefined) {
+      clauses.push('scheduled_for < ?');
+      params.push(filter.toIso);
+    }
+    return this.db
+      .prepare(
+        `SELECT slot_key AS slotKey, scheduled_for AS scheduledFor, skip_reason AS reason,
+                created_at AS createdAt
+         FROM bot_poll_slot_skips WHERE ${clauses.join(' AND ')} ORDER BY scheduled_for`,
+      )
+      .all(...params) as Array<{
+      slotKey: string;
+      scheduledFor: string;
+      reason: 'quiet_hours';
+      createdAt: string;
+    }>;
+  }
+
+  /** Olvida los horarios saltados futuros para reevaluarlos tras un cambio de configuración. */
+  public clearFuturePollSlotSkips(fromIso: string, botId = 'neurobot'): number {
+    return this.db
+      .prepare('DELETE FROM bot_poll_slot_skips WHERE bot_id = ? AND scheduled_for >= ?')
+      .run(botId, fromIso).changes;
   }
 
   /**
@@ -4129,16 +4231,57 @@ export class AppDatabase {
     ).map(mapPollDelivery);
   }
 
+  /**
+   * Localiza la entrega (grupo + encuesta) a partir del id serializado del mensaje de creación.
+   * Primero coincidencia exacta con lo guardado al enviar. Si no existe y el id trae el cuarto
+   * segmento `participant` (formato `fromMe_remote_id_participant`, que whatsapp-web.js admite
+   * junto al de 3 segmentos), se compara la clave canónica `fromMe_remote_id` en ambos sentidos.
+   * Nunca se hace matching por pregunta ni por aproximación: siempre es el mismo id de mensaje.
+   */
   public getPollDeliveryByMessageId(
     whatsappMessageId: string,
     botId = 'neurobot',
-  ): { delivery: PollDeliveryRecord; poll: PollRecord } | null {
-    const row = this.db
+  ): {
+    delivery: PollDeliveryRecord;
+    poll: PollRecord;
+    matchedBy: 'exact' | 'canonical_key';
+  } | null {
+    const exact = this.db
       .prepare('SELECT * FROM bot_poll_deliveries WHERE bot_id = ? AND whatsapp_message_id = ?')
       .get(botId, whatsappMessageId) as PollDeliveryRow | undefined;
+    let row = exact;
+    let matchedBy: 'exact' | 'canonical_key' = 'exact';
+    if (row === undefined) {
+      const segments = whatsappMessageId.split('_');
+      if (segments.length >= 3) {
+        const canonicalKey = segments.slice(0, 3).join('_');
+        const escaped = canonicalKey.replace(/[\\%_]/gu, (char) => `\\${char}`);
+        row = this.db
+          .prepare(
+            `SELECT * FROM bot_poll_deliveries
+             WHERE bot_id = ? AND whatsapp_message_id IS NOT NULL
+               AND (whatsapp_message_id = ? OR whatsapp_message_id LIKE ? ESCAPE '\\')
+             ORDER BY id LIMIT 1`,
+          )
+          .get(botId, canonicalKey, `${escaped}\\_%`) as PollDeliveryRow | undefined;
+        matchedBy = 'canonical_key';
+      }
+    }
     if (row === undefined) return null;
     const poll = this.getPoll(row.poll_id, botId);
-    return poll === null ? null : { delivery: mapPollDelivery(row), poll };
+    return poll === null ? null : { delivery: mapPollDelivery(row), poll, matchedBy };
+  }
+
+  /** Cantidad de entregas enviadas con id de mensaje guardado desde `sinceIso` (diagnóstico). */
+  public countPollDeliveriesWithMessageId(sinceIso: string, botId = 'neurobot'): number {
+    return (
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS total FROM bot_poll_deliveries
+           WHERE bot_id = ? AND status = 'sent' AND whatsapp_message_id IS NOT NULL AND sent_at >= ?`,
+        )
+        .get(botId, sinceIso) as { total: number }
+    ).total;
   }
 
   /**

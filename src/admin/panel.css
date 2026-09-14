@@ -2796,6 +2796,46 @@ button.status-switch.is-loading .status-switch__knob {
 .poll-weekly-schedule.is-collapsed > .poll-automation-status {
   display: none;
 }
+/* Formulario propietario de los controles de encuestas (asociados por form=): no se dibuja. */
+.poll-automation-owner {
+  display: none;
+}
+.poll-quiet-hours {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0.9rem 1rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: #f8fafc;
+}
+.poll-quiet-hours legend {
+  padding: 0 0.35rem;
+  font-weight: 600;
+}
+.poll-quiet-hours-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 500;
+}
+.poll-quiet-hours-toggle input {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
+}
+.poll-quiet-hours-range.is-disabled {
+  opacity: 0.55;
+}
+.poll-quiet-hours-help {
+  margin: 0;
+  font-size: 0.85rem;
+}
+.poll-updated-ago {
+  display: block;
+  width: 100%;
+  font-size: 0.8rem;
+}
 
 /* ---------- Encuestas: dashboard de resultados ---------- */
 .poll-dashboard-heading {

@@ -128,12 +128,26 @@ try {
     const automaticMessagesReady =
       automationForm instanceof HTMLFormElement &&
       requiredAutomationFields.every((name) => automationForm.elements.namedItem(name) !== null);
-    const pollPanel = document.querySelector('#poll-automation-form');
-    const pollAutomationReady = Boolean(
-      pollPanel?.querySelector('[name="poll_start_time"]') &&
-        pollPanel?.querySelector('[name="poll_interval_hours"]') &&
-        pollPanel?.querySelector('#save-poll-automation'),
-    );
+    // Los controles de encuestas se asocian por form= al formulario propietario, así que se
+    // comprueban a través de form.elements y no como descendientes. El botón de guardar no debe
+    // pertenecer nunca al formulario general (ese era el bug del formulario anidado).
+    const pollForm = document.querySelector('#poll-automation-form');
+    const saveButton = document.querySelector('#save-poll-automation');
+    const pollFields = [
+      'poll_start_time',
+      'poll_interval_hours',
+      'poll_quiet_hours_enabled',
+      'poll_quiet_hours_start',
+      'poll_quiet_hours_end',
+    ];
+    const pollAutomationReady =
+      pollForm instanceof HTMLFormElement &&
+      !automationForm.contains(pollForm) &&
+      pollFields.every((name) => pollForm.elements.namedItem(name) !== null) &&
+      saveButton instanceof HTMLButtonElement &&
+      saveButton.form === pollForm &&
+      saveButton.form !== automationForm &&
+      document.querySelectorAll('form form').length === 0;
     return {
       href: window.location.href,
       readyState: document.readyState,

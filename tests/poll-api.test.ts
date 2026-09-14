@@ -192,6 +192,85 @@ describe('API administrativa de encuestas', () => {
     expect(toggled.json().nextScheduledAt).toBeNull();
   });
 
+  it('guarda el horario de descanso, lo refleja en los próximos envíos y rechaza franjas inválidas', async () => {
+    const auth = await login(app);
+    // 11:00Z = 08:00 en Chile. Con 12:00 cada 2 h y descanso 23:00–08:00 los próximos envíos
+    // saltan la madrugada y continúan en 08:00 sin recalcular la serie.
+    const saved = await injectAuthenticated(app, auth, {
+      method: 'PATCH',
+      url: '/api/polls/configuration',
+      payload: {
+        startTime: '12:00',
+        intervalHours: 2,
+        enabled: true,
+        quietHoursEnabled: true,
+        quietHoursStart: '23:00',
+        quietHoursEnd: '08:00',
+      },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toMatchObject({
+      configuration: {
+        quietHoursEnabled: true,
+        quietHoursStart: '23:00',
+        quietHoursEnd: '08:00',
+      },
+      quietHoursLabel: '23:00 – 08:00',
+    });
+    currentNow = new Date('2026-01-06T00:30:00.000Z'); // 21:30 en Chile
+    const next = await app.inject({
+      method: 'GET',
+      url: '/api/polls/next-send',
+      headers: { cookie: auth.cookie },
+    });
+    expect(next.json()).toMatchObject({ nextScheduledAt: 'Hoy · 22:00' });
+    expect(next.json().nextSlots.map((slot: { localTime: string }) => slot.localTime)).toEqual([
+      '22:00',
+      '08:00',
+      '10:00',
+      '12:00',
+      '14:00',
+    ]);
+
+    const invalid = await injectAuthenticated(app, auth, {
+      method: 'PATCH',
+      url: '/api/polls/configuration',
+      payload: { quietHoursStart: '10:00', quietHoursEnd: '10:00' },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().code).toBe('POLL_QUIET_HOURS_INVALID');
+    const malformed = await injectAuthenticated(app, auth, {
+      method: 'PATCH',
+      url: '/api/polls/configuration',
+      payload: { quietHoursStart: '25:00' },
+    });
+    expect(malformed.statusCode).toBeGreaterThanOrEqual(400);
+    expect(malformed.statusCode).toBeLessThan(500);
+    const overview = await app.inject({
+      method: 'GET',
+      url: '/api/polls',
+      headers: { cookie: auth.cookie },
+    });
+    expect(overview.json().configuration).toMatchObject({
+      quietHoursStart: '23:00',
+      quietHoursEnd: '08:00',
+    });
+
+    const disabled = await injectAuthenticated(app, auth, {
+      method: 'PATCH',
+      url: '/api/polls/configuration',
+      payload: { quietHoursEnabled: false },
+    });
+    expect(disabled.json().quietHoursLabel).toBeNull();
+    expect(disabled.json().nextSlots.map((slot: { localTime: string }) => slot.localTime)).toEqual([
+      '22:00',
+      '00:00',
+      '02:00',
+      '04:00',
+      '06:00',
+    ]);
+  });
+
   it('rechaza activar sin grupos de automatización disponibles', async () => {
     const auth = await login(app);
     database.setBotGroupBlocked('neurobot', GROUP_ID, true);

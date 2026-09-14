@@ -13,7 +13,7 @@ describe('persistencia SQLite', () => {
     database.migrate();
     expect(database.getMigrationVersions()).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-      27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37,
+      27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38,
     ]);
     expect(database.getBotProfile('neurobot')).toMatchObject({
       botName: 'Neurobot',
@@ -50,6 +50,10 @@ describe('persistencia SQLite', () => {
       timezone: 'America/Santiago',
       anchorLocalDate: null,
       activatedAt: null,
+      // Instalación nueva: el horario de descanso recomendado viene activo desde el inicio.
+      quietHoursEnabled: true,
+      quietHoursStart: '23:00',
+      quietHoursEnd: '08:00',
       updatedAt: expect.any(String),
     });
     database.close();
@@ -471,7 +475,8 @@ describe('persistencia SQLite', () => {
       // Reconstruye el estado anterior a la migración 37 (esquema de las migraciones 8 y 25).
       const raw = new BetterSqlite3(path);
       raw.exec(`
-        DELETE FROM migrations WHERE version = 37;
+        DELETE FROM migrations WHERE version IN (37, 38);
+        DROP TABLE bot_poll_slot_skips;
         DROP TABLE bot_poll_vote_events;
         DROP TABLE bot_poll_votes;
         DROP TABLE bot_poll_deliveries;
@@ -511,6 +516,13 @@ describe('persistencia SQLite', () => {
       // La semántica cambió: queda desactivada hasta que el administrador la active de nuevo,
       // pero la hora y la zona horaria anteriores se conservan como punto de partida.
       expect(configuration).toMatchObject({ enabled: false, startTime: '13:00', intervalHours: 3 });
+      // Migración 38: una instalación existente no cambia de comportamiento por sorpresa; el
+      // descanso queda desactivado con 23:00–08:00 preseleccionado para activarlo desde el panel.
+      expect(configuration).toMatchObject({
+        quietHoursEnabled: false,
+        quietHoursStart: '23:00',
+        quietHoursEnd: '08:00',
+      });
       expect(migrated.listLegacyPollTemplates('neurobot')).toHaveLength(36);
       migrated.close();
       const verify = new BetterSqlite3(path);
@@ -534,6 +546,7 @@ describe('persistencia SQLite', () => {
         'bot_poll_deliveries',
         'bot_poll_options',
         'bot_poll_send_history',
+        'bot_poll_slot_skips',
         'bot_poll_templates',
         'bot_poll_vote_events',
         'bot_poll_votes',
@@ -651,6 +664,9 @@ describe('persistencia SQLite', () => {
       timezone: 'America/Santiago',
       anchorLocalDate: '2026-01-05',
       activatedAt: '2026-01-05T13:00:00.000Z',
+      quietHoursEnabled: false,
+      quietHoursStart: '23:00',
+      quietHoursEnd: '08:00',
     };
     database.savePollAutomationConfiguration({ ...base, enabled: true }, 'neurobot');
     database.savePollAutomationConfiguration({ ...base, enabled: false }, 'neurobot');

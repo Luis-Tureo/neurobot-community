@@ -1,6 +1,7 @@
 import type { Logger } from 'pino';
 import type { PollVoteEvent, PollVoteOutcome } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
+import { describeSerializedMessageId } from '../messaging/identifiers.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import { localDateOf } from './community-digest-schedule.js';
@@ -36,20 +37,28 @@ export class PollVoteService {
   }
 
   public async handle(event: PollVoteEvent): Promise<PollVoteOutcome> {
+    const structure = describeSerializedMessageId(event.pollMessageId);
     const match = this.repository.deliveryByMessageId(event.pollMessageId);
     if (match === null) {
-      // Puede ser un menú seleccionable u otra encuesta ajena al módulo: no es un error.
-      this.logger.debug(
+      // Solo identificadores técnicos seguros: hash del id, segmento hexadecimal del mensaje
+      // (sin JID) y cuántas entregas recientes tienen id guardado, para ubicar el corte.
+      const since = new Date(this.now().getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      this.logger.warn(
         {
-          operation: 'POLL_VOTE_UNKNOWN_POLL',
+          operation: 'POLL_VOTE_DELIVERY_NOT_FOUND',
           botId: this.repository.botId,
           pollHash: this.anonymizer.identifier(event.pollMessageId),
+          pollMessageIdSegment: structure.messageIdSegment,
+          pollMessageIdSegments: structure.segmentCount,
+          parentIdSource: event.parentIdSource ?? null,
+          selectedOptionCount: event.selectedOptions.length,
+          recentDeliveriesWithMessageId: this.repository.countDeliveriesWithMessageId(since),
         },
-        'Voto recibido para una encuesta no registrada',
+        'Voto recibido para una encuesta sin entrega registrada con ese id de mensaje',
       );
       return 'unknown_poll';
     }
-    const { poll, delivery } = match;
+    const { poll, delivery, matchedBy } = match;
     // `index` es el localId asignado por la librería en el orden exacto de las alternativas
     // enviadas; cuando WhatsApp también entrega el nombre se exige coincidencia exacta.
     const validIndexes = event.selectedOptions
@@ -59,12 +68,46 @@ export class PollVoteService {
         return option.name === null || option.name === label.trim();
       })
       .map((option) => option.index);
+    this.logger.info(
+      {
+        operation: 'POLL_VOTE_RECEIVED',
+        botId: this.repository.botId,
+        pollId: poll.id,
+        deliveryId: delivery.id,
+        pollHash: this.anonymizer.identifier(event.pollMessageId),
+        pollMessageIdSegment: structure.messageIdSegment,
+        deliveryFound: true,
+        matchedBy,
+        selectedOptionCount: event.selectedOptions.length,
+        validOptionCount: validIndexes.length,
+        selectedLocalIds: event.selectedOptions.map((option) => option.index),
+        optionNamesProvided: event.selectedOptions.every((option) => option.name !== null),
+        expectedOptionCount: poll.options.length,
+      },
+      'Voto de encuesta asociado a su entrega',
+    );
     if (validIndexes.length !== event.selectedOptions.length) {
+      this.logger.warn(
+        {
+          operation: 'POLL_VOTE_INVALID_OPTION',
+          botId: this.repository.botId,
+          pollId: poll.id,
+          selectedLocalIds: event.selectedOptions.map((option) => option.index),
+          expectedOptionCount: poll.options.length,
+          nameMismatch: event.selectedOptions.some(
+            (option) =>
+              option.name !== null &&
+              poll.options[option.index] !== undefined &&
+              option.name !== (poll.options[option.index] ?? '').trim(),
+          ),
+        },
+        'El voto trae opciones que no coinciden con las alternativas enviadas',
+      );
       this.record('POLL_VOTE_INVALID_OPTION', poll.id, delivery.groupId, event.voterId, 'ignored');
       if (validIndexes.length === 0 && event.selectedOptions.length > 0) return 'invalid_option';
     }
     const now = this.now();
-    const votedAt = new Date(event.votedAtMs);
+    const votedAt = this.plausibleVotedAt(event.votedAtMs, delivery.sentAt ?? poll.sentAt, now);
     const timezone = this.repository.configuration().timezone;
     const outcome = this.repository.recordVote(
       {
@@ -91,6 +134,30 @@ export class PollVoteService {
     this.record(eventType, poll.id, delivery.groupId, event.voterId, outcome);
     if (outcome === 'recorded' || outcome === 'updated') this.onChange?.(outcome);
     return outcome;
+  }
+
+  /**
+   * `voted_at` determina el período de la analítica ("Hoy" en la zona horaria del asistente).
+   * WhatsApp entrega `senderTimestampMs`; si llega vacío o implausible (antes de enviar la
+   * encuesta o en el futuro), se usa el instante de recepción para no perder el voto del período.
+   */
+  private plausibleVotedAt(votedAtMs: number, sentAtIso: string | null, now: Date): Date {
+    const sentAtMs = sentAtIso === null ? Number.NaN : Date.parse(sentAtIso);
+    const lowerBound = Number.isFinite(sentAtMs) ? sentAtMs - 60_000 : Number.NEGATIVE_INFINITY;
+    const upperBound = now.getTime() + 10 * 60_000;
+    if (!Number.isFinite(votedAtMs) || votedAtMs < lowerBound || votedAtMs > upperBound) {
+      this.logger.info(
+        {
+          operation: 'POLL_VOTE_TIMESTAMP_ADJUSTED',
+          botId: this.repository.botId,
+          reportedAt: Number.isFinite(votedAtMs) ? new Date(votedAtMs).toISOString() : null,
+          receivedAt: now.toISOString(),
+        },
+        'El instante del voto reportado por WhatsApp no es plausible; se usa el de recepción',
+      );
+      return now;
+    }
+    return new Date(votedAtMs);
   }
 
   private record(

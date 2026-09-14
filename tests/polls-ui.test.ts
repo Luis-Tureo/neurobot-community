@@ -109,6 +109,48 @@ describe('interfaz de encuestas', () => {
     expect(script).toContain('El conector de WhatsApp activo no soporta encuestas nativas');
   });
 
+  it('integra el horario de descanso en la misma tarjeta de programación semanal', () => {
+    const card = html.slice(
+      html.indexOf('class="card inset poll-weekly-schedule'),
+      html.indexOf('</article>', html.indexOf('class="card inset poll-weekly-schedule')),
+    );
+    expect(card).toContain('Programación semanal de encuestas');
+    expect(card).toContain('<legend>Horario de descanso</legend>');
+    expect(card).toContain('No enviar encuestas durante este horario');
+    expect(card).toContain('name="poll_quiet_hours_enabled"');
+    expect(card).toContain('name="poll_quiet_hours_start"');
+    expect(card).toContain('name="poll_quiet_hours_end"');
+    expect(card).toContain('value="23:00"');
+    expect(card).toContain('value="08:00"');
+    expect(card).toContain('id="poll-quiet-hours-label"');
+    expect(card).toContain('id="poll-quiet-hours-error"');
+    // Un único botón de guardado para hora, recurrencia y descanso; ninguna sección aparte.
+    expect(card.match(/<button id="save-poll-automation"/gu)).toHaveLength(1);
+    expect(html.match(/<legend>Horario de descanso<\/legend>/gu)).toHaveLength(1);
+    expect(script).toContain('quietHoursEnabled: form.elements.poll_quiet_hours_enabled.checked');
+    expect(script).toContain('quietHoursStart: form.elements.poll_quiet_hours_start.value');
+    expect(script).toContain('quietHoursEnd: form.elements.poll_quiet_hours_end.value');
+    expect(script).toContain('La hora de inicio y la de fin del descanso no pueden ser iguales.');
+    expect(script).toContain("error.code === 'POLL_QUIET_HOURS_INVALID'");
+    expect(styles).toContain('.poll-quiet-hours');
+  });
+
+  it('el dashboard se recarga al entrar a Encuestas, con sondeo moderado y marca de actualización', () => {
+    expect(script).toContain(
+      "new window.CustomEvent('panel-section-activated', { detail: { name } })",
+    );
+    expect(dashboard).toContain("window.addEventListener('panel-section-activated'");
+    expect(dashboard).toContain("if (event.detail?.name !== 'polls') return;");
+    expect(dashboard).toContain('void loadPollDashboard({ force: true })');
+    expect(dashboard).toContain('const REFRESH_INTERVAL_MS = 30_000;');
+    expect(dashboard).toContain("document.addEventListener('visibilitychange'");
+    expect(dashboard).toContain('Actualizado hace ${seconds} s');
+    expect(pollsSection).toContain('id="poll-updated-ago"');
+    // Solo datos reales: el estado vacío se oculta únicamente cuando hay votos en la respuesta.
+    expect(dashboard).toContain('const hasVotes = totals.votes > 0;');
+    expect(dashboard).not.toContain('Math.random');
+  });
+
   it('delega la prueba segura al Centro de pruebas sin plantillas', () => {
     expect(labScript).toContain("api(botPath('/api/polls/send-test')");
     expect(labScript).toContain('body: JSON.stringify({ groupKey, confirmed: true })');
