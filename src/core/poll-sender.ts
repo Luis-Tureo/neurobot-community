@@ -85,7 +85,7 @@ export class PollSender {
         const receipt = await this.client.sendPoll(groupId, {
           question: poll.question,
           options: [...poll.options],
-          allowMultipleAnswers: false,
+          allowMultipleAnswers: poll.allowMultipleAnswers === true,
         });
         messageId = receipt?.messageId ?? null;
       } catch (error) {
@@ -109,6 +109,7 @@ export class PollSender {
             operation: 'POLL_RECEIPT_PERSISTENCE_FAILED',
             botId: this.repository.botId,
             pollId: poll.id,
+            deliveryId: delivery.id,
             groupHash: this.anonymizer.identifier(groupId),
             ...serializeError(error, 'POLL_RECEIPT_PERSISTENCE_FAILED', false),
           },
@@ -133,9 +134,23 @@ export class PollSender {
             operation: 'POLL_SENT_WITHOUT_MESSAGE_ID',
             botId: this.repository.botId,
             pollId: poll.id,
+            deliveryId: delivery.id,
             groupHash: this.anonymizer.identifier(groupId),
+            hasWhatsappMessageId: false,
           },
           'La encuesta se envió pero el conector no devolvió el id del mensaje; no se podrán asociar votos',
+        );
+      } else {
+        this.logger.info(
+          {
+            operation: 'POLL_SENT_WITH_MESSAGE_ID',
+            botId: this.repository.botId,
+            pollId: poll.id,
+            deliveryId: delivery.id,
+            groupHash: this.anonymizer.identifier(groupId),
+            hasWhatsappMessageId: true,
+          },
+          'La encuesta se envió y su messageId quedó registrado para asociar votos',
         );
       }
       return { status: 'sent', errorCode: null };

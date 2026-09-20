@@ -225,6 +225,7 @@ describe('generación y planificación anticipada', () => {
         question: '¿Qué ambiente te ayuda mas a concentrarte? 🧠',
         options: ['Silencio', 'Música', 'Ruido'],
         category: 'concentración',
+        allowMultipleAnswers: false,
         attempts: 1,
         model: null,
         totalTokens: 1,

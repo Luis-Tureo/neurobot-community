@@ -57,7 +57,7 @@ describe('interfaz de encuestas', () => {
     for (const kpi of ['votes', 'participants', 'polls', 'average']) {
       expect(pollsSection).toContain(`data-kpi="${kpi}"`);
     }
-    expect(pollsSection).toContain('Total de votos');
+    expect(pollsSection).toContain('Respuestas');
     expect(pollsSection).toContain('Participantes únicos');
     expect(pollsSection).toContain('Encuestas con participación');
     expect(pollsSection).toContain('Promedio por encuesta');

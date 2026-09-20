@@ -59,6 +59,19 @@ export class PollVoteService {
       return 'unknown_poll';
     }
     const { poll, delivery, matchedBy } = match;
+    this.logger.info(
+      {
+        operation: 'POLL_VOTE_DELIVERY_RESOLVED',
+        botId: this.repository.botId,
+        pollId: poll.id,
+        deliveryId: delivery.id,
+        deliveryResolved: true,
+        matchedBy,
+        pollHash: this.anonymizer.identifier(event.pollMessageId),
+        pollMessageIdSegment: structure.messageIdSegment,
+      },
+      'Entrega de encuesta resuelta para el mensaje',
+    );
     // `index` es el localId asignado por la librería en el orden exacto de las alternativas
     // enviadas; cuando WhatsApp también entrega el nombre se exige coincidencia exacta.
     const validIndexes = event.selectedOptions
@@ -86,6 +99,20 @@ export class PollVoteService {
       },
       'Voto de encuesta asociado a su entrega',
     );
+    if (validIndexes.length > 0 || event.selectedOptions.length === 0) {
+      this.logger.info(
+        {
+          operation: 'POLL_VOTE_OPTION_RESOLVED',
+          botId: this.repository.botId,
+          pollId: poll.id,
+          deliveryId: delivery.id,
+          optionResolved: true,
+          validOptionCount: validIndexes.length,
+          selectedOptionCount: event.selectedOptions.length,
+        },
+        'Opciones de la encuesta resueltas exitosamente',
+      );
+    }
     if (validIndexes.length !== event.selectedOptions.length) {
       this.logger.warn(
         {
@@ -104,7 +131,19 @@ export class PollVoteService {
         'El voto trae opciones que no coinciden con las alternativas enviadas',
       );
       this.record('POLL_VOTE_INVALID_OPTION', poll.id, delivery.groupId, event.voterId, 'ignored');
-      if (validIndexes.length === 0 && event.selectedOptions.length > 0) return 'invalid_option';
+      if (validIndexes.length === 0 && event.selectedOptions.length > 0) {
+        this.logger.warn(
+          {
+            operation: 'POLL_VOTE_OPTION_NOT_FOUND',
+            botId: this.repository.botId,
+            pollId: poll.id,
+            deliveryId: delivery.id,
+            optionResolved: false,
+          },
+          'Ninguna opción del voto pudo resolverse contra la encuesta enviada',
+        );
+        return 'invalid_option';
+      }
     }
     const now = this.now();
     const votedAt = this.plausibleVotedAt(event.votedAtMs, delivery.sentAt ?? poll.sentAt, now);
@@ -120,6 +159,17 @@ export class PollVoteService {
         eventKey: event.eventKey,
       },
       now,
+    );
+    this.logger.info(
+      {
+        operation: 'POLL_VOTE_PERSISTED',
+        botId: this.repository.botId,
+        pollId: poll.id,
+        deliveryId: delivery.id,
+        votePersisted: outcome === 'recorded' || outcome === 'updated' || outcome === 'unchanged',
+        outcome,
+      },
+      'Voto de encuesta persistido en la base de datos',
     );
     const eventType =
       outcome === 'recorded'

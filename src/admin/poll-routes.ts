@@ -225,6 +225,20 @@ export function registerPollRoutes(app: FastifyInstance, context: AdminServerCon
       return detail;
     },
   );
+
+  app.get('/api/polls/diagnostic', { preHandler: requireSession }, async (request, reply) => {
+    const botId = parseBotIdQuery(request.query, context);
+    const services = pollServicesFor(context, botId);
+    if (services === null) return pollServiceUnavailable(reply);
+    const stats = context.database.countPollDeliveryStats(botId);
+    const recentDeliveries = context.database.listPollDeliveriesDiagnostic(20, botId);
+    return {
+      botId,
+      deliveries: stats,
+      recentDeliveries,
+      timestamp: new Date().toISOString(),
+    };
+  });
 }
 
 type PollServices = NonNullable<ReturnType<typeof pollServicesFor>>;

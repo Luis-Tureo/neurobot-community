@@ -56,6 +56,7 @@ const VALID = JSON.stringify({
   question: '¿Qué ambiente te ayuda más a concentrarte? 🧠',
   options: ['Silencio total 🤫', 'Música 🎧', 'Sonido ambiente 🌧️', 'Me da igual 🌱'],
   category: 'concentración',
+  selectionMode: 'single',
 });
 
 describe('parseo y validación de encuestas generadas', () => {
@@ -64,6 +65,49 @@ describe('parseo y validación de encuestas generadas', () => {
     expect(poll.question).toBe('¿Qué ambiente te ayuda más a concentrarte? 🧠');
     expect(poll.options).toHaveLength(4);
     expect(poll.category).toBe('concentración');
+    expect(poll.allowMultipleAnswers).toBe(false);
+  });
+
+  it('acepta selectionMode multiple y activa allowMultipleAnswers', () => {
+    const multiple = JSON.stringify({
+      question: '¿Qué cosas te ayudan a descansar?',
+      options: ['Dormir', 'Pasear', 'Leer'],
+      category: 'descanso',
+      selectionMode: 'multiple',
+    });
+    const poll = parseGeneratedPoll(multiple);
+    expect(poll.allowMultipleAnswers).toBe(true);
+  });
+
+  it('rechaza JSON con selectionMode inválido (Test J)', () => {
+    const invalidMode = JSON.stringify({
+      question: '¿Qué ambiente prefieres?',
+      options: ['Opción A', 'Opción B'],
+      category: 'concentración',
+      selectionMode: 'invalid_mode',
+    });
+    expect(() => parseGeneratedPoll(invalidMode)).toThrow('POLL_SELECTION_MODE_INVALID');
+  });
+
+  it('permite 2 opciones para caso binario (Test I)', () => {
+    const binary = validatePollContent({
+      question: '¿Prefieres trabajar de día o de noche?',
+      options: ['De día ☀️', 'De noche 🌙'],
+      category: 'rutinas',
+      allowMultipleAnswers: false,
+    });
+    expect(binary.options).toHaveLength(2);
+  });
+
+  it('rechaza más de 5 opciones (máximo 5) (Test H)', () => {
+    expect(() =>
+      validatePollContent({
+        question: '¿Qué prefieres hoy?',
+        options: ['1', '2', '3', '4', '5', '6'],
+        category: 'x',
+        allowMultipleAnswers: false,
+      }),
+    ).toThrow('POLL_OPTION_COUNT_INVALID');
   });
 
   it('repara texto alrededor del objeto y fences de código', () => {
@@ -74,13 +118,19 @@ describe('parseo y validación de encuestas generadas', () => {
   it('rechaza JSON inválido, opciones duplicadas, cantidades fuera de rango y preguntas no permitidas', () => {
     expect(() => parseGeneratedPoll('no es json')).toThrow(PollGenerationError);
     expect(() =>
-      validatePollContent({ question: '¿Qué prefieres hoy?', options: ['Uno'], category: 'x' }),
+      validatePollContent({
+        question: '¿Qué prefieres hoy?',
+        options: ['Uno'],
+        category: 'x',
+        allowMultipleAnswers: false,
+      }),
     ).toThrow('POLL_OPTION_COUNT_INVALID');
     expect(() =>
       validatePollContent({
         question: '¿Qué prefieres hoy?',
         options: ['Música', 'música 🎧'],
         category: 'x',
+        allowMultipleAnswers: false,
       }),
     ).toThrow('POLL_OPTIONS_DUPLICATED');
     expect(() =>
@@ -88,6 +138,7 @@ describe('parseo y validación de encuestas generadas', () => {
         question: '¿Cuántos síntomas de autismo tienes?',
         options: ['Uno', 'Dos'],
         category: 'x',
+        allowMultipleAnswers: false,
       }),
     ).toThrow('POLL_QUESTION_NOT_ALLOWED');
     expect(() =>
@@ -95,6 +146,7 @@ describe('parseo y validación de encuestas generadas', () => {
         question: '<script>alert(1)</script> ¿Qué prefieres?',
         options: ['Uno', 'Dos'],
         category: 'x',
+        allowMultipleAnswers: false,
       }),
     ).toThrow(PollGenerationError);
     expect(() =>
@@ -102,6 +154,7 @@ describe('parseo y validación de encuestas generadas', () => {
         question: '¿Qué prefieres hoy?',
         options: ['1', '2', '3', '4', '5', '6', '7'],
         category: 'x',
+        allowMultipleAnswers: false,
       }),
     ).toThrow('POLL_OPTION_COUNT_INVALID');
   });

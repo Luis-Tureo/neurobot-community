@@ -121,8 +121,10 @@ export class PollAnalyticsService {
       this.botId,
     );
     const votesChangePercent =
-      previousTotals.votes >= this.comparisonMinimumVotes
-        ? Math.round(((totals.votes - previousTotals.votes) / previousTotals.votes) * 1000) / 10
+      previousTotals.responses >= this.comparisonMinimumVotes
+        ? Math.round(
+            ((totals.responses - previousTotals.responses) / previousTotals.responses) * 1000,
+          ) / 10
         : null;
     const byDay = new Map(
       this.database
@@ -138,7 +140,8 @@ export class PollAnalyticsService {
       const row = byDay.get(date);
       timeseries.push({
         localDate: date,
-        votes: row?.votes ?? 0,
+        responses: row?.responses ?? 0,
+        votes: row?.votes ?? row?.responses ?? 0,
         participants: row?.participants ?? 0,
       });
     }
@@ -146,17 +149,21 @@ export class PollAnalyticsService {
       this.database.listPollVotesByCategory(period.fromIso, period.toIso, this.botId),
     );
     const recentPage = this.recent(period, this.recentLimit, 0);
+    const averageResponsesPerPoll =
+      totals.pollsWithVotes === 0
+        ? null
+        : Math.round((totals.responses / totals.pollsWithVotes) * 10) / 10;
     return {
       period,
       totals: {
-        votes: totals.votes,
+        responses: totals.responses,
+        votes: totals.responses,
+        selections: totals.selections,
         participants: totals.participants,
         pollsWithVotes: totals.pollsWithVotes,
         pollsSent,
-        averageVotesPerPoll:
-          totals.pollsWithVotes === 0
-            ? null
-            : Math.round((totals.votes / totals.pollsWithVotes) * 10) / 10,
+        averageResponsesPerPoll,
+        averageVotesPerPoll: averageResponsesPerPoll,
         votesChangePercent,
       },
       timeseries,
@@ -269,15 +276,19 @@ export function summarizePoll(
 ): PollResultSummary {
   const counts = poll.options.map((_, index) => votes?.options.get(index) ?? 0);
   const totalVotes = counts.reduce((sum, count) => sum + count, 0);
+  const participants = votes?.participants ?? 0;
   const maximum = Math.max(0, ...counts);
   const winners = counts.filter((count) => count === maximum && count > 0).length;
+  // En selección única el denominador es totalVotes. En selección múltiple, el porcentaje
+  // representa la proporción de participantes que marcaron cada opción (la suma puede superar 100%).
+  const base = poll.allowMultipleAnswers ? participants : totalVotes;
   const options: PollOptionResult[] = poll.options.map((label, index) => {
     const count = counts[index] ?? 0;
     return {
       index,
       label,
       votes: count,
-      percentage: totalVotes === 0 ? 0 : Math.round((count / totalVotes) * 100),
+      percentage: base === 0 ? 0 : Math.round((count / base) * 100),
       winner: winners === 1 && count === maximum && count > 0,
     };
   });
@@ -290,7 +301,8 @@ export function summarizePoll(
     scheduledFor: poll.scheduledFor,
     status: poll.status,
     totalVotes,
-    participants: votes?.participants ?? 0,
+    participants,
+    allowMultipleAnswers: poll.allowMultipleAnswers === true,
     options,
   };
 }

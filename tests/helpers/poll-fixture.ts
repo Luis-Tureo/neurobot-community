@@ -42,7 +42,9 @@ export class FakeGenerator implements PollContentGenerator {
     this.calls.push(request);
     const scripted = this.scripted.shift();
     if (scripted instanceof Error) throw scripted;
-    if (scripted !== undefined) return { ...scripted, category: request.category };
+    if (scripted !== undefined) {
+      return Object.assign({ allowMultipleAnswers: false, category: request.category }, scripted);
+    }
     if (this.failures > 0) {
       this.failures -= 1;
       throw new PollGenerationError('AI_UNAVAILABLE', 'AI_TIMEOUT', true);
@@ -53,6 +55,7 @@ export class FakeGenerator implements PollContentGenerator {
       question: `¿Prefieres k${this.counter}z o w${this.counter}q para ${request.category}?`,
       options: ['Opción A', 'Opción B', 'Opción C'],
       category: request.category,
+      allowMultipleAnswers: false,
       attempts: 1,
       model: 'openai/gpt-oss-120b',
       totalTokens: 30,
@@ -114,6 +117,7 @@ export function createSubject(
     repository,
     generator,
     planner,
+    sender,
     service,
     votes,
     anonymizer,

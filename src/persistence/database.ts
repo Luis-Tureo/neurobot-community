@@ -152,6 +152,7 @@ type PollRow = {
   last_error: string | null;
   created_at: string;
   updated_at: string;
+  allow_multiple_answers: number;  // 0 = single, 1 = multiple
 };
 
 type PollDeliveryRow = {
@@ -2591,6 +2592,16 @@ export class AppDatabase {
             ON bot_poll_slot_skips(bot_id, scheduled_for);
         `,
       },
+      {
+        version: 39,
+        sql: `
+          -- Soporte de encuestas de selección múltiple: single choice por defecto para
+          -- encuestas históricas. El valor 0 = single, 1 = multiple.
+          ALTER TABLE bot_polls
+            ADD COLUMN allow_multiple_answers INTEGER NOT NULL DEFAULT 0
+              CHECK (allow_multiple_answers IN (0, 1));
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -3916,6 +3927,7 @@ export class AppDatabase {
       source?: PollDeliverySource;
       slotKey?: string | null;
       scheduledFor?: string | null;
+      allowMultipleAnswers?: boolean;
     },
     botId = 'neurobot',
   ): PollRecord {
@@ -3926,8 +3938,8 @@ export class AppDatabase {
           `INSERT INTO bot_polls(
              bot_id, question, normalized_question, category, origin, source_poll_id,
              source_template_id, status, source, slot_key, scheduled_for, sent_at, attempts,
-             last_attempt_at, last_error, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, ?, ?)`,
+             last_attempt_at, last_error, allow_multiple_answers, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, NULL, ?, ?, ?)`,
         )
         .run(
           botId,
@@ -3941,6 +3953,7 @@ export class AppDatabase {
           input.source ?? 'scheduled',
           input.slotKey ?? null,
           input.scheduledFor ?? null,
+          input.allowMultipleAnswers === true ? 1 : 0,
           now,
           now,
         );
@@ -4285,6 +4298,76 @@ export class AppDatabase {
   }
 
   /**
+   * Estadísticas técnicas agregadas de entregas (sin JIDs ni contenido).
+   * Permite diagnosticar en producción si los message IDs se persistieron.
+   */
+  public countPollDeliveryStats(
+    botId = 'neurobot',
+  ): { totalSent: number; withMessageId: number; withoutMessageId: number } {
+    const row = this.db
+      .prepare(
+        `SELECT
+           COUNT(*) AS totalSent,
+           COALESCE(SUM(CASE WHEN whatsapp_message_id IS NOT NULL THEN 1 ELSE 0 END), 0) AS withMessageId,
+           COALESCE(SUM(CASE WHEN whatsapp_message_id IS NULL THEN 1 ELSE 0 END), 0) AS withoutMessageId
+         FROM bot_poll_deliveries
+         WHERE bot_id = ? AND status = 'sent'`,
+      )
+      .get(botId) as { totalSent: number; withMessageId: number; withoutMessageId: number };
+    return {
+      totalSent: Number(row.totalSent),
+      withMessageId: Number(row.withMessageId),
+      withoutMessageId: Number(row.withoutMessageId),
+    };
+  }
+
+  /**
+   * Muestra de diagnóstico seguro de las últimas entregas enviadas (sin JIDs).
+   */
+  public listPollDeliveriesDiagnostic(
+    limit = 20,
+    botId = 'neurobot',
+  ): Array<{
+    id: number;
+    pollId: number;
+    hasMessageId: boolean;
+    messageIdPrefix: string | null;
+    status: string;
+    attempts: number;
+    sentAt: string | null;
+    lastError: string | null;
+  }> {
+    return (
+      this.db
+        .prepare(
+          `SELECT id, poll_id AS pollId,
+                  whatsapp_message_id IS NOT NULL AS hasMessageId,
+                  CASE
+                    WHEN whatsapp_message_id IS NULL THEN NULL
+                    ELSE substr(whatsapp_message_id, 1, 15)
+                  END AS messageIdPrefix,
+                  status, attempts, sent_at AS sentAt, last_error AS lastError
+           FROM bot_poll_deliveries
+           WHERE bot_id = ? AND status = 'sent'
+           ORDER BY id DESC LIMIT ?`,
+        )
+        .all(botId, limit) as Array<{
+        id: number;
+        pollId: number;
+        hasMessageId: number;
+        messageIdPrefix: string | null;
+        status: string;
+        attempts: number;
+        sentAt: string | null;
+        lastError: string | null;
+      }>
+    ).map((row) => ({
+      ...row,
+      hasMessageId: row.hasMessageId === 1,
+    }));
+  }
+
+  /**
    * Aplica un evento de voto de forma idempotente. Cada evento trae la selección completa del
    * votante; los cambios reemplazan la selección anterior (nunca se suman) y los eventos
    * repetidos o más antiguos que el último procesado se ignoran.
@@ -4375,17 +4458,39 @@ export class AppDatabase {
     fromIso: string,
     toIso: string,
     botId = 'neurobot',
-  ): { votes: number; participants: number; pollsWithVotes: number } {
-    return this.db
+  ): {
+    responses: number;
+    votes: number;
+    selections: number;
+    participants: number;
+    pollsWithVotes: number;
+  } {
+    const row = this.db
       .prepare(
-        `SELECT COUNT(*) AS votes, COUNT(DISTINCT voter_hash) AS participants,
-                COUNT(DISTINCT poll_id) AS pollsWithVotes
-         FROM bot_poll_votes WHERE bot_id = ? AND voted_at >= ? AND voted_at < ?`,
+        `SELECT
+           (SELECT COUNT(*) FROM (
+             SELECT DISTINCT delivery_id, voter_hash
+             FROM bot_poll_votes
+             WHERE bot_id = ? AND voted_at >= ? AND voted_at < ?
+           )) AS responses,
+           COUNT(*)                     AS selections,
+           COUNT(DISTINCT voter_hash)   AS participants,
+           COUNT(DISTINCT delivery_id)  AS pollsWithVotes
+         FROM bot_poll_votes
+         WHERE bot_id = ? AND voted_at >= ? AND voted_at < ?`,
       )
-      .get(botId, fromIso, toIso) as {
-      votes: number;
+      .get(botId, fromIso, toIso, botId, fromIso, toIso) as {
+      responses: number;
+      selections: number;
       participants: number;
       pollsWithVotes: number;
+    };
+    return {
+      responses: Number(row.responses),
+      votes: Number(row.responses),
+      selections: Number(row.selections),
+      participants: Number(row.participants),
+      pollsWithVotes: Number(row.pollsWithVotes),
     };
   }
 
@@ -4404,19 +4509,25 @@ export class AppDatabase {
     fromIso: string,
     toIso: string,
     botId = 'neurobot',
-  ): Array<{ localDate: string; votes: number; participants: number }> {
-    return this.db
-      .prepare(
-        `SELECT local_date AS localDate, COUNT(*) AS votes,
-                COUNT(DISTINCT voter_hash) AS participants
-         FROM bot_poll_votes WHERE bot_id = ? AND voted_at >= ? AND voted_at < ?
-         GROUP BY local_date ORDER BY local_date`,
-      )
-      .all(botId, fromIso, toIso) as Array<{
-      localDate: string;
-      votes: number;
-      participants: number;
-    }>;
+  ): Array<{ localDate: string; responses: number; votes: number; participants: number }> {
+    return (
+      this.db
+        .prepare(
+          `SELECT local_date AS localDate,
+                  COUNT(DISTINCT delivery_id || ':' || voter_hash) AS responses,
+                  COUNT(DISTINCT voter_hash) AS participants
+           FROM bot_poll_votes WHERE bot_id = ? AND voted_at >= ? AND voted_at < ?
+           GROUP BY local_date ORDER BY local_date`,
+        )
+        .all(botId, fromIso, toIso) as Array<{
+        localDate: string;
+        responses: number;
+        participants: number;
+      }>
+    ).map((row) => ({
+      ...row,
+      votes: row.responses,
+    }));
   }
 
   public listTopPolls(
@@ -9406,6 +9517,7 @@ function mapPoll(row: PollRow, options: string[]): PollRecord {
     lastError: row.last_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    allowMultipleAnswers: row.allow_multiple_answers === 1,
   };
 }
 

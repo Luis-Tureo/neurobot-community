@@ -17,6 +17,7 @@ async function sendEnergyPoll(subject: Subject) {
     question: QUESTION,
     options: [...OPTIONS],
     category: 'bienestar',
+    allowMultipleAnswers: false,
     attempts: 1,
     model: 'openai/gpt-oss-120b',
     totalTokens: 30,
@@ -173,7 +174,9 @@ describe('pipeline completo: envío → whatsapp_message_id → vote_update → 
       expect(
         subject.database.countPollVotes('2026-01-01T00:00:00Z', '2026-12-31T00:00:00Z'),
       ).toEqual({
+        responses: 1,
         votes: 1,
+        selections: 1,
         participants: 1,
         pollsWithVotes: 1,
       });
@@ -356,7 +359,7 @@ describe('períodos de la analítica con la zona horaria del asistente', () => {
         pollsSent: 1,
       });
       expect(analytics.summary(today).timeseries).toEqual([
-        { localDate: '2026-01-05', votes: 1, participants: 1 },
+        { localDate: '2026-01-05', responses: 1, votes: 1, participants: 1 },
       ]);
 
       // Al día siguiente: la encuesta se envió ayer (pollsSent usa sent_at) y el voto de ayer ya

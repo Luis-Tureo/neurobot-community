@@ -50,7 +50,7 @@ export const POLL_QUESTION_MIN_CHARS = 10;
 export const POLL_QUESTION_MAX_CHARS = 200;
 export const POLL_OPTION_MAX_CHARS = 100;
 export const POLL_MIN_OPTIONS = 2;
-export const POLL_MAX_OPTIONS = 6;
+export const POLL_MAX_OPTIONS = 5;
 export const POLL_GENERATION_MAX_ATTEMPTS = 2;
 export const POLL_GENERATION_OUTPUT_TOKENS = 400;
 /** Umbral Dice sobre raíces de palabras a partir del cual dos preguntas se consideran equivalentes. */
@@ -66,21 +66,28 @@ export const POLL_JSON_SCHEMA: Record<string, unknown> = {
     options: {
       type: 'array',
       items: { type: 'string' },
-      description: 'Entre 2 y 6 alternativas breves y distintas entre sí; idealmente 3 o 4.',
+      description:
+        'Entre 2 y 5 alternativas breves y distintas entre sí; habitualmente 3 o 4 (2 solo si es estrictamente binaria).',
     },
     category: {
       type: 'string',
       description: 'Tema principal de la encuesta, en minúsculas.',
     },
+    selectionMode: {
+      type: 'string',
+      enum: ['single', 'multiple'],
+      description:
+        'Modo de respuesta: "single" si las opciones son mutuamente excluyentes o preferencia única; "multiple" si varias opciones pueden aplicar simultáneamente.',
+    },
   },
-  required: ['question', 'options', 'category'],
+  required: ['question', 'options', 'category', 'selectionMode'],
   additionalProperties: false,
 };
 
 export const POLL_SYSTEM_INSTRUCTION = [
   'Eres el asistente de una comunidad de WhatsApp de personas neurodivergentes (autismo, TDAH y',
   'personas en proceso de conocerse mejor). Creas encuestas cortas para que la comunidad comparta',
-  'experiencias y preferencias cotidianas.',
+  'experiencias, hábitos y preferencias cotidianas.',
   '',
   'REGLAS OBLIGATORIAS:',
   '- Escribe en español neutro, tono amigable, natural, respetuoso e inclusivo (usa formas como',
@@ -89,17 +96,27 @@ export const POLL_SYSTEM_INSTRUCTION = [
   '  ni una evaluación: prohibido preguntar por síntomas, diagnósticos, gravedad, medicación,',
   '  "qué tan enfermo" o "cuántos rasgos" tiene alguien.',
   '- Una sola pregunta breve (máximo 200 caracteres) y clara, apta para leer en el teléfono.',
-  '- Entre 2 y 6 alternativas, preferentemente 3 o 4: breves (máximo 100 caracteres), distintas',
-  '  entre sí, sin duplicados ni alternativas vacías. Es válido incluir una alternativa neutra',
-  '  como "Depende del día" o "Me da igual".',
+  '- Cantidad de opciones: entre 2 y 5 (MÁXIMO 5). Lo habitual es 3 o 4; 2 opciones únicamente si la',
+  '  pregunta es genuinamente binaria (ej. sí/no). No generes siempre 5 opciones.',
+  '  Opciones breves (máximo 100 caracteres), distintas entre sí, sin duplicados ni vacías.',
+  '- ENFOQUE CONTEMPORÁNEO Y NATURAL: orienta las preguntas a la vida actual de jóvenes y adultos',
+  '  (gestión de energía, pausas, playlists, podcasts, sobrecarga digital o de notificaciones,',
+  '  ambientes de estudio/trabajo, rutinas de sueño, gaming, intereses especiales cotidianos).',
+  '  Evita clasificaciones culturales rígidas y trilladas (como enumerar mecánicamente "Rock / Pop / Jazz"',
+  '  como representación de música), referencias anticuadas por defecto, jerga forzada o modas virales efímeras,',
+  '  y no menciones marcas comerciales innecesarias.',
+  '- SELECTION MODE ("single" o "multiple"):',
+  '  * "single": opciones mutuamente excluyentes o preferencia principal (ej. "¿A qué hora te concentras mejor?").',
+  '  * "multiple": varias opciones pueden ser ciertas simultáneamente (ej. "¿Qué cosas te ayudan a desconectar?").',
   '- Puedes usar como máximo un emoji en la pregunta y uno por alternativa, sin abusar.',
   '- No repitas ni parafrasees las preguntas recientes que se indican en el contexto.',
   '- Usa la categoría objetivo indicada; devuelve esa misma categoría en minúsculas.',
   '- Responde ÚNICAMENTE con el objeto JSON solicitado, sin texto adicional.',
   '',
   'EJEMPLOS DE ESTILO (no los copies):',
-  '{"question":"¿Qué ambiente te ayuda más a concentrarte? 🧠","options":["Silencio total 🤫","Música 🎧","Sonido ambiente 🌧️","Me da igual 🌱"],"category":"concentración"}',
-  '{"question":"Cuando necesitas recargar energía, ¿qué prefieres?","options":["Estar solo/a","Dormir","Escuchar música","Hablar con alguien"],"category":"energía"}',
+  '{"question":"¿Qué ambiente te ayuda más a concentrarte? 🧠","options":["Silencio total 🤫","Música o playlist 🎧","Sonido de lluvia o ambiente 🌧️","Depende del día 🌱"],"category":"concentración","selectionMode":"single"}',
+  '{"question":"¿Qué cosas te ayudan a recargar energía después de un día intenso?","options":["Estar a solas","Luz tenue","Poner una playlist favorita","Jugar o desconectar en una pantalla","Caminar un rato"],"category":"energía","selectionMode":"multiple"}',
+  '{"question":"¿Sueles silenciar las notificaciones del teléfono?","options":["Casi siempre en silencio 🔕","Solo las de grupos","Con sonido activado 🔔"],"category":"tecnología","selectionMode":"single"}',
 ].join('\n');
 
 const FORBIDDEN_PATTERNS = [
@@ -382,7 +399,12 @@ export function parseGeneratedPoll(raw: string): PollContent {
     ? candidate.options.filter((option): option is string => typeof option === 'string')
     : [];
   const category = typeof candidate.category === 'string' ? candidate.category : '';
-  return validatePollContent({ question, options, category });
+  const selectionMode = candidate.selectionMode;
+  if (selectionMode !== 'single' && selectionMode !== 'multiple') {
+    throw new PollGenerationError('AI_INVALID_RESPONSE', 'POLL_SELECTION_MODE_INVALID');
+  }
+  const allowMultipleAnswers = selectionMode === 'multiple';
+  return validatePollContent({ question, options, category, allowMultipleAnswers });
 }
 
 export function validatePollContent(content: PollContent): PollContent {
@@ -407,7 +429,12 @@ export function validatePollContent(content: PollContent): PollContent {
     throw new PollGenerationError('AI_INVALID_RESPONSE', 'POLL_OPTIONS_DUPLICATED');
   }
   const category = cleanLine(content.category, 80).toLocaleLowerCase('es') || 'comunidad';
-  return { question, options, category };
+  return {
+    question,
+    options,
+    category,
+    allowMultipleAnswers: content.allowMultipleAnswers === true,
+  };
 }
 
 /** Normaliza para comparar: sin mayúsculas, acentos, emojis, puntuación ni espacios repetidos. */

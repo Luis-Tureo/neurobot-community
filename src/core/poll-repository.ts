@@ -47,6 +47,7 @@ export class PollRepository {
     source?: PollDeliverySource;
     slotKey?: string | null;
     scheduledFor?: string | null;
+    allowMultipleAnswers?: boolean;
   }): PollRecord {
     return this.database.insertPoll(input, this.botId);
   }
@@ -144,6 +145,14 @@ export class PollRepository {
 
   public countDeliveriesWithMessageId(sinceIso: string): number {
     return this.database.countPollDeliveriesWithMessageId(sinceIso, this.botId);
+  }
+
+  public deliveryStats() {
+    return this.database.countPollDeliveryStats(this.botId);
+  }
+
+  public deliveriesDiagnostic(limit = 20) {
+    return this.database.listPollDeliveriesDiagnostic(limit, this.botId);
   }
 
   public recordVote(

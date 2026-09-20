@@ -217,6 +217,8 @@ export type PollStatus = 'generated' | 'scheduled' | 'sending' | 'sent' | 'faile
 export type PollDeliveryStatus = 'pending' | 'sending' | 'sent' | 'failed' | 'skipped';
 export type PollDeliverySource = 'scheduled' | 'manual';
 
+export type PollSelectionMode = 'single' | 'multiple';
+
 export type NativePoll = {
   question: string;
   options: string[];
@@ -269,6 +271,7 @@ export type PollContent = {
   question: string;
   options: string[];
   category: string;
+  allowMultipleAnswers: boolean;
 };
 
 export type PollRecord = PollContent & {
@@ -369,21 +372,24 @@ export type PollResultSummary = {
   status: PollStatus;
   totalVotes: number;
   participants: number;
+  allowMultipleAnswers: boolean;
   options: PollOptionResult[];
 };
 
 export type PollAnalyticsSummary = {
   period: PollAnalyticsPeriod;
   totals: {
-    votes: number;
-    participants: number;
-    pollsWithVotes: number;
+    responses: number; // pares únicos (delivery_id, voter_hash) con al menos una opción activa
+    votes: number; // alias retrocompatible de responses
+    selections: number; // COUNT(*) de bot_poll_votes (selecciones individuales)
+    participants: number; // COUNT(DISTINCT voter_hash)
+    pollsWithVotes: number; // COUNT(DISTINCT delivery_id) con al menos una respuesta
     pollsSent: number;
-    averageVotesPerPoll: number | null;
-    /** Variación porcentual de votos vs el período anterior equivalente; null si no hay datos suficientes. */
-    votesChangePercent: number | null;
+    averageResponsesPerPoll: number | null; // responses / pollsWithVotes
+    averageVotesPerPoll: number | null; // alias retrocompatible (= averageResponsesPerPoll)
+    votesChangePercent: number | null; // variación de responses vs período anterior
   };
-  timeseries: Array<{ localDate: string; votes: number; participants: number }>;
+  timeseries: Array<{ localDate: string; responses: number; votes: number; participants: number }>;
   topPolls: Array<{ id: number; question: string; category: string; votes: number }>;
   categories: Array<{ category: string; votes: number; percentage: number }>;
   trends: Array<{

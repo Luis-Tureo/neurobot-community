@@ -244,7 +244,12 @@ export class PollPlanner {
       let content: PollContent;
       try {
         const generated = await this.generator.generate({ category, avoidQuestions: recent });
-        content = { question: generated.question, options: generated.options, category };
+        content = {
+          question: generated.question,
+          options: generated.options,
+          category,
+          allowMultipleAnswers: generated.allowMultipleAnswers === true,
+        };
       } catch (error) {
         const code = error instanceof PollGenerationError ? error.code : 'POLL_GENERATION_FAILED';
         this.event('POLL_GENERATION_FAILED', { result: 'failed', category, errorCode: code });
@@ -317,6 +322,7 @@ export class PollPlanner {
       question: source.question,
       options: [...source.options],
       category: source.category,
+      allowMultipleAnswers: source.allowMultipleAnswers === true,
       normalizedQuestion: source.normalizedQuestion,
       origin: 'reused',
       sourcePollId: source.id,
@@ -335,9 +341,8 @@ export class PollPlanner {
     const templates = this.repository
       .legacyTemplates()
       // El banco histórico contiene escalas y preguntas extensas de hasta 12 alternativas.
-      // Solo se reutilizan plantillas que ya cumplen la experiencia actual: recortarlas cambiaría
-      // el significado de la encuesta y podría eliminar alternativas esenciales.
-      .filter((template) => template.options.length >= 2 && template.options.length <= 6)
+      // Solo se reutilizan plantillas que ya cumplen la experiencia actual: 2 a 5 alternativas.
+      .filter((template) => template.options.length >= 2 && template.options.length <= 5)
       .filter((template) => findSimilarQuestion(template.question, recent) === null)
       .sort((left, right) => {
         const leftUsed = usage.get(left.id) ?? '';
@@ -350,6 +355,7 @@ export class PollPlanner {
       question: template.question,
       options: [...template.options],
       category: template.category.toLocaleLowerCase('es'),
+      allowMultipleAnswers: false,
       normalizedQuestion: normalizePollQuestion(template.question),
       origin: 'legacy_bank',
       sourceTemplateId: template.id,

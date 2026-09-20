@@ -36,6 +36,7 @@ class StaticGenerator implements PollContentGenerator {
       question: `¿Prefieres k${this.counter}z o w${this.counter}q para ${request.category}?`,
       options: ['Opción A', 'Opción B', 'Opción C'],
       category: request.category,
+      allowMultipleAnswers: false,
       attempts: 1,
       model: 'openai/gpt-oss-120b',
       totalTokens: 12,
@@ -404,6 +405,25 @@ describe('API administrativa de encuestas', () => {
       headers: { cookie: auth.cookie },
     });
     expect(badPeriod.statusCode).toBe(400);
+
+    const diag = await app.inject({
+      method: 'GET',
+      url: '/api/polls/diagnostic',
+      headers: { cookie: auth.cookie },
+    });
+    expect(diag.statusCode).toBe(200);
+    expect(diag.json().deliveries).toMatchObject({
+      totalSent: 1,
+      withMessageId: 1,
+      withoutMessageId: 0,
+    });
+    expect(diag.json().recentDeliveries).toHaveLength(1);
+    expect(diag.json().recentDeliveries[0]).toMatchObject({
+      hasMessageId: true,
+      status: 'sent',
+    });
+    expect(diag.body).not.toContain('56911111111');
+    expect(diag.body).not.toContain(GROUP_ID);
   });
 
   it('no expone las rutas antiguas del banco de encuestas', async () => {

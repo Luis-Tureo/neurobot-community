@@ -162,11 +162,12 @@ function renderKpis(summary) {
     card.querySelector('strong').textContent = value;
     card.querySelector('.poll-kpi-hint').textContent = hint;
   };
+  const responses = totals.responses ?? totals.votes;
   const change =
     totals.votesChangePercent === null
       ? ''
       : `${totals.votesChangePercent >= 0 ? '+' : ''}${decimalFormatter.format(totals.votesChangePercent)}% vs período anterior`;
-  setKpi('votes', numberFormatter.format(totals.votes), change);
+  setKpi('votes', numberFormatter.format(responses), change);
   setKpi('participants', numberFormatter.format(totals.participants));
   setKpi(
     'polls',
@@ -175,10 +176,11 @@ function renderKpis(summary) {
       ? `de ${numberFormatter.format(totals.pollsSent)} enviadas en el período`
       : '',
   );
+  const avg = totals.averageResponsesPerPoll ?? totals.averageVotesPerPoll;
   setKpi(
     'average',
-    totals.averageVotesPerPoll === null ? '—' : decimalFormatter.format(totals.averageVotesPerPoll),
-    'votos por encuesta con participación',
+    avg === null ? '—' : decimalFormatter.format(avg),
+    'respuestas por encuesta con participación',
   );
 }
 
@@ -312,10 +314,12 @@ function pollResultCard(poll, { withDetailButton }) {
   heading.className = 'poll-result-heading';
   const title = document.createElement('h4');
   title.textContent = poll.question;
+  const modeLabel = poll.allowMultipleAnswers ? 'Selección múltiple' : 'Respuesta única';
   const meta = document.createElement('p');
   meta.className = 'muted';
   meta.textContent = [
-    `${numberFormatter.format(poll.totalVotes)} votos`,
+    modeLabel,
+    `${numberFormatter.format(poll.totalVotes)} respuestas`,
     `${numberFormatter.format(poll.participants)} participantes`,
     poll.sentAt ? formatDateTime(poll.sentAt) : null,
   ]
@@ -333,6 +337,15 @@ function pollResultCard(poll, { withDetailButton }) {
         barRow(option.label, option.votes, option.percentage, { winner: option.winner }),
       );
     });
+    if (poll.allowMultipleAnswers) {
+      const note = document.createElement('p');
+      note.className = 'muted';
+      note.style.fontSize = '0.8rem';
+      note.style.marginTop = '0.4rem';
+      note.textContent =
+        '* En selección múltiple los porcentajes representan la proporción de participantes que marcaron cada opción y pueden sumar más del 100%.';
+      options.append(note);
+    }
     card.append(options);
     const winner = poll.options.find((option) => option.winner);
     if (winner) {
@@ -394,12 +407,13 @@ async function openPollDetail(pollId) {
     const meta = document.querySelector('#poll-detail-meta');
     meta.replaceChildren();
     const entries = [
+      ['Tipo', detail.allowMultipleAnswers ? 'Selección múltiple' : 'Respuesta única'],
       ['Fecha de envío', detail.sentAt ? formatDateTime(detail.sentAt) : 'No enviada'],
       ['Categoría', capitalize(detail.category)],
       ['Origen', originLabels[detail.origin] || detail.origin],
       ['Estado', statusLabel(detail.status)],
-      ['Total de votos', numberFormatter.format(detail.totalVotes)],
-      ['Participantes', numberFormatter.format(detail.participants)],
+      ['Total de respuestas', numberFormatter.format(detail.totalVotes)],
+      ['Participantes únicos', numberFormatter.format(detail.participants)],
       ['Grupos con envío', String(detail.deliveries.filter((d) => d.status === 'sent').length)],
     ];
     entries.forEach(([term, value]) => {

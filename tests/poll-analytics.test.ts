@@ -178,10 +178,13 @@ describe('analítica de encuestas', () => {
       const period = fixture.analytics.resolvePeriod({ key: '7d' });
       const summary = fixture.analytics.summary(period);
       expect(summary.totals).toEqual({
+        responses: 11,
         votes: 11,
+        selections: 11,
         participants: 10,
         pollsWithVotes: 2,
         pollsSent: 3,
+        averageResponsesPerPoll: 5.5,
         averageVotesPerPoll: 5.5,
         votesChangePercent: -8.3,
       });
@@ -261,14 +264,19 @@ describe('analítica de encuestas', () => {
       const period = fixture.analytics.resolvePeriod({ key: 'today' });
       const summary = fixture.analytics.summary(period);
       expect(summary.totals).toEqual({
+        responses: 0,
         votes: 0,
+        selections: 0,
         participants: 0,
         pollsWithVotes: 0,
         pollsSent: 0,
+        averageResponsesPerPoll: null,
         averageVotesPerPoll: null,
         votesChangePercent: null,
       });
-      expect(summary.timeseries).toEqual([{ localDate: '2026-01-14', votes: 0, participants: 0 }]);
+      expect(summary.timeseries).toEqual([
+        { localDate: '2026-01-14', responses: 0, votes: 0, participants: 0 },
+      ]);
       expect(summary.topPolls).toEqual([]);
       expect(summary.categories).toEqual([]);
       expect(summary.trends).toEqual([]);

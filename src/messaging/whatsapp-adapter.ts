@@ -697,9 +697,23 @@ export class WhatsAppWebAdapter implements MessagingClient {
         messageSecret: undefined,
       }),
     );
-    // El id serializado del mensaje de creación es el que llega luego en cada `vote_update`
-    // (`parentMessage.id` / `parentMsgKey`), así que basta para asociar los votos.
-    return { messageId: getSerializedId(sentMessage?.id) };
+    const rawId = sentMessage?.id;
+    const messageId = getSerializedId(rawId);
+    this.logger.info(
+      {
+        operation: 'POLL_SEND_RECEIPT_RESOLVED',
+        hasSentMessage: sentMessage !== undefined && sentMessage !== null,
+        hasRawId: rawId !== undefined && rawId !== null,
+        rawIdType: typeof rawId,
+        hasSerialized:
+          typeof rawId === 'object' && rawId !== null && '_serialized' in (rawId as object),
+        messageIdAvailable: messageId !== null,
+        messageIdLength: messageId?.length ?? 0,
+        groupHash: this.hash(chatId),
+      },
+      'Recibo de envío de encuesta resuelto',
+    );
+    return { messageId };
   }
 
   public async sendSelectableMenu(
