@@ -20,6 +20,7 @@ import type { PollScheduler } from './poll-scheduler.js';
 import type { PollService } from './poll-service.js';
 import type { PollAnalyticsService } from './poll-analytics-service.js';
 import type { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
+import type { CommunityCountryService } from './community-country-service.js';
 
 type ClientFactory = (bot: BotRecord, context: { freshLinkingSession: boolean }) => MessagingClient;
 
@@ -375,6 +376,14 @@ export class MultiBotManager {
 
   public aiQueue(botId: string): AIRequestQueueService | null {
     return this.instances.get(botId)?.aiRequestQueue() ?? null;
+  }
+
+  public countryService(botId: string): CommunityCountryService | null {
+    return this.instances.get(botId)?.communityCountryService() ?? null;
+  }
+
+  public messagingClient(botId: string): MessagingClient | null {
+    return this.instances.get(botId)?.messagingClient() ?? null;
   }
 
   public resetTransientState(): void {

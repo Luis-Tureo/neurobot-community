@@ -95,6 +95,7 @@
                 Centro de pruebas
               </option>
               <option value="polls" data-bot-only data-module="polls">Encuestas</option>
+              <option value="countries" data-bot-only data-module="countries">Países</option>
               <option value="requests" data-bot-only data-module="requests">
                 Solicitudes humanas
               </option>
@@ -158,6 +159,9 @@
               </button>
               <button data-section="polls" data-module="polls" class="bot-only hidden">
                 <span aria-hidden="true">▥</span> Encuestas
+              </button>
+              <button data-section="countries" data-module="countries" class="bot-only hidden">
+                <span aria-hidden="true">🌎</span> Países
               </button>
               <button data-section="requests" data-module="requests" class="bot-only hidden">
                 <span aria-hidden="true">◎</span> Solicitudes
@@ -1551,6 +1555,90 @@
                 </article>
               </div>
             </section>
+
+            <section id="section-countries" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Comunidad</p>
+                  <h2>Países de la comunidad</h2>
+                  <p class="muted">País asociado al número de WhatsApp de los integrantes</p>
+                </div>
+                <div class="countries-actions">
+                  <button id="countries-sync-btn" type="button" class="secondary">
+                    ↻ Sincronizar integrantes
+                  </button>
+                </div>
+              </div>
+
+              <div class="info-callout countries-disclaimer" role="note">
+                <strong>Nota sobre privacidad y alcance:</strong> Esta información refleja únicamente el país asociado al prefijo internacional del número de WhatsApp o declarado voluntariamente por cada integrante mediante el comando <code>!pais</code>. <em>No representa necesariamente nacionalidad, residencia actual ni ubicación física.</em> Por privacidad, los países con menos de 5 integrantes se agrupan bajo «Otros países». No se muestran ni registran números telefónicos ni identificadores privados.
+              </div>
+
+              <div id="countries-kpis" class="poll-kpi-grid" aria-live="polite">
+                <article class="status-card" data-kpi="total">
+                  <span>Total integrantes</span>
+                  <strong id="country-kpi-total">—</strong>
+                  <small class="poll-kpi-hint">En grupos de la comunidad</small>
+                </article>
+                <article class="status-card" data-kpi="identified">
+                  <span>Con país asociado</span>
+                  <strong id="country-kpi-identified">—</strong>
+                  <small class="poll-kpi-hint" id="country-kpi-identified-pct">—</small>
+                </article>
+                <article class="status-card" data-kpi="unidentified">
+                  <span>Sin identificar</span>
+                  <strong id="country-kpi-unidentified">—</strong>
+                  <small class="poll-kpi-hint">Sin prefijo detectable (@lid)</small>
+                </article>
+                <article class="status-card" data-kpi="diversity">
+                  <span>Diversidad de países</span>
+                  <strong id="country-kpi-countries">—</strong>
+                  <small class="poll-kpi-hint">Países representados</small>
+                </article>
+              </div>
+
+              <article class="card inset countries-table-card">
+                <div class="section-heading">
+                  <div>
+                    <h3>Distribución geográfica</h3>
+                    <p class="muted">Detalle por país y fuente de datos</p>
+                  </div>
+                  <div class="search-box">
+                    <label for="countries-search-input" class="sr-only">Buscar país</label>
+                    <input
+                      id="countries-search-input"
+                      type="search"
+                      placeholder="Buscar por país o código (ej: Chile, CL, AR)..."
+                      aria-label="Buscar país o código ISO"
+                      autocomplete="off"
+                    />
+                  </div>
+                </div>
+
+                <div class="table-responsive">
+                  <table id="countries-table" class="data-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">País</th>
+                        <th scope="col" class="text-right">Integrantes</th>
+                        <th scope="col">Distribución (%)</th>
+                        <th scope="col" class="text-right">Detectado por número</th>
+                        <th scope="col" class="text-right">Declarado</th>
+                      </tr>
+                    </thead>
+                    <tbody id="countries-table-body">
+                      <tr>
+                        <td colspan="5" class="text-center muted py-4">Cargando datos de países...</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div id="countries-empty-state" class="empty-state hidden">
+                  <p class="muted">No se encontraron países que coincidan con la búsqueda.</p>
+                </div>
+              </article>
+            </section>
           </div>
         </div>
       </div>
@@ -1560,5 +1648,6 @@
     <script type="module" src="/multibot-panel.js"></script>
     <script type="module" src="/panel-ui.js"></script>
     <script type="module" src="/automation-lab.js"></script>
+    <script type="module" src="/countries-dashboard.js"></script>
   </body>
 </html>

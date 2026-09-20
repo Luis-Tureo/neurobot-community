@@ -13,6 +13,7 @@ export type AssistantModuleKey =
   | 'ai'
   | 'automatic-messages'
   | 'polls'
+  | 'countries'
   | 'requests';
 
 const common: AssistantModuleKey[] = [
@@ -23,7 +24,7 @@ const common: AssistantModuleKey[] = [
   'cached-answers',
   'ai',
 ];
-const community: AssistantModuleKey[] = ['automatic-messages', 'polls'];
+const community: AssistantModuleKey[] = ['automatic-messages', 'polls', 'countries'];
 const commercial: AssistantModuleKey[] = ['menus', 'catalog', 'media', 'hours', 'requests'];
 
 export class AssistantModuleVisibilityService {

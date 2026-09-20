@@ -20,6 +20,7 @@ import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
 import { ExpiringSet } from './expiring-cache.js';
 import { WELCOME_BATCH_WINDOW_MS } from './automatic-message-defaults.js';
+import type { CommunityCountryService } from './community-country-service.js';
 import {
   joinWelcomeNames,
   renderWelcomeTemplate,
@@ -48,6 +49,7 @@ export type AutomaticMessageServiceOptions = {
   welcomeDeduplicationTtlMs?: number;
   now?: () => Date;
   sleep?: (milliseconds: number) => Promise<void>;
+  countryService?: CommunityCountryService | undefined;
 };
 
 type WelcomeBatch = {
@@ -64,6 +66,7 @@ export class AutomaticMessageService {
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly botId: string;
   private readonly welcomeEventDeduplicationTtlMs: number;
+  private readonly countryService: CommunityCountryService | undefined;
   private readonly joinEvents: ExpiringSet;
   private readonly welcomeBatches = new Map<string, WelcomeBatch>();
   private readonly nextGroupSendAt = new Map<string, number>();
@@ -86,6 +89,7 @@ export class AutomaticMessageService {
     this.now = options.now ?? (() => new Date());
     this.sleep = options.sleep ?? wait;
     this.botId = options.botId ?? 'neurobot';
+    this.countryService = options.countryService;
     const welcomeTtl = options.welcomeDeduplicationTtlMs ?? 10 * 60 * 1000;
     this.welcomeEventDeduplicationTtlMs = welcomeTtl;
     this.joinEvents = new ExpiringSet(welcomeTtl);
@@ -151,6 +155,16 @@ export class AutomaticMessageService {
   }
 
   public async handleGroupJoin(event: GroupJoinEvent): Promise<void> {
+    if (this.countryService && event.participantIds?.length > 0) {
+      try {
+        this.countryService.registerParticipantsBatch(this.botId, event.participantIds);
+      } catch (error) {
+        this.logger.error(
+          { operation: 'COUNTRY_BATCH_REGISTRATION_FAILED', botId: this.botId, err: error },
+          'Error registrando países de participantes en ingreso a grupo',
+        );
+      }
+    }
     const now = this.now();
     const configuration = this.database.getAutomaticMessageConfiguration(this.botId);
     const local = toLocalDateTime(now, configuration.timezone);
@@ -553,6 +567,21 @@ export class AutomaticMessageService {
   private async reconcileWelcomeParticipantsOnce(): Promise<void> {
     if (!this.started || !this.client.isReady()) return;
     const groups = await this.client.listGroups();
+    if (this.countryService && groups.length > 0) {
+      try {
+        const participantIds: string[] = [];
+        for (const group of groups) {
+          if (Array.isArray(group.participantIds)) {
+            participantIds.push(...group.participantIds);
+          }
+        }
+        if (participantIds.length > 0) {
+          this.countryService.registerParticipantsBatch(this.botId, participantIds);
+        }
+      } catch {
+        // Silencioso y no bloqueante
+      }
+    }
     const runtime = this.database.getWelcomeRuntime(this.botId);
     let newCount = 0;
     let participantCount = 0;

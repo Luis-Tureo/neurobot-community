@@ -15,6 +15,11 @@ import {
 } from '../core/brief-message-defaults.js';
 import { DEFAULT_POLL_TEMPLATES } from '../core/poll-defaults.js';
 import { GROQ_PREFERRED_MODEL } from '../ai/groq-constants.js';
+import {
+  COUNTRY_PRIVACY_MIN_COUNT,
+  getCountryFlag,
+  getCountryName,
+} from '../core/country-metadata.js';
 import type {
   AutomaticMessageConfiguration,
   AutomaticMessageType,
@@ -28,6 +33,10 @@ import type {
   CachedAnswer,
   CachedAnswerSourceType,
   CachedAnswerStatus,
+  CommunityCountriesSummary,
+  CountrySource,
+  CountryStatistic,
+  ParticipantCountryRecord,
   AIProviderChange,
   AIProviderChangeAction,
   AISettings,
@@ -2600,6 +2609,27 @@ export class AppDatabase {
           ALTER TABLE bot_polls
             ADD COLUMN allow_multiple_answers INTEGER NOT NULL DEFAULT 0
               CHECK (allow_multiple_answers IN (0, 1));
+        `,
+      },
+      {
+        version: 40,
+        sql: `
+          -- Tabla de países asociados a participantes de la comunidad
+          CREATE TABLE bot_community_participants (
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            participant_hash TEXT NOT NULL,
+            country_code TEXT,
+            country_source TEXT NOT NULL CHECK (country_source IN ('phone_prefix', 'declared', 'unknown')),
+            detected_country_code TEXT,
+            declared_country_code TEXT,
+            country_detected_at TEXT,
+            country_updated_at TEXT NOT NULL,
+            PRIMARY KEY (bot_id, participant_hash)
+          );
+          CREATE INDEX idx_bot_community_participants_bot_country
+            ON bot_community_participants(bot_id, country_code);
+          CREATE INDEX idx_bot_community_participants_bot_source
+            ON bot_community_participants(bot_id, country_source);
         `,
       },
     ];
@@ -9352,6 +9382,363 @@ export class AppDatabase {
     return this.db
       .prepare('DELETE FROM community_digest_rollups WHERE bot_id = ? AND group_hash = ?')
       .run(botId, groupHash).changes;
+  }
+
+  public getParticipantCountry(
+    botId: string,
+    participantHash: string,
+  ): ParticipantCountryRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT bot_id, participant_hash, country_code, country_source,
+                detected_country_code, declared_country_code, country_detected_at, country_updated_at
+         FROM bot_community_participants
+         WHERE bot_id = ? AND participant_hash = ?`,
+      )
+      .get(botId, participantHash) as
+      | {
+          bot_id: string;
+          participant_hash: string;
+          country_code: string | null;
+          country_source: CountrySource;
+          detected_country_code: string | null;
+          declared_country_code: string | null;
+          country_detected_at: string | null;
+          country_updated_at: string;
+        }
+      | undefined;
+
+    if (!row) return null;
+
+    return {
+      botId: row.bot_id,
+      participantHash: row.participant_hash,
+      countryCode: row.country_code,
+      countrySource: row.country_source,
+      detectedCountryCode: row.detected_country_code,
+      declaredCountryCode: row.declared_country_code,
+      countryDetectedAt: row.country_detected_at,
+      countryUpdatedAt: row.country_updated_at,
+    };
+  }
+
+  public saveParticipantCountriesBatch(
+    botId: string,
+    resolutions: Array<{
+      participantHash: string;
+      countryCode: string | null;
+      source: CountrySource;
+    }>,
+  ): { inserted: number; updated: number; unchanged: number } {
+    if (resolutions.length === 0) {
+      return { inserted: 0, updated: 0, unchanged: 0 };
+    }
+
+    const getStmt = this.db.prepare(
+      `SELECT country_code, country_source, detected_country_code, declared_country_code, country_detected_at
+       FROM bot_community_participants
+       WHERE bot_id = ? AND participant_hash = ?`,
+    );
+
+    const insertStmt = this.db.prepare(
+      `INSERT INTO bot_community_participants (
+         bot_id, participant_hash, country_code, country_source,
+         detected_country_code, declared_country_code, country_detected_at, country_updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+
+    const updateStmt = this.db.prepare(
+      `UPDATE bot_community_participants
+       SET country_code = ?,
+           country_source = ?,
+           detected_country_code = ?,
+           declared_country_code = ?,
+           country_detected_at = ?,
+           country_updated_at = ?
+       WHERE bot_id = ? AND participant_hash = ?`,
+    );
+
+    let inserted = 0;
+    let updated = 0;
+    let unchanged = 0;
+
+    const runBatch = this.db.transaction(() => {
+      const now = new Date().toISOString();
+
+      for (const item of resolutions) {
+        const existing = getStmt.get(botId, item.participantHash) as
+          | {
+              country_code: string | null;
+              country_source: CountrySource;
+              detected_country_code: string | null;
+              declared_country_code: string | null;
+              country_detected_at: string | null;
+            }
+          | undefined;
+
+        if (!existing) {
+          if (item.source === 'phone_prefix') {
+            insertStmt.run(
+              botId,
+              item.participantHash,
+              item.countryCode,
+              'phone_prefix',
+              item.countryCode,
+              null,
+              now,
+              now,
+            );
+          } else if (item.source === 'declared') {
+            insertStmt.run(
+              botId,
+              item.participantHash,
+              item.countryCode,
+              'declared',
+              null,
+              item.countryCode,
+              null,
+              now,
+            );
+          } else {
+            insertStmt.run(
+              botId,
+              item.participantHash,
+              null,
+              'unknown',
+              null,
+              null,
+              null,
+              now,
+            );
+          }
+          inserted++;
+        } else {
+          // Source priority: declared > phone_prefix > unknown
+          if (existing.country_source === 'declared') {
+            if (item.source === 'declared') {
+              if (existing.country_code === item.countryCode) {
+                unchanged++;
+              } else {
+                updateStmt.run(
+                  item.countryCode,
+                  'declared',
+                  existing.detected_country_code,
+                  item.countryCode,
+                  existing.country_detected_at,
+                  now,
+                  botId,
+                  item.participantHash,
+                );
+                updated++;
+              }
+            } else if (item.source === 'phone_prefix') {
+              // Never overwrite declared country, but record detected if missing
+              if (existing.detected_country_code === null && item.countryCode !== null) {
+                updateStmt.run(
+                  existing.country_code,
+                  'declared',
+                  item.countryCode,
+                  existing.declared_country_code,
+                  existing.country_detected_at ?? now,
+                  now,
+                  botId,
+                  item.participantHash,
+                );
+                updated++;
+              } else {
+                unchanged++;
+              }
+            } else {
+              unchanged++;
+            }
+          } else if (existing.country_source === 'phone_prefix') {
+            if (item.source === 'declared') {
+              updateStmt.run(
+                item.countryCode,
+                'declared',
+                existing.detected_country_code,
+                item.countryCode,
+                existing.country_detected_at,
+                now,
+                botId,
+                item.participantHash,
+              );
+              updated++;
+            } else if (item.source === 'phone_prefix') {
+              if (existing.country_code === item.countryCode) {
+                unchanged++;
+              } else {
+                updateStmt.run(
+                  item.countryCode,
+                  'phone_prefix',
+                  item.countryCode,
+                  existing.declared_country_code,
+                  existing.country_detected_at ?? now,
+                  now,
+                  botId,
+                  item.participantHash,
+                );
+                updated++;
+              }
+            } else {
+              unchanged++;
+            }
+          } else {
+            // existing source is 'unknown'
+            if (item.source === 'declared') {
+              updateStmt.run(
+                item.countryCode,
+                'declared',
+                existing.detected_country_code,
+                item.countryCode,
+                existing.country_detected_at,
+                now,
+                botId,
+                item.participantHash,
+              );
+              updated++;
+            } else if (item.source === 'phone_prefix') {
+              updateStmt.run(
+                item.countryCode,
+                'phone_prefix',
+                item.countryCode,
+                existing.declared_country_code,
+                now,
+                now,
+                botId,
+                item.participantHash,
+              );
+              updated++;
+            } else {
+              unchanged++;
+            }
+          }
+        }
+      }
+    });
+
+    runBatch();
+    return { inserted, updated, unchanged };
+  }
+
+  public declareParticipantCountry(
+    botId: string,
+    participantHash: string,
+    countryCode: string,
+  ): ParticipantCountryRecord {
+    const now = new Date().toISOString();
+    const existing = this.getParticipantCountry(botId, participantHash);
+
+    if (!existing) {
+      this.db
+        .prepare(
+          `INSERT INTO bot_community_participants (
+             bot_id, participant_hash, country_code, country_source,
+             detected_country_code, declared_country_code, country_detected_at, country_updated_at
+           ) VALUES (?, ?, ?, 'declared', NULL, ?, NULL, ?)`,
+        )
+        .run(botId, participantHash, countryCode, countryCode, now);
+    } else {
+      this.db
+        .prepare(
+          `UPDATE bot_community_participants
+           SET country_code = ?,
+               country_source = 'declared',
+               declared_country_code = ?,
+               country_updated_at = ?
+           WHERE bot_id = ? AND participant_hash = ?`,
+        )
+        .run(countryCode, countryCode, now, botId, participantHash);
+    }
+
+    return this.getParticipantCountry(botId, participantHash)!;
+  }
+
+  public getCommunityCountryAggregates(
+    botId: string,
+    privacyMinCount = COUNTRY_PRIVACY_MIN_COUNT,
+  ): CommunityCountriesSummary {
+    const totalRow = this.db
+      .prepare('SELECT COUNT(*) as count FROM bot_community_participants WHERE bot_id = ?')
+      .get(botId) as { count: number } | undefined;
+    const totalParticipants = totalRow?.count ?? 0;
+
+    const unidentifiedRow = this.db
+      .prepare(
+        'SELECT COUNT(*) as count FROM bot_community_participants WHERE bot_id = ? AND country_code IS NULL',
+      )
+      .get(botId) as { count: number } | undefined;
+    const unidentified = unidentifiedRow?.count ?? 0;
+    const identified = totalParticipants - unidentified;
+
+    const rows = this.db
+      .prepare(
+        `SELECT country_code,
+                COUNT(*) as participant_count,
+                SUM(CASE WHEN country_source = 'phone_prefix' THEN 1 ELSE 0 END) as detected_count,
+                SUM(CASE WHEN country_source = 'declared' THEN 1 ELSE 0 END) as declared_count
+         FROM bot_community_participants
+         WHERE bot_id = ? AND country_code IS NOT NULL
+         GROUP BY country_code
+         ORDER BY participant_count DESC, country_code ASC`,
+      )
+      .all(botId) as Array<{
+        country_code: string;
+        participant_count: number;
+        detected_count: number;
+        declared_count: number;
+      }>;
+
+    const countriesCount = rows.length;
+    const countries: CountryStatistic[] = [];
+    let otherCount = 0;
+    let otherDetectedCount = 0;
+    let otherDeclaredCount = 0;
+
+    for (const row of rows) {
+      if (row.participant_count >= privacyMinCount) {
+        countries.push({
+          countryCode: row.country_code,
+          countryName: getCountryName(row.country_code),
+          flagEmoji: getCountryFlag(row.country_code),
+          participantCount: row.participant_count,
+          percentage:
+            totalParticipants > 0
+              ? Number(((row.participant_count / totalParticipants) * 100).toFixed(1))
+              : 0,
+          detectedCount: row.detected_count,
+          declaredCount: row.declared_count,
+        });
+      } else {
+        otherCount += row.participant_count;
+        otherDetectedCount += row.detected_count;
+        otherDeclaredCount += row.declared_count;
+      }
+    }
+
+    if (otherCount > 0) {
+      countries.push({
+        countryCode: null,
+        countryName: 'Otros países',
+        flagEmoji: '🌐',
+        participantCount: otherCount,
+        percentage:
+          totalParticipants > 0
+            ? Number(((otherCount / totalParticipants) * 100).toFixed(1))
+            : 0,
+        detectedCount: otherDetectedCount,
+        declaredCount: otherDeclaredCount,
+      });
+    }
+
+    return {
+      totalParticipants,
+      identified,
+      unidentified,
+      countriesCount,
+      privacyMinCount,
+      countries,
+    };
   }
 }
 

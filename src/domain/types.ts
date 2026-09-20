@@ -864,3 +864,40 @@ export type HumanAssistanceRequest = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type CountrySource = 'phone_prefix' | 'declared' | 'unknown';
+
+export type CountryResolution = {
+  countryCode: string | null;
+  source: CountrySource;
+};
+
+export type ParticipantCountryRecord = {
+  botId: string;
+  participantHash: string;
+  countryCode: string | null;
+  countrySource: CountrySource;
+  detectedCountryCode: string | null;
+  declaredCountryCode: string | null;
+  countryDetectedAt: string | null;
+  countryUpdatedAt: string;
+};
+
+export type CountryStatistic = {
+  countryCode: string | null;
+  countryName: string;
+  flagEmoji: string;
+  participantCount: number;
+  percentage: number;
+  detectedCount: number;
+  declaredCount: number;
+};
+
+export type CommunityCountriesSummary = {
+  totalParticipants: number;
+  identified: number;
+  unidentified: number;
+  countriesCount: number;
+  privacyMinCount: number;
+  countries: CountryStatistic[];
+};

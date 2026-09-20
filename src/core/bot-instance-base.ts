@@ -26,6 +26,8 @@ import { PollSender } from './poll-sender.js';
 import { PollService } from './poll-service.js';
 import { PollVoteService } from './poll-vote-service.js';
 import { OutboundMessageQueueService } from './outbound-message-queue-service.js';
+import { CountryResolver } from './country-resolver.js';
+import { CommunityCountryService } from './community-country-service.js';
 
 export type BotInstanceOptions = {
   maxMessageLength: number;
@@ -71,6 +73,8 @@ export class BotInstance {
   protected incomingMessageObserver: ((message: IncomingMessage) => void) | null = null;
   private readonly communityServicesEnabled: boolean;
   private readonly qrMaxAgeMs: number;
+  public readonly countryResolver: CountryResolver;
+  public readonly countryService: CommunityCountryService;
 
   public constructor(
     public readonly bot: BotRecord,
@@ -169,8 +173,16 @@ export class BotInstance {
             this.outboundQueue,
           )
         : undefined;
+    this.countryResolver = new CountryResolver();
+    this.countryService = new CommunityCountryService(
+      database,
+      this.countryResolver,
+      anonymizer,
+      logger,
+    );
     this.automaticMessages = new AutomaticMessageService(database, client, logger, anonymizer, {
       botId: bot.id,
+      countryService: this.countryService,
     });
     this.pollRepository = new PollRepository(database, bot.id);
     const pollGenerator = new PollGenerator(provider, this.aiQueue, database, logger, bot.id);
@@ -201,6 +213,7 @@ export class BotInstance {
       bot.id,
       flow,
       this.outboundQueue,
+      this.countryService,
     );
     client.setEvents({
       onMessage: async (message) => {
@@ -361,7 +374,14 @@ export class BotInstance {
         );
       },
       onGroupJoin: async (event) => {
-        if (this.communityServicesEnabled) await this.automaticMessages.handleGroupJoin(event);
+        if (this.communityServicesEnabled) {
+          try {
+            this.countryService.registerParticipantsBatch(bot.id, event.participantIds);
+          } catch {
+            // Silencioso y no bloqueante
+          }
+          await this.automaticMessages.handleGroupJoin(event);
+        }
         await options.onGroupJoin?.(bot.id, event);
       },
       onGroupChanged: async (event) => {
@@ -461,6 +481,10 @@ export class BotInstance {
 
   public automaticMessageService(): AutomaticMessageService {
     return this.automaticMessages;
+  }
+
+  public communityCountryService(): CommunityCountryService {
+    return this.countryService;
   }
 
   public pollDataRepository(): PollRepository {

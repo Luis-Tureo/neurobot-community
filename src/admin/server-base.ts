@@ -33,6 +33,8 @@ import {
   type AssistantModuleKey,
 } from '../core/assistant-module-visibility-service.js';
 import type { ConnectionManager } from '../core/connection-manager.js';
+import { CommunityCountryService } from '../core/community-country-service.js';
+import { CountryResolver } from '../core/country-resolver.js';
 import type { GroupDiscoveryService } from '../core/group-discovery-service.js';
 import { InteractiveMessageAdapter } from '../core/interactive-message-adapter.js';
 import type { PollRepository } from '../core/poll-repository.js';
@@ -556,6 +558,7 @@ export type AdminServerContext = {
   secretVault?: SecretVault;
   sessionManager?: WhatsAppSessionManager;
   mediaDirectory?: string;
+  countryService?: CommunityCountryService;
 };
 
 export async function buildAdminServer(context: AdminServerContext): Promise<FastifyInstance> {
@@ -3195,6 +3198,21 @@ export function pollServicesFor(context: AdminServerContext, botId: string) {
   return repository === null || service === null || scheduler === null || analytics === null
     ? null
     : { repository, service, scheduler, analytics };
+}
+
+export function countryServiceFor(
+  context: AdminServerContext,
+  botId: string,
+): CommunityCountryService {
+  const fromManager = context.multiBotManager?.countryService(botId);
+  if (fromManager) return fromManager;
+  if (botId === 'neurobot' && context.countryService) return context.countryService;
+  return new CommunityCountryService(
+    context.database,
+    new CountryResolver(),
+    context.anonymizer,
+    context.logger,
+  );
 }
 
 function safeBotResponse(bot: NonNullable<ReturnType<AppDatabase['getBot']>>) {

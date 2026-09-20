@@ -7,6 +7,7 @@ import { registerAutomationLabContextRoute } from './automation-lab-context-rout
 import { installAzureForwardedHttps } from './azure-forwarded-https.js';
 import { registerCommunityDigestRoutes } from './community-digest-routes.js';
 import { registerPollRoutes } from './poll-routes.js';
+import { registerCommunityCountryRoutes } from './community-country-routes.js';
 import { SessionStore } from './session-store.js';
 import { registerWelcomeScheduleRoutes } from './welcome-schedule-routes.js';
 
@@ -24,6 +25,7 @@ export async function buildAdminServer(context: AdminServerContext) {
     registerCommunityDigestRoutes(app, context);
     registerWelcomeScheduleRoutes(app, context);
     registerPollRoutes(app, context);
+    registerCommunityCountryRoutes(app, context);
     return app;
   } finally {
     SessionStore.disableSharedSecret(context.sessionSecret);

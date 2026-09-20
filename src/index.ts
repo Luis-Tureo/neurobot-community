@@ -132,6 +132,9 @@ async function main(): Promise<void> {
     aiProviderFactory: aiProviders,
     secretVault: vault,
     sessionManager,
+    ...(multiBotManager.countryService('neurobot') !== null
+      ? { countryService: multiBotManager.countryService('neurobot')! }
+      : {}),
   });
 
   await server.listen({ host: environment.panelHost, port: environment.panelPort });

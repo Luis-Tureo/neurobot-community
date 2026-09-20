@@ -15,6 +15,8 @@ import {
 } from './bot-activation.js';
 import type { ConversationFlowService } from './conversation-flow-service.js';
 import type { OutboundMessageQueueService } from './outbound-message-queue-service.js';
+import type { CommunityCountryService } from './community-country-service.js';
+import { getCountryFlag, getCountryName } from './country-metadata.js';
 
 export type MessageProcessorOptions = {
   maxMessageLength: number;
@@ -46,6 +48,7 @@ export class MessageProcessor {
     private readonly botId = 'neurobot',
     private readonly conversationFlow?: ConversationFlowService,
     private readonly outboundQueue?: OutboundMessageQueueService,
+    private readonly countryService?: CommunityCountryService,
   ) {}
 
   public async process(message: IncomingMessage): Promise<ProcessResult> {
@@ -66,6 +69,38 @@ export class MessageProcessor {
     const bot = this.database.getBot(this.botId);
     if (bot === null || !bot.enabled) return 'bot_disabled';
     if (!message.isGroup) {
+      const privateCountryMatch = message.body.trim().match(/^!pa[ií]s(?:\s+(.+))?$/i);
+      if (this.countryService && privateCountryMatch) {
+        if (!this.processedMessages.checkAndAdd(message.id)) return 'duplicate';
+        const countryArg = privateCountryMatch[1]?.trim();
+        let responseText: string;
+        if (countryArg && countryArg.length > 0) {
+          const decl = this.countryService.handleCountryDeclaration(
+            this.botId,
+            message.participantId,
+            countryArg,
+          );
+          responseText = decl.success
+            ? `Listo, registré ${decl.countryName} como tu país 🌎`
+            : (decl.error ??
+              'No reconocí ese país. Puedes indicarlo con el nombre o código de tu país (ej: !pais Chile o !pais CL).');
+        } else {
+          const record = this.countryService.getCountryForParticipant(
+            this.botId,
+            message.participantId,
+          );
+          if (record && record.countryCode) {
+            const countryName = getCountryName(record.countryCode);
+            const flag = getCountryFlag(record.countryCode);
+            responseText = `Tu país registrado es ${countryName} ${flag}`;
+          } else {
+            responseText = 'No tengo registrado tu país aún. Puedes indicarlo con !pais <País>';
+          }
+        }
+        const sent = await this.safeSend(message.chatId, responseText, context);
+        return sent ? 'responded' : 'send_failed';
+      }
+
       if (
         !bot.capabilities.privateChatsEnabled ||
         !bot.privateMessagesEnabled ||
@@ -148,6 +183,54 @@ export class MessageProcessor {
       whatsappIdentifiers: botIdentifiers,
       aliases: this.database.listBotActivationAliases(this.botId),
     });
+
+    const rawBodyTrimmed = message.body.trim();
+    const countryMatch =
+      rawBodyTrimmed.match(/^!pa[ií]s(?:\s+(.+))?$/i) ??
+      (invocation.invoked
+        ? invocation.cleanedText.trim().match(/^!pa[ií]s(?:\s+(.+))?$/i)
+        : null);
+
+    if (this.countryService && countryMatch) {
+      const countryArg = countryMatch[1]?.trim();
+      let responseText: string;
+      if (countryArg && countryArg.length > 0) {
+        const decl = this.countryService.handleCountryDeclaration(
+          this.botId,
+          message.participantId,
+          countryArg,
+        );
+        responseText = decl.success
+          ? `Listo, registré ${decl.countryName} como tu país 🌎`
+          : (decl.error ??
+            'No reconocí ese país. Puedes indicarlo con el nombre o código de tu país (ej: !pais Chile o !pais CL).');
+      } else {
+        const record = this.countryService.getCountryForParticipant(
+          this.botId,
+          message.participantId,
+        );
+        if (record && record.countryCode) {
+          const countryName = getCountryName(record.countryCode);
+          const flag = getCountryFlag(record.countryCode);
+          responseText = `Tu país registrado es ${countryName} ${flag}`;
+        } else {
+          responseText = 'No tengo registrado tu país aún. Puedes indicarlo con !pais <País>';
+        }
+      }
+      const sent = await this.safeSend(message.chatId, responseText, context);
+      this.database.recordTechnicalEvent({
+        eventType: 'message_processed',
+        botId: this.botId,
+        activationType: invocation.invoked ? invocation.method : 'alias',
+        groupHash,
+        userHash,
+        result: sent ? 'COUNTRY_COMMAND_RESPONDED' : 'send_failed',
+        durationMs: Math.round(performance.now() - started),
+        ...(!sent ? { errorCode: 'MESSAGE_SEND_FAILED' } : {}),
+      });
+      return sent ? 'responded' : 'send_failed';
+    }
+
     if (!invocation.invoked) {
       if (
         !bot.capabilities.communitySingleTurnMode &&
