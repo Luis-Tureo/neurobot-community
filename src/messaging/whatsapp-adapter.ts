@@ -690,18 +690,173 @@ export class WhatsAppWebAdapter implements MessagingClient {
 
   public async sendPoll(chatId: string, poll: NativePoll): Promise<PollSendReceipt> {
     const client = this.requireReadyClient();
-    const sentMessage = await client.sendMessage(
-      chatId,
-      new Poll(poll.question, poll.options, {
-        allowMultipleAnswers: poll.allowMultipleAnswers,
-        messageSecret: undefined,
-      }),
-    );
-    const rawId = sentMessage?.id;
-    const messageId = getSerializedId(rawId);
+
+    let capturedMessageId: string | null = null;
+    const messageCreateHandler = (message: unknown) => {
+      try {
+        if (typeof message !== 'object' || message === null) return;
+        const fromMe = Reflect.get(message, 'fromMe') === true;
+        if (!fromMe) return;
+        const rawType = Reflect.get(message, 'type');
+        const rawTo = Reflect.get(message, 'to');
+        const toId = getSerializedId(rawTo);
+        const targetChatId = getSerializedId(chatId);
+        const chatMatches = toId === null || targetChatId === null || toId === targetChatId;
+        const rawPollName = Reflect.get(message, 'pollName');
+        const rawBody = Reflect.get(message, 'body');
+        const isPollType = rawType === 'poll_creation' || rawType === 'poll';
+        const questionMatches =
+          rawPollName === poll.question ||
+          rawBody === poll.question ||
+          (typeof rawPollName === 'string' && rawPollName.trim() === poll.question.trim());
+        if (chatMatches && (isPollType || questionMatches)) {
+          const rawId = Reflect.get(message, 'id');
+          const resolved = getSerializedId(rawId);
+          if (resolved !== null) {
+            capturedMessageId = resolved;
+          }
+        }
+      } catch {
+        // Ignorar fallos en el observador
+      }
+    };
+
+    if (typeof client.on === 'function') {
+      client.on('message_create', messageCreateHandler);
+    }
+
+    let sentMessage: unknown = null;
+    let sendError: unknown = null;
+    try {
+      sentMessage = await client.sendMessage(
+        chatId,
+        new Poll(poll.question, poll.options, {
+          allowMultipleAnswers: poll.allowMultipleAnswers,
+          messageSecret: undefined,
+        }),
+        { waitUntilMsgSent: true },
+      );
+    } catch (error) {
+      sendError = error;
+    } finally {
+      if (typeof client.off === 'function') {
+        client.off('message_create', messageCreateHandler);
+      } else if (typeof client.removeListener === 'function') {
+        client.removeListener('message_create', messageCreateHandler);
+      }
+    }
+
+    if (sendError !== null && capturedMessageId === null) {
+      throw sendError;
+    }
+
+    let messageId: string | null = null;
+    let resolutionSource = 'none';
+
+    // Fuente 1: id devuelto por client.sendMessage si whatsapp-web.js lo deserializó
+    const rawId =
+      typeof sentMessage === 'object' && sentMessage !== null
+        ? Reflect.get(sentMessage, 'id')
+        : undefined;
+    const directMessageId = getSerializedId(rawId);
+    if (directMessageId !== null) {
+      messageId = directMessageId;
+      resolutionSource = 'sent_message';
+    }
+
+    // Fuente 2: evento message_create emitido al crearse el mensaje saliente en WhatsApp Web
+    if (messageId === null && capturedMessageId !== null) {
+      messageId = capturedMessageId;
+      resolutionSource = 'message_create_event';
+    }
+
+    // Fuente 3: inspección en la página Puppeteer de la colección de mensajes de WhatsApp Web
+    if (messageId === null && client.pupPage !== undefined) {
+      try {
+        const evaluated = await client.pupPage.evaluate(
+          (targetChatId: string, expectedQuestion: string) => {
+            try {
+              const browserGlobal = globalThis as unknown as {
+                require?: (name: string) => { Msg?: { getModelsArray?: () => unknown[] } };
+                window?: {
+                  require?: (name: string) => { Msg?: { getModelsArray?: () => unknown[] } };
+                };
+              };
+              const requireFn = browserGlobal.window?.require ?? browserGlobal.require;
+              const MsgCollection = requireFn?.('WAWebCollections')?.Msg;
+              if (MsgCollection && typeof MsgCollection.getModelsArray === 'function') {
+                const models = MsgCollection.getModelsArray();
+                for (let i = models.length - 1; i >= Math.max(0, models.length - 25); i -= 1) {
+                  const m = models[i] as {
+                    id?: { fromMe?: boolean; _serialized?: string; id?: string };
+                    fromMe?: boolean;
+                    to?: { _serialized?: string } | string;
+                    from?: { _serialized?: string } | string;
+                    type?: string;
+                    pollName?: string;
+                    body?: string;
+                  } | null;
+                  if (!m) continue;
+                  const isMe = m.id?.fromMe === true || m.fromMe === true;
+                  const to = typeof m.to === 'object' && m.to !== null ? m.to._serialized : m.to;
+                  const from =
+                    typeof m.from === 'object' && m.from !== null ? m.from._serialized : m.from;
+                  const matchesChat = to === targetChatId || from === targetChatId;
+                  const isPoll =
+                    m.type === 'poll_creation' ||
+                    m.pollName === expectedQuestion ||
+                    m.body === expectedQuestion;
+                  if (isMe && matchesChat && isPoll) {
+                    return m.id?._serialized || (typeof m.id === 'string' ? m.id : null);
+                  }
+                }
+              }
+              return null;
+            } catch {
+              return null;
+            }
+          },
+          chatId,
+          poll.question,
+        );
+        const evaluatedMessageId = getSerializedId(evaluated);
+        if (evaluatedMessageId !== null) {
+          messageId = evaluatedMessageId;
+          resolutionSource = 'page_evaluation';
+        }
+      } catch {
+        // Fallback silencioso
+      }
+    }
+
+    // Fuente 4: última consulta a nivel de chat
+    if (messageId === null && typeof client.getChatById === 'function') {
+      try {
+        const chat = await client.getChatById(chatId);
+        if (chat) {
+          const lastMsg = Reflect.get(chat, 'lastMessage') as unknown;
+          if (typeof lastMsg === 'object' && lastMsg !== null) {
+            const isMe = Reflect.get(lastMsg, 'fromMe') === true;
+            const lastType = Reflect.get(lastMsg, 'type');
+            const lastPollName = Reflect.get(lastMsg, 'pollName');
+            if (isMe && (lastType === 'poll_creation' || lastPollName === poll.question)) {
+              const lastId = getSerializedId(Reflect.get(lastMsg, 'id'));
+              if (lastId !== null) {
+                messageId = lastId;
+                resolutionSource = 'chat_last_message';
+              }
+            }
+          }
+        }
+      } catch {
+        // Fallback silencioso
+      }
+    }
+
     this.logger.info(
       {
         operation: 'POLL_SEND_RECEIPT_RESOLVED',
+        resolutionSource,
         hasSentMessage: sentMessage !== undefined && sentMessage !== null,
         hasRawId: rawId !== undefined && rawId !== null,
         rawIdType: typeof rawId,
@@ -734,7 +889,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
       chatId,
       new Poll(question, options, { allowMultipleAnswers: false, messageSecret: undefined }),
     );
-    const pollId = getSerializedId(sentMessage.id);
+    const pollId = getSerializedId(sentMessage?.id);
     if (pollId === null) return false;
     this.cleanupSelectableMenuPolls();
     this.selectableMenuPolls.set(pollId, {

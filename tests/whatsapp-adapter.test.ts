@@ -203,6 +203,53 @@ describe('adaptador de WhatsApp', () => {
     expect(nativePoll.options.allowMultipleAnswers).toBe(true);
   });
 
+  it('recupera messageId vía evento message_create cuando sendMessage devuelve undefined', async () => {
+    const { adapter, fake } = createSubject();
+    fake.sendMessage.mockImplementation(async () => {
+      // Simula el comportamiento real de whatsapp-web.js en producción donde
+      // Msg.get() devuelve undefined y el evento message_create se dispara concurrentemente
+      fake.emit('message_create', {
+        id: { _serialized: 'true_grupo-normal@g.us_POLL_MC_456' },
+        type: 'poll_creation',
+        fromMe: true,
+        to: 'grupo-normal@g.us',
+        pollName: '¿Pregunta con fallback?',
+      });
+      return undefined;
+    });
+    await adapter.initialize();
+    fake.emit('ready');
+
+    const receipt = await adapter.sendPoll('grupo-normal@g.us', {
+      question: '¿Pregunta con fallback?',
+      options: ['Op1', 'Op2'],
+      allowMultipleAnswers: false,
+    });
+    expect(receipt).toEqual({ messageId: 'true_grupo-normal@g.us_poll_mc_456' });
+  });
+
+  it('recupera messageId vía chat.lastMessage cuando sendMessage devuelve undefined y no hubo message_create', async () => {
+    const { adapter, fake } = createSubject();
+    fake.sendMessage.mockResolvedValueOnce(undefined);
+    fake.getChatById.mockResolvedValueOnce({
+      lastMessage: {
+        id: { _serialized: 'true_grupo-normal@g.us_LAST_MSG_789' },
+        fromMe: true,
+        type: 'poll_creation',
+        pollName: '¿Pregunta con chat fallback?',
+      },
+    } as unknown as object);
+    await adapter.initialize();
+    fake.emit('ready');
+
+    const receipt = await adapter.sendPoll('grupo-normal@g.us', {
+      question: '¿Pregunta con chat fallback?',
+      options: ['Op1', 'Op2'],
+      allowMultipleAnswers: false,
+    });
+    expect(receipt).toEqual({ messageId: 'true_grupo-normal@g.us_last_msg_789' });
+  });
+
   it('ignora mensajes privados cuando el canal privado general está desactivado', async () => {
     const { adapter, fake, received } = createSubject();
     await adapter.initialize();
