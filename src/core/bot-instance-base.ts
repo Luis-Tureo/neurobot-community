@@ -173,7 +173,7 @@ export class BotInstance {
             this.outboundQueue,
           )
         : undefined;
-    this.countryResolver = new CountryResolver();
+    this.countryResolver = new CountryResolver({ logger });
     this.countryService = new CommunityCountryService(
       database,
       this.countryResolver,
@@ -376,7 +376,7 @@ export class BotInstance {
       onGroupJoin: async (event) => {
         if (this.communityServicesEnabled) {
           try {
-            this.countryService.registerParticipantsBatch(bot.id, event.participantIds);
+            this.countryService.registerParticipantsBatch(bot.id, event.participantIds, event.groupId);
           } catch {
             // Silencioso y no bloqueante
           }
@@ -387,6 +387,15 @@ export class BotInstance {
       onGroupChanged: async (event) => {
         if (this.communityServicesEnabled && event.type === 'LEAVE') {
           this.automaticMessages.handleGroupLeave(event);
+          try {
+            if (event.participantIds) {
+              for (const pid of event.participantIds) {
+                this.countryService.handleGroupLeave(bot.id, event.groupId, pid);
+              }
+            }
+          } catch {
+            // Silencioso y no bloqueante
+          }
         }
         await this.discovery.handleGroupChange(event);
       },

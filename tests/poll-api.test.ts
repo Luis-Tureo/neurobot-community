@@ -36,7 +36,7 @@ class StaticGenerator implements PollContentGenerator {
       question: `¿Prefieres k${this.counter}z o w${this.counter}q para ${request.category}?`,
       options: ['Opción A', 'Opción B', 'Opción C'],
       category: request.category,
-      allowMultipleAnswers: false,
+      allowMultipleAnswers: request.selectionMode === 'multiple',
       attempts: 1,
       model: 'openai/gpt-oss-120b',
       totalTokens: 12,
@@ -124,6 +124,7 @@ describe('API administrativa de encuestas', () => {
         enabled: false,
         startTime: '09:00',
         intervalHours: 3,
+        selectionMode: 'mixed',
         timezone: 'America/Santiago',
       },
       intervalOptions: [1, 2, 3, 4, 5, 6, 8, 12, 24],
@@ -146,6 +147,19 @@ describe('API administrativa de encuestas', () => {
       payload: { intervalHours: 7 },
     });
     expect(rejected.statusCode).toBe(400);
+    const rejectedMode = await injectAuthenticated(app, auth, {
+      method: 'PATCH',
+      url: '/api/polls/configuration',
+      payload: { selectionMode: 'invalido' },
+    });
+    expect(rejectedMode.statusCode).toBe(400);
+    const updatedMode = await injectAuthenticated(app, auth, {
+      method: 'PATCH',
+      url: '/api/polls/configuration',
+      payload: { selectionMode: 'multiple' },
+    });
+    expect(updatedMode.statusCode).toBe(200);
+    expect(updatedMode.json().configuration.selectionMode).toBe('multiple');
     const legacy = await injectAuthenticated(app, auth, {
       method: 'PATCH',
       url: '/api/polls/configuration',
@@ -314,6 +328,21 @@ describe('API administrativa de encuestas', () => {
       payload: { groupKey, confirmed: true },
     });
     expect(limited.statusCode).toBe(429);
+
+    currentNow = new Date(currentNow.getTime() + 61_000);
+    const dateSpy = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 15_000);
+    try {
+      const multiSent = await injectAuthenticated(app, auth, {
+        method: 'POST',
+        url: '/api/polls/send-test',
+        payload: { groupKey, confirmed: true, selectionMode: 'multiple' },
+      });
+      expect(multiSent.statusCode).toBe(200);
+      expect(client.sentPolls).toHaveLength(2);
+      expect(client.sentPolls[1]?.allowMultipleAnswers).toBe(true);
+    } finally {
+      dateSpy.mockRestore();
+    }
   });
 
   it('entrega KPIs y resultados reales a partir de los votos recibidos, con paginación y detalle', async () => {

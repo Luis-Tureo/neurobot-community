@@ -388,6 +388,104 @@ describe('generación y planificación anticipada', () => {
   });
 });
 
+describe('política de modo de selección (single, multiple, mixed)', () => {
+  it('respeta selectionMode "multiple" en generación y banco fallback', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:50') });
+    try {
+      enable(subject.service, { selectionMode: 'multiple' });
+      await subject.service.runDueTasks();
+      const scheduled = subject.repository.list({ statuses: ['scheduled'] })[0];
+      expect(scheduled?.allowMultipleAnswers).toBe(true);
+
+      // Al enviar al grupo, WhatsApp recibe allowMultipleAnswers: true
+      subject.setNow(at('2026-01-05', '09:00'));
+      await subject.service.runDueTasks();
+      expect(subject.client.sentPolls).toHaveLength(1);
+      expect(subject.client.sentPolls[0]?.allowMultipleAnswers).toBe(true);
+    } finally {
+      subject.database.close();
+    }
+
+    // Probar banco fallback con selectionMode: 'multiple'
+    const bankSubject = createSubject({ initialNow: at('2026-01-05', '11:50') });
+    try {
+      enable(bankSubject.service, { selectionMode: 'multiple' });
+      bankSubject.generator.available = false;
+      const plan = await bankSubject.planner.ensureCoverage();
+      expect(plan.bank).toBe(1);
+      const bankScheduled = bankSubject.repository.list({ statuses: ['scheduled'] })[0];
+      expect(bankScheduled?.origin).toBe('legacy_bank');
+      expect(bankScheduled?.allowMultipleAnswers).toBe(true);
+    } finally {
+      bankSubject.database.close();
+    }
+  });
+
+  it('respeta selectionMode "single" en generación y banco fallback', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:50') });
+    try {
+      enable(subject.service, { selectionMode: 'single' });
+      await subject.service.runDueTasks();
+      const scheduled = subject.repository.list({ statuses: ['scheduled'] })[0];
+      expect(scheduled?.allowMultipleAnswers).toBe(false);
+
+      subject.setNow(at('2026-01-05', '09:00'));
+      await subject.service.runDueTasks();
+      expect(subject.client.sentPolls[0]?.allowMultipleAnswers).toBe(false);
+    } finally {
+      subject.database.close();
+    }
+
+    const bankSubject = createSubject({ initialNow: at('2026-01-05', '11:50') });
+    try {
+      enable(bankSubject.service, { selectionMode: 'single' });
+      bankSubject.generator.available = false;
+      const plan = await bankSubject.planner.ensureCoverage();
+      expect(plan.bank).toBe(1);
+      const bankScheduled = bankSubject.repository.list({ statuses: ['scheduled'] })[0];
+      expect(bankScheduled?.origin).toBe('legacy_bank');
+      expect(bankScheduled?.allowMultipleAnswers).toBe(false);
+    } finally {
+      bankSubject.database.close();
+    }
+  });
+
+  it('al cambiar selectionMode libera encuestas programadas para reajustar la cobertura', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:50') });
+    try {
+      enable(subject.service, { selectionMode: 'single' });
+      await subject.service.runDueTasks();
+      const before = subject.repository.list({ statuses: ['scheduled'] });
+      expect(before.length).toBeGreaterThan(0);
+      expect(before.every((p) => !p.allowMultipleAnswers)).toBe(true);
+
+      // Al cambiar a multiple, se liberan las programadas existentes
+      subject.service.updateConfiguration({ selectionMode: 'multiple' });
+      expect(subject.repository.list({ statuses: ['scheduled'] })).toHaveLength(0);
+
+      // Siguiente corrida programa bajo la nueva política
+      await subject.service.runDueTasks();
+      const after = subject.repository.list({ statuses: ['scheduled'] });
+      expect(after.length).toBeGreaterThan(0);
+      expect(after.every((p) => p.allowMultipleAnswers)).toBe(true);
+    } finally {
+      subject.database.close();
+    }
+  });
+
+  it('permite envío manual especificando selectionMode explícito independientemente de la configuración global', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:50') });
+    try {
+      enable(subject.service, { selectionMode: 'single' });
+      const manual = await subject.service.sendManual(GROUP_ID, { selectionMode: 'multiple' });
+      expect(manual.allowMultipleAnswers).toBe(true);
+      expect(subject.client.sentPolls[0]?.allowMultipleAnswers).toBe(true);
+    } finally {
+      subject.database.close();
+    }
+  });
+});
+
 describe('envío de encuestas nativas', () => {
   it('envía una sola vez por horario aunque el tick se repita y guarda el id del mensaje', async () => {
     const subject = createSubject({ initialNow: at('2026-01-05', '08:00') });

@@ -18,6 +18,7 @@ import { createLogger } from '../../src/infrastructure/logger.js';
 import { SimulatedMessagingClient } from '../../src/messaging/simulated-client.js';
 import { AppDatabase } from '../../src/persistence/database.js';
 import { Anonymizer } from '../../src/security/anonymizer.js';
+import type { PollAutomationSelectionMode } from '../../src/domain/types.js';
 
 export const GROUP_ID = 'encuestas@g.us';
 export const SECOND_GROUP_ID = 'segundo@g.us';
@@ -43,7 +44,10 @@ export class FakeGenerator implements PollContentGenerator {
     const scripted = this.scripted.shift();
     if (scripted instanceof Error) throw scripted;
     if (scripted !== undefined) {
-      return Object.assign({ allowMultipleAnswers: false, category: request.category }, scripted);
+      return Object.assign(
+        { allowMultipleAnswers: request.selectionMode === 'multiple', category: request.category },
+        scripted,
+      );
     }
     if (this.failures > 0) {
       this.failures -= 1;
@@ -55,7 +59,7 @@ export class FakeGenerator implements PollContentGenerator {
       question: `¿Prefieres k${this.counter}z o w${this.counter}q para ${request.category}?`,
       options: ['Opción A', 'Opción B', 'Opción C'],
       category: request.category,
-      allowMultipleAnswers: false,
+      allowMultipleAnswers: request.selectionMode === 'multiple',
       attempts: 1,
       model: 'openai/gpt-oss-120b',
       totalTokens: 30,
@@ -133,6 +137,7 @@ export function enable(
   overrides: {
     startTime?: string;
     intervalHours?: number;
+    selectionMode?: PollAutomationSelectionMode;
     quietHoursEnabled?: boolean;
     quietHoursStart?: string;
     quietHoursEnd?: string;
@@ -142,6 +147,7 @@ export function enable(
     enabled: true,
     startTime: overrides.startTime ?? '09:00',
     intervalHours: overrides.intervalHours ?? 3,
+    ...(overrides.selectionMode !== undefined ? { selectionMode: overrides.selectionMode } : {}),
     timezone: 'America/Santiago',
     // Los asistentes nuevos nacen con el descanso activo; estas pruebas de la serie canónica
     // completa lo desactivan explícitamente salvo que el caso lo configure.

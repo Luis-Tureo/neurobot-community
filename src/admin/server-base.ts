@@ -36,6 +36,7 @@ import type { ConnectionManager } from '../core/connection-manager.js';
 import { CommunityCountryService } from '../core/community-country-service.js';
 import { CountryResolver } from '../core/country-resolver.js';
 import type { GroupDiscoveryService } from '../core/group-discovery-service.js';
+import type { MessagingClient } from '../messaging/messaging-client.js';
 import { InteractiveMessageAdapter } from '../core/interactive-message-adapter.js';
 import type { PollRepository } from '../core/poll-repository.js';
 import type { PollScheduler } from '../core/poll-scheduler.js';
@@ -559,6 +560,7 @@ export type AdminServerContext = {
   sessionManager?: WhatsAppSessionManager;
   mediaDirectory?: string;
   countryService?: CommunityCountryService;
+  messagingClient?: MessagingClient;
 };
 
 export async function buildAdminServer(context: AdminServerContext): Promise<FastifyInstance> {
@@ -3154,6 +3156,7 @@ export function parseBotIdQuery(query: unknown, context: AdminServerContext): st
 function moduleForProtectedRoute(route: string): AssistantModuleKey | null {
   if (route.startsWith('/api/polls')) return 'polls';
   if (route.startsWith('/api/automatic-messages')) return 'automatic-messages';
+  if (route.startsWith('/api/community/countries')) return 'countries';
   if (route.includes('/groups')) return 'automatic-messages';
   if (route.includes('/catalog')) return 'catalog';
   if (route.includes('/media')) return 'media';
@@ -3168,7 +3171,11 @@ function botIdForProtectedRoute(request: FastifyRequest, route: string): string 
     const value = (request.params as { botId?: unknown } | null)?.botId;
     return typeof value === 'string' && /^[a-z][a-z0-9-]{2,39}$/u.test(value) ? value : null;
   }
-  if (route.startsWith('/api/polls') || route.startsWith('/api/automatic-messages')) {
+  if (
+    route.startsWith('/api/polls') ||
+    route.startsWith('/api/automatic-messages') ||
+    route.startsWith('/api/community/countries')
+  ) {
     const value = (request.query as { botId?: unknown } | null)?.botId ?? 'neurobot';
     return typeof value === 'string' && /^[a-z][a-z0-9-]{2,39}$/u.test(value) ? value : null;
   }
@@ -3200,6 +3207,16 @@ export function pollServicesFor(context: AdminServerContext, botId: string) {
     : { repository, service, scheduler, analytics };
 }
 
+export function messagingClientFor(
+  context: AdminServerContext,
+  botId: string,
+): MessagingClient | null {
+  const fromManager = context.multiBotManager?.client(botId);
+  if (fromManager) return fromManager;
+  if (botId === 'neurobot' && context.messagingClient) return context.messagingClient;
+  return null;
+}
+
 export function countryServiceFor(
   context: AdminServerContext,
   botId: string,
@@ -3209,7 +3226,7 @@ export function countryServiceFor(
   if (botId === 'neurobot' && context.countryService) return context.countryService;
   return new CommunityCountryService(
     context.database,
-    new CountryResolver(),
+    new CountryResolver({ logger: context.logger }),
     context.anonymizer,
     context.logger,
   );

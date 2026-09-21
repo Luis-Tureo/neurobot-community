@@ -627,6 +627,12 @@ export class WhatsAppWebAdapter implements MessagingClient {
     };
   }
 
+  public async resolveCanonicalIdentities(participantIds: string[]): Promise<Map<string, string>> {
+    const client = this.requireReadyClient();
+    const sourceIds = [...new Set(participantIds.filter(isParticipantId))];
+    return this.resolveCanonicalParticipantIdentities(client, sourceIds);
+  }
+
   public async resolveWelcomeParticipants(participantIds: string[]): Promise<WelcomeParticipant[]> {
     const client = this.requireReadyClient();
     const sourceIds = [...new Set(participantIds.filter(isParticipantId))];

@@ -27,6 +27,7 @@ const configurationSchema = z
         message: 'La recurrencia debe ser una de las opciones disponibles.',
       })
       .optional(),
+    selectionMode: z.enum(['mixed', 'single', 'multiple']).optional(),
     timezone: z
       .string()
       .trim()
@@ -44,6 +45,7 @@ const manualSendSchema = z
   .object({
     groupKey: z.string().length(20),
     confirmed: z.literal(true),
+    selectionMode: z.enum(['single', 'multiple']).optional(),
   })
   .strict();
 
@@ -160,7 +162,9 @@ export function registerPollRoutes(app: FastifyInstance, context: AdminServerCon
       }
       manualSendGate.set(gateKey, now + 10_000);
       try {
-        const result = await services.service.sendManual(groupId);
+        const result = await services.service.sendManual(groupId, {
+          selectionMode: input.selectionMode,
+        });
         audit(
           context,
           'poll_manual_send',
@@ -297,6 +301,7 @@ function overview(context: AdminServerContext, botId: string, services: PollServ
       enabled: configuration.enabled,
       startTime: configuration.startTime,
       intervalHours: configuration.intervalHours,
+      selectionMode: configuration.selectionMode,
       timezone: configuration.timezone,
       quietHoursEnabled: configuration.quietHoursEnabled,
       quietHoursStart: configuration.quietHoursStart,

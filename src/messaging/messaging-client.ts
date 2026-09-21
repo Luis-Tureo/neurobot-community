@@ -89,6 +89,7 @@ export interface MessagingClient {
   sendMessage(chatId: string, text: string, replyToMessageId?: string): Promise<void>;
   sendMessageWithMentions?(chatId: string, text: string, mentionIds: string[]): Promise<void>;
   resolveWelcomeParticipants?(participantIds: string[]): Promise<WelcomeParticipant[]>;
+  resolveCanonicalIdentities?(participantIds: string[]): Promise<Map<string, string>>;
   getGroupAdministratorIds?(chatId: string): Promise<string[]>;
   fetchGroupMessageHistory?(request: GroupMessageHistoryRequest): Promise<GroupMessageHistory>;
   sendMedia?(chatId: string, absolutePath: string, caption: string): Promise<void>;

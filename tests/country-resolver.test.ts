@@ -147,6 +147,38 @@ describe('CountryResolver y CountryMetadata', () => {
     expect(parseCountryInput('País Inexistente')).toBeNull();
   });
 
+  it('número con prefijo reconocible pero formato o longitud local inválida termina en unknown', () => {
+    // Prefijo chileno (+56 9) pero longitud incompleta
+    expect(resolver.resolveCountryFromWhatsappId('569123@c.us')).toEqual({
+      countryCode: null,
+      source: 'unknown',
+    });
+    // Prefijo argentino (+54) pero longitud incompleta
+    expect(resolver.resolveCountryFromWhatsappId('5411@c.us')).toEqual({
+      countryCode: null,
+      source: 'unknown',
+    });
+  });
+
+  it('parseCountryInput resuelve cualquier país soportado por getCountries() y rechaza códigos inexistentes', () => {
+    expect(parseCountryInput('Filipinas')).toBe('PH');
+    expect(parseCountryInput('PH')).toBe('PH');
+    expect(parseCountryInput('Turquía')).toBe('TR');
+    expect(parseCountryInput('turquia')).toBe('TR');
+    expect(parseCountryInput('TR')).toBe('TR');
+    expect(parseCountryInput('Islandia')).toBe('IS');
+    expect(parseCountryInput('IS')).toBe('IS');
+    expect(parseCountryInput('Japón')).toBe('JP');
+    expect(parseCountryInput('japon')).toBe('JP');
+    expect(parseCountryInput('JP')).toBe('JP');
+
+    // Códigos ISO inexistentes deben devolver null
+    expect(parseCountryInput('ZZ')).toBeNull();
+    expect(parseCountryInput('XX')).toBeNull();
+    expect(parseCountryInput('zz')).toBeNull();
+    expect(parseCountryInput('xx')).toBeNull();
+  });
+
   it('verifica que la constante de privacidad sea 5', () => {
     expect(COUNTRY_PRIVACY_MIN_COUNT).toBe(5);
   });

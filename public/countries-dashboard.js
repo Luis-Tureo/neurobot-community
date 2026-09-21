@@ -15,6 +15,7 @@ let dependencies = {
 };
 
 let currentCountries = [];
+let initialized = false;
 
 const numberFormatter = new Intl.NumberFormat('es-CL');
 
@@ -57,10 +58,36 @@ function escapeHtml(text) {
     .replace(/'/g, '&#39;');
 }
 
+async function requestApi(path, options) {
+  if (dependencies.api) {
+    if (options?.method === 'POST') {
+      if (typeof dependencies.api.post === 'function') {
+        const bodyObj = options.body ? JSON.parse(options.body) : {};
+        return dependencies.api.post(path, bodyObj);
+      }
+      return dependencies.api(path, options);
+    }
+    if (typeof dependencies.api.get === 'function') {
+      return dependencies.api.get(path);
+    }
+    return dependencies.api(path, options);
+  }
+  const response = await fetch(path, options);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const err = new Error(payload.error || `HTTP ${response.status}`);
+    throw err;
+  }
+  return payload;
+}
+
 export function initializeCountriesDashboard(deps) {
   if (deps) {
     dependencies = { ...dependencies, ...deps };
   }
+
+  if (initialized) return;
+  initialized = true;
 
   const searchInput = document.querySelector('#countries-search-input');
   if (searchInput) {
@@ -97,12 +124,7 @@ export async function loadCountriesDashboard() {
       ? dependencies.botScopedPath('/api/community/countries')
       : '/api/community/countries';
 
-    const summary = dependencies.api
-      ? await dependencies.api.get(path)
-      : await fetch(path).then((res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return res.json();
-        });
+    const summary = await requestApi(path);
 
     currentCountries = summary.countries || [];
 
@@ -211,9 +233,7 @@ async function syncCountries() {
       ? dependencies.botScopedPath('/api/community/countries/sync')
       : '/api/community/countries/sync';
 
-    const result = dependencies.api
-      ? await dependencies.api.post(path, {})
-      : await fetch(path, { method: 'POST' }).then((r) => r.json());
+    const result = await requestApi(path, { method: 'POST', body: '{}' });
 
     dependencies.showNotice(
       `Sincronización completada: ${result.totalParticipants || 0} integrantes analizados (${result.inserted || 0} nuevos, ${result.updated || 0} actualizados).`,
@@ -232,11 +252,4 @@ async function syncCountries() {
       syncBtn.textContent = originalText;
     }
   }
-}
-
-// Auto-inicializar si ya se cargaron dependencias globales
-if (typeof window !== 'undefined') {
-  window.addEventListener('DOMContentLoaded', () => {
-    // Si app-panel ya definió initializeCountriesDashboard, se ejecutará allí.
-  });
 }

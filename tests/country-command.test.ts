@@ -65,7 +65,7 @@ function createSubject() {
   const provider = new FakeAIProvider();
   const countryService = new CommunityCountryService(
     database,
-    new CountryResolver(),
+    new CountryResolver({ logger }),
     anonymizer,
     logger,
   );
@@ -110,22 +110,23 @@ describe('comando !pais / !país', () => {
   let database: AppDatabase;
   let client: SimulatedMessagingClient;
   let processor: MessageProcessor;
+  let countryService: CommunityCountryService;
 
   beforeEach(() => {
-    ({ database, client, processor } = createSubject());
+    ({ database, client, processor, countryService } = createSubject());
   });
 
   afterEach(() => {
     database.close();
   });
 
-  it('!pais Chile en grupo → responde "Listo, registré Chile como tu país 🌎"', async () => {
+  it('!pais Chile en grupo → responde con bandera específica "Listo, registré Chile 🇨🇱 como tu país."', async () => {
     const result = await processor.process(
       makeMessage({ body: '!pais Chile', isGroup: true }),
     );
     expect(result).toBe('responded');
     expect(client.sentMessages).toHaveLength(1);
-    expect(client.sentMessages[0]?.text).toContain('Listo, registré Chile como tu país 🌎');
+    expect(client.sentMessages[0]?.text).toContain('Listo, registré Chile 🇨🇱 como tu país.');
   });
 
   it('!país (con tilde) también funciona', async () => {
@@ -133,10 +134,10 @@ describe('comando !pais / !país', () => {
       makeMessage({ body: '!país Colombia', isGroup: true }),
     );
     expect(result).toBe('responded');
-    expect(client.sentMessages[0]?.text).toContain('Colombia');
+    expect(client.sentMessages[0]?.text).toContain('Colombia 🇨🇴');
   });
 
-  it('!pais sin argumento en grupo → responde con país registrado', async () => {
+  it('!pais sin argumento en grupo → responde con país registrado sin revelar fuente', async () => {
     // Primero registrar Chile
     await processor.process(makeMessage({ body: '!pais Chile', isGroup: true }));
     client.sentMessages.length = 0;
@@ -147,7 +148,7 @@ describe('comando !pais / !país', () => {
     );
     expect(result).toBe('responded');
     expect(client.sentMessages).toHaveLength(1);
-    expect(client.sentMessages[0]?.text).toContain('Chile');
+    expect(client.sentMessages[0]?.text).toContain('Tu país registrado es Chile 🇨🇱.');
   });
 
   it('!pais sin argumento y sin registro previo → responde indicando que no hay país', async () => {
@@ -167,15 +168,51 @@ describe('comando !pais / !país', () => {
     expect(text).toMatch(/no reconoc/i);
   });
 
-  it('!pais en chat privado → responde correctamente', async () => {
+  it('!pais en chat privado no convierte a la persona en miembro activo de la comunidad', async () => {
+    const privateUser = '5491123456789@c.us';
     const result = await processor.process(
       makeMessage({
-        chatId: PARTICIPANT_ID,
+        chatId: privateUser,
+        participantId: privateUser,
         body: '!pais Argentina',
         isGroup: false,
       }),
     );
     expect(result).toBe('responded');
-    expect(client.sentMessages[0]?.text).toContain('Argentina');
+    expect(client.sentMessages[0]?.text).toContain('Argentina 🇦🇷');
+
+    // Su declaración voluntaria está guardada
+    const record = await countryService.getCountryForParticipant('neurobot', privateUser);
+    expect(record?.countryCode).toBe('AR');
+    expect(record?.countrySource).toBe('declared');
+
+    // Pero NO incrementa las estadísticas comunitarias porque no tiene membresía en grupos
+    const distribution = countryService.getDistribution('neurobot');
+    expect(distribution.totalParticipants).toBe(0);
+  });
+
+  it('resolución LID -> teléfono: usuario con LID mapeado se registra bajo su teléfono canónico', async () => {
+    const lidUser = '9876543210@lid';
+    const phoneCanonical = '56912345678@c.us';
+    client.lidPhoneMappings.set(lidUser, phoneCanonical);
+
+    const result = await processor.process(
+      makeMessage({
+        participantId: lidUser,
+        body: '!pais Chile',
+        isGroup: true,
+      }),
+    );
+    expect(result).toBe('responded');
+    expect(client.sentMessages[0]?.text).toContain('Chile 🇨🇱');
+
+    // El registro debe residir en el hash del teléfono canónico
+    const recordPhone = await countryService.getCountryForParticipant('neurobot', phoneCanonical);
+    expect(recordPhone?.countryCode).toBe('CL');
+    expect(recordPhone?.countrySource).toBe('declared');
+
+    // Y al consultar con el LID, resuelve la misma persona
+    const recordLid = await countryService.getCountryForParticipant('neurobot', lidUser, client);
+    expect(recordLid?.countryCode).toBe('CL');
   });
 });

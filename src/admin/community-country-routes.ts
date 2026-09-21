@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AdminServerContext } from './server-base.js';
-import { countryServiceFor, parseBotIdQuery } from './server-base.js';
+import { countryServiceFor, messagingClientFor, parseBotIdQuery } from './server-base.js';
 import { SessionStore } from './session-store.js';
 
 const COOKIE_NAME = 'panel_session';
@@ -30,11 +30,6 @@ export function registerCommunityCountryRoutes(
     { preHandler: requireSession },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const botId = parseBotIdQuery(request.query, context);
-      const bot = context.database.getBot(botId);
-      if (!bot) {
-        return reply.code(404).send({ error: 'Asistente no encontrado.', code: 'BOT_NOT_FOUND' });
-      }
-
       const countryService = countryServiceFor(context, botId);
       const summary = countryService.getDistribution(botId);
       return reply.code(200).send(summary);
@@ -46,28 +41,32 @@ export function registerCommunityCountryRoutes(
     { preHandler: [requireSession, requireCsrf] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const botId = parseBotIdQuery(request.query, context);
-      const bot = context.database.getBot(botId);
-      if (!bot) {
-        return reply.code(404).send({ error: 'Asistente no encontrado.', code: 'BOT_NOT_FOUND' });
+      const client = messagingClientFor(context, botId);
+
+      // Una sincronización solo puede declararse exitosa si existe una fuente autoritativa conectada
+      if (client === null || !client.isReady()) {
+        return reply.code(503).send({
+          error: 'La sincronización de países no está disponible porque WhatsApp no está conectado.',
+          code: 'COUNTRY_SYNC_UNAVAILABLE',
+        });
+      }
+
+      let groups;
+      try {
+        groups = await client.listGroups();
+      } catch {
+        return reply.code(503).send({
+          error: 'No fue posible consultar la lista autoritativa de participantes desde WhatsApp.',
+          code: 'COUNTRY_SYNC_UNAVAILABLE',
+        });
       }
 
       const countryService = countryServiceFor(context, botId);
-      const client = context.multiBotManager?.messagingClient(botId);
-
       const groupsProvider = {
-        listGroups: async () => {
-          if (client && typeof client.listGroups === 'function') {
-            return client.listGroups();
-          }
-          const dbGroups = context.database.listGroups();
-          return dbGroups.map((group) => ({
-            id: group.id,
-            participantIds: [] as string[],
-          }));
-        },
+        listGroups: async () => groups,
       };
 
-      const result = await countryService.syncFromGroups(botId, groupsProvider);
+      const result = await countryService.syncFromGroups(botId, groupsProvider, client);
       return reply.code(200).send({
         success: true,
         ...result,

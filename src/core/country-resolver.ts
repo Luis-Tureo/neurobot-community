@@ -89,7 +89,7 @@ export class CountryResolver {
       }
 
       const countryCode = parsed?.country ?? null;
-      if (countryCode && (parsed?.isValid() || parsed?.country)) {
+      if (parsed && parsed.isValid() && countryCode) {
         const result: CountryResolution = {
           countryCode,
           source: 'phone_prefix',

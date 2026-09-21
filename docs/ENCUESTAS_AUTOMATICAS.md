@@ -2,10 +2,10 @@
 
 Las encuestas comunitarias se dividen en dos partes independientes:
 
-- **Automatizaciones → Programación semanal de encuestas**: el administrador solo configura
-  _Activo_, _Hora de inicio_, _Enviar una nueva encuesta cada N horas_ y el _Horario de descanso_
-  (franja en la que no se envían encuestas). La IA (Groq, el mismo proveedor, clave y modelo del
-  asistente) crea el contenido.
+- **Automatizaciones → Programación semanal de encuestas**: el administrador configura
+  _Activo_, _Hora de inicio_, _Enviar una nueva encuesta cada N horas_, el _Modo de respuesta_
+  (`mixed` | `single` | `multiple`) y el _Horario de descanso_ (franja en la que no se envían
+  encuestas). La IA (Groq, el mismo proveedor, clave y modelo del asistente) crea el contenido.
 - **Encuestas**: dashboard de resultados reales (KPIs, votos por día, encuestas más votadas,
   resultados por opción, categorías y tendencias) alimentado exclusivamente por los votos
   recibidos desde WhatsApp.
@@ -77,12 +77,12 @@ reasignan a los nuevos horarios; lo enviado, los votos y los KPIs no se tocan. U
 margen venció (backend detenido) no se envía atrasado: su contenido regresa a la reserva.
 
 ## WhatsApp
-
-`whatsapp-web.js` envía `Poll` nativos (`allowMultipleAnswers = false`) y el `id._serialized` del
-mensaje se guarda en `bot_poll_deliveries.whatsapp_message_id`. Cada `vote_update` trae
-`parentMessage.id` / `parentMsgKey`, que se compara con ese id para identificar la encuesta y el
-grupo. El conector Cloud API no soporta encuestas: el servicio lo detecta
-(`supportsNativePolls()`), no envía nada y lo registra con `POLL_NOT_SUPPORTED_BY_CONNECTOR`.
+ 
+`whatsapp-web.js` envía `Poll` nativos con `allowMultipleAnswers` según el tipo de encuesta
+(`true` o `false`) y el `id._serialized` del mensaje se guarda en
+`bot_poll_deliveries.whatsapp_message_id`. Cada `vote_update` trae `parentMessage.id` / `parentMsgKey`,
+que se compara con ese id para identificar la encuesta y el grupo. El conector Cloud API no soporta encuestas:
+el servicio lo detecta (`supportsNativePolls()`), no envía nada y lo registra con `POLL_NOT_SUPPORTED_BY_CONNECTOR`.
 
 ### Votos
 
@@ -143,17 +143,18 @@ lista como enviada ayer; ambas lecturas son intencionales y están cubiertas por
 
 ## Tablas
 
-`bot_polls` (instancia: contenido, origen, estado, horario, envío), `bot_poll_answer_options`,
-`bot_poll_deliveries` (una fila por grupo con `whatsapp_message_id`, intentos y error),
-`bot_poll_votes` (selección vigente por votante y opción), `bot_poll_vote_events`
+`bot_polls` (instancia: contenido, origen, estado, horario, envío, `allow_multiple_answers`),
+`bot_poll_configurations` (configuración del asistente, incluyendo `selection_mode`),
+`bot_poll_answer_options`, `bot_poll_deliveries` (una fila por grupo con `whatsapp_message_id`,
+intentos y error), `bot_poll_votes` (selección vigente por votante y opción), `bot_poll_vote_events`
 (deduplicación) y `bot_poll_slot_skips` (horarios saltados por el descanso). Las tablas del banco antiguo se conservan de solo lectura.
 
 ## Endpoints
 
 - `GET /api/polls`, `GET /api/polls/next-send`, `PATCH /api/polls/configuration`
-  (`{ enabled?, startTime?, intervalHours?, timezone?, quietHoursEnabled?, quietHoursStart?,
+  (`{ enabled?, startTime?, intervalHours?, selectionMode?, timezone?, quietHoursEnabled?, quietHoursStart?,
 quietHoursEnd? }`; la franja inválida responde 400 `POLL_QUIET_HOURS_INVALID`),
-  `POST /api/polls/send-test`.
+  `POST /api/polls/send-test` (`{ groupKey, confirmed: true, selectionMode? }`).
 - `GET /api/polls/analytics?period=today|7d|30d|week|month|custom&from&to`,
   `GET /api/polls/analytics/polls?…&limit&offset`, `GET /api/polls/analytics/polls/:pollId`.
 

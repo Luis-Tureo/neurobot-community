@@ -1,3 +1,4 @@
+import { getCountries } from 'libphonenumber-js';
 import { normalizeText } from '../utils/text.js';
 
 /**
@@ -9,6 +10,9 @@ import { normalizeText } from '../utils/text.js';
 export const COUNTRY_PRIVACY_MIN_COUNT = 5;
 
 const spanishRegionNames = new Intl.DisplayNames(['es'], { type: 'region' });
+
+// Conjunto canónico de códigos ISO 3166-1 alpha-2 soportados por libphonenumber-js
+export const SUPPORTED_COUNTRY_CODES = new Set<string>(getCountries());
 
 // Alias habituales en español para agilizar el comando !pais y la búsqueda
 const COMMON_COUNTRY_ALIASES: Record<string, string> = {
@@ -75,6 +79,22 @@ const COMMON_COUNTRY_ALIASES: Record<string, string> = {
   pt: 'PT',
 };
 
+// Índice dinámico generado para los 245 países soportados por libphonenumber-js
+const COUNTRY_NAME_TO_CODE = new Map<string, string>();
+for (const code of SUPPORTED_COUNTRY_CODES) {
+  try {
+    const localizedName = spanishRegionNames.of(code);
+    if (localizedName) {
+      const normalizedName = normalizeText(localizedName).replace(/[^a-z0-9]/gu, '');
+      if (normalizedName.length > 0) {
+        COUNTRY_NAME_TO_CODE.set(normalizedName, code);
+      }
+    }
+  } catch {
+    // Ignorar códigos sin traducción
+  }
+}
+
 /**
  * Obtiene el nombre localizado en español de un país según su código ISO alpha-2.
  */
@@ -104,12 +124,20 @@ export function getCountryFlag(countryCode: string | null): string {
 }
 
 /**
- * Resuelve un texto libre de país (ej. "España", "cl", "Chile", "México") a su
- * código ISO 3166-1 alpha-2 correspondiente.
+ * Resuelve un texto libre de país (ej. "España", "cl", "Chile", "México", "Filipinas", "Turquía")
+ * a su código ISO 3166-1 alpha-2 correspondiente.
+ * Utiliza getCountries() de libphonenumber-js como fuente de verdad canónica.
  */
 export function parseCountryInput(input: string): string | null {
   const trimmed = input.trim();
   if (trimmed.length === 0) return null;
+
+  // Si son exactamente 2 letras, verificar si es un código ISO válido soportado
+  if (trimmed.length === 2 && /^[a-zA-Z]{2}$/.test(trimmed)) {
+    const code = trimmed.toUpperCase();
+    if (SUPPORTED_COUNTRY_CODES.has(code)) return code;
+    return null;
+  }
 
   const normalized = normalizeText(trimmed).replace(/[^a-z0-9]/gu, '');
   if (normalized.length === 0) return null;
@@ -118,36 +146,9 @@ export function parseCountryInput(input: string): string | null {
   const directAlias = COMMON_COUNTRY_ALIASES[normalized];
   if (directAlias !== undefined) return directAlias;
 
-  // Si son 2 letras, verificar si es un código ISO válido
-  if (trimmed.length === 2 && /^[a-zA-Z]{2}$/.test(trimmed)) {
-    const code = trimmed.toUpperCase();
-    try {
-      const name = spanishRegionNames.of(code);
-      if (name && name !== code) return code;
-    } catch {
-      // Código inválido
-    }
-  }
-
-  // Búsqueda exhaustiva entre los códigos más comunes y territorios
-  const candidateCodes = [
-    'CL', 'AR', 'PE', 'MX', 'CO', 'ES', 'US', 'VE', 'EC', 'UY', 'PY', 'BO',
-    'BR', 'CR', 'PA', 'GT', 'HN', 'SV', 'NI', 'CU', 'DO', 'PR', 'CA', 'GB',
-    'FR', 'DE', 'IT', 'PT', 'AU', 'NZ', 'JP', 'CN', 'IN', 'RU', 'CH', 'SE',
-    'NO', 'NL', 'BE', 'AT', 'IE', 'PL', 'IL', 'ZA'
-  ];
-
-  for (const code of candidateCodes) {
-    try {
-      const localizedName = spanishRegionNames.of(code);
-      if (localizedName) {
-        const normalizedName = normalizeText(localizedName).replace(/[^a-z0-9]/gu, '');
-        if (normalizedName === normalized) return code;
-      }
-    } catch {
-      // Ignorar errores de región
-    }
-  }
+  // Búsqueda en el índice completo de nombres en español
+  const dynamicMatch = COUNTRY_NAME_TO_CODE.get(normalized);
+  if (dynamicMatch !== undefined) return dynamicMatch;
 
   return null;
 }

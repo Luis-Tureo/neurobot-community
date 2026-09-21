@@ -1,6 +1,7 @@
 import { confirmAction, showToast } from './ui-feedback.js';
 import { setStatusSwitchState } from './status-switch.js';
 import { initializePollDashboard, loadPollDashboard } from './poll-dashboard.js';
+import { initializeCountriesDashboard, loadCountriesDashboard } from './countries-dashboard.js';
 
 const state = {
   csrfToken: null,
@@ -1294,6 +1295,8 @@ function renderPollAutomation(data) {
   if (pollAutomationForm) {
     pollField('poll_start_time').value = configuration.startTime;
     pollField('poll_interval_hours').value = String(configuration.intervalHours);
+    const modeField = pollField('poll_selection_mode');
+    if (modeField) modeField.value = configuration.selectionMode || 'mixed';
     const quietEnabled = pollField('poll_quiet_hours_enabled');
     if (quietEnabled) quietEnabled.checked = configuration.quietHoursEnabled !== false;
     const quietStart = pollField('poll_quiet_hours_start');
@@ -1305,6 +1308,15 @@ function renderPollAutomation(data) {
   }
   const quietLabel = document.querySelector('#poll-quiet-hours-label');
   if (quietLabel) quietLabel.textContent = quietHoursLabel(configuration);
+  const selectionModeLabel = document.querySelector('#poll-selection-mode-label');
+  if (selectionModeLabel) {
+    const labels = {
+      mixed: 'Mixto',
+      single: 'Solo respuesta única',
+      multiple: 'Solo selección múltiple',
+    };
+    selectionModeLabel.textContent = labels[configuration.selectionMode] || 'Mixto';
+  }
   const support = document.querySelector('#poll-automation-support');
   if (support) {
     const problems = [];
@@ -1362,6 +1374,7 @@ pollAutomationForm?.addEventListener('submit', async (event) => {
       body: JSON.stringify({
         startTime: form.elements.poll_start_time.value,
         intervalHours: Number(form.elements.poll_interval_hours.value),
+        selectionMode: form.elements.poll_selection_mode?.value || 'mixed',
         timezone: state.selectedBotTimezone,
         quietHoursEnabled: form.elements.poll_quiet_hours_enabled.checked,
         quietHoursStart: form.elements.poll_quiet_hours_start.value,
@@ -1387,6 +1400,7 @@ window.addEventListener('poll-automation-changed', (event) => {
 });
 
 initializePollDashboard({ api, botScopedPath, showNotice });
+initializeCountriesDashboard({ api, botScopedPath, showNotice });
 
 function listItem(title, subtitle) {
   const item = document.createElement('article');
@@ -1418,6 +1432,7 @@ window.addEventListener('bot-services-load', (event) => {
   const loaders = [];
   if (visibleModules.has('automatic-messages')) loaders.push(loadAutomaticMessages());
   if (visibleModules.has('polls')) loaders.push(loadPolls());
+  if (visibleModules.has('countries')) loaders.push(loadCountriesDashboard());
   void Promise.all(loaders).catch((error) => {
     showNotice(error.message, true);
   });

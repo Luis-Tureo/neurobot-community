@@ -48,7 +48,16 @@ export class SimulatedMessagingClient implements MessagingClient {
   public readonly ownIdentifiers = new Set<string>();
   public readonly welcomeParticipants = new Map<string, WelcomeParticipant>();
   public readonly groupAdministrators = new Map<string, string[]>();
+  public readonly lidPhoneMappings = new Map<string, string>();
   private events: MessagingClientEvents | null = null;
+
+  public async resolveCanonicalIdentities(participantIds: string[]): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    for (const id of participantIds) {
+      result.set(id, this.lidPhoneMappings.get(id) ?? id);
+    }
+    return result;
+  }
 
   public setEvents(events: MessagingClientEvents): void {
     this.events = events;

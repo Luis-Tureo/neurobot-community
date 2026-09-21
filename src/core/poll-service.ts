@@ -1,5 +1,9 @@
 import type { Logger } from 'pino';
-import type { PollAutomationConfiguration, PollRecord } from '../domain/types.js';
+import type {
+  PollAutomationConfiguration,
+  PollAutomationSelectionMode,
+  PollRecord,
+} from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import { isSupportedGroupId } from '../messaging/identifiers.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
@@ -32,6 +36,7 @@ export type ManualPollResult = {
   pollId: number;
   question: string;
   options: string[];
+  allowMultipleAnswers: boolean;
   origin: PollRecord['origin'];
   errorCode: string | null;
 };
@@ -46,6 +51,7 @@ export type PollConfigurationUpdate = {
   enabled?: boolean | undefined;
   startTime?: string | undefined;
   intervalHours?: number | undefined;
+  selectionMode?: PollAutomationSelectionMode | undefined;
   timezone?: string | undefined;
   quietHoursEnabled?: boolean | undefined;
   quietHoursStart?: string | undefined;
@@ -101,6 +107,7 @@ export class PollService {
       enabled: update.enabled ?? current.enabled,
       startTime: update.startTime ?? current.startTime,
       intervalHours: update.intervalHours ?? current.intervalHours,
+      selectionMode: update.selectionMode ?? current.selectionMode,
       timezone: update.timezone ?? current.timezone,
       anchorLocalDate: current.anchorLocalDate,
       activatedAt: current.activatedAt,
@@ -122,13 +129,20 @@ export class PollService {
       (next.quietHoursEnabled &&
         (next.quietHoursStart !== current.quietHoursStart ||
           next.quietHoursEnd !== current.quietHoursEnd));
+    const selectionModeChanged = next.selectionMode !== current.selectionMode;
     const activated = next.enabled && !current.enabled;
     if (activated) next.activatedAt = now.toISOString();
     if (activated || scheduleChanged || next.anchorLocalDate === null) {
       next.anchorLocalDate = localDateOf(now, next.timezone);
     }
     const saved = this.repository.saveConfiguration(next);
-    if (scheduleChanged || activated || quietHoursChanged || (!next.enabled && current.enabled)) {
+    if (
+      scheduleChanged ||
+      activated ||
+      quietHoursChanged ||
+      selectionModeChanged ||
+      (!next.enabled && current.enabled)
+    ) {
       const released = this.repository.releaseScheduled();
       // Los horarios saltados futuros se reevalúan con la nueva franja; el historial se conserva.
       this.repository.clearFutureSlotSkips(now.toISOString());
@@ -138,7 +152,9 @@ export class PollService {
             ? 'activated'
             : scheduleChanged
               ? 'rescheduled'
-              : 'quiet_hours_changed'
+              : selectionModeChanged
+                ? 'selection_mode_changed'
+                : 'quiet_hours_changed'
           : 'deactivated',
         itemCount: released,
         localTime: next.startTime,
@@ -174,12 +190,15 @@ export class PollService {
   }
 
   /** Envío inmediato a un grupo (Centro de pruebas). No consume horarios programados. */
-  public async sendManual(groupId: string): Promise<ManualPollResult> {
+  public async sendManual(
+    groupId: string,
+    options: { selectionMode?: 'single' | 'multiple' } = {},
+  ): Promise<ManualPollResult> {
     const now = this.now();
     if (!this.nativePollsSupported()) throw new Error('POLL_NOT_SUPPORTED_BY_CONNECTOR');
     const rejection = await this.groupRejection(groupId, now);
     if (rejection !== null) throw new Error(rejection);
-    const candidate = await this.planner.acquireForImmediateSend(now);
+    const candidate = await this.planner.acquireForImmediateSend(now, options.selectionMode);
     if (candidate === null) throw new Error('POLL_CONTENT_UNAVAILABLE');
     const poll = this.repository.claimForManualSending(candidate.id, now);
     if (poll === null) throw new Error('POLL_CONTENT_UNAVAILABLE');
@@ -191,6 +210,7 @@ export class PollService {
       pollId: poll.id,
       question: poll.question,
       options: [...poll.options],
+      allowMultipleAnswers: poll.allowMultipleAnswers === true,
       origin: poll.origin,
       errorCode: outcome.lastError,
     };

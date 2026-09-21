@@ -1,7 +1,7 @@
 import type { Logger } from 'pino';
 import type { AIProvider } from '../ai/ai-provider.js';
 import type { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
-import type { PollContent } from '../domain/types.js';
+import type { PollAutomationSelectionMode, PollContent } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import type { AppDatabase } from '../persistence/database.js';
 import { normalizeText } from '../utils/text.js';
@@ -251,6 +251,7 @@ export class PollGenerationError extends Error {
 export type PollGenerationRequest = {
   category: string;
   avoidQuestions: string[];
+  selectionMode?: PollAutomationSelectionMode;
 };
 
 export type PollGenerationResult = PollContent & {
@@ -316,6 +317,12 @@ export class PollGenerator implements PollContentGenerator {
       }
       try {
         const content = parseGeneratedPoll(raw.text);
+        if (request.selectionMode === 'single' && content.allowMultipleAnswers) {
+          throw new PollGenerationError('AI_INVALID_RESPONSE', 'POLL_SELECTION_MODE_MISMATCH');
+        }
+        if (request.selectionMode === 'multiple' && !content.allowMultipleAnswers) {
+          throw new PollGenerationError('AI_INVALID_RESPONSE', 'POLL_SELECTION_MODE_MISMATCH');
+        }
         return {
           ...content,
           category: request.category,
@@ -378,8 +385,15 @@ export function buildGenerationContext(request: PollGenerationRequest): string {
     .map((question) => question.trim())
     .filter((question) => question !== '')
     .slice(0, 60);
+  const modeInstruction =
+    request.selectionMode === 'single'
+      ? 'Modo de respuesta OBLIGATORIO: "single" (opciones mutuamente excluyentes o de preferencia única).'
+      : request.selectionMode === 'multiple'
+        ? 'Modo de respuesta OBLIGATORIO: "multiple" (las opciones deben ser situaciones o preferencias que pueden aplicar simultáneamente).'
+        : null;
   return [
     `Categoría objetivo: ${request.category}`,
+    ...(modeInstruction ? [modeInstruction] : []),
     `Temas disponibles: ${POLL_TOPICS.join(', ')}`,
     avoid.length === 0
       ? 'Preguntas recientes: ninguna.'

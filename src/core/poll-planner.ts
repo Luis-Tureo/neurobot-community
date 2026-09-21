@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import type { PollContent, PollRecord } from '../domain/types.js';
+import type { PollAutomationSelectionMode, PollContent, PollRecord } from '../domain/types.js';
 import { serializeError } from '../infrastructure/safe-error.js';
 import type { AppDatabase } from '../persistence/database.js';
 import {
@@ -157,14 +157,20 @@ export class PollPlanner {
     );
     const missing = slots.filter((slot) => !occupied.has(slot.key));
     if (missing.length === 0) return result;
+    const mode = configuration.selectionMode;
     const pool = this.repository.list({ statuses: ['generated'], orderBy: 'created_asc' });
     let generations = 0;
     for (const slot of missing) {
-      let candidate = pool.shift() ?? null;
+      const candidateIndex = pool.findIndex((poll) => {
+        if (mode === 'single') return !poll.allowMultipleAnswers;
+        if (mode === 'multiple') return poll.allowMultipleAnswers;
+        return true;
+      });
+      let candidate = candidateIndex !== -1 ? pool.splice(candidateIndex, 1)[0] ?? null : null;
       if (candidate === null) {
         const urgent = slot.instantMs - now.getTime() <= this.fallbackWindowMs;
         const allowGeneration = generations < this.maxGenerationsPerRun;
-        const prepared = await this.prepare(now, { urgent, allowGeneration });
+        const prepared = await this.prepare(now, { urgent, allowGeneration, selectionMode: mode });
         if (prepared === null) break;
         candidate = prepared.poll;
         if (prepared.generated) generations += 1;
@@ -179,15 +185,26 @@ export class PollPlanner {
   }
 
   /** Obtiene una encuesta lista para un envío inmediato (reserva → IA → historial → banco). */
-  public async acquireForImmediateSend(now = this.now()): Promise<PollRecord | null> {
+  public async acquireForImmediateSend(
+    now = this.now(),
+    selectionMode?: 'single' | 'multiple',
+  ): Promise<PollRecord | null> {
+    const desiredMode = selectionMode ?? this.repository.configuration().selectionMode;
     const pool = this.repository.list({
       statuses: ['generated'],
       orderBy: 'created_asc',
-      limit: 1,
     });
-    const fromPool = pool[0];
+    const fromPool = pool.find((poll) => {
+      if (desiredMode === 'single') return !poll.allowMultipleAnswers;
+      if (desiredMode === 'multiple') return poll.allowMultipleAnswers;
+      return true;
+    });
     if (fromPool !== undefined) return fromPool;
-    const prepared = await this.prepare(now, { urgent: true, allowGeneration: true });
+    const prepared = await this.prepare(now, {
+      urgent: true,
+      allowGeneration: true,
+      selectionMode: desiredMode,
+    });
     return prepared?.poll ?? null;
   }
 
@@ -208,15 +225,20 @@ export class PollPlanner {
 
   private async prepare(
     now: Date,
-    context: { urgent: boolean; allowGeneration: boolean },
+    context: {
+      urgent: boolean;
+      allowGeneration: boolean;
+      selectionMode?: PollAutomationSelectionMode;
+    },
   ): Promise<PreparedPoll | null> {
     const recent = this.recentQuestions(now);
+    const mode = context.selectionMode ?? this.repository.configuration().selectionMode;
     if (
       context.allowGeneration &&
       this.generator.isAvailable() &&
       now.getTime() >= this.generationBackoffUntil
     ) {
-      const generated = await this.generateNew(now, recent);
+      const generated = await this.generateNew(now, recent, mode);
       if (generated === 'unavailable') {
         this.generationBackoffUntil = now.getTime() + this.generationBackoffMs;
       } else if (generated !== null) {
@@ -224,9 +246,9 @@ export class PollPlanner {
       }
     }
     if (!context.urgent) return null;
-    const reused = this.reuseHistorical(now, recent);
+    const reused = this.reuseHistorical(now, recent, mode);
     if (reused !== null) return { poll: reused, generated: false };
-    const bank = this.bankFallback(recent);
+    const bank = this.bankFallback(recent, mode);
     return bank === null ? null : { poll: bank, generated: false };
   }
 
@@ -238,12 +260,17 @@ export class PollPlanner {
   private async generateNew(
     now: Date,
     recent: string[],
+    selectionMode?: PollAutomationSelectionMode,
   ): Promise<PollRecord | 'unavailable' | null> {
     const categories = this.categoryOrder(now);
     for (const category of categories.slice(0, 2)) {
       let content: PollContent;
       try {
-        const generated = await this.generator.generate({ category, avoidQuestions: recent });
+        const generated = await this.generator.generate({
+          category,
+          avoidQuestions: recent,
+          selectionMode,
+        });
         content = {
           question: generated.question,
           options: generated.options,
@@ -298,7 +325,11 @@ export class PollPlanner {
     return shuffled.sort((left, right) => (usage.get(left) ?? 0) - (usage.get(right) ?? 0));
   }
 
-  private reuseHistorical(now: Date, recent: string[]): PollRecord | null {
+  private reuseHistorical(
+    now: Date,
+    recent: string[],
+    selectionMode?: PollAutomationSelectionMode,
+  ): PollRecord | null {
     const sent = this.repository.list({ statuses: ['sent'], orderBy: 'sent_asc', limit: 2000 });
     const latestByQuestion = new Map<string, { poll: PollRecord; lastSentAt: string }>();
     for (const poll of sent) {
@@ -311,6 +342,11 @@ export class PollPlanner {
       }
     }
     const candidates = [...latestByQuestion.values()]
+      .filter((entry) => {
+        if (selectionMode === 'single') return !entry.poll.allowMultipleAnswers;
+        if (selectionMode === 'multiple') return entry.poll.allowMultipleAnswers;
+        return true;
+      })
       .filter((entry) => findSimilarQuestion(entry.poll.question, recent) === null)
       .sort((left, right) => left.lastSentAt.localeCompare(right.lastSentAt));
     if (candidates.length === 0) return null;
@@ -336,13 +372,21 @@ export class PollPlanner {
     return poll;
   }
 
-  private bankFallback(recent: string[]): PollRecord | null {
+  private bankFallback(
+    recent: string[],
+    selectionMode?: PollAutomationSelectionMode,
+  ): PollRecord | null {
     const usage = this.repository.legacyTemplateUsage();
     const templates = this.repository
       .legacyTemplates()
       // El banco histórico contiene escalas y preguntas extensas de hasta 12 alternativas.
       // Solo se reutilizan plantillas que ya cumplen la experiencia actual: 2 a 5 alternativas.
       .filter((template) => template.options.length >= 2 && template.options.length <= 5)
+      .filter((template) => {
+        if (selectionMode === 'single') return template.allowMultipleAnswers !== true;
+        if (selectionMode === 'multiple') return template.allowMultipleAnswers === true;
+        return true;
+      })
       .filter((template) => findSimilarQuestion(template.question, recent) === null)
       .sort((left, right) => {
         const leftUsed = usage.get(left.id) ?? '';
@@ -355,7 +399,7 @@ export class PollPlanner {
       question: template.question,
       options: [...template.options],
       category: template.category.toLocaleLowerCase('es'),
-      allowMultipleAnswers: false,
+      allowMultipleAnswers: template.allowMultipleAnswers === true,
       normalizedQuestion: normalizePollQuestion(template.question),
       origin: 'legacy_bank',
       sourceTemplateId: template.id,

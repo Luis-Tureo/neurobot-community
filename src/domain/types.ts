@@ -218,6 +218,7 @@ export type PollDeliveryStatus = 'pending' | 'sending' | 'sent' | 'failed' | 'sk
 export type PollDeliverySource = 'scheduled' | 'manual';
 
 export type PollSelectionMode = 'single' | 'multiple';
+export type PollAutomationSelectionMode = 'mixed' | 'single' | 'multiple';
 
 export type NativePoll = {
   question: string;
@@ -248,6 +249,8 @@ export type PollAutomationConfiguration = PollQuietHours & {
   startTime: string;
   /** Recurrencia en horas entre envíos consecutivos. */
   intervalHours: number;
+  /** Política de modo de respuesta: mixto (defecto), solo respuesta única o solo selección múltiple. */
+  selectionMode: PollAutomationSelectionMode;
   timezone: string;
   /** Fecha local desde la que se ancla la serie de horarios (fase de la recurrencia). */
   anchorLocalDate: string | null;
@@ -264,6 +267,7 @@ export type LegacyPollTemplate = {
   question: string;
   category: string;
   options: string[];
+  allowMultipleAnswers?: boolean;
 };
 
 /** Contenido generado (o reutilizado) listo para un horario de envío. */

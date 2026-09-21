@@ -2,6 +2,7 @@
  * Tests O–P: filterCountries del dashboard de países (frontend pure function).
  */
 import { describe, it, expect } from 'vitest';
+// @ts-expect-error Plain JS frontend module without TypeScript declarations
 import { filterCountries } from '../public/countries-dashboard.js';
 import type { CountryStatistic } from '../src/domain/types.js';
 

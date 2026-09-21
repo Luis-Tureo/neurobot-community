@@ -70,6 +70,7 @@ import type {
   OrganizationType,
   LegacyPollTemplate,
   PollAutomationConfiguration,
+  PollAutomationSelectionMode,
   PollDeliveryRecord,
   PollDeliverySource,
   PollDeliveryStatus,
@@ -2632,6 +2633,44 @@ export class AppDatabase {
             ON bot_community_participants(bot_id, country_source);
         `,
       },
+      {
+        version: 41,
+        sql: `
+          -- Membresías activas de participantes en grupos comunitarios del asistente
+          CREATE TABLE bot_community_memberships (
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            group_id TEXT NOT NULL,
+            participant_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (bot_id, group_id, participant_hash)
+          );
+          CREATE INDEX idx_bot_community_memberships_participant
+            ON bot_community_memberships(bot_id, participant_hash);
+          CREATE INDEX idx_bot_community_memberships_group
+            ON bot_community_memberships(bot_id, group_id);
+        `,
+      },
+      {
+        version: 42,
+        sql: `
+          -- Modo de selección para la programación de encuestas: mixed (defecto), single o multiple.
+          -- Reemplaza la columna heredada homónima (SAME_FOR_ALL / PER_GROUP) del banco antiguo.
+          ALTER TABLE bot_poll_configurations DROP COLUMN selection_mode;
+          ALTER TABLE bot_poll_configurations
+            ADD COLUMN selection_mode TEXT NOT NULL DEFAULT 'mixed'
+              CHECK (selection_mode IN ('mixed', 'single', 'multiple'));
+
+          -- Sincronizar plantillas predeterminadas con selección múltiple natural
+          UPDATE bot_poll_templates
+            SET allow_multiple_answers = 1
+            WHERE is_default = 1 AND default_key IN (
+              'need-today', 'quiet-afternoon', 'group-activity', 'participation-style',
+              'group-content', 'hobby-type', 'daily-organization', 'weekend-plan',
+              'close-week', 'free-hour'
+            );
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -3065,8 +3104,8 @@ export class AppDatabase {
       .prepare(
         `INSERT OR IGNORE INTO bot_poll_configurations(
            bot_id, enabled, send_time, timezone, interval_hours, quiet_hours_enabled,
-           quiet_hours_start, quiet_hours_end, updated_at
-         ) VALUES (?, 0, '09:00', ?, 3, 1, '23:00', '08:00', ?)`,
+           quiet_hours_start, quiet_hours_end, selection_mode, updated_at
+         ) VALUES (?, 0, '09:00', ?, 3, 1, '23:00', '08:00', 'mixed', ?)`,
       )
       .run(botId, timezone, now);
     const insertTemplate = this.db.prepare(
@@ -3775,7 +3814,7 @@ export class AppDatabase {
     const row = this.db
       .prepare(
         `SELECT enabled, send_time, timezone, interval_hours, anchor_local_date, activated_at,
-                quiet_hours_enabled, quiet_hours_start, quiet_hours_end, updated_at
+                quiet_hours_enabled, quiet_hours_start, quiet_hours_end, selection_mode, updated_at
          FROM bot_poll_configurations WHERE bot_id = ?`,
       )
       .get(botId) as
@@ -3789,13 +3828,18 @@ export class AppDatabase {
           quiet_hours_enabled: number;
           quiet_hours_start: string;
           quiet_hours_end: string;
+          selection_mode?: string;
           updated_at: string;
         }
       | undefined;
+    const rawMode = row?.selection_mode;
+    const selectionMode: PollAutomationSelectionMode =
+      rawMode === 'single' || rawMode === 'multiple' ? rawMode : 'mixed';
     return {
       enabled: row?.enabled === 1,
       startTime: row?.send_time ?? '09:00',
       intervalHours: row?.interval_hours ?? 3,
+      selectionMode,
       timezone: row?.timezone ?? this.getBot(botId)?.timezone ?? 'America/Santiago',
       anchorLocalDate: row?.anchor_local_date ?? null,
       activatedAt: row?.activated_at ?? null,
@@ -3808,7 +3852,9 @@ export class AppDatabase {
   }
 
   public savePollAutomationConfiguration(
-    configuration: Omit<PollAutomationConfiguration, 'updatedAt'>,
+    configuration: Omit<PollAutomationConfiguration, 'updatedAt'> & {
+      selectionMode?: PollAutomationSelectionMode;
+    },
     botId = 'neurobot',
   ): PollAutomationConfiguration {
     if (!isTime(configuration.startTime)) {
@@ -3827,20 +3873,25 @@ export class AppDatabase {
     if (configuration.quietHoursStart === configuration.quietHoursEnd) {
       throw new Error('El horario de descanso debe tener una hora de inicio distinta a la de fin.');
     }
+    const selectionMode = configuration.selectionMode ?? 'mixed';
+    if (selectionMode !== 'mixed' && selectionMode !== 'single' && selectionMode !== 'multiple') {
+      throw new Error('El modo de selección de encuestas no es válido.');
+    }
     const now = new Date().toISOString();
     this.db
       .prepare(
         `INSERT INTO bot_poll_configurations(
            bot_id, enabled, send_time, timezone, interval_hours, anchor_local_date, activated_at,
-           quiet_hours_enabled, quiet_hours_start, quiet_hours_end, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           quiet_hours_enabled, quiet_hours_start, quiet_hours_end, selection_mode, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(bot_id) DO UPDATE SET enabled = excluded.enabled,
            send_time = excluded.send_time, timezone = excluded.timezone,
            interval_hours = excluded.interval_hours, anchor_local_date = excluded.anchor_local_date,
            activated_at = excluded.activated_at,
            quiet_hours_enabled = excluded.quiet_hours_enabled,
            quiet_hours_start = excluded.quiet_hours_start,
-           quiet_hours_end = excluded.quiet_hours_end, updated_at = excluded.updated_at`,
+           quiet_hours_end = excluded.quiet_hours_end,
+           selection_mode = excluded.selection_mode, updated_at = excluded.updated_at`,
       )
       .run(
         botId,
@@ -3853,6 +3904,7 @@ export class AppDatabase {
         configuration.quietHoursEnabled ? 1 : 0,
         configuration.quietHoursStart,
         configuration.quietHoursEnd,
+        selectionMode,
         now,
       );
     return this.getPollAutomationConfiguration(botId);
@@ -3918,7 +3970,7 @@ export class AppDatabase {
   public listLegacyPollTemplates(botId = 'neurobot'): LegacyPollTemplate[] {
     const rows = this.db
       .prepare(
-        `SELECT templates.id, templates.question, templates.category
+        `SELECT templates.id, templates.question, templates.category, templates.allow_multiple_answers
          FROM bot_poll_templates templates
          LEFT JOIN assistant_poll_template_settings settings
            ON settings.assistant_id = templates.bot_id AND settings.poll_template_id = templates.id
@@ -3926,7 +3978,12 @@ export class AppDatabase {
            AND (settings.status IS NULL OR settings.status <> 'HIDDEN')
          ORDER BY templates.id`,
       )
-      .all(botId) as Array<{ id: number; question: string; category: string }>;
+      .all(botId) as Array<{
+      id: number;
+      question: string;
+      category: string;
+      allow_multiple_answers: number;
+    }>;
     const options = new Map<number, string[]>();
     for (const option of this.db
       .prepare(
@@ -3940,7 +3997,13 @@ export class AppDatabase {
       options.set(option.template_id, list);
     }
     return rows
-      .map((row) => ({ ...row, options: options.get(row.id) ?? [] }))
+      .map((row) => ({
+        id: row.id,
+        question: row.question,
+        category: row.category,
+        allowMultipleAnswers: row.allow_multiple_answers === 1,
+        options: options.get(row.id) ?? [],
+      }))
       .filter((template) => template.options.length >= 2);
   }
 
@@ -9654,33 +9717,222 @@ export class AppDatabase {
     return this.getParticipantCountry(botId, participantHash)!;
   }
 
+  public recordCommunityMembership(
+    botId: string,
+    groupId: string,
+    participantHash: string,
+  ): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO bot_community_memberships (
+           bot_id, group_id, participant_hash, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(bot_id, group_id, participant_hash) DO UPDATE SET
+           updated_at = excluded.updated_at`,
+      )
+      .run(botId, groupId, participantHash, now, now);
+  }
+
+  public recordCommunityMembershipsBatch(
+    botId: string,
+    groupId: string,
+    participantHashes: string[],
+  ): void {
+    if (participantHashes.length === 0) return;
+    const now = new Date().toISOString();
+    const insertStmt = this.db.prepare(
+      `INSERT INTO bot_community_memberships (
+         bot_id, group_id, participant_hash, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(bot_id, group_id, participant_hash) DO UPDATE SET
+         updated_at = excluded.updated_at`,
+    );
+    const run = this.db.transaction(() => {
+      for (const hash of participantHashes) {
+        insertStmt.run(botId, groupId, hash, now, now);
+      }
+    });
+    run();
+  }
+
+  public removeCommunityMembership(
+    botId: string,
+    groupId: string,
+    participantHash: string,
+  ): void {
+    this.db
+      .prepare(
+        'DELETE FROM bot_community_memberships WHERE bot_id = ? AND group_id = ? AND participant_hash = ?',
+      )
+      .run(botId, groupId, participantHash);
+  }
+
+  public reconcileCommunityGroupMemberships(
+    botId: string,
+    groupId: string,
+    currentParticipantHashes: string[],
+  ): { added: number; removed: number } {
+    const currentSet = new Set(currentParticipantHashes);
+    const existingRows = this.db
+      .prepare(
+        'SELECT participant_hash FROM bot_community_memberships WHERE bot_id = ? AND group_id = ?',
+      )
+      .all(botId, groupId) as Array<{ participant_hash: string }>;
+
+    const existingSet = new Set(existingRows.map((r) => r.participant_hash));
+    let added = 0;
+    let removed = 0;
+
+    const run = this.db.transaction(() => {
+      const now = new Date().toISOString();
+      const insertStmt = this.db.prepare(
+        `INSERT INTO bot_community_memberships (
+           bot_id, group_id, participant_hash, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(bot_id, group_id, participant_hash) DO UPDATE SET
+           updated_at = excluded.updated_at`,
+      );
+      const deleteStmt = this.db.prepare(
+        'DELETE FROM bot_community_memberships WHERE bot_id = ? AND group_id = ? AND participant_hash = ?',
+      );
+
+      for (const hash of currentSet) {
+        if (!existingSet.has(hash)) {
+          insertStmt.run(botId, groupId, hash, now, now);
+          added += 1;
+        }
+      }
+
+      for (const hash of existingSet) {
+        if (!currentSet.has(hash)) {
+          deleteStmt.run(botId, groupId, hash);
+          removed += 1;
+        }
+      }
+    });
+    run();
+    return { added, removed };
+  }
+
+  public mergeParticipantIdentities(
+    botId: string,
+    sourceHash: string,
+    targetHash: string,
+  ): void {
+    if (sourceHash === targetHash) return;
+    const run = this.db.transaction(() => {
+      const now = new Date().toISOString();
+      const source = this.getParticipantCountry(botId, sourceHash);
+      const target = this.getParticipantCountry(botId, targetHash);
+
+      if (source && source.countrySource === 'declared' && source.declaredCountryCode) {
+        if (!target) {
+          this.db
+            .prepare(
+              `INSERT INTO bot_community_participants (
+                 bot_id, participant_hash, country_code, country_source,
+                 detected_country_code, declared_country_code, country_detected_at, country_updated_at
+               ) VALUES (?, ?, ?, 'declared', NULL, ?, NULL, ?)`,
+            )
+            .run(botId, targetHash, source.declaredCountryCode, source.declaredCountryCode, now);
+        } else if (target.countrySource !== 'declared') {
+          this.db
+            .prepare(
+              `UPDATE bot_community_participants
+               SET country_code = ?,
+                   country_source = 'declared',
+                   declared_country_code = ?,
+                   country_updated_at = ?
+               WHERE bot_id = ? AND participant_hash = ?`,
+            )
+            .run(source.declaredCountryCode, source.declaredCountryCode, now, botId, targetHash);
+        }
+      }
+
+      // Reubicar membresías de source a target
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO bot_community_memberships (
+             bot_id, group_id, participant_hash, created_at, updated_at
+           )
+           SELECT bot_id, group_id, ?, created_at, updated_at
+           FROM bot_community_memberships
+           WHERE bot_id = ? AND participant_hash = ?`,
+        )
+        .run(targetHash, botId, sourceHash);
+
+      this.db
+        .prepare(
+          'DELETE FROM bot_community_memberships WHERE bot_id = ? AND participant_hash = ?',
+        )
+        .run(botId, sourceHash);
+
+      this.db
+        .prepare(
+          'DELETE FROM bot_community_participants WHERE bot_id = ? AND participant_hash = ?',
+        )
+        .run(botId, sourceHash);
+    });
+    run();
+  }
+
   public getCommunityCountryAggregates(
     botId: string,
     privacyMinCount = COUNTRY_PRIVACY_MIN_COUNT,
   ): CommunityCountriesSummary {
+    // 1. Participantes únicos activos en al menos un grupo comunitario válido del bot
     const totalRow = this.db
-      .prepare('SELECT COUNT(*) as count FROM bot_community_participants WHERE bot_id = ?')
+      .prepare(
+        `SELECT COUNT(DISTINCT m.participant_hash) as count
+         FROM bot_community_memberships m
+         INNER JOIN bot_groups g ON g.bot_id = m.bot_id AND g.group_id = m.group_id
+         WHERE m.bot_id = ? AND g.active = 1 AND g.blocked = 0 AND g.bot_is_member = 1`,
+      )
       .get(botId) as { count: number } | undefined;
     const totalParticipants = totalRow?.count ?? 0;
 
+    if (totalParticipants === 0) {
+      return {
+        totalParticipants: 0,
+        identified: 0,
+        unidentified: 0,
+        countriesCount: 0,
+        privacyMinCount,
+        countries: [],
+      };
+    }
+
+    // 2. Participantes no identificados (sin registro o country_code nulo/vacío)
     const unidentifiedRow = this.db
       .prepare(
-        'SELECT COUNT(*) as count FROM bot_community_participants WHERE bot_id = ? AND country_code IS NULL',
+        `SELECT COUNT(DISTINCT m.participant_hash) as count
+         FROM bot_community_memberships m
+         INNER JOIN bot_groups g ON g.bot_id = m.bot_id AND g.group_id = m.group_id
+         LEFT JOIN bot_community_participants p
+           ON p.bot_id = m.bot_id AND p.participant_hash = m.participant_hash
+         WHERE m.bot_id = ? AND g.active = 1 AND g.blocked = 0 AND g.bot_is_member = 1
+           AND (p.country_code IS NULL OR p.country_code = '')`,
       )
       .get(botId) as { count: number } | undefined;
     const unidentified = unidentifiedRow?.count ?? 0;
-    const identified = totalParticipants - unidentified;
+    const identified = Math.max(0, totalParticipants - unidentified);
 
+    // 3. Distribución por país para participantes con país identificado
     const rows = this.db
       .prepare(
-        `SELECT country_code,
-                COUNT(*) as participant_count,
-                SUM(CASE WHEN country_source = 'phone_prefix' THEN 1 ELSE 0 END) as detected_count,
-                SUM(CASE WHEN country_source = 'declared' THEN 1 ELSE 0 END) as declared_count
-         FROM bot_community_participants
-         WHERE bot_id = ? AND country_code IS NOT NULL
-         GROUP BY country_code
-         ORDER BY participant_count DESC, country_code ASC`,
+        `SELECT p.country_code,
+                COUNT(DISTINCT m.participant_hash) as participant_count,
+                SUM(CASE WHEN p.country_source = 'phone_prefix' THEN 1 ELSE 0 END) as detected_count,
+                SUM(CASE WHEN p.country_source = 'declared' THEN 1 ELSE 0 END) as declared_count
+         FROM bot_community_memberships m
+         INNER JOIN bot_groups g ON g.bot_id = m.bot_id AND g.group_id = m.group_id
+         INNER JOIN bot_community_participants p
+           ON p.bot_id = m.bot_id AND p.participant_hash = m.participant_hash
+         WHERE m.bot_id = ? AND g.active = 1 AND g.blocked = 0 AND g.bot_is_member = 1
+           AND p.country_code IS NOT NULL AND p.country_code != ''
+         GROUP BY p.country_code
+         ORDER BY participant_count DESC, p.country_code ASC`,
       )
       .all(botId) as Array<{
         country_code: string;
@@ -9689,7 +9941,6 @@ export class AppDatabase {
         declared_count: number;
       }>;
 
-    const countriesCount = rows.length;
     const countries: CountryStatistic[] = [];
     let otherCount = 0;
     let otherDetectedCount = 0;
@@ -9702,10 +9953,7 @@ export class AppDatabase {
           countryName: getCountryName(row.country_code),
           flagEmoji: getCountryFlag(row.country_code),
           participantCount: row.participant_count,
-          percentage:
-            totalParticipants > 0
-              ? Number(((row.participant_count / totalParticipants) * 100).toFixed(1))
-              : 0,
+          percentage: Number(((row.participant_count / totalParticipants) * 100).toFixed(1)),
           detectedCount: row.detected_count,
           declaredCount: row.declared_count,
         });
@@ -9722,14 +9970,14 @@ export class AppDatabase {
         countryName: 'Otros países',
         flagEmoji: '🌐',
         participantCount: otherCount,
-        percentage:
-          totalParticipants > 0
-            ? Number(((otherCount / totalParticipants) * 100).toFixed(1))
-            : 0,
+        percentage: Number(((otherCount / totalParticipants) * 100).toFixed(1)),
         detectedCount: otherDetectedCount,
         declaredCount: otherDeclaredCount,
       });
     }
+
+    // El número de países representa solo los países publicables que superan el umbral de privacidad
+    const countriesCount = countries.filter((c) => c.countryCode !== null).length;
 
     return {
       totalParticipants,

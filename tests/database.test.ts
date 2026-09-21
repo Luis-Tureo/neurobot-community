@@ -13,7 +13,7 @@ describe('persistencia SQLite', () => {
     database.migrate();
     expect(database.getMigrationVersions()).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
-      27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+      27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
     ]);
     expect(database.getBotProfile('neurobot')).toMatchObject({
       botName: 'Neurobot',
@@ -47,6 +47,7 @@ describe('persistencia SQLite', () => {
       enabled: false,
       startTime: '09:00',
       intervalHours: 3,
+      selectionMode: 'mixed',
       timezone: 'America/Santiago',
       anchorLocalDate: null,
       activatedAt: null,
@@ -307,7 +308,7 @@ describe('persistencia SQLite', () => {
     second.migrate();
     expect(second.listAutomationGroupIds('neurobot')).toEqual(['grupo-b@g.us']);
     second.close();
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
 
   it('conserva textos personalizados y permite restaurar cada valor por separado', () => {
@@ -693,4 +694,56 @@ describe('persistencia SQLite', () => {
     ).toThrow('La hora de inicio de las encuestas no es válida.');
     database.close();
   });
+
+  it('persiste selectionMode (single, multiple, mixed) y rechaza modos inválidos', () => {
+    const database = new AppDatabase(':memory:');
+    database.migrate();
+    const base = {
+      startTime: '09:00',
+      intervalHours: 3,
+      timezone: 'America/Santiago',
+      anchorLocalDate: '2026-01-05',
+      activatedAt: '2026-01-05T12:00:00.000Z',
+      quietHoursEnabled: true,
+      quietHoursStart: '23:00',
+      quietHoursEnd: '08:00',
+    };
+    database.savePollAutomationConfiguration({ ...base, enabled: true, selectionMode: 'multiple' });
+    expect(database.getPollAutomationConfiguration().selectionMode).toBe('multiple');
+
+    database.savePollAutomationConfiguration({ ...base, enabled: true, selectionMode: 'single' });
+    expect(database.getPollAutomationConfiguration().selectionMode).toBe('single');
+
+    database.savePollAutomationConfiguration({ ...base, enabled: true, selectionMode: 'mixed' });
+    expect(database.getPollAutomationConfiguration().selectionMode).toBe('mixed');
+
+    expect(() =>
+      database.savePollAutomationConfiguration({
+        ...base,
+        enabled: true,
+        // @ts-expect-error validación en tiempo de ejecución
+        selectionMode: 'invalido',
+      }),
+    ).toThrow('El modo de selección de encuestas no es válido.');
+
+    // Las 10 plantillas predeterminadas con selección múltiple natural tienen allowMultipleAnswers: true
+    const templates = database.listLegacyPollTemplates();
+    const multiselectKeys = new Set([
+      'need-today',
+      'quiet-afternoon',
+      'group-activity',
+      'participation-style',
+      'group-content',
+      'hobby-type',
+      'daily-organization',
+      'weekend-plan',
+      'close-week',
+      'free-hour',
+    ]);
+    const multiTemplates = templates.filter((t) => t.allowMultipleAnswers === true);
+    expect(multiTemplates).toHaveLength(10);
+    expect(templates.filter((t) => !t.allowMultipleAnswers)).toHaveLength(26);
+    database.close();
+  });
 });
+

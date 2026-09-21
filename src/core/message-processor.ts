@@ -75,24 +75,26 @@ export class MessageProcessor {
         const countryArg = privateCountryMatch[1]?.trim();
         let responseText: string;
         if (countryArg && countryArg.length > 0) {
-          const decl = this.countryService.handleCountryDeclaration(
+          const decl = await this.countryService.handleCountryDeclaration(
             this.botId,
             message.participantId,
             countryArg,
+            this.client,
           );
           responseText = decl.success
-            ? `Listo, registré ${decl.countryName} como tu país 🌎`
+            ? `Listo, registré ${decl.countryName} ${decl.flagEmoji} como tu país.`
             : (decl.error ??
               'No reconocí ese país. Puedes indicarlo con el nombre o código de tu país (ej: !pais Chile o !pais CL).');
         } else {
-          const record = this.countryService.getCountryForParticipant(
+          const record = await this.countryService.getCountryForParticipant(
             this.botId,
             message.participantId,
+            this.client,
           );
           if (record && record.countryCode) {
             const countryName = getCountryName(record.countryCode);
             const flag = getCountryFlag(record.countryCode);
-            responseText = `Tu país registrado es ${countryName} ${flag}`;
+            responseText = `Tu país registrado es ${countryName} ${flag}.`;
           } else {
             responseText = 'No tengo registrado tu país aún. Puedes indicarlo con !pais <País>';
           }
@@ -195,24 +197,30 @@ export class MessageProcessor {
       const countryArg = countryMatch[1]?.trim();
       let responseText: string;
       if (countryArg && countryArg.length > 0) {
-        const decl = this.countryService.handleCountryDeclaration(
+        const decl = await this.countryService.handleCountryDeclaration(
           this.botId,
           message.participantId,
           countryArg,
+          this.client,
         );
+        // Al interactuar en un grupo válido, registrar también membresía comunitaria
+        const partHash = this.countryService.hashParticipant(message.participantId);
+        this.database.recordCommunityMembership(this.botId, message.chatId, partHash);
+
         responseText = decl.success
-          ? `Listo, registré ${decl.countryName} como tu país 🌎`
+          ? `Listo, registré ${decl.countryName} ${decl.flagEmoji} como tu país.`
           : (decl.error ??
             'No reconocí ese país. Puedes indicarlo con el nombre o código de tu país (ej: !pais Chile o !pais CL).');
       } else {
-        const record = this.countryService.getCountryForParticipant(
+        const record = await this.countryService.getCountryForParticipant(
           this.botId,
           message.participantId,
+          this.client,
         );
         if (record && record.countryCode) {
           const countryName = getCountryName(record.countryCode);
           const flag = getCountryFlag(record.countryCode);
-          responseText = `Tu país registrado es ${countryName} ${flag}`;
+          responseText = `Tu país registrado es ${countryName} ${flag}.`;
         } else {
           responseText = 'No tengo registrado tu país aún. Puedes indicarlo con !pais <País>';
         }
