@@ -108,13 +108,6 @@ export function initializeCountriesDashboard(deps) {
       void loadCountriesDashboard();
     }
   });
-
-  window.addEventListener('bot-services-load', (event) => {
-    const visibleModules = new Set(event.detail?.visibleModules || []);
-    if (visibleModules.has('countries')) {
-      void loadCountriesDashboard();
-    }
-  });
 }
 
 export async function loadCountriesDashboard() {
@@ -235,10 +228,10 @@ async function syncCountries() {
 
     const result = await requestApi(path, { method: 'POST', body: '{}' });
 
-    dependencies.showNotice(
-      `Sincronización completada: ${result.totalParticipants || 0} integrantes analizados (${result.inserted || 0} nuevos, ${result.updated || 0} actualizados).`,
-      false,
-    );
+    const msg = result.partial
+      ? `Sincronización parcial: ${result.totalParticipants || 0} integrantes analizados (${result.inserted || 0} nuevos, ${result.updated || 0} actualizados). Se conservaron grupos no disponibles.`
+      : `Sincronización completada: ${result.totalParticipants || 0} integrantes analizados (${result.inserted || 0} nuevos, ${result.updated || 0} actualizados).`;
+    dependencies.showNotice(msg, false);
 
     await loadCountriesDashboard();
   } catch (error) {

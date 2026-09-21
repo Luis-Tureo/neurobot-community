@@ -44,7 +44,12 @@ export function registerCommunityCountryRoutes(
       const client = messagingClientFor(context, botId);
 
       // Una sincronización solo puede declararse exitosa si existe una fuente autoritativa conectada
-      if (client === null || !client.isReady()) {
+      const state = await client?.getState?.();
+      if (
+        client === null ||
+        !client.isReady() ||
+        (state !== undefined && state !== null && state !== 'CONNECTED')
+      ) {
         return reply.code(503).send({
           error: 'La sincronización de países no está disponible porque WhatsApp no está conectado.',
           code: 'COUNTRY_SYNC_UNAVAILABLE',
@@ -67,10 +72,7 @@ export function registerCommunityCountryRoutes(
       };
 
       const result = await countryService.syncFromGroups(botId, groupsProvider, client);
-      return reply.code(200).send({
-        success: true,
-        ...result,
-      });
+      return reply.code(200).send(result);
     },
   );
 }

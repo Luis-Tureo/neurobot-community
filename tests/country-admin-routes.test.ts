@@ -232,7 +232,7 @@ describe('API administrativa — rutas de países', () => {
     expect(postRes.json()).toMatchObject({ code: 'ASSISTANT_MODULE_NOT_AVAILABLE' });
   });
 
-  it('sync con WhatsApp desconectado o no listo devuelve 503 COUNTRY_SYNC_UNAVAILABLE y no borra datos', async () => {
+  it('Test G: sync con WhatsApp desconectado o no listo devuelve 503 COUNTRY_SYNC_UNAVAILABLE y no borra datos', async () => {
     // Primero agregar un participante con membresía
     countryService.registerParticipantsBatch(BOT_ID, ['56912345678@c.us'], GROUP_ID);
     const beforeStats = countryService.getDistribution(BOT_ID);
@@ -258,5 +258,22 @@ describe('API administrativa — rutas de países', () => {
     const afterStats = countryService.getDistribution(BOT_ID);
     expect(afterStats.totalParticipants).toBe(1);
     expect(afterStats.countries).toEqual(beforeStats.countries);
+
+    // Simular además estado incompatible ('DISCONNECTED')
+    client.ready = true;
+    client.connectionState = 'DISCONNECTED';
+
+    const disconnectedRes = await app.inject({
+      method: 'POST',
+      url: '/api/community/countries/sync',
+      headers: {
+        cookie: auth.cookie,
+        'x-csrf-token': auth.csrf,
+      },
+    });
+
+    expect(disconnectedRes.statusCode).toBe(503);
+    expect(disconnectedRes.json()).toMatchObject({ code: 'COUNTRY_SYNC_UNAVAILABLE' });
+    expect(countryService.getDistribution(BOT_ID).totalParticipants).toBe(1);
   });
 });

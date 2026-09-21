@@ -8,8 +8,13 @@ import type {
   PollVoteEvent,
   WelcomeParticipant,
 } from '../domain/types.js';
-import type { MessagingClient, MessagingClientEvents } from './messaging-client.js';
-import type { InteractiveMenuPayload, SelectableMenuPayload } from './messaging-client.js';
+import type {
+  GroupScanDiagnostics,
+  InteractiveMenuPayload,
+  MessagingClient,
+  MessagingClientEvents,
+  SelectableMenuPayload,
+} from './messaging-client.js';
 
 export type SentMessage = {
   chatId: string;
@@ -43,6 +48,11 @@ export class SimulatedMessagingClient implements MessagingClient {
   public ready = true;
   public connectionState: string | null = 'CONNECTED';
   public skippedChats = 0;
+  public scanDiagnostics: GroupScanDiagnostics = {
+    skippedUnsupported: 0,
+    mappingErrors: 0,
+    incompleteGroups: 0,
+  };
   public groupListSource: GroupListSource = 'SIMULATED';
   public listGroupsFailures: unknown[] = [];
   public readonly ownIdentifiers = new Set<string>();
@@ -148,11 +158,21 @@ export class SimulatedMessagingClient implements MessagingClient {
   public async listGroups(): Promise<DetectedGroup[]> {
     const failure = this.listGroupsFailures.shift();
     if (failure !== undefined) throw failure;
+    const incomplete = this.groups.filter((g) => g.participantIds === null).length;
+    this.scanDiagnostics.incompleteGroups = incomplete;
     return this.groups;
   }
 
   public getLastGroupScanSkippedCount(): number {
     return this.skippedChats;
+  }
+
+  public getLastGroupScanDiagnostics(): GroupScanDiagnostics {
+    return { ...this.scanDiagnostics };
+  }
+
+  public getLastGroupScanErrorCount(): number {
+    return this.scanDiagnostics.mappingErrors + this.scanDiagnostics.incompleteGroups;
   }
 
   public getLastGroupListSource(): GroupListSource | null {
