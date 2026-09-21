@@ -7,7 +7,7 @@
  * 503: WhatsApp no listo/conectado devuelve COUNTRY_SYNC_UNAVAILABLE y no borra datos
  */
 import type { FastifyInstance } from 'fastify';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { buildAdminServer } from '../src/admin/server.js';
 import { AutomaticMessageService } from '../src/core/automatic-message-service.js';
 import { CommunityCountryService } from '../src/core/community-country-service.js';
@@ -230,6 +230,27 @@ describe('API administrativa — rutas de países', () => {
     });
     expect(postRes.statusCode).toBe(404);
     expect(postRes.json()).toMatchObject({ code: 'ASSISTANT_MODULE_NOT_AVAILABLE' });
+  });
+
+  it('sync devuelve 503 COUNTRY_SYNC_UNAVAILABLE si getState falla durante una desconexión concurrente', async () => {
+    countryService.registerParticipantsBatch(BOT_ID, ['56912345678@c.us'], GROUP_ID);
+    const beforeStats = countryService.getDistribution(BOT_ID);
+    const auth = await login(app);
+
+    vi.spyOn(client, 'getState').mockRejectedValueOnce(new Error('WhatsApp state unavailable'));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/community/countries/sync',
+      headers: {
+        cookie: auth.cookie,
+        'x-csrf-token': auth.csrf,
+      },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({ code: 'COUNTRY_SYNC_UNAVAILABLE' });
+    expect(countryService.getDistribution(BOT_ID)).toEqual(beforeStats);
   });
 
   it('Test G: sync con WhatsApp desconectado o no listo devuelve 503 COUNTRY_SYNC_UNAVAILABLE y no borra datos', async () => {
