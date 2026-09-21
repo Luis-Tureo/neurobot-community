@@ -47,7 +47,20 @@ export class CommunityCountryService {
     private readonly countryResolver: CountryResolver,
     private readonly anonymizer: Anonymizer,
     private readonly logger: Logger,
-  ) {}
+  ) {
+    const migratedMemberships = this.database.migrateLegacyCommunityMemberships((groupId) =>
+      this.anonymizer.identifier(groupId),
+    );
+    if (migratedMemberships > 0) {
+      this.logger.info(
+        {
+          operation: 'COMMUNITY_MEMBERSHIP_PRIVACY_MIGRATION_COMPLETED',
+          migratedMemberships,
+        },
+        'Membresías comunitarias legacy migradas a identificadores de grupo anonimizados',
+      );
+    }
+  }
 
   public hashGroup(groupId: string): string {
     return this.anonymizer.identifier(groupId);
