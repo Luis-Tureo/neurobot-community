@@ -43,13 +43,9 @@ export function registerCommunityCountryRoutes(
       const botId = parseBotIdQuery(request.query, context);
       const client = messagingClientFor(context, botId);
 
-      // Una sincronización solo puede declararse exitosa si existe una fuente autoritativa conectada
-      const state = await client?.getState?.();
-      if (
-        client === null ||
-        !client.isReady() ||
-        (state !== undefined && state !== null && state !== 'CONNECTED')
-      ) {
+      // Una sincronización solo puede declararse exitosa si existe una fuente autoritativa conectada.
+      // Tanto getState como listGroups pueden fallar durante una desconexión concurrente.
+      if (client === null || !client.isReady()) {
         return reply.code(503).send({
           error: 'La sincronización de países no está disponible porque WhatsApp no está conectado.',
           code: 'COUNTRY_SYNC_UNAVAILABLE',
@@ -58,6 +54,13 @@ export function registerCommunityCountryRoutes(
 
       let groups;
       try {
+        const state = await client.getState();
+        if (state !== null && state !== 'CONNECTED') {
+          return reply.code(503).send({
+            error: 'La sincronización de países no está disponible porque WhatsApp no está conectado.',
+            code: 'COUNTRY_SYNC_UNAVAILABLE',
+          });
+        }
         groups = await client.listGroups();
       } catch {
         return reply.code(503).send({
