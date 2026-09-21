@@ -269,7 +269,7 @@ export class PollPlanner {
         const generated = await this.generator.generate({
           category,
           avoidQuestions: recent,
-          selectionMode,
+          ...(selectionMode !== undefined ? { selectionMode } : {}),
         });
         content = {
           question: generated.question,

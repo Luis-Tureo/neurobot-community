@@ -1,6 +1,7 @@
 import type {
   LegacyPollTemplate,
   PollAutomationConfiguration,
+  PollAutomationSelectionMode,
   PollDeliveryRecord,
   PollDeliverySource,
   PollOrigin,
@@ -22,7 +23,9 @@ export class PollRepository {
   }
 
   public saveConfiguration(
-    configuration: Omit<PollAutomationConfiguration, 'updatedAt'>,
+    configuration: Omit<PollAutomationConfiguration, 'updatedAt' | 'selectionMode'> & {
+      selectionMode?: PollAutomationSelectionMode;
+    },
   ): PollAutomationConfiguration {
     return this.database.savePollAutomationConfiguration(configuration, this.botId);
   }

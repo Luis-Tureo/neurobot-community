@@ -728,18 +728,6 @@ describe('persistencia SQLite', () => {
 
     // Las 10 plantillas predeterminadas con selección múltiple natural tienen allowMultipleAnswers: true
     const templates = database.listLegacyPollTemplates();
-    const multiselectKeys = new Set([
-      'need-today',
-      'quiet-afternoon',
-      'group-activity',
-      'participation-style',
-      'group-content',
-      'hobby-type',
-      'daily-organization',
-      'weekend-plan',
-      'close-week',
-      'free-hour',
-    ]);
     const multiTemplates = templates.filter((t) => t.allowMultipleAnswers === true);
     expect(multiTemplates).toHaveLength(10);
     expect(templates.filter((t) => !t.allowMultipleAnswers)).toHaveLength(26);

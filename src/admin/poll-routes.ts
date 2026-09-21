@@ -162,9 +162,10 @@ export function registerPollRoutes(app: FastifyInstance, context: AdminServerCon
       }
       manualSendGate.set(gateKey, now + 10_000);
       try {
-        const result = await services.service.sendManual(groupId, {
-          selectionMode: input.selectionMode,
-        });
+        const result = await services.service.sendManual(
+          groupId,
+          input.selectionMode !== undefined ? { selectionMode: input.selectionMode } : {},
+        );
         audit(
           context,
           'poll_manual_send',

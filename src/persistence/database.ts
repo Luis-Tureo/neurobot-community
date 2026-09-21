@@ -3852,7 +3852,7 @@ export class AppDatabase {
   }
 
   public savePollAutomationConfiguration(
-    configuration: Omit<PollAutomationConfiguration, 'updatedAt'> & {
+    configuration: Omit<PollAutomationConfiguration, 'updatedAt' | 'selectionMode'> & {
       selectionMode?: PollAutomationSelectionMode;
     },
     botId = 'neurobot',
