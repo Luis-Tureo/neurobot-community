@@ -56,6 +56,77 @@ describe('Ciclo de vida y membresía activa de la comunidad (Migración 41)', ()
     expect(() => database.migrate()).not.toThrow();
   });
 
+  it('migración 43 preserva memberships legacy y las convierte a group_hash antes de borrar la tabla temporal', () => {
+    const legacyGroupId = 'grupo-legacy@g.us';
+    const participantId = '56912345678@c.us';
+    const participantHash = countryService.hashParticipant(participantId);
+    const timestamp = '2026-09-21T20:00:00.000Z';
+
+    // Simular una instalación que venía de la migración 41 con datos reales.
+    // La migración 43 deja esta tabla temporal intacta hasta que exista el Anonymizer.
+    // @ts-expect-error acceso a db interna para prueba de migración
+    database.db.exec(`
+      CREATE TABLE bot_community_memberships_legacy_43 (
+        bot_id TEXT NOT NULL,
+        group_id TEXT NOT NULL,
+        participant_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (bot_id, group_id, participant_hash)
+      );
+    `);
+    // @ts-expect-error acceso a db interna para prueba de migración
+    database.db
+      .prepare(
+        `INSERT INTO bot_community_memberships_legacy_43
+         (bot_id, group_id, participant_hash, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(BOT_ID, legacyGroupId, participantHash, timestamp, timestamp);
+
+    const logger = createLogger('silent');
+    // Una nueva instancia del servicio completa el backfill transaccional usando el HMAC real.
+    new CommunityCountryService(
+      database,
+      new CountryResolver({ logger }),
+      anonymizer,
+      logger,
+    );
+
+    // @ts-expect-error acceso a db interna para verificación de esquema/datos
+    const migrated = database.db
+      .prepare(
+        `SELECT bot_id, group_hash, participant_hash, created_at, updated_at
+         FROM bot_community_memberships
+         WHERE bot_id = ? AND participant_hash = ?`,
+      )
+      .get(BOT_ID, participantHash) as
+      | {
+          bot_id: string;
+          group_hash: string;
+          participant_hash: string;
+          created_at: string;
+          updated_at: string;
+        }
+      | undefined;
+
+    expect(migrated).toMatchObject({
+      bot_id: BOT_ID,
+      group_hash: anonymizer.identifier(legacyGroupId),
+      participant_hash: participantHash,
+      created_at: timestamp,
+      updated_at: timestamp,
+    });
+
+    // @ts-expect-error acceso a db interna para verificar eliminación segura de la tabla temporal
+    const legacyTable = database.db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'bot_community_memberships_legacy_43'",
+      )
+      .get();
+    expect(legacyTable).toBeUndefined();
+  });
+
   it('Test A: Privacidad de memberships — SQLite no contiene JIDs reales (@g.us) ni nombres de grupo', () => {
     const user = '56912345678@c.us';
     countryService.registerParticipantsBatch(BOT_ID, [user], 'grupoA@g.us');
