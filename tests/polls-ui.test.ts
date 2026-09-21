@@ -158,4 +158,14 @@ describe('interfaz de encuestas', () => {
     expect(labScript).toContain('pollData.nativePollsSupported');
     expect(script).not.toContain('innerHTML');
   });
+
+  it('integra selector de modo de selección (única, múltiple, mixto) en la programación', () => {
+    expect(html).toContain('name="poll_selection_mode"');
+    expect(html).toContain('id="poll-selection-mode-label"');
+    expect(html).toContain('value="mixed"');
+    expect(html).toContain('value="single"');
+    expect(html).toContain('value="multiple"');
+    expect(script).toContain('selectionMode: form.elements.poll_selection_mode?.value || \'mixed\'');
+  });
 });
+

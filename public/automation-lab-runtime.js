@@ -465,16 +465,18 @@ function sendPollTest(groupKey, options = {}) {
   if (!pollsAvailable) {
     throw new Error('El conector activo no soporta encuestas nativas de WhatsApp.');
   }
-  const payload = options.selectionMode
-    ? { groupKey, confirmed: true, selectionMode: options.selectionMode }
-    : { groupKey, confirmed: true };
+  if (options.selectionMode) {
+    return api(botPath('/api/polls/send-test'), {
+      method: 'POST',
+      body: JSON.stringify({ groupKey, confirmed: true, selectionMode: options.selectionMode }),
+    });
+  }
   return api(botPath('/api/polls/send-test'), {
     method: 'POST',
-    body: payload.selectionMode
-      ? JSON.stringify(payload)
-      : JSON.stringify({ groupKey, confirmed: true }),
+    body: JSON.stringify({ groupKey, confirmed: true }),
   });
 }
+
 
 function sendDigestTest(period, groupKeys) {
   return api(botPath('/api/automatic-messages/digests/send-test'), {
