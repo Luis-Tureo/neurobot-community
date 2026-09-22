@@ -13,6 +13,8 @@ import type {
   InteractiveMenuPayload,
   MessagingClient,
   MessagingClientEvents,
+  NativeScheduledEvent,
+  ScheduledEventSendReceipt,
   SelectableMenuPayload,
 } from './messaging-client.js';
 
@@ -23,6 +25,8 @@ export type SentMessage = {
   mentionIds?: string[];
 };
 
+export type SentScheduledEvent = { chatId: string; event: NativeScheduledEvent; messageId: string };
+
 export type SentPoll = NativePoll & { chatId: string; messageId: string };
 
 /** Contador global para que los ids simulados sean únicos incluso entre instancias. */
@@ -32,6 +36,7 @@ export type SentMedia = { chatId: string; absolutePath: string; caption: string 
 export class SimulatedMessagingClient implements MessagingClient {
   public readonly sentMessages: SentMessage[] = [];
   public readonly sentPolls: SentPoll[] = [];
+  public readonly sentScheduledEvents: SentScheduledEvent[] = [];
   public readonly sentMedia: SentMedia[] = [];
   public readonly sentInteractiveMenus: Array<{ chatId: string; payload: InteractiveMenuPayload }> =
     [];
@@ -39,6 +44,7 @@ export class SimulatedMessagingClient implements MessagingClient {
     [];
   public interactiveSupported = false;
   public nativePollsSupported = true;
+  public scheduledEventsSupported = true;
   public selectableMenusSupported = true;
   public initializeCalls = 0;
   public destroyCalls = 0;
@@ -117,6 +123,20 @@ export class SimulatedMessagingClient implements MessagingClient {
 
   public supportsNativePolls(): boolean {
     return this.nativePollsSupported;
+  }
+
+  public supportsScheduledEvents(): boolean {
+    return this.scheduledEventsSupported;
+  }
+
+  public async sendScheduledEvent(
+    chatId: string,
+    event: NativeScheduledEvent,
+  ): Promise<ScheduledEventSendReceipt> {
+    if (this.failSending) throw new Error('Fallo simulado');
+    const messageId = 'event-' + String(this.sentScheduledEvents.length + 1);
+    this.sentScheduledEvents.push({ chatId, event, messageId });
+    return { messageId };
   }
 
   public async sendPoll(chatId: string, poll: NativePoll): Promise<PollSendReceipt> {
