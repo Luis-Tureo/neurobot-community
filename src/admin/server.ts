@@ -8,6 +8,7 @@ import { installAzureForwardedHttps } from './azure-forwarded-https.js';
 import { registerCommunityDigestRoutes } from './community-digest-routes.js';
 import { registerPollRoutes } from './poll-routes.js';
 import { registerCommunityCountryRoutes } from './community-country-routes.js';
+import { registerThemedDayRoutes } from './themed-day-routes.js';
 import { SessionStore } from './session-store.js';
 import { registerWelcomeScheduleRoutes } from './welcome-schedule-routes.js';
 
@@ -26,6 +27,7 @@ export async function buildAdminServer(context: AdminServerContext) {
     registerWelcomeScheduleRoutes(app, context);
     registerPollRoutes(app, context);
     registerCommunityCountryRoutes(app, context);
+    registerThemedDayRoutes(app, context);
     return app;
   } finally {
     SessionStore.disableSharedSecret(context.sessionSecret);

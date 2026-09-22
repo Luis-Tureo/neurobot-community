@@ -11,11 +11,17 @@ import {
 } from './community-digest-registry.js';
 import { BotInstance as BaseBotInstance, type BotInstanceOptions } from './bot-instance-base.js';
 import { installScheduledWelcomeEnhancer } from './scheduled-welcome-enhancer.js';
+import { ThemedDayService } from './themed-day-service.js';
+import {
+  registerThemedDayService,
+  unregisterThemedDayService,
+} from './themed-day-registry.js';
 
 export type { BotInstanceOptions } from './bot-instance-base.js';
 
 export class BotInstance extends BaseBotInstance {
   private readonly communityDigest: CommunityDigestService | null;
+  private readonly themedDays: ThemedDayService | null;
 
   public constructor(
     bot: BotRecord,
@@ -47,6 +53,12 @@ export class BotInstance extends BaseBotInstance {
             : { bufferSecret: options.digestBufferSecret }),
         })
       : null;
+    this.themedDays = bot.groupChannelEnabled
+      ? new ThemedDayService(database, client, logger, anonymizer, { botId: bot.id })
+      : null;
+    if (this.themedDays !== null) {
+      registerThemedDayService(bot.id, this.themedDays);
+    }
     if (this.communityDigest !== null) {
       registerCommunityDigestService(bot.id, this.communityDigest);
       const digest = this.communityDigest;
@@ -61,9 +73,17 @@ export class BotInstance extends BaseBotInstance {
       registerCommunityDigestService(this.bot.id, this.communityDigest);
       this.communityDigest.start();
     }
+    if (this.themedDays !== null) {
+      registerThemedDayService(this.bot.id, this.themedDays);
+      this.themedDays.start();
+    }
     try {
       await super.start();
     } catch (error) {
+      this.themedDays?.stop();
+      if (this.themedDays !== null) {
+        unregisterThemedDayService(this.bot.id, this.themedDays);
+      }
       this.communityDigest?.stop();
       if (this.communityDigest !== null) {
         unregisterCommunityDigestService(this.bot.id, this.communityDigest);
@@ -73,6 +93,10 @@ export class BotInstance extends BaseBotInstance {
   }
 
   public override async stop(): Promise<void> {
+    this.themedDays?.stop();
+    if (this.themedDays !== null) {
+      unregisterThemedDayService(this.bot.id, this.themedDays);
+    }
     this.communityDigest?.stop();
     if (this.communityDigest !== null) {
       unregisterCommunityDigestService(this.bot.id, this.communityDigest);
@@ -82,5 +106,9 @@ export class BotInstance extends BaseBotInstance {
 
   public communityDigestService(): CommunityDigestService | null {
     return this.communityDigest;
+  }
+
+  public themedDayService(): ThemedDayService | null {
+    return this.themedDays;
   }
 }

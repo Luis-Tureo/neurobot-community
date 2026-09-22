@@ -3157,6 +3157,7 @@ function moduleForProtectedRoute(route: string): AssistantModuleKey | null {
   if (route.startsWith('/api/polls')) return 'polls';
   if (route.startsWith('/api/automatic-messages')) return 'automatic-messages';
   if (route.startsWith('/api/community/countries')) return 'countries';
+  if (route.startsWith('/api/themed-days')) return 'themed-days';
   if (route.includes('/groups')) return 'automatic-messages';
   if (route.includes('/catalog')) return 'catalog';
   if (route.includes('/media')) return 'media';
@@ -3174,7 +3175,8 @@ function botIdForProtectedRoute(request: FastifyRequest, route: string): string 
   if (
     route.startsWith('/api/polls') ||
     route.startsWith('/api/automatic-messages') ||
-    route.startsWith('/api/community/countries')
+    route.startsWith('/api/community/countries') ||
+    route.startsWith('/api/themed-days')
   ) {
     const value = (request.query as { botId?: unknown } | null)?.botId ?? 'neurobot';
     return typeof value === 'string' && /^[a-z][a-z0-9-]{2,39}$/u.test(value) ? value : null;
