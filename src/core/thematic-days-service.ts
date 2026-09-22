@@ -289,6 +289,7 @@ export class ThematicDaysService {
     this.timer = setTimeout(() => {
       this.timer = null;
       this.tickPromise ??= this.runDueTasksNow()
+        .then(() => undefined)
         .catch((error: unknown) => {
           const details = serializeError(error, 'THEMATIC_DAYS_TICK_FAILED', false);
           this.record('THEMATIC_DAYS_TICK_FAILED', 'failed', details.errorCode);
