@@ -75,12 +75,22 @@ export function registerThematicDaysRoutes(
       .listBotGroups(botId, (identifier) => context.anonymizer.identifier(identifier))
       .filter((group) => group.active && !group.blocked && group.botIsMember === true)
       .map((group) => ({ key: group.groupHash, name: group.name }));
+    const groupNames = new Map(groups.map((group) => [group.key, group.name]));
+    const recentDeliveries = service.recentDeliveries(50).map((delivery) => ({
+      dayKey: delivery.dayKey,
+      localDate: delivery.localDate,
+      status: delivery.status,
+      attempts: delivery.attempts,
+      errorCode: delivery.errorCode,
+      sentAt: delivery.sentAt,
+      groupName: groupNames.get(delivery.groupKey) ?? 'Grupo no disponible',
+    }));
     return reply.header('cache-control', 'no-store, max-age=0').send({
       configuration: service.configuration(),
       schedulerStarted: service.isStarted(),
       supportsNativeEvents: service.supportsNativeEvents(),
       authorizedGroups: groups,
-      recentDeliveries: service.recentDeliveries(50),
+      recentDeliveries,
     });
   });
 
