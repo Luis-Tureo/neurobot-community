@@ -96,6 +96,7 @@
               </option>
               <option value="polls" data-bot-only data-module="polls">Encuestas</option>
               <option value="countries" data-bot-only data-module="countries">Países</option>
+              <option value="themed-days" data-bot-only data-module="themed-days">Días temáticos</option>
               <option value="requests" data-bot-only data-module="requests">
                 Solicitudes humanas
               </option>
@@ -162,6 +163,9 @@
               </button>
               <button data-section="countries" data-module="countries" class="bot-only hidden">
                 <span aria-hidden="true">🌎</span> Países
+              </button>
+              <button data-section="themed-days" data-module="themed-days" class="bot-only hidden">
+                <span aria-hidden="true">🎉</span> Días temáticos
               </button>
               <button data-section="requests" data-module="requests" class="bot-only hidden">
                 <span aria-hidden="true">◎</span> Solicitudes
@@ -1652,6 +1656,35 @@
                   <p class="muted">No se encontraron países que coincidan con la búsqueda.</p>
                 </div>
               </article>
+            </section>
+            <section id="section-themed-days" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Participación comunitaria</p>
+                  <h2>Días temáticos</h2>
+                  <p class="muted">Eventos nativos de WhatsApp que NeuroBot crea automáticamente cada semana.</p>
+                </div>
+                <button id="themed-days-save" type="button">Guardar días temáticos</button>
+              </div>
+
+              <div class="info-callout" role="note">
+                <strong>Eventos semanales, no mensajes normales.</strong>
+                <p>Cada día activado se publicará como un evento nativo de WhatsApp. Los integrantes podrán responder al evento desde WhatsApp. Por seguridad, todos vienen desactivados inicialmente.</p>
+              </div>
+
+              <div class="form-row">
+                <div class="status-card">
+                  <span>Compatibilidad</span>
+                  <strong id="themed-days-support">—</strong>
+                </div>
+                <div class="status-card">
+                  <span>Destino</span>
+                  <strong id="themed-days-groups">—</strong>
+                  <small>Usa los grupos seleccionados en Automatizaciones; si no existe selección, usa los grupos activos.</small>
+                </div>
+              </div>
+
+              <div id="themed-days-list" class="list"></div>
             </section>
           </div>
         </div>
