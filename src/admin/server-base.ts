@@ -34,6 +34,7 @@ import {
 } from '../core/assistant-module-visibility-service.js';
 import type { ConnectionManager } from '../core/connection-manager.js';
 import { CommunityCountryService } from '../core/community-country-service.js';
+import type { ThemedDayService } from '../core/themed-day-service.js';
 import { CountryResolver } from '../core/country-resolver.js';
 import type { GroupDiscoveryService } from '../core/group-discovery-service.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
@@ -560,6 +561,7 @@ export type AdminServerContext = {
   sessionManager?: WhatsAppSessionManager;
   mediaDirectory?: string;
   countryService?: CommunityCountryService;
+  themedDayService?: ThemedDayService;
   messagingClient?: MessagingClient;
 };
 
@@ -3157,6 +3159,7 @@ function moduleForProtectedRoute(route: string): AssistantModuleKey | null {
   if (route.startsWith('/api/polls')) return 'polls';
   if (route.startsWith('/api/automatic-messages')) return 'automatic-messages';
   if (route.startsWith('/api/community/countries')) return 'countries';
+  if (route.startsWith('/api/themed-days')) return 'themed-days';
   if (route.includes('/groups')) return 'automatic-messages';
   if (route.includes('/catalog')) return 'catalog';
   if (route.includes('/media')) return 'media';
@@ -3174,7 +3177,8 @@ function botIdForProtectedRoute(request: FastifyRequest, route: string): string 
   if (
     route.startsWith('/api/polls') ||
     route.startsWith('/api/automatic-messages') ||
-    route.startsWith('/api/community/countries')
+    route.startsWith('/api/community/countries') ||
+    route.startsWith('/api/themed-days')
   ) {
     const value = (request.query as { botId?: unknown } | null)?.botId ?? 'neurobot';
     return typeof value === 'string' && /^[a-z][a-z0-9-]{2,39}$/u.test(value) ? value : null;
@@ -3232,6 +3236,15 @@ export function countryServiceFor(
   );
 }
 
+export function themedDayServiceFor(
+  context: AdminServerContext,
+  botId: string,
+): ThemedDayService | null {
+  return (
+    context.multiBotManager?.themedDays(botId) ??
+    (botId === 'neurobot' ? (context.themedDayService ?? null) : null)
+  );
+}
 function safeBotResponse(bot: NonNullable<ReturnType<AppDatabase['getBot']>>) {
   return {
     id: bot.id,
