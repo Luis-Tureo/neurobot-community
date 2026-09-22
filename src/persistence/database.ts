@@ -14,6 +14,13 @@ import {
   LEGACY_COMMAND_RESPONSES,
 } from '../core/brief-message-defaults.js';
 import { DEFAULT_POLL_TEMPLATES } from '../core/poll-defaults.js';
+import { DEFAULT_THEMED_DAYS } from '../core/themed-day-defaults.js';
+import type {
+  ThemedDayConfiguration,
+  ThemedDayDeliveryRecord,
+  ThemedDayDeliveryStatus,
+  ThemedDayWeekday,
+} from '../core/themed-day-types.js';
 import { GROQ_PREFERRED_MODEL } from '../ai/groq-constants.js';
 import {
   COUNTRY_PRIVACY_MIN_COUNT,
@@ -2693,6 +2700,40 @@ export class AppDatabase {
             ON bot_community_memberships(bot_id, participant_hash);
           CREATE INDEX idx_bot_community_memberships_group
             ON bot_community_memberships(bot_id, group_hash);
+        `,
+      },
+      {
+        version: 44,
+        sql: `
+          CREATE TABLE bot_themed_days (
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            weekday INTEGER NOT NULL CHECK (weekday BETWEEN 1 AND 7),
+            enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            publish_time TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            timezone TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (bot_id, weekday)
+          );
+          CREATE TABLE bot_themed_day_deliveries (
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            weekday INTEGER NOT NULL CHECK (weekday BETWEEN 1 AND 7),
+            group_id TEXT NOT NULL,
+            local_date TEXT NOT NULL,
+            whatsapp_message_id TEXT,
+            status TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'failed')),
+            attempts INTEGER NOT NULL DEFAULT 1,
+            error_code TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            sent_at TEXT,
+            PRIMARY KEY (bot_id, weekday, group_id, local_date)
+          );
+          CREATE INDEX idx_bot_themed_day_deliveries_recent
+            ON bot_themed_day_deliveries(bot_id, local_date DESC, weekday);
         `,
       },
     ];
@@ -9799,6 +9840,167 @@ export class AppDatabase {
     return migrate();
   }
 
+  private ensureThemedDayDefaults(botId: string): void {
+    const timezone = this.getBotProfile(botId).timezone;
+    const now = new Date().toISOString();
+    const insert = this.db.prepare(
+      `INSERT OR IGNORE INTO bot_themed_days (
+         bot_id, weekday, enabled, name, description, publish_time, start_time, end_time, timezone, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const seed = this.db.transaction(() => {
+      for (const day of DEFAULT_THEMED_DAYS) {
+        insert.run(
+          botId,
+          day.weekday,
+          day.enabled ? 1 : 0,
+          day.name,
+          day.description,
+          day.publishTime,
+          day.startTime,
+          day.endTime,
+          timezone,
+          now,
+        );
+      }
+    });
+    seed();
+  }
+
+  public listThemedDayConfigurations(botId: string): ThemedDayConfiguration[] {
+    this.ensureThemedDayDefaults(botId);
+    return (
+      this.db
+        .prepare(
+          `SELECT weekday, enabled, name, description, publish_time, start_time, end_time, timezone
+           FROM bot_themed_days WHERE bot_id = ? ORDER BY weekday`,
+        )
+        .all(botId) as Array<{
+        weekday: number;
+        enabled: number;
+        name: string;
+        description: string;
+        publish_time: string;
+        start_time: string;
+        end_time: string;
+        timezone: string;
+      }>
+    ).map((row) => ({
+      weekday: row.weekday as ThemedDayWeekday,
+      enabled: row.enabled === 1,
+      name: row.name,
+      description: row.description,
+      publishTime: row.publish_time,
+      startTime: row.start_time,
+      endTime: row.end_time,
+      timezone: row.timezone,
+    }));
+  }
+
+  public saveThemedDayConfigurations(
+    botId: string,
+    configurations: ThemedDayConfiguration[],
+  ): void {
+    this.ensureThemedDayDefaults(botId);
+    const update = this.db.prepare(
+      `UPDATE bot_themed_days
+       SET enabled = ?, name = ?, description = ?, publish_time = ?, start_time = ?,
+           end_time = ?, timezone = ?, updated_at = ?
+       WHERE bot_id = ? AND weekday = ?`,
+    );
+    const save = this.db.transaction(() => {
+      const now = new Date().toISOString();
+      for (const day of configurations) {
+        update.run(
+          day.enabled ? 1 : 0,
+          day.name,
+          day.description,
+          day.publishTime,
+          day.startTime,
+          day.endTime,
+          day.timezone,
+          now,
+          botId,
+          day.weekday,
+        );
+      }
+    });
+    save();
+  }
+
+  public claimThemedDayDelivery(
+    botId: string,
+    weekday: ThemedDayWeekday,
+    groupId: string,
+    localDate: string,
+  ): boolean {
+    const now = new Date().toISOString();
+    const result = this.db
+      .prepare(
+        `INSERT INTO bot_themed_day_deliveries (
+           bot_id, weekday, group_id, local_date, status, attempts, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'pending', 1, ?, ?)
+         ON CONFLICT(bot_id, weekday, group_id, local_date) DO UPDATE SET
+           status = 'pending',
+           attempts = bot_themed_day_deliveries.attempts + 1,
+           updated_at = excluded.updated_at,
+           error_code = NULL
+         WHERE bot_themed_day_deliveries.status = 'failed'
+           AND bot_themed_day_deliveries.attempts < 2`,
+      )
+      .run(botId, weekday, groupId, localDate, now, now);
+    return result.changes === 1;
+  }
+
+  public completeThemedDayDelivery(
+    botId: string,
+    weekday: ThemedDayWeekday,
+    groupId: string,
+    localDate: string,
+    status: Exclude<ThemedDayDeliveryStatus, 'pending'>,
+    whatsappMessageId: string | null,
+    errorCode: string | null,
+  ): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE bot_themed_day_deliveries
+         SET status = ?, whatsapp_message_id = ?, error_code = ?, updated_at = ?,
+             sent_at = CASE WHEN ? = 'sent' THEN ? ELSE sent_at END
+         WHERE bot_id = ? AND weekday = ? AND group_id = ? AND local_date = ?`,
+      )
+      .run(status, whatsappMessageId, errorCode, now, status, now, botId, weekday, groupId, localDate);
+  }
+
+  public listThemedDayDeliveries(botId: string, limit = 20): ThemedDayDeliveryRecord[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT bot_id, weekday, local_date, status, attempts, error_code, sent_at
+           FROM bot_themed_day_deliveries
+           WHERE bot_id = ?
+           ORDER BY local_date DESC, weekday DESC
+           LIMIT ?`,
+        )
+        .all(botId, Math.max(1, Math.min(100, limit))) as Array<{
+        bot_id: string;
+        weekday: number;
+        local_date: string;
+        status: ThemedDayDeliveryStatus;
+        attempts: number;
+        error_code: string | null;
+        sent_at: string | null;
+      }>
+    ).map((row) => ({
+      botId: row.bot_id,
+      weekday: row.weekday as ThemedDayWeekday,
+      localDate: row.local_date,
+      status: row.status,
+      attempts: row.attempts,
+      errorCode: row.error_code,
+      sentAt: row.sent_at,
+    }));
+  }
   public recordCommunityMembership(
     botId: string,
     groupHash: string,
