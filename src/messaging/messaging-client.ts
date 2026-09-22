@@ -81,6 +81,20 @@ export class GroupMessageHistoryError extends Error {
   }
 }
 
+export type NativeScheduledEvent = {
+  name: string;
+  startTime: Date;
+  description?: string;
+  endTime?: Date;
+  location?: string;
+  callType?: 'video' | 'voice' | 'none';
+  messageSecret?: number[];
+};
+
+export type ScheduledEventSendReceipt = {
+  messageId: string | null;
+};
+
 export interface MessagingClient {
   setEvents(events: MessagingClientEvents): void;
   initialize(): Promise<void>;
@@ -98,6 +112,12 @@ export interface MessagingClient {
   /** Indica si el conector puede enviar encuestas nativas (Poll). Ausente = no soportado. */
   supportsNativePolls?(): boolean;
   sendPoll(chatId: string, poll: NativePoll): Promise<PollSendReceipt>;
+  /** Indica si el conector puede crear Eventos nativos de WhatsApp. */
+  supportsNativeScheduledEvents?(): boolean;
+  sendScheduledEvent?(
+    chatId: string,
+    event: NativeScheduledEvent,
+  ): Promise<ScheduledEventSendReceipt>;
   listGroups(): Promise<DetectedGroup[]>;
   getLastGroupScanSkippedCount(): number;
   getLastGroupScanDiagnostics?(): GroupScanDiagnostics;
