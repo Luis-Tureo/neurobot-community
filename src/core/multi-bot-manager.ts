@@ -21,6 +21,7 @@ import type { PollService } from './poll-service.js';
 import type { PollAnalyticsService } from './poll-analytics-service.js';
 import type { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
 import type { CommunityCountryService } from './community-country-service.js';
+import type { ThemedDayService } from './themed-day-service.js';
 
 type ClientFactory = (bot: BotRecord, context: { freshLinkingSession: boolean }) => MessagingClient;
 
@@ -380,6 +381,10 @@ export class MultiBotManager {
 
   public countryService(botId: string): CommunityCountryService | null {
     return this.instances.get(botId)?.communityCountryService() ?? null;
+  }
+
+  public themedDays(botId: string): ThemedDayService | null {
+    return this.instances.get(botId)?.themedDayService() ?? null;
   }
 
   public messagingClient(botId: string): MessagingClient | null {

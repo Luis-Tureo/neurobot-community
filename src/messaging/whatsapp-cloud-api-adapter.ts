@@ -143,6 +143,10 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
     return false;
   }
 
+  public supportsScheduledEvents(): boolean {
+    return false;
+  }
+
   public async sendPoll(_chatId: string, _poll: NativePoll): Promise<PollSendReceipt> {
     throw new Error('Las encuestas comunitarias no pertenecen al conector comercial Cloud API.');
   }

@@ -25,6 +25,7 @@ import { PollScheduler } from './poll-scheduler.js';
 import { PollSender } from './poll-sender.js';
 import { PollService } from './poll-service.js';
 import { PollVoteService } from './poll-vote-service.js';
+import { ThemedDayService } from './themed-day-service.js';
 import { OutboundMessageQueueService } from './outbound-message-queue-service.js';
 import { CountryResolver } from './country-resolver.js';
 import { CommunityCountryService } from './community-country-service.js';
@@ -62,6 +63,7 @@ export class BotInstance {
   private readonly pollScheduler: PollScheduler;
   private readonly pollVotes: PollVoteService;
   private readonly pollAnalytics: PollAnalyticsService;
+  private readonly themedDays: ThemedDayService;
   private readonly aiQueue: AIRequestQueueService;
   private readonly outboundQueue: OutboundMessageQueueService;
   private activeQr: ActiveQr | null = null;
@@ -199,6 +201,7 @@ export class BotInstance {
     this.pollScheduler = new PollScheduler(this.pollService, logger);
     this.pollVotes = new PollVoteService(this.pollRepository, database, logger, anonymizer);
     this.pollAnalytics = new PollAnalyticsService(database, bot.id);
+    this.themedDays = new ThemedDayService(database, client, logger, bot.id);
     this.processor = new MessageProcessor(
       database,
       client,
@@ -319,6 +322,7 @@ export class BotInstance {
         if (this.communityServicesEnabled) {
           this.automaticMessages.reconfigure();
           this.pollScheduler.reconfigure();
+          this.themedDays.reconfigure();
         }
         options.onReady?.(bot.id);
       },
@@ -421,6 +425,7 @@ export class BotInstance {
     if (this.communityServicesEnabled) {
       this.automaticMessages.start();
       this.pollScheduler.start();
+      this.themedDays.start();
     } else {
       this.logger.info(
         { operation: 'POLL_SERVICE_NOT_REQUIRED', botId: this.bot.id },
@@ -434,6 +439,7 @@ export class BotInstance {
       if (this.communityServicesEnabled) {
         this.automaticMessages.stop();
         this.pollScheduler.stop();
+        this.themedDays.stop();
       }
       throw error;
     }
@@ -516,6 +522,10 @@ export class BotInstance {
     return this.pollAnalytics;
   }
 
+  public themedDayService(): ThemedDayService {
+    return this.themedDays;
+  }
+
   public aiRequestQueue(): AIRequestQueueService {
     return this.aiQueue;
   }
@@ -594,6 +604,7 @@ export class BotInstance {
     this.discovery.stop();
     this.automaticMessages.stop();
     this.pollScheduler.stop();
+    this.themedDays.stop();
   }
 }
 
