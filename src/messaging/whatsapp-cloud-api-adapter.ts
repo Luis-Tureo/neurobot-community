@@ -11,6 +11,8 @@ import type {
   InteractiveMenuPayload,
   MessagingClient,
   MessagingClientEvents,
+  NativeScheduledEvent,
+  ScheduledEventSendReceipt,
 } from './messaging-client.js';
 import { splitWhatsAppText } from './whatsapp-text-segmentation.js';
 
@@ -141,6 +143,17 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
 
   public supportsNativePolls(): boolean {
     return false;
+  }
+
+  public supportsNativeScheduledEvents(): boolean {
+    return false;
+  }
+
+  public async sendScheduledEvent(
+    _chatId: string,
+    _event: NativeScheduledEvent,
+  ): Promise<ScheduledEventSendReceipt> {
+    throw new Error('Los eventos temáticos nativos no están disponibles en el conector Cloud API.');
   }
 
   public async sendPoll(_chatId: string, _poll: NativePoll): Promise<PollSendReceipt> {
