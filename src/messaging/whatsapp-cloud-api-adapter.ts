@@ -7,6 +7,7 @@ import type {
   PollSendReceipt,
 } from '../domain/types.js';
 import type {
+  GroupScanDiagnostics,
   InteractiveMenuPayload,
   MessagingClient,
   MessagingClientEvents,
@@ -151,6 +152,14 @@ export class WhatsAppCloudApiAdapter implements MessagingClient {
   }
 
   public getLastGroupScanSkippedCount(): number {
+    return 0;
+  }
+
+  public getLastGroupScanDiagnostics(): GroupScanDiagnostics {
+    return { skippedUnsupported: 0, mappingErrors: 0, incompleteGroups: 0 };
+  }
+
+  public getLastGroupScanErrorCount(): number {
     return 0;
   }
 

@@ -17,9 +17,20 @@ export type CommunityCountryBatchResult = {
   unchanged: number;
 };
 
+export type CountrySyncAuthority = 'authoritative' | 'partial';
+
 export type CommunityCountrySyncResult = CommunityCountryBatchResult & {
+  success: boolean;
+  complete: boolean;
+  partial: boolean;
+  authority: CountrySyncAuthority;
+  pruningPerformed: boolean;
+  groupsProcessed: number;
+  groupsSkipped: number;
+  participantsProcessed: number;
   totalGroups: number;
   totalParticipants: number;
+  removed: number;
 };
 
 export type CountryDeclarationResult = {
@@ -36,12 +47,35 @@ export class CommunityCountryService {
     private readonly countryResolver: CountryResolver,
     private readonly anonymizer: Anonymizer,
     private readonly logger: Logger,
-  ) {}
+  ) {
+    const migratedMemberships = this.database.migrateLegacyCommunityMemberships((groupId) =>
+      this.anonymizer.identifier(groupId),
+    );
+    if (migratedMemberships > 0) {
+      this.logger.info(
+        {
+          operation: 'COMMUNITY_MEMBERSHIP_PRIVACY_MIGRATION_COMPLETED',
+          migratedMemberships,
+        },
+        'Membresías comunitarias legacy migradas a identificadores de grupo anonimizados',
+      );
+    }
+  }
+
+  public hashGroup(groupId: string): string {
+    return this.anonymizer.identifier(groupId);
+  }
 
   public hashParticipant(participantId: string): string {
     const normalized =
       normalizeWhatsAppIdentity(participantId) ?? participantId.trim().toLowerCase();
     return this.anonymizer.fingerprint(['community-participant', normalized]);
+  }
+
+  public recordMembership(botId: string, groupId: string, participantId: string): void {
+    const groupHash = this.hashGroup(groupId);
+    const participantHash = this.hashParticipant(participantId);
+    this.database.recordCommunityMembership(botId, groupHash, participantHash);
   }
 
   public async resolveCanonicalId(
@@ -109,14 +143,15 @@ export class CommunityCountryService {
 
     // Si se especifica grupo, registrar también la membresía comunitaria
     if (groupId) {
-      this.database.recordCommunityMembershipsBatch(botId, groupId, participantHashes);
+      const groupHash = this.hashGroup(groupId);
+      this.database.recordCommunityMembershipsBatch(botId, groupHash, participantHashes);
     }
 
     this.logger.info(
       {
         operation: 'COMMUNITY_COUNTRY_BATCH_PROCESSED',
         botId,
-        groupId: groupId ?? null,
+        groupHash: groupId ? this.hashGroup(groupId) : null,
         total: resolutions.length,
         inserted: result.inserted,
         updated: result.updated,
@@ -134,10 +169,11 @@ export class CommunityCountryService {
   }
 
   public handleGroupLeave(botId: string, groupId: string, participantId: string): void {
+    const groupHash = this.hashGroup(groupId);
     const participantHash = this.hashParticipant(participantId);
-    this.database.removeCommunityMembership(botId, groupId, participantHash);
+    this.database.removeCommunityMembership(botId, groupHash, participantHash);
     this.logger.info(
-      { operation: 'COMMUNITY_MEMBERSHIP_REMOVED', botId },
+      { operation: 'COMMUNITY_MEMBERSHIP_REMOVED', botId, groupHash },
       'Membresía comunitaria removida por salida del grupo',
     );
   }
@@ -163,25 +199,62 @@ export class CommunityCountryService {
         'No se encontraron grupos comunitarios autorizados para sincronizar',
       );
       return {
+        success: true,
+        complete: false,
+        partial: true,
+        authority: 'partial',
+        pruningPerformed: false,
+        groupsProcessed: 0,
+        groupsSkipped: 0,
+        participantsProcessed: 0,
         totalGroups: 0,
         totalParticipants: 0,
         total: 0,
         inserted: 0,
         updated: 0,
         unchanged: 0,
+        removed: 0,
       };
     }
 
     const allResolvedParticipantIds = new Set<string>();
+    let totalRemoved = 0;
+    let groupsProcessed = 0;
+    let groupsSkipped = 0;
 
     for (const group of authorizedGroups) {
-      const rawIds = (group.participantIds ?? []).filter(
+      const groupHash = this.hashGroup(group.id);
+
+      // Si un grupo viene con participantIds === null o undefined, los datos están incompletos
+      if (group.participantIds === null || group.participantIds === undefined) {
+        this.database.recordTechnicalEvent({
+          eventType: 'COUNTRY_GROUP_PARTICIPANTS_UNAVAILABLE',
+          botId,
+          groupHash,
+          result: 'partial',
+        });
+        this.logger.warn(
+          { operation: 'COUNTRY_GROUP_PARTICIPANTS_UNAVAILABLE', botId, groupHash },
+          'Participantes no disponibles para el grupo comunitario; se conserva el estado previo',
+        );
+        groupsSkipped += 1;
+        continue;
+      }
+
+      const rawIds = group.participantIds.filter(
         (id): id is string => typeof id === 'string' && id.trim() !== '',
       );
 
       // Si un grupo viene con lista vacía de participantes, es probable que no se hayan cargado;
       // por seguridad no reconciliamos para evitar pruning destructivo
-      if (rawIds.length === 0) continue;
+      if (rawIds.length === 0) {
+        this.logger.warn(
+          { operation: 'COUNTRY_GROUP_EMPTY_PARTICIPANTS', botId, groupHash },
+          'Grupo sin participantes legibles; se omite para evitar descarte accidental',
+        );
+        groupsSkipped += 1;
+        continue;
+      }
 
       // Resolver identidades canónicas (LID -> teléfono) si el cliente lo soporta
       let canonicalIds = rawIds;
@@ -199,7 +272,7 @@ export class CommunityCountryService {
           });
         } catch {
           this.logger.debug(
-            { operation: 'CANONICAL_IDENTITIES_RESOLUTION_FAILED', botId },
+            { operation: 'CANONICAL_IDENTITIES_RESOLUTION_FAILED', botId, groupHash },
             'No fue posible resolver identidades canónicas para el grupo',
           );
         }
@@ -207,51 +280,91 @@ export class CommunityCountryService {
 
       canonicalIds.forEach((id) => allResolvedParticipantIds.add(id));
 
-      // Reconciliar membresías del grupo de forma exacta y autoritativa
-      const groupHashes = canonicalIds.map((id) => this.hashParticipant(id));
+      // Reconciliar membresías del grupo de forma granular y autoritativa con groupHash
+      const participantHashes = canonicalIds.map((id) => this.hashParticipant(id));
       const reconciliation = this.database.reconcileCommunityGroupMemberships(
         botId,
-        group.id,
-        groupHashes,
+        groupHash,
+        participantHashes,
       );
+
+      totalRemoved += reconciliation.removed;
+      groupsProcessed += 1;
 
       if (reconciliation.added > 0) {
         this.logger.info(
-          { operation: 'COMMUNITY_MEMBERSHIPS_ACTIVATED', botId, count: reconciliation.added },
+          {
+            operation: 'COMMUNITY_MEMBERSHIPS_ACTIVATED',
+            botId,
+            groupHash,
+            count: reconciliation.added,
+          },
           'Nuevas membresías comunitarias registradas',
         );
       }
       if (reconciliation.removed > 0) {
         this.logger.info(
-          { operation: 'COMMUNITY_MEMBERSHIPS_DEACTIVATED', botId, count: reconciliation.removed },
+          {
+            operation: 'COMMUNITY_MEMBERSHIPS_DEACTIVATED',
+            botId,
+            groupHash,
+            count: reconciliation.removed,
+          },
           'Membresías comunitarias inactivadas',
         );
       }
     }
 
     // Registrar o actualizar perfiles de país para el conjunto unificado de participantes
-    const batchResult = this.registerParticipantsBatch(botId, Array.from(allResolvedParticipantIds));
+    const batchResult = this.registerParticipantsBatch(
+      botId,
+      Array.from(allResolvedParticipantIds),
+    );
+
+    // Determinar si la sincronización es autoritativa o parcial
+    const scanErrorCount = client?.getLastGroupScanErrorCount?.() ?? 0;
+    const isClientReady = client ? client.isReady() : true;
+    const isAuthoritative =
+      isClientReady &&
+      scanErrorCount === 0 &&
+      groupsSkipped === 0 &&
+      authorizedGroups.length > 0;
+
+    const authority: CountrySyncAuthority = isAuthoritative ? 'authoritative' : 'partial';
 
     this.logger.info(
       {
         operation: 'COMMUNITY_COUNTRY_SYNC_COMPLETED',
         botId,
+        authority,
+        groupsProcessed,
+        groupsSkipped,
         totalGroups: authorizedGroups.length,
         totalParticipants: allResolvedParticipantIds.size,
         inserted: batchResult.inserted,
         updated: batchResult.updated,
         unchanged: batchResult.unchanged,
+        removed: totalRemoved,
       },
       'Sincronización de países de integrantes de grupos finalizada',
     );
 
     return {
+      success: true,
+      complete: isAuthoritative,
+      partial: !isAuthoritative,
+      authority,
+      pruningPerformed: isAuthoritative ? true : totalRemoved > 0,
+      groupsProcessed,
+      groupsSkipped,
+      participantsProcessed: allResolvedParticipantIds.size,
       totalGroups: authorizedGroups.length,
       totalParticipants: allResolvedParticipantIds.size,
       total: allResolvedParticipantIds.size,
       inserted: batchResult.inserted,
       updated: batchResult.updated,
       unchanged: batchResult.unchanged,
+      removed: totalRemoved,
     };
   }
 
@@ -315,7 +428,15 @@ export class CommunityCountryService {
     botId: string,
     privacyMinCount?: number,
   ): CommunityCountriesSummary {
-    const summary = this.database.getCommunityCountryAggregates(botId, privacyMinCount);
+    const activeGroups = this.database
+      .listBotGroups(botId, (id) => this.hashGroup(id))
+      .filter((g) => g.active && !g.blocked && g.botIsMember);
+    const validGroupHashes = activeGroups.map((g) => g.groupHash);
+    const summary = this.database.getCommunityCountryAggregates(
+      botId,
+      privacyMinCount,
+      validGroupHashes,
+    );
     this.logger.info(
       {
         operation: 'COMMUNITY_COUNTRY_AGGREGATES_CALCULATED',

@@ -38,6 +38,7 @@ import {
   MAX_GROUP_MESSAGE_HISTORY,
   type GroupMessageHistory,
   type GroupMessageHistoryRequest,
+  type GroupScanDiagnostics,
   type MessagingClient,
   type MessagingClientEvents,
   type SelectableMenuPayload,
@@ -430,6 +431,11 @@ export class WhatsAppWebAdapter implements MessagingClient {
   private readyHandled = false;
   private ready = false;
   private skippedChats = 0;
+  private scanDiagnostics: GroupScanDiagnostics = {
+    skippedUnsupported: 0,
+    mappingErrors: 0,
+    incompleteGroups: 0,
+  };
   private lastGroupListSource: GroupListSource | null = null;
   private readonly botIdentifiers = new Set<string>();
   private readonly selectableMenuPolls = new Map<
@@ -921,11 +927,17 @@ export class WhatsAppWebAdapter implements MessagingClient {
     this.lastGroupListSource = source;
     const groups: DetectedGroup[] = [];
     this.skippedChats = 0;
+    this.scanDiagnostics = {
+      skippedUnsupported: 0,
+      mappingErrors: 0,
+      incompleteGroups: 0,
+    };
 
     for (const [chatIndex, chat] of chats.entries()) {
       try {
         if (typeof chat !== 'object' || chat === null) {
           this.skippedChats += 1;
+          this.scanDiagnostics.skippedUnsupported += 1;
           continue;
         }
         const adapterError = Reflect.get(chat, 'adapterError');
@@ -943,11 +955,13 @@ export class WhatsAppWebAdapter implements MessagingClient {
           isCommunityAnnouncementChat(chat)
         ) {
           this.skippedChats += 1;
+          this.scanDiagnostics.skippedUnsupported += 1;
           continue;
         }
         const id = getSerializedId(Reflect.get(chat, 'id'));
         if (!isSupportedGroupId(id)) {
           this.skippedChats += 1;
+          this.scanDiagnostics.skippedUnsupported += 1;
           continue;
         }
         const rawName = Reflect.get(chat, 'name');
@@ -983,6 +997,9 @@ export class WhatsAppWebAdapter implements MessagingClient {
           }
         }
         const participantIds = await this.resolveGroupParticipantIds(client, rawParticipantIds);
+        if (participantIds === null) {
+          this.scanDiagnostics.incompleteGroups += 1;
+        }
         const resolvedAdministratorIds = await this.resolveGroupParticipantIds(
           client,
           rawAdministratorIds,
@@ -1003,6 +1020,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
         });
       } catch (error) {
         this.skippedChats += 1;
+        this.scanDiagnostics.mappingErrors += 1;
         const candidateId = safeChatId(chat);
         this.logger.warn(
           {
@@ -1021,6 +1039,14 @@ export class WhatsAppWebAdapter implements MessagingClient {
 
   public getLastGroupScanSkippedCount(): number {
     return this.skippedChats;
+  }
+
+  public getLastGroupScanDiagnostics(): GroupScanDiagnostics {
+    return { ...this.scanDiagnostics };
+  }
+
+  public getLastGroupScanErrorCount(): number {
+    return this.scanDiagnostics.mappingErrors + this.scanDiagnostics.incompleteGroups;
   }
 
   public getLastGroupListSource(): GroupListSource | null {

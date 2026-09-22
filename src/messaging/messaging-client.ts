@@ -100,6 +100,8 @@ export interface MessagingClient {
   sendPoll(chatId: string, poll: NativePoll): Promise<PollSendReceipt>;
   listGroups(): Promise<DetectedGroup[]>;
   getLastGroupScanSkippedCount(): number;
+  getLastGroupScanDiagnostics?(): GroupScanDiagnostics;
+  getLastGroupScanErrorCount?(): number;
   getLastGroupListSource(): GroupListSource | null;
   getState(): Promise<string | null>;
   isReady(): boolean;
@@ -107,3 +109,9 @@ export interface MessagingClient {
   getOwnIdentifier?(): string | null;
   getOwnIdentifiers?(): readonly string[];
 }
+
+export type GroupScanDiagnostics = {
+  skippedUnsupported: number;
+  mappingErrors: number;
+  incompleteGroups: number;
+};

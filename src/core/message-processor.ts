@@ -204,8 +204,7 @@ export class MessageProcessor {
           this.client,
         );
         // Al interactuar en un grupo válido, registrar también membresía comunitaria
-        const partHash = this.countryService.hashParticipant(message.participantId);
-        this.database.recordCommunityMembership(this.botId, message.chatId, partHash);
+        this.countryService.recordMembership(this.botId, message.chatId, message.participantId);
 
         responseText = decl.success
           ? `Listo, registré ${decl.countryName} ${decl.flagEmoji} como tu país.`

@@ -2671,6 +2671,30 @@ export class AppDatabase {
             );
         `,
       },
+      {
+        version: 43,
+        sql: `
+          -- Preservar las membresías existentes mientras se sustituye el JID de grupo por un HMAC.
+          -- El backfill a group_hash se completa desde CommunityCountryService, donde está disponible
+          -- el Anonymizer. La tabla legacy sólo se elimina después de verificar la copia.
+          DROP INDEX IF EXISTS idx_bot_community_memberships_participant;
+          DROP INDEX IF EXISTS idx_bot_community_memberships_group;
+          ALTER TABLE bot_community_memberships
+            RENAME TO bot_community_memberships_legacy_43;
+          CREATE TABLE bot_community_memberships (
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            group_hash TEXT NOT NULL,
+            participant_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (bot_id, group_hash, participant_hash)
+          );
+          CREATE INDEX idx_bot_community_memberships_participant
+            ON bot_community_memberships(bot_id, participant_hash);
+          CREATE INDEX idx_bot_community_memberships_group
+            ON bot_community_memberships(bot_id, group_hash);
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -9717,40 +9741,98 @@ export class AppDatabase {
     return this.getParticipantCountry(botId, participantHash)!;
   }
 
+  public migrateLegacyCommunityMemberships(
+    hashGroup: (groupId: string) => string,
+  ): number {
+    const legacyExists = this.db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'bot_community_memberships_legacy_43'",
+      )
+      .get();
+    if (legacyExists === undefined) return 0;
+
+    const rows = this.db
+      .prepare(
+        `SELECT bot_id, group_id, participant_hash, created_at, updated_at
+         FROM bot_community_memberships_legacy_43`,
+      )
+      .all() as Array<{
+      bot_id: string;
+      group_id: string;
+      participant_hash: string;
+      created_at: string;
+      updated_at: string;
+    }>;
+
+    const migrate = this.db.transaction(() => {
+      const insert = this.db.prepare(
+        `INSERT INTO bot_community_memberships (
+           bot_id, group_hash, participant_hash, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(bot_id, group_hash, participant_hash) DO UPDATE SET
+           created_at = MIN(bot_community_memberships.created_at, excluded.created_at),
+           updated_at = MAX(bot_community_memberships.updated_at, excluded.updated_at)`,
+      );
+      const verify = this.db.prepare(
+        `SELECT 1 FROM bot_community_memberships
+         WHERE bot_id = ? AND group_hash = ? AND participant_hash = ?`,
+      );
+
+      for (const row of rows) {
+        const groupHash = hashGroup(row.group_id);
+        insert.run(
+          row.bot_id,
+          groupHash,
+          row.participant_hash,
+          row.created_at,
+          row.updated_at,
+        );
+        if (verify.get(row.bot_id, groupHash, row.participant_hash) === undefined) {
+          throw new Error('No fue posible verificar la migración privada de una membresía comunitaria.');
+        }
+      }
+
+      this.db.exec('DROP TABLE bot_community_memberships_legacy_43');
+      return rows.length;
+    });
+
+    return migrate();
+  }
+
   public recordCommunityMembership(
     botId: string,
-    groupId: string,
+    groupHash: string,
     participantHash: string,
   ): void {
     const now = new Date().toISOString();
     this.db
       .prepare(
         `INSERT INTO bot_community_memberships (
-           bot_id, group_id, participant_hash, created_at, updated_at
+           bot_id, group_hash, participant_hash, created_at, updated_at
          ) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(bot_id, group_id, participant_hash) DO UPDATE SET
+         ON CONFLICT(bot_id, group_hash, participant_hash) DO UPDATE SET
            updated_at = excluded.updated_at`,
       )
-      .run(botId, groupId, participantHash, now, now);
+      .run(botId, groupHash, participantHash, now, now);
   }
 
   public recordCommunityMembershipsBatch(
     botId: string,
-    groupId: string,
+    groupHash: string,
     participantHashes: string[],
   ): void {
     if (participantHashes.length === 0) return;
     const now = new Date().toISOString();
     const insertStmt = this.db.prepare(
       `INSERT INTO bot_community_memberships (
-         bot_id, group_id, participant_hash, created_at, updated_at
+         bot_id, group_hash, participant_hash, created_at, updated_at
        ) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(bot_id, group_id, participant_hash) DO UPDATE SET
+       ON CONFLICT(bot_id, group_hash, participant_hash) DO UPDATE SET
          updated_at = excluded.updated_at`,
     );
     const run = this.db.transaction(() => {
       for (const hash of participantHashes) {
-        insertStmt.run(botId, groupId, hash, now, now);
+        insertStmt.run(botId, groupHash, hash, now, now);
       }
     });
     run();
@@ -9758,27 +9840,27 @@ export class AppDatabase {
 
   public removeCommunityMembership(
     botId: string,
-    groupId: string,
+    groupHash: string,
     participantHash: string,
   ): void {
     this.db
       .prepare(
-        'DELETE FROM bot_community_memberships WHERE bot_id = ? AND group_id = ? AND participant_hash = ?',
+        'DELETE FROM bot_community_memberships WHERE bot_id = ? AND group_hash = ? AND participant_hash = ?',
       )
-      .run(botId, groupId, participantHash);
+      .run(botId, groupHash, participantHash);
   }
 
   public reconcileCommunityGroupMemberships(
     botId: string,
-    groupId: string,
+    groupHash: string,
     currentParticipantHashes: string[],
   ): { added: number; removed: number } {
     const currentSet = new Set(currentParticipantHashes);
     const existingRows = this.db
       .prepare(
-        'SELECT participant_hash FROM bot_community_memberships WHERE bot_id = ? AND group_id = ?',
+        'SELECT participant_hash FROM bot_community_memberships WHERE bot_id = ? AND group_hash = ?',
       )
-      .all(botId, groupId) as Array<{ participant_hash: string }>;
+      .all(botId, groupHash) as Array<{ participant_hash: string }>;
 
     const existingSet = new Set(existingRows.map((r) => r.participant_hash));
     let added = 0;
@@ -9788,25 +9870,25 @@ export class AppDatabase {
       const now = new Date().toISOString();
       const insertStmt = this.db.prepare(
         `INSERT INTO bot_community_memberships (
-           bot_id, group_id, participant_hash, created_at, updated_at
+           bot_id, group_hash, participant_hash, created_at, updated_at
          ) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(bot_id, group_id, participant_hash) DO UPDATE SET
+         ON CONFLICT(bot_id, group_hash, participant_hash) DO UPDATE SET
            updated_at = excluded.updated_at`,
       );
       const deleteStmt = this.db.prepare(
-        'DELETE FROM bot_community_memberships WHERE bot_id = ? AND group_id = ? AND participant_hash = ?',
+        'DELETE FROM bot_community_memberships WHERE bot_id = ? AND group_hash = ? AND participant_hash = ?',
       );
 
       for (const hash of currentSet) {
         if (!existingSet.has(hash)) {
-          insertStmt.run(botId, groupId, hash, now, now);
+          insertStmt.run(botId, groupHash, hash, now, now);
           added += 1;
         }
       }
 
       for (const hash of existingSet) {
         if (!currentSet.has(hash)) {
-          deleteStmt.run(botId, groupId, hash);
+          deleteStmt.run(botId, groupHash, hash);
           removed += 1;
         }
       }
@@ -9854,9 +9936,9 @@ export class AppDatabase {
       this.db
         .prepare(
           `INSERT OR IGNORE INTO bot_community_memberships (
-             bot_id, group_id, participant_hash, created_at, updated_at
+             bot_id, group_hash, participant_hash, created_at, updated_at
            )
-           SELECT bot_id, group_id, ?, created_at, updated_at
+           SELECT bot_id, group_hash, ?, created_at, updated_at
            FROM bot_community_memberships
            WHERE bot_id = ? AND participant_hash = ?`,
         )
@@ -9880,16 +9962,36 @@ export class AppDatabase {
   public getCommunityCountryAggregates(
     botId: string,
     privacyMinCount = COUNTRY_PRIVACY_MIN_COUNT,
+    validGroupHashes?: string[],
   ): CommunityCountriesSummary {
+    if (validGroupHashes !== undefined && validGroupHashes.length === 0) {
+      return {
+        totalParticipants: 0,
+        identified: 0,
+        unidentified: 0,
+        countriesCount: 0,
+        privacyMinCount,
+        countries: [],
+      };
+    }
+
+    const groupFilter =
+      validGroupHashes && validGroupHashes.length > 0
+        ? ` AND m.group_hash IN (${validGroupHashes.map(() => '?').join(', ')})`
+        : '';
+    const queryParams =
+      validGroupHashes && validGroupHashes.length > 0
+        ? [botId, ...validGroupHashes]
+        : [botId];
+
     // 1. Participantes únicos activos en al menos un grupo comunitario válido del bot
     const totalRow = this.db
       .prepare(
         `SELECT COUNT(DISTINCT m.participant_hash) as count
          FROM bot_community_memberships m
-         INNER JOIN bot_groups g ON g.bot_id = m.bot_id AND g.group_id = m.group_id
-         WHERE m.bot_id = ? AND g.active = 1 AND g.blocked = 0 AND g.bot_is_member = 1`,
+         WHERE m.bot_id = ?${groupFilter}`,
       )
-      .get(botId) as { count: number } | undefined;
+      .get(...queryParams) as { count: number } | undefined;
     const totalParticipants = totalRow?.count ?? 0;
 
     if (totalParticipants === 0) {
@@ -9908,13 +10010,12 @@ export class AppDatabase {
       .prepare(
         `SELECT COUNT(DISTINCT m.participant_hash) as count
          FROM bot_community_memberships m
-         INNER JOIN bot_groups g ON g.bot_id = m.bot_id AND g.group_id = m.group_id
          LEFT JOIN bot_community_participants p
            ON p.bot_id = m.bot_id AND p.participant_hash = m.participant_hash
-         WHERE m.bot_id = ? AND g.active = 1 AND g.blocked = 0 AND g.bot_is_member = 1
+         WHERE m.bot_id = ?${groupFilter}
            AND (p.country_code IS NULL OR p.country_code = '')`,
       )
-      .get(botId) as { count: number } | undefined;
+      .get(...queryParams) as { count: number } | undefined;
     const unidentified = unidentifiedRow?.count ?? 0;
     const identified = Math.max(0, totalParticipants - unidentified);
 
@@ -9926,15 +10027,14 @@ export class AppDatabase {
                 SUM(CASE WHEN p.country_source = 'phone_prefix' THEN 1 ELSE 0 END) as detected_count,
                 SUM(CASE WHEN p.country_source = 'declared' THEN 1 ELSE 0 END) as declared_count
          FROM bot_community_memberships m
-         INNER JOIN bot_groups g ON g.bot_id = m.bot_id AND g.group_id = m.group_id
          INNER JOIN bot_community_participants p
            ON p.bot_id = m.bot_id AND p.participant_hash = m.participant_hash
-         WHERE m.bot_id = ? AND g.active = 1 AND g.blocked = 0 AND g.bot_is_member = 1
+         WHERE m.bot_id = ?${groupFilter}
            AND p.country_code IS NOT NULL AND p.country_code != ''
          GROUP BY p.country_code
          ORDER BY participant_count DESC, p.country_code ASC`,
       )
-      .all(botId) as Array<{
+      .all(...queryParams) as Array<{
         country_code: string;
         participant_count: number;
         detected_count: number;
