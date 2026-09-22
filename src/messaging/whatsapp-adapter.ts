@@ -714,9 +714,9 @@ export class WhatsAppWebAdapter implements MessagingClient {
     const sentMessage = await client.sendMessage(
       chatId,
       new ScheduledEvent(event.name, event.startTime, {
-        description: event.description,
-        endTime: event.endTime,
-        location: event.location,
+        ...(event.description === undefined ? {} : { description: event.description }),
+        ...(event.endTime === undefined ? {} : { endTime: event.endTime }),
+        ...(event.location === undefined ? {} : { location: event.location }),
         callType: event.callType ?? 'none',
         isEventCanceled: false,
         messageSecret: event.messageSecret,
