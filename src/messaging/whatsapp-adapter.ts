@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import type { Logger } from 'pino';
 import WhatsApp from 'whatsapp-web.js';
 import type {
@@ -717,6 +718,7 @@ export class WhatsAppWebAdapter implements MessagingClient {
         description: event.description,
         endTime: event.endTime,
         callType: event.callType,
+        messageSecret: [...randomBytes(32)],
       }),
       { waitUntilMsgSent: true },
     );
