@@ -41,10 +41,12 @@ import {
   type GroupScanDiagnostics,
   type MessagingClient,
   type MessagingClientEvents,
+  type NativeScheduledEvent,
+  type ScheduledEventSendReceipt,
   type SelectableMenuPayload,
 } from './messaging-client.js';
 
-const { Client, LocalAuth, MessageMedia, Poll } = WhatsApp;
+const { Client, LocalAuth, MessageMedia, Poll, ScheduledEvent } = WhatsApp;
 const supportedMessageTypes = new Set(['chat']);
 const DEFAULT_GROUP_ADMINISTRATOR_CACHE_TTL_MS = 5 * 60_000;
 const DEFAULT_GROUP_ADMINISTRATOR_STALE_TTL_MS = 15 * 60_000;
@@ -698,6 +700,28 @@ export class WhatsAppWebAdapter implements MessagingClient {
 
   public supportsNativePolls(): boolean {
     return true;
+  }
+
+  public supportsScheduledEvents(): boolean {
+    return true;
+  }
+
+  public async sendScheduledEvent(
+    chatId: string,
+    event: NativeScheduledEvent,
+  ): Promise<ScheduledEventSendReceipt> {
+    const client = this.requireReadyClient();
+    const sent = await client.sendMessage(
+      chatId,
+      new ScheduledEvent(event.name, event.startTime, {
+        description: event.description,
+        endTime: event.endTime,
+        callType: event.callType,
+      }),
+      { waitUntilMsgSent: true },
+    );
+    const rawId = typeof sent === 'object' && sent !== null ? Reflect.get(sent, 'id') : null;
+    return { messageId: getSerializedId(rawId) };
   }
 
   public async sendPoll(chatId: string, poll: NativePoll): Promise<PollSendReceipt> {
