@@ -95,6 +95,9 @@
                 Centro de pruebas
               </option>
               <option value="polls" data-bot-only data-module="polls">Encuestas</option>
+              <option value="themed-days" data-bot-only data-module="themed-days">
+                Días temáticos
+              </option>
               <option value="countries" data-bot-only data-module="countries">Países</option>
               <option value="requests" data-bot-only data-module="requests">
                 Solicitudes humanas
@@ -159,6 +162,13 @@
               </button>
               <button data-section="polls" data-module="polls" class="bot-only hidden">
                 <span aria-hidden="true">▥</span> Encuestas
+              </button>
+              <button
+                data-section="themed-days"
+                data-module="themed-days"
+                class="bot-only hidden"
+              >
+                <span aria-hidden="true">🎉</span> Días temáticos
               </button>
               <button data-section="countries" data-module="countries" class="bot-only hidden">
                 <span aria-hidden="true">🌎</span> Países
@@ -1568,6 +1578,64 @@
                   <div id="poll-detail-results" class="poll-results-list"></div>
                 </article>
               </div>
+            </section>
+
+            <section id="section-themed-days" class="panel-section hidden">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Participación comunitaria</p>
+                  <h2>Días temáticos</h2>
+                  <p class="muted">
+                    Cada día activo envía un mensaje automático a los grupos una vez por semana.
+                  </p>
+                </div>
+                <button id="themed-days-refresh" type="button" class="secondary">↻ Actualizar</button>
+              </div>
+
+              <div class="info-callout" role="note">
+                <strong>Mensajes comunitarios automáticos</strong>
+                <p>
+                  Los mensajes temáticos se envían directamente a los grupos autorizados. Las siete
+                  plantillas vienen desactivadas por defecto: activa sólo las que quieras usar.
+                </p>
+                <p id="themed-days-support" class="muted"></p>
+              </div>
+
+              <form id="themed-days-form">
+                <article class="card inset">
+                  <div class="section-heading">
+                    <div>
+                      <h3>Grupos participantes</h3>
+                      <p class="muted">Los días activos se publicarán sólo en estos grupos.</p>
+                    </div>
+                  </div>
+                  <div id="themed-days-groups" class="checks"></div>
+                  <div class="form-row">
+                    <label>
+                      Grupo para pruebas
+                      <select id="themed-days-test-group"></select>
+                    </label>
+                  </div>
+                </article>
+
+                <div id="themed-days-list" class="list"></div>
+
+                <div class="actions">
+                  <button type="submit">Guardar días temáticos</button>
+                </div>
+              </form>
+
+              <article class="card inset">
+                <div class="section-heading">
+                  <div>
+                    <h3>Historial reciente</h3>
+                    <p class="muted">
+                      Ejecuciones programadas sin exponer identificadores privados de grupos.
+                    </p>
+                  </div>
+                </div>
+                <div id="themed-days-history" class="list"></div>
+              </article>
             </section>
 
             <section id="section-countries" class="panel-section hidden">

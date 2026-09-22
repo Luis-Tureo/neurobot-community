@@ -2695,6 +2695,50 @@ export class AppDatabase {
             ON bot_community_memberships(bot_id, group_hash);
         `,
       },
+      {
+        version: 44,
+        sql: `
+          -- Días temáticos recurrentes publicados como mensajes normales de WhatsApp.
+          CREATE TABLE bot_themed_day_settings (
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            day_key TEXT NOT NULL CHECK (
+              day_key IN ('monday','tuesday','wednesday','thursday','friday','saturday','sunday')
+            ),
+            enabled INTEGER NOT NULL DEFAULT 0,
+            start_time TEXT NOT NULL DEFAULT '10:00',
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            image_path TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (bot_id, day_key)
+          );
+
+          CREATE TABLE bot_themed_day_groups (
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            group_key TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (bot_id, group_key)
+          );
+
+          CREATE TABLE bot_themed_day_deliveries (
+            bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+            day_key TEXT NOT NULL,
+            group_key TEXT NOT NULL,
+            local_date TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            whatsapp_message_id TEXT,
+            error_code TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            sent_at TEXT,
+            PRIMARY KEY (bot_id, day_key, group_key, local_date)
+          );
+
+          CREATE INDEX idx_bot_themed_day_deliveries_recent
+            ON bot_themed_day_deliveries(bot_id, local_date DESC, day_key);
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -10087,6 +10131,197 @@ export class AppDatabase {
       privacyMinCount,
       countries,
     };
+  }
+
+  public listThemedDaySettings(botId: string): Array<{
+    dayKey: string;
+    enabled: boolean;
+    startTime: string;
+    title: string;
+    description: string;
+    imagePath: string | null;
+  }> {
+    return (
+      this.db
+        .prepare(
+          `SELECT day_key, enabled, start_time, title, description, image_path
+           FROM bot_themed_day_settings
+           WHERE bot_id = ?
+           ORDER BY day_key`,
+        )
+        .all(botId) as Array<{
+          day_key: string;
+          enabled: number;
+          start_time: string;
+          title: string;
+          description: string;
+          image_path: string | null;
+        }>
+    ).map((row) => ({
+      dayKey: row.day_key,
+      enabled: row.enabled === 1,
+      startTime: row.start_time,
+      title: row.title,
+      description: row.description,
+      imagePath: row.image_path,
+    }));
+  }
+
+  public saveThemedDaySettings(
+    botId: string,
+    days: Array<{
+      key: string;
+      enabled: boolean;
+      startTime: string;
+      title: string;
+      description: string;
+      imagePath?: string | null;
+    }>,
+  ): void {
+    const now = new Date().toISOString();
+    const statement = this.db.prepare(
+      `INSERT INTO bot_themed_day_settings(
+         bot_id, day_key, enabled, start_time, title, description, image_path, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(bot_id, day_key) DO UPDATE SET
+         enabled = excluded.enabled,
+         start_time = excluded.start_time,
+         title = excluded.title,
+         description = excluded.description,
+         image_path = excluded.image_path,
+         updated_at = excluded.updated_at`,
+    );
+    const run = this.db.transaction(() => {
+      for (const day of days) {
+        statement.run(
+          botId,
+          day.key,
+          day.enabled ? 1 : 0,
+          day.startTime,
+          day.title,
+          day.description,
+          day.imagePath ?? null,
+          now,
+        );
+      }
+    });
+    run();
+  }
+
+  public listThemedDayGroupKeys(botId: string): string[] {
+    return (
+      this.db
+        .prepare(
+          'SELECT group_key FROM bot_themed_day_groups WHERE bot_id = ? ORDER BY group_key',
+        )
+        .all(botId) as Array<{ group_key: string }>
+    ).map((row) => row.group_key);
+  }
+
+  public saveThemedDayGroupKeys(botId: string, groupKeys: string[]): void {
+    const now = new Date().toISOString();
+    const insert = this.db.prepare(
+      `INSERT INTO bot_themed_day_groups(bot_id, group_key, created_at)
+       VALUES (?, ?, ?)`,
+    );
+    const run = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM bot_themed_day_groups WHERE bot_id = ?').run(botId);
+      for (const groupKey of new Set(groupKeys)) insert.run(botId, groupKey, now);
+    });
+    run();
+  }
+
+  public claimThemedDayDelivery(
+    botId: string,
+    dayKey: string,
+    groupKey: string,
+    localDate: string,
+  ): boolean {
+    const now = new Date().toISOString();
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO bot_themed_day_deliveries(
+           bot_id, day_key, group_key, local_date, status, attempts, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, 'PENDING', 0, ?, ?)`,
+      )
+      .run(botId, dayKey, groupKey, localDate, now, now);
+    return result.changes === 1;
+  }
+
+  public completeThemedDayDelivery(input: {
+    botId: string;
+    dayKey: string;
+    groupKey: string;
+    localDate: string;
+    status: 'SENT' | 'FAILED';
+    messageId?: string | null;
+    errorCode?: string | null;
+  }): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE bot_themed_day_deliveries
+         SET status = ?,
+             whatsapp_message_id = ?,
+             attempts = attempts + 1,
+             error_code = ?,
+             sent_at = CASE WHEN ? = 'SENT' THEN ? ELSE sent_at END,
+             updated_at = ?
+         WHERE bot_id = ? AND day_key = ? AND group_key = ? AND local_date = ?`,
+      )
+      .run(
+        input.status,
+        input.messageId ?? null,
+        input.errorCode ?? null,
+        input.status,
+        now,
+        now,
+        input.botId,
+        input.dayKey,
+        input.groupKey,
+        input.localDate,
+      );
+  }
+
+  public listThemedDayDeliveries(
+    botId: string,
+    limit = 50,
+  ): Array<{
+    dayKey: string;
+    groupKey: string;
+    localDate: string;
+    status: string;
+    attempts: number;
+    errorCode: string | null;
+    sentAt: string | null;
+  }> {
+    return (
+      this.db
+        .prepare(
+          `SELECT day_key, group_key, local_date, status, attempts, error_code, sent_at
+           FROM bot_themed_day_deliveries
+           WHERE bot_id = ?
+           ORDER BY local_date DESC, updated_at DESC
+           LIMIT ?`,
+        )
+        .all(botId, limit) as Array<{
+          day_key: string;
+          group_key: string;
+          local_date: string;
+          status: string;
+          attempts: number;
+          error_code: string | null;
+          sent_at: string | null;
+        }>
+    ).map((row) => ({
+      dayKey: row.day_key,
+      groupKey: row.group_key,
+      localDate: row.local_date,
+      status: row.status,
+      attempts: row.attempts,
+      errorCode: row.error_code,
+      sentAt: row.sent_at,
+    }));
   }
 }
 
