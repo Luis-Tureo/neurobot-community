@@ -13,6 +13,8 @@ import type {
   InteractiveMenuPayload,
   MessagingClient,
   MessagingClientEvents,
+  NativeScheduledEvent,
+  ScheduledEventSendReceipt,
   SelectableMenuPayload,
 } from './messaging-client.js';
 
@@ -24,14 +26,17 @@ export type SentMessage = {
 };
 
 export type SentPoll = NativePoll & { chatId: string; messageId: string };
+export type SentScheduledEvent = NativeScheduledEvent & { chatId: string; messageId: string };
 
-/** Contador global para que los ids simulados sean únicos incluso entre instancias. */
+/** Contadores globales para que los ids simulados sean únicos incluso entre instancias. */
 let simulatedPollCounter = 0;
+let simulatedScheduledEventCounter = 0;
 export type SentMedia = { chatId: string; absolutePath: string; caption: string };
 
 export class SimulatedMessagingClient implements MessagingClient {
   public readonly sentMessages: SentMessage[] = [];
   public readonly sentPolls: SentPoll[] = [];
+  public readonly sentScheduledEvents: SentScheduledEvent[] = [];
   public readonly sentMedia: SentMedia[] = [];
   public readonly sentInteractiveMenus: Array<{ chatId: string; payload: InteractiveMenuPayload }> =
     [];
@@ -39,6 +44,7 @@ export class SimulatedMessagingClient implements MessagingClient {
     [];
   public interactiveSupported = false;
   public nativePollsSupported = true;
+  public nativeScheduledEventsSupported = true;
   public selectableMenusSupported = true;
   public initializeCalls = 0;
   public destroyCalls = 0;
@@ -117,6 +123,22 @@ export class SimulatedMessagingClient implements MessagingClient {
 
   public supportsNativePolls(): boolean {
     return this.nativePollsSupported;
+  }
+
+  public supportsNativeScheduledEvents(): boolean {
+    return this.nativeScheduledEventsSupported;
+  }
+
+  public async sendScheduledEvent(
+    chatId: string,
+    event: NativeScheduledEvent,
+  ): Promise<ScheduledEventSendReceipt> {
+    if (this.failSending) throw new Error('Fallo simulado');
+    if (!this.nativeScheduledEventsSupported) throw new Error('Eventos nativos no soportados');
+    simulatedScheduledEventCounter += 1;
+    const messageId = `true_${chatId}_event-${simulatedScheduledEventCounter}`;
+    this.sentScheduledEvents.push({ chatId, messageId, ...event });
+    return { messageId };
   }
 
   public async sendPoll(chatId: string, poll: NativePoll): Promise<PollSendReceipt> {
