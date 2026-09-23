@@ -203,6 +203,31 @@ describe('adaptador de WhatsApp', () => {
     expect(nativePoll.options.allowMultipleAnswers).toBe(true);
   });
 
+  it.each([2, 6, 8, 12])('entrega las %i alternativas completas al Poll nativo', async (count) => {
+    const { adapter, fake } = createSubject();
+    fake.sendMessage.mockResolvedValue({ id: { _serialized: 'true_grupo-normal@g.us_ADAPTIVE' } });
+    await adapter.initialize();
+    fake.emit('ready');
+    const options = Array.from({ length: count }, (_, index) => `Alternativa ${index + 1}`);
+    await adapter.sendPoll('grupo-normal@g.us', {
+      question: '¿Qué alternativas te sirven?',
+      options,
+      allowMultipleAnswers: count >= 8,
+    });
+    const [, nativePoll] = fake.sendMessage.mock.calls[0] as unknown as [
+      string,
+      {
+        pollOptions: Array<{ name: string; localId: number }>;
+        options: { allowMultipleAnswers: boolean };
+      },
+    ];
+    expect(nativePoll.pollOptions.map((option) => option.name)).toEqual(options);
+    expect(nativePoll.pollOptions.map((option) => option.localId)).toEqual(
+      options.map((_, index) => index),
+    );
+    expect(nativePoll.options.allowMultipleAnswers).toBe(count >= 8);
+  });
+
   it('recupera messageId vía evento message_create cuando sendMessage devuelve undefined', async () => {
     const { adapter, fake } = createSubject();
     fake.sendMessage.mockImplementation(async () => {

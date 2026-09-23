@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import BetterSqlite3 from 'better-sqlite3';
 import { GROQ_PREFERRED_MODEL } from '../src/ai/groq-constants.js';
+import { DEFAULT_POLL_TEMPLATES } from '../src/core/poll-defaults.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { SecretVault } from '../src/security/secret-vault.js';
 
@@ -42,7 +43,7 @@ describe('persistencia SQLite', () => {
     });
     expect(database.listCommands().map((item) => item.name)).toContain('ayuda');
     expect(database.listCommands()).toHaveLength(8);
-    expect(database.listLegacyPollTemplates()).toHaveLength(36);
+    expect(database.listLegacyPollTemplates()).toHaveLength(DEFAULT_POLL_TEMPLATES.length);
     expect(database.getPollAutomationConfiguration()).toEqual({
       enabled: false,
       startTime: '09:00',
@@ -524,7 +525,9 @@ describe('persistencia SQLite', () => {
         quietHoursStart: '23:00',
         quietHoursEnd: '08:00',
       });
-      expect(migrated.listLegacyPollTemplates('neurobot')).toHaveLength(36);
+      expect(migrated.listLegacyPollTemplates('neurobot')).toHaveLength(
+        DEFAULT_POLL_TEMPLATES.length,
+      );
       migrated.close();
       const verify = new BetterSqlite3(path);
       handles.push(verify);
@@ -572,9 +575,7 @@ describe('persistencia SQLite', () => {
       const currentVoteSchema = verify
         .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'bot_poll_votes'")
         .get() as { sql: string };
-      expect(currentVoteSchema.sql).toContain(
-        'UNIQUE(delivery_id, voter_hash, option_index)',
-      );
+      expect(currentVoteSchema.sql).toContain('UNIQUE(delivery_id, voter_hash, option_index)');
       verify.close();
     } finally {
       for (const handle of handles) {
@@ -726,11 +727,12 @@ describe('persistencia SQLite', () => {
       }),
     ).toThrow('El modo de selección de encuestas no es válido.');
 
-    // Las 10 plantillas predeterminadas con selección múltiple natural tienen allowMultipleAnswers: true
+    // Las plantillas retiradas conservan sus filas, pero solo el banco nuevo queda habilitado.
     const templates = database.listLegacyPollTemplates();
     const multiTemplates = templates.filter((t) => t.allowMultipleAnswers === true);
-    expect(multiTemplates).toHaveLength(10);
-    expect(templates.filter((t) => !t.allowMultipleAnswers)).toHaveLength(26);
+    expect(templates).toHaveLength(DEFAULT_POLL_TEMPLATES.length);
+    expect(multiTemplates.length).toBeGreaterThan(30);
+    expect(templates.filter((t) => !t.allowMultipleAnswers).length).toBeGreaterThan(20);
     database.close();
   });
 
@@ -750,4 +752,3 @@ describe('persistencia SQLite', () => {
     database.close();
   });
 });
-

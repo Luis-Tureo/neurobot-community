@@ -252,7 +252,16 @@ describe('generación y planificación anticipada', () => {
       const old = subject.repository.insert({
         question: '¿Cómo prefieres empezar tu mañana?',
         normalizedQuestion: 'como prefieres empezar tu manana',
-        options: ['Con calma', 'Con música'],
+        options: [
+          'Con calma',
+          'Con música',
+          'Con noticias',
+          'Con lectura',
+          'Con ejercicio',
+          'Con desayuno',
+          'Con charla',
+          'Con silencio',
+        ],
         category: 'rutinas',
         origin: 'ai',
         status: 'generated',
@@ -283,6 +292,7 @@ describe('generación y planificación anticipada', () => {
         sourcePollId: old.id,
         slotKey: '2026-01-05T12:00',
       });
+      expect(scheduled[0]?.options).toEqual(old.options);
       // Dentro de la pausa no vuelve a llamar a Groq.
       const calls = subject.generator.calls.length;
       await subject.planner.ensureCoverage();
@@ -307,7 +317,7 @@ describe('generación y planificación anticipada', () => {
       const scheduled = subject.repository.list({ statuses: ['scheduled'] })[0];
       expect(scheduled?.origin).toBe('legacy_bank');
       expect(scheduled?.sourceTemplateId).not.toBeNull();
-      expect(scheduled?.options.length).toBeGreaterThanOrEqual(2);
+      expect(scheduled?.options.length).toBeGreaterThan(5);
       // El siguiente slot inminente toma otra plantilla distinta.
       subject.setNow(at('2026-01-05', '14:50'));
       await subject.service.runDueTasks();
@@ -320,7 +330,7 @@ describe('generación y planificación anticipada', () => {
     }
   });
 
-  it('salta plantillas legacy con más de seis opciones sin truncarlas', async () => {
+  it('admite 11 opciones fallback y descarta 13 sin truncarlas', async () => {
     const subject = createSubject({ initialNow: at('2026-01-05', '11:50') });
     try {
       enable(subject.service);
@@ -329,18 +339,15 @@ describe('generación y planificación anticipada', () => {
         id: 900,
         question: '¿Qué número representa mejor tu experiencia?',
         category: 'Reflexión',
-        options: Array.from({ length: 11 }, (_, index) => String(index + 1)),
+        options: Array.from({ length: 13 }, (_, index) => String(index + 1)),
       };
       const compatible = {
         id: 901,
         question: '¿Qué ritmo prefieres hoy?',
         category: 'Preferencias',
-        options: ['Muy tranquilo', 'Tranquilo', 'Intermedio', 'Activo', 'Muy activo'],
+        options: Array.from({ length: 11 }, (_, index) => `Ritmo ${index + 1}`),
       };
-      vi.spyOn(subject.repository, 'legacyTemplates').mockReturnValue([
-        incompatible,
-        compatible,
-      ]);
+      vi.spyOn(subject.repository, 'legacyTemplates').mockReturnValue([incompatible, compatible]);
       vi.spyOn(subject.repository, 'legacyTemplateUsage').mockReturnValue(new Map());
 
       const plan = await subject.planner.ensureCoverage();
@@ -352,7 +359,7 @@ describe('generación y planificación anticipada', () => {
         sourceTemplateId: compatible.id,
         options: compatible.options,
       });
-      expect(scheduled?.options).not.toEqual(incompatible.options.slice(0, 6));
+      expect(scheduled?.options).not.toEqual(incompatible.options.slice(0, 12));
     } finally {
       subject.database.close();
     }

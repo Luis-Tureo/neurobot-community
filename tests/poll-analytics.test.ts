@@ -15,6 +15,7 @@ type Fixture = {
     category: string,
     options: string[],
     sentAt: Date,
+    allowMultipleAnswers?: boolean,
   ) => {
     pollId: number;
     deliveryId: number;
@@ -52,12 +53,13 @@ function createFixture(now: Date): Fixture {
   return {
     database,
     analytics,
-    sendPoll(question, category, options, sentAt) {
+    sendPoll(question, category, options, sentAt, allowMultipleAnswers = false) {
       slot += 1;
       const poll = database.insertPoll({
         question,
         normalizedQuestion: question.toLowerCase(),
         options,
+        allowMultipleAnswers,
         category,
         origin: slot % 2 === 0 ? 'reused' : 'ai',
         status: 'generated',
@@ -90,6 +92,34 @@ function createFixture(now: Date): Fixture {
 }
 
 describe('analítica de encuestas', () => {
+  it.each([6, 8, 12])('conserva ranking y detalles con %i alternativas', (count) => {
+    const when = at('2026-01-14', '15:00');
+    const fixture = createFixture(when);
+    const multiple = count > 6;
+    try {
+      const options = Array.from({ length: count }, (_, index) => `Alternativa ${index + 1}`);
+      const { pollId, deliveryId } = fixture.sendPoll(
+        '¿Qué alternativas prefieres para aprender?',
+        'estudio',
+        options,
+        when,
+        multiple,
+      );
+      fixture.vote(deliveryId, pollId, 'a', multiple ? [0, count - 1] : [count - 1], when);
+      fixture.vote(deliveryId, pollId, 'b', [count - 1], when);
+      const detail = fixture.analytics.detail(pollId);
+      expect(detail?.options).toHaveLength(count);
+      expect(detail?.participants).toBe(2);
+      expect(detail?.options[count - 1]).toMatchObject({ votes: 2, percentage: 100, winner: true });
+      if (multiple) expect(detail?.options[0]).toMatchObject({ votes: 1, percentage: 50 });
+      const summary = fixture.analytics.summary(fixture.analytics.resolvePeriod({ key: 'today' }));
+      expect(summary.recent[0]?.options).toHaveLength(count);
+      expect(summary.topPolls[0]?.id).toBe(pollId);
+    } finally {
+      fixture.database.close();
+    }
+  });
+
   it('resuelve períodos en la zona horaria del asistente y calcula el período anterior', () => {
     const fixture = createFixture(at('2026-01-14', '15:00'));
     try {

@@ -370,6 +370,27 @@ describe('Pruebas A–G y K del sistema de métricas de encuestas y multiselecci
   });
 
   // Test K: PollSender pasa allowMultipleAnswers: true/false correctamente a WhatsApp
+  it('bloquea 13 alternativas antes de contactar el adaptador', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:59') });
+    try {
+      const poll = subject.repository.insert({
+        question: '¿Qué opciones te sirven para concentrarte?',
+        options: Array.from({ length: 12 }, (_, index) => `Alternativa ${index + 1}`),
+        category: 'concentración',
+        allowMultipleAnswers: true,
+        normalizedQuestion: 'que opciones te sirven para concentrarte',
+        origin: 'reused',
+        status: 'generated',
+      });
+      // La BD ya impide almacenar la opción 13. Este guard cubre también una entrada no confiable al sender.
+      const result = await subject.sender.send({ ...poll, options: [...poll.options, 'Alternativa 13'] }, [GROUP_ID]);
+      expect(result).toMatchObject({ status: 'failed', lastError: 'POLL_OPTION_COUNT_INVALID' });
+      expect(subject.client.sentPolls).toHaveLength(0);
+    } finally {
+      subject.database.close();
+    }
+  });
+
   it('Test K: PollSender propaga allowMultipleAnswers: true y false correctamente al cliente de WhatsApp', async () => {
     const subject = createSubject({ initialNow: at('2026-01-05', '08:59') });
     try {

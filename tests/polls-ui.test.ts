@@ -165,7 +165,20 @@ describe('interfaz de encuestas', () => {
     expect(html).toContain('value="mixed"');
     expect(html).toContain('value="single"');
     expect(html).toContain('value="multiple"');
-    expect(script).toContain('selectionMode: form.elements.poll_selection_mode?.value || \'mixed\'');
+    expect(script).toContain("selectionMode: form.elements.poll_selection_mode?.value || 'mixed'");
+    expect(html).toContain(
+      'Mixto: NeuroBot decide según la pregunta si se puede elegir una o varias',
+    );
+    expect(html).toContain('Las encuestas pueden tener entre 2 y 12 alternativas');
+  });
+
+  it('recorre todas las alternativas y deja envolver etiquetas largas en tarjetas y detalles', () => {
+    expect(dashboard).toContain('poll.options.forEach((option) => {');
+    expect(dashboard).toContain(
+      'results.replaceChildren(pollResultCard(detail, { withDetailButton: false }))',
+    );
+    expect(styles).toContain('.poll-bar-label {');
+    expect(styles).toContain('overflow-wrap: anywhere;');
+    expect(styles).toContain('min-width: 0;');
   });
 });
-

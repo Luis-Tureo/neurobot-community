@@ -42,6 +42,9 @@ export const POLL_TOPICS = [
   'situaciones cotidianas',
   'humor',
   'tecnología',
+  'vida digital',
+  'gaming',
+  'creatividad',
   'música',
   'entretenimiento',
 ] as const;
@@ -50,9 +53,9 @@ export const POLL_QUESTION_MIN_CHARS = 10;
 export const POLL_QUESTION_MAX_CHARS = 200;
 export const POLL_OPTION_MAX_CHARS = 100;
 export const POLL_MIN_OPTIONS = 2;
-export const POLL_MAX_OPTIONS = 5;
+export const POLL_NATIVE_MAX_OPTIONS = 12;
 export const POLL_GENERATION_MAX_ATTEMPTS = 2;
-export const POLL_GENERATION_OUTPUT_TOKENS = 400;
+export const POLL_GENERATION_OUTPUT_TOKENS = 700;
 /** Umbral Dice sobre raíces de palabras a partir del cual dos preguntas se consideran equivalentes. */
 export const POLL_SIMILARITY_THRESHOLD = 0.65;
 
@@ -66,8 +69,7 @@ export const POLL_JSON_SCHEMA: Record<string, unknown> = {
     options: {
       type: 'array',
       items: { type: 'string' },
-      description:
-        'Entre 2 y 5 alternativas breves y distintas entre sí; habitualmente 3 o 4 (2 solo si es estrictamente binaria).',
+      description: `Entre ${POLL_MIN_OPTIONS} y ${POLL_NATIVE_MAX_OPTIONS} alternativas breves y distintas. La cantidad varía según la pregunta: usa la menor cantidad necesaria, sin rellenar artificialmente; 12 solo cuando cada opción esté justificada.`,
     },
     category: {
       type: 'string',
@@ -96,12 +98,17 @@ export const POLL_SYSTEM_INSTRUCTION = [
   '  ni una evaluación: prohibido preguntar por síntomas, diagnósticos, gravedad, medicación,',
   '  "qué tan enfermo" o "cuántos rasgos" tiene alguien.',
   '- Una sola pregunta breve (máximo 200 caracteres) y clara, apta para leer en el teléfono.',
-  '- Cantidad de opciones: entre 2 y 5 (MÁXIMO 5). Lo habitual es 3 o 4; 2 opciones únicamente si la',
-  '  pregunta es genuinamente binaria (ej. sí/no). No generes siempre 5 opciones.',
-  '  Opciones breves (máximo 100 caracteres), distintas entre sí, sin duplicados ni vacías.',
+  `- La cantidad de alternativas debe adaptarse a la pregunta. Usa entre ${POLL_MIN_OPTIONS} y ${POLL_NATIVE_MAX_OPTIONS}.`,
+  '  No generes opciones innecesarias únicamente para alcanzar una cantidad determinada.',
+  '  Si bastan 2 o 3 alternativas, no generes más. Si una pregunta múltiple tiene 6-8 posibilidades',
+  '  naturales, inclúyelas. Utiliza 9-12 únicamente cuando cada alternativa aporte una respuesta útil.',
+  '  Las opciones deben cubrir respuestas razonables sin duplicarse semánticamente; máximo 100 caracteres',
+  '  por opción. No agregues "Todas las anteriores" en selección múltiple. En selección única, úsala',
+  '  solo excepcionalmente cuando tenga sentido; tampoco añadas opciones de escape por rutina.',
   '- ENFOQUE CONTEMPORÁNEO Y NATURAL: orienta las preguntas a la vida actual de jóvenes y adultos',
-  '  (gestión de energía, pausas, playlists, podcasts, sobrecarga digital o de notificaciones,',
-  '  ambientes de estudio/trabajo, rutinas de sueño, gaming, intereses especiales cotidianos).',
+  '  (gestión de energía, pausas, playlists, podcasts, streaming, memes, chats, comunidades online,',
+  '  sobrecarga digital o de notificaciones, modo oscuro, estudio online, trabajo híbrido,',
+  '  herramientas digitales, IA cotidiana, creatividad, sueño, gaming e hiperfocos cotidianos).',
   '  Evita clasificaciones culturales rígidas y trilladas (como enumerar mecánicamente "Rock / Pop / Jazz"',
   '  como representación de música), referencias anticuadas por defecto, jerga forzada o modas virales efímeras,',
   '  y no menciones marcas comerciales innecesarias.',
@@ -113,10 +120,11 @@ export const POLL_SYSTEM_INSTRUCTION = [
   '- Usa la categoría objetivo indicada; devuelve esa misma categoría en minúsculas.',
   '- Responde ÚNICAMENTE con el objeto JSON solicitado, sin texto adicional.',
   '',
-  'EJEMPLOS DE ESTILO (no los copies):',
-  '{"question":"¿Qué ambiente te ayuda más a concentrarte? 🧠","options":["Silencio total 🤫","Música o playlist 🎧","Sonido de lluvia o ambiente 🌧️","Depende del día 🌱"],"category":"concentración","selectionMode":"single"}',
-  '{"question":"¿Qué cosas te ayudan a recargar energía después de un día intenso?","options":["Estar a solas","Luz tenue","Poner una playlist favorita","Jugar o desconectar en una pantalla","Caminar un rato"],"category":"energía","selectionMode":"multiple"}',
-  '{"question":"¿Sueles silenciar las notificaciones del teléfono?","options":["Casi siempre en silencio 🔕","Solo las de grupos","Con sonido activado 🔔"],"category":"tecnología","selectionMode":"single"}',
+  'EJEMPLOS DE ESTILO Y CANTIDAD (no copies literalmente los ejemplos):',
+  '{"question":"¿Sueles usar el teléfono en modo oscuro?","options":["Sí","No"],"category":"tecnología","selectionMode":"single"}',
+  '{"question":"¿Cómo prefieres enterarte de algo importante en un grupo?","options":["Mensaje breve","Mensaje fijado","Imagen o resumen","Que me mencionen","Lo reviso cuando pueda"],"category":"comunicación","selectionMode":"single"}',
+  '{"question":"¿Qué cosas te ayudan a concentrarte cuando tienes algo importante que hacer?","options":["Silencio","Música o playlist","Auriculares","Temporizador","Moverme mientras pienso","Lista de tareas","Tener algo para beber","Estar a solas"],"category":"concentración","selectionMode":"multiple"}',
+  '{"question":"¿Qué haces normalmente para desconectarte un rato?","options":["Escuchar música","Ver series o videos","Gaming","Dormir","Salir a caminar","Hablar con alguien","Estar a solas","Hacer algo creativo","Leer","No hacer nada en particular"],"category":"descanso","selectionMode":"multiple"}',
 ].join('\n');
 
 const FORBIDDEN_PATTERNS = [
@@ -409,9 +417,13 @@ export function parseGeneratedPoll(raw: string): PollContent {
   const candidate = extractJsonObject(raw);
   if (candidate === null) throw new PollGenerationError('AI_INVALID_RESPONSE');
   const question = typeof candidate.question === 'string' ? candidate.question : '';
-  const options = Array.isArray(candidate.options)
-    ? candidate.options.filter((option): option is string => typeof option === 'string')
-    : [];
+  const options = Array.isArray(candidate.options) ? candidate.options : [];
+  if (options.length < POLL_MIN_OPTIONS || options.length > POLL_NATIVE_MAX_OPTIONS) {
+    throw new PollGenerationError('AI_INVALID_RESPONSE', 'POLL_OPTION_COUNT_INVALID');
+  }
+  if (!options.every((option): option is string => typeof option === 'string')) {
+    throw new PollGenerationError('AI_INVALID_RESPONSE', 'POLL_OPTIONS_INVALID');
+  }
   const category = typeof candidate.category === 'string' ? candidate.category : '';
   const selectionMode = candidate.selectionMode;
   if (selectionMode !== 'single' && selectionMode !== 'multiple') {
@@ -432,7 +444,11 @@ export function validatePollContent(content: PollContent): PollContent {
   const options = content.options
     .map((option) => cleanLine(option, POLL_OPTION_MAX_CHARS))
     .filter((option) => option !== '');
-  if (options.length < POLL_MIN_OPTIONS || options.length > POLL_MAX_OPTIONS) {
+  if (
+    content.options.length < POLL_MIN_OPTIONS ||
+    content.options.length > POLL_NATIVE_MAX_OPTIONS ||
+    options.length !== content.options.length
+  ) {
     throw new PollGenerationError('AI_INVALID_RESPONSE', 'POLL_OPTION_COUNT_INVALID');
   }
   const normalizedOptions = options.map((option) => normalizePollQuestion(option));
@@ -465,7 +481,9 @@ function contentStems(value: string): Set<string> {
   const stems = new Set<string>();
   for (const token of normalizePollQuestion(value).split(' ')) {
     if (token === '' || STOPWORDS.has(token) || token.length < 3) continue;
-    stems.add(token.length > 6 ? token.slice(0, 6) : token);
+    // Estas formulaciones cotidianas describen la misma ayuda práctica.
+    const concept = /^(ayuda|ayudan|ayudar|mejor|mejora)$/u.test(token) ? 'ayuda' : token;
+    stems.add(concept.length > 6 ? concept.slice(0, 6) : concept);
   }
   return stems;
 }

@@ -2,6 +2,8 @@ import { AIProviderError, type AIProvider } from '../src/ai/ai-provider.js';
 import { AIRequestQueueService } from '../src/ai/ai-request-queue-service.js';
 import {
   POLL_SYSTEM_INSTRUCTION,
+  POLL_JSON_SCHEMA,
+  POLL_NATIVE_MAX_OPTIONS,
   PollGenerationError,
   PollGenerator,
   findSimilarQuestion,
@@ -99,14 +101,29 @@ describe('parseo y validación de encuestas generadas', () => {
     expect(binary.options).toHaveLength(2);
   });
 
-  it('rechaza más de 5 opciones (máximo 5) (Test H)', () => {
-    expect(() =>
-      validatePollContent({
-        question: '¿Qué prefieres hoy?',
-        options: ['1', '2', '3', '4', '5', '6'],
-        category: 'x',
-        allowMultipleAnswers: false,
+  it.each([2, 3, 4, 5, 6, 8, 10, 12])('acepta %i opciones', (count) => {
+    const poll = parseGeneratedPoll(
+      JSON.stringify({
+        question: '¿Qué formato prefieres para aprender?',
+        options: Array.from({ length: count }, (_, index) => `Opción ${index + 1}`),
+        category: 'estudio',
+        selectionMode: count >= 8 ? 'multiple' : 'single',
       }),
+    );
+    expect(poll.options).toHaveLength(count);
+    expect(poll.allowMultipleAnswers).toBe(count >= 8);
+  });
+
+  it.each([0, 1, 13])('rechaza %i opciones sin truncar', (count) => {
+    expect(() =>
+      parseGeneratedPoll(
+        JSON.stringify({
+          question: '¿Qué formato prefieres para aprender?',
+          options: Array.from({ length: count }, (_, index) => `Opción ${index + 1}`),
+          category: 'estudio',
+          selectionMode: 'single',
+        }),
+      ),
     ).toThrow('POLL_OPTION_COUNT_INVALID');
   });
 
@@ -150,13 +167,44 @@ describe('parseo y validación de encuestas generadas', () => {
       }),
     ).toThrow(PollGenerationError);
     expect(() =>
-      validatePollContent({
-        question: '¿Qué prefieres hoy?',
-        options: ['1', '2', '3', '4', '5', '6', '7'],
-        category: 'x',
-        allowMultipleAnswers: false,
-      }),
+      parseGeneratedPoll(
+        JSON.stringify({
+          question: '¿Qué prefieres hoy?',
+          options: [
+            'Una',
+            'Dos',
+            'Tres',
+            'Cuatro',
+            'Cinco',
+            'Seis',
+            'Siete',
+            'Ocho',
+            'Nueve',
+            'Diez',
+            'Once',
+            'Doce',
+            'Trece',
+          ],
+          category: 'preferencias',
+          selectionMode: 'multiple',
+        }),
+      ),
     ).toThrow('POLL_OPTION_COUNT_INVALID');
+  });
+
+  it('explica cantidad adaptativa, modos y contenido contemporáneo en el contrato de IA', () => {
+    expect(POLL_NATIVE_MAX_OPTIONS).toBe(12);
+    expect(POLL_JSON_SCHEMA.properties).toMatchObject({
+      selectionMode: { enum: ['single', 'multiple'] },
+    });
+    expect(POLL_SYSTEM_INSTRUCTION).toContain('entre 2 y 12');
+    expect(POLL_SYSTEM_INSTRUCTION).toContain('6-8 posibilidades');
+    expect(POLL_SYSTEM_INSTRUCTION).toContain('Rock / Pop / Jazz');
+    expect(POLL_SYSTEM_INSTRUCTION).toContain('vida actual');
+    expect(POLL_SYSTEM_INSTRUCTION).toContain(
+      'No agregues "Todas las anteriores" en selección múltiple',
+    );
+    expect(POLL_SYSTEM_INSTRUCTION).not.toMatch(/MÁXIMO 5|habitual es 3 o 4/u);
   });
 });
 
@@ -166,6 +214,15 @@ describe('detección de preguntas parecidas', () => {
   });
 
   it('considera equivalentes las preguntas casi iguales y distintas las que cambian de tema', () => {
+    expect(
+      isSimilarQuestion(
+        '¿Qué cosas te ayudan a concentrarte?',
+        '¿Qué usas para concentrarte mejor?',
+      ),
+    ).toBe(true);
+    expect(
+      isSimilarQuestion('¿Qué escuchas cuando estudias?', '¿Qué haces cuando necesitas descansar?'),
+    ).toBe(false);
     expect(
       isSimilarQuestion(
         '¿Qué haces cuando estás sobrecargado?',
@@ -225,6 +282,96 @@ describe('generación con Groq (proveedor simulado)', () => {
       ).rejects.toMatchObject({ code: 'AI_INVALID_RESPONSE' });
     } finally {
       failing.database.close();
+    }
+  });
+
+  it('reintenta cuando la IA devuelve 13 opciones y acepta la respuesta siguiente', async () => {
+    const excessive = JSON.stringify({
+      question: '¿Qué formatos usas para aprender?',
+      options: Array.from({ length: 13 }, (_, index) => `Formato ${index + 1}`),
+      category: 'estudio',
+      selectionMode: 'multiple',
+    });
+    const { database, generator } = createGenerator([excessive, VALID]);
+    try {
+      const result = await generator.generate({
+        category: 'estudio',
+        avoidQuestions: [],
+        selectionMode: 'mixed',
+      });
+      expect(result.attempts).toBe(2);
+      expect(result.options).toHaveLength(4);
+    } finally {
+      database.close();
+    }
+  });
+
+  it.each([
+    ['mixed', 'single', false],
+    ['mixed', 'multiple', true],
+    ['single', 'single', false],
+    ['multiple', 'multiple', true],
+  ] as const)('modo %s acepta respuesta %s', async (requested, mode, expected) => {
+    const response = JSON.stringify({
+      question: '¿Qué cosas te ayudan a estudiar?',
+      options: [
+        'Agua',
+        'Silencio',
+        'Música',
+        'Pausas',
+        'Auriculares',
+        'Lista de tareas',
+        'Temporizador',
+        'Luz natural',
+      ],
+      category: 'estudio',
+      selectionMode: mode,
+    });
+    const { database, generator } = createGenerator([response]);
+    try {
+      expect(
+        (
+          await generator.generate({
+            category: 'estudio',
+            avoidQuestions: [],
+            selectionMode: requested,
+          })
+        ).allowMultipleAnswers,
+      ).toBe(expected);
+    } finally {
+      database.close();
+    }
+  });
+
+  it.each([
+    ['single', 'multiple'],
+    ['multiple', 'single'],
+  ] as const)('modo %s rechaza respuesta %s', async (requested, mode) => {
+    const response = JSON.stringify({
+      question: '¿Qué cosas te ayudan a estudiar?',
+      options: [
+        'Agua',
+        'Silencio',
+        'Música',
+        'Pausas',
+        'Auriculares',
+        'Lista de tareas',
+        'Temporizador',
+        'Luz natural',
+      ],
+      category: 'estudio',
+      selectionMode: mode,
+    });
+    const { database, generator } = createGenerator([response, response]);
+    try {
+      await expect(
+        generator.generate({ category: 'estudio', avoidQuestions: [], selectionMode: requested }),
+      ).rejects.toMatchObject({
+        code: 'AI_INVALID_RESPONSE',
+        reason: 'POLL_SELECTION_MODE_MISMATCH',
+      });
+    } finally {
+      database.close();
     }
   });
 

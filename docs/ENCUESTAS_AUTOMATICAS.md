@@ -10,6 +10,27 @@ Las encuestas comunitarias se dividen en dos partes independientes:
   resultados por opción, categorías y tendencias) alimentado exclusivamente por los votos
   recibidos desde WhatsApp.
 
+## Contenido y modos de respuesta
+
+Cada encuesta nativa tiene entre **2 y 12 alternativas**. El límite superior corresponde al Poll
+nativo usado por WhatsApp Web; la cantidad es adaptativa y se usa la menor que cubra bien la
+pregunta. Una pregunta binaria puede tener dos opciones, mientras una selección múltiple amplia
+puede justificar más. El generador rechaza respuestas de IA con 13 o más alternativas y reintenta;
+no recorta el arreglo. El prompt favorece situaciones actuales (vida digital, música, gaming,
+creatividad y hábitos cotidianos) sin jerga generacional ni preguntas clínicas.
+
+El modo predeterminado **mixed** deja que la IA elija entre **single** (una preferencia principal)
+y **multiple** (varias respuestas simultáneas). Los modos forzados single y multiple exigen el
+tipo correspondiente también en generación y fallback. WhatsApp Web recibe
+`allowMultipleAnswers: true` para multiple; cada opción se marca manualmente, incluso si se quieren
+marcar todas. No se agrega «Todas las anteriores» a las encuestas multiple. En single solo tendría
+sentido excepcionalmente; tampoco se agregan opciones de escape por defecto.
+
+El banco fallback incluye plantillas contemporáneas con distintas cantidades de alternativas y
+ambos modos. Al iniciar una instalación existente se añaden las plantillas nuevas y se desactivan
+las predeterminadas retiradas, conservando sus filas para referencias históricas; las plantillas
+personalizadas no se modifican. Las encuestas enviadas y sus votos tampoco se reescriben.
+
 ## Recurrencia sin drift
 
 Los horarios se derivan **siempre** de `startTime + intervalHours + timezone` anclados a una fecha
@@ -64,6 +85,10 @@ formato y que inicio ≠ fin (una franja igual sería ambigua entre 0 y 24 horas
 3. encuesta **histórica** del nuevo sistema enviada hace más de 14 días (o la menos reciente);
 4. **banco heredado** (`bot_poll_templates`, solo lectura) como último recurso.
 
+La reutilización y el banco comprueban que las opciones sigan dentro del límite nativo y que el
+contenido sea válido antes de volver a ofrecerlo. En analytics, el porcentaje de cada alternativa
+multiple se divide por **participantes únicos**: sus porcentajes pueden sumar más de 100 %.
+
 Las opciones 3 y 4 solo se usan para el horario inminente (≤ 45 min), para no gastar historial
 mientras Groq esté momentáneamente caído. Se guarda `origin` = `ai` | `reused` | `legacy_bank` y,
 cuando corresponde, `source_poll_id` / `source_template_id`.
@@ -77,7 +102,7 @@ reasignan a los nuevos horarios; lo enviado, los votos y los KPIs no se tocan. U
 margen venció (backend detenido) no se envía atrasado: su contenido regresa a la reserva.
 
 ## WhatsApp
- 
+
 `whatsapp-web.js` envía `Poll` nativos con `allowMultipleAnswers` según el tipo de encuesta
 (`true` o `false`) y el `id._serialized` del mensaje se guarda en
 `bot_poll_deliveries.whatsapp_message_id`. Cada `vote_update` trae `parentMessage.id` / `parentMsgKey`,

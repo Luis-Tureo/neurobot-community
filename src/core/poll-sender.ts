@@ -4,6 +4,7 @@ import { serializeError } from '../infrastructure/safe-error.js';
 import type { MessagingClient } from '../messaging/messaging-client.js';
 import type { AppDatabase } from '../persistence/database.js';
 import type { Anonymizer } from '../security/anonymizer.js';
+import { POLL_MIN_OPTIONS, POLL_NATIVE_MAX_OPTIONS } from './poll-generator.js';
 import type { PollRepository } from './poll-repository.js';
 
 export type PollSendOutcome = {
@@ -45,6 +46,14 @@ export class PollSender {
   }
 
   public async send(poll: PollRecord, groupIds: string[]): Promise<PollSendOutcome> {
+    if (poll.options.length < POLL_MIN_OPTIONS || poll.options.length > POLL_NATIVE_MAX_OPTIONS) {
+      return {
+        status: 'failed',
+        sentGroups: 0,
+        failedGroups: groupIds.length,
+        lastError: 'POLL_OPTION_COUNT_INVALID',
+      };
+    }
     const outcome: PollSendOutcome = {
       status: 'skipped',
       sentGroups: 0,

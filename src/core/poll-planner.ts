@@ -4,9 +4,12 @@ import { serializeError } from '../infrastructure/safe-error.js';
 import type { AppDatabase } from '../persistence/database.js';
 import {
   POLL_TOPICS,
+  POLL_MIN_OPTIONS,
+  POLL_NATIVE_MAX_OPTIONS,
   PollGenerationError,
   findSimilarQuestion,
   normalizePollQuestion,
+  validatePollContent,
   type PollContentGenerator,
 } from './poll-generator.js';
 import type { PollRepository } from './poll-repository.js';
@@ -166,7 +169,7 @@ export class PollPlanner {
         if (mode === 'multiple') return poll.allowMultipleAnswers;
         return true;
       });
-      let candidate = candidateIndex !== -1 ? pool.splice(candidateIndex, 1)[0] ?? null : null;
+      let candidate = candidateIndex !== -1 ? (pool.splice(candidateIndex, 1)[0] ?? null) : null;
       if (candidate === null) {
         const urgent = slot.instantMs - now.getTime() <= this.fallbackWindowMs;
         const allowGeneration = generations < this.maxGenerationsPerRun;
@@ -347,6 +350,7 @@ export class PollPlanner {
         if (selectionMode === 'multiple') return entry.poll.allowMultipleAnswers;
         return true;
       })
+      .filter((entry) => isUsablePoll(entry.poll))
       .filter((entry) => findSimilarQuestion(entry.poll.question, recent) === null)
       .sort((left, right) => left.lastSentAt.localeCompare(right.lastSentAt));
     if (candidates.length === 0) return null;
@@ -379,9 +383,7 @@ export class PollPlanner {
     const usage = this.repository.legacyTemplateUsage();
     const templates = this.repository
       .legacyTemplates()
-      // El banco histórico contiene escalas y preguntas extensas de hasta 12 alternativas.
-      // Solo se reutilizan plantillas que ya cumplen la experiencia actual: 2 a 5 alternativas.
-      .filter((template) => template.options.length >= 2 && template.options.length <= 5)
+      .filter((template) => isUsablePoll(template))
       .filter((template) => {
         if (selectionMode === 'single') return template.allowMultipleAnswers !== true;
         if (selectionMode === 'multiple') return template.allowMultipleAnswers === true;
@@ -444,5 +446,25 @@ export class PollPlanner {
         'No fue posible persistir un evento de encuestas',
       );
     }
+  }
+}
+
+function isUsablePoll(
+  content: Omit<PollContent, 'allowMultipleAnswers'> & { allowMultipleAnswers?: boolean },
+): boolean {
+  if (
+    content.options.length < POLL_MIN_OPTIONS ||
+    content.options.length > POLL_NATIVE_MAX_OPTIONS
+  ) {
+    return false;
+  }
+  try {
+    validatePollContent({
+      ...content,
+      allowMultipleAnswers: content.allowMultipleAnswers === true,
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
