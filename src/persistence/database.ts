@@ -3199,6 +3199,18 @@ export class AppDatabase {
       const id = Number(result.lastInsertRowid);
       template.options.forEach((option, index) => insertOption.run(id, index, option));
     }
+    // Conservar las filas antiguas por referencias históricas, sin seguir ofreciendo sus preguntas.
+    // Las plantillas personalizadas y las preferencias ocultas de cada asistente se mantienen.
+    const currentKeys = new Set(DEFAULT_POLL_TEMPLATES.map((template) => template.key));
+    const existingDefaults = this.db
+      .prepare('SELECT id, default_key FROM bot_poll_templates WHERE bot_id = ? AND is_default = 1')
+      .all(botId) as Array<{ id: number; default_key: string | null }>;
+    const disableRetired = this.db.prepare('UPDATE bot_poll_templates SET enabled = 0 WHERE id = ?');
+    for (const existing of existingDefaults) {
+      if (existing.default_key !== null && !currentKeys.has(existing.default_key)) {
+        disableRetired.run(existing.id);
+      }
+    }
   }
 
   private seedDefaults(): void {

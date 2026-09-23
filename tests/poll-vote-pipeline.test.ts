@@ -69,6 +69,72 @@ function optionVotes(analytics: PollAnalyticsService, pollId: number): number[] 
 }
 
 describe('pipeline completo: envío → whatsapp_message_id → vote_update → BD → analítica', () => {
+  it('persiste tres selecciones nativas de ocho opciones, incluida una selección de todas', async () => {
+    const subject = createSubject({ initialNow: at('2026-01-05', '08:59') });
+    const analytics = new PollAnalyticsService(subject.database, 'neurobot', { now: subject.now });
+    const options = [
+      'Silencio',
+      'Música',
+      'Auriculares',
+      'Temporizador',
+      'Lista',
+      'Agua',
+      'Movimiento',
+      'Luz natural',
+    ];
+    try {
+      subject.generator.scripted.push({
+        question: '¿Qué cosas te ayudan a estudiar?',
+        options,
+        category: 'estudio',
+        allowMultipleAnswers: true,
+        attempts: 1,
+        model: 'openai/gpt-oss-120b',
+        totalTokens: 30,
+      });
+      enable(subject.service, { startTime: '09:00', intervalHours: 3, selectionMode: 'multiple' });
+      await subject.service.runDueTasks();
+      subject.setNow(at('2026-01-05', '09:00'));
+      await subject.service.runDueTasks();
+      const poll = subject.repository.list({ statuses: ['sent'] })[0];
+      const messageId = subject.client.sentPolls[0]?.messageId;
+      if (poll === undefined || messageId === null || messageId === undefined)
+        throw new Error('encuesta sin envío');
+      expect(poll.options).toEqual(options);
+      expect(subject.client.sentPolls[0]?.allowMultipleAnswers).toBe(true);
+      const selections = [
+        [0, 3, 6],
+        [1, 3, 7],
+        [0, 1, 2, 3, 4, 5, 6, 7],
+      ];
+      const voters = [USER_1, USER_2, '56933333333@c.us'];
+      for (const [index, indexes] of selections.entries()) {
+        const when = at('2026-01-05', `09:0${index + 1}`);
+        const vote = parsePollVoteEvent(
+          rawVote(messageId, voters[index]!, indexes!, when, {
+            selectedOptions: indexes!.map((localId) => ({ name: options[localId], localId })),
+          }),
+          (value) => subject.anonymizer.identifier(value),
+        );
+        if (vote === null) throw new Error('vote_update no normalizado');
+        expect(await subject.votes.handle(vote)).toBe('recorded');
+      }
+      const detail = analytics.detail(poll.id);
+      expect(detail?.participants).toBe(3);
+      expect(detail?.totalVotes).toBe(14);
+      expect(detail?.options.map((option) => option.votes)).toEqual([2, 2, 1, 3, 1, 1, 2, 2]);
+      expect(detail?.options.map((option) => option.percentage)).toEqual([
+        67, 67, 33, 100, 33, 33, 67, 67,
+      ]);
+      expect(
+        analytics.summary(analytics.resolvePeriod({ key: 'today' }, subject.now())).recent[0]
+          ?.options,
+      ).toHaveLength(8);
+    } finally {
+      subject.database.close();
+    }
+  });
+
   it('reproduce el caso funcional crítico (votar, cambiar, retirar, repetir)', async () => {
     const subject = createSubject({ initialNow: at('2026-01-05', '08:59') });
     const analytics = new PollAnalyticsService(subject.database, 'neurobot', { now: subject.now });

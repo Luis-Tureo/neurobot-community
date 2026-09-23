@@ -6,6 +6,7 @@ import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { SecretVault } from '../src/security/secret-vault.js';
 import { PollRepository } from '../src/core/poll-repository.js';
+import { DEFAULT_POLL_TEMPLATES } from '../src/core/poll-defaults.js';
 
 function storeProfile(name: string) {
   return createDefaultAssistantProfile({
@@ -242,8 +243,8 @@ describe('aislamiento multibot', () => {
     expect(secondPolls.configuration()).toMatchObject({ enabled: false, intervalHours: 3 });
     expect(firstPolls.list({})[0]?.question).toContain('primer asistente');
     expect(secondPolls.list({})).toHaveLength(0);
-    expect(firstPolls.legacyTemplates()).toHaveLength(36);
-    expect(secondPolls.legacyTemplates()).toHaveLength(36);
+    expect(firstPolls.legacyTemplates()).toHaveLength(DEFAULT_POLL_TEMPLATES.length);
+    expect(secondPolls.legacyTemplates()).toHaveLength(DEFAULT_POLL_TEMPLATES.length);
   });
 
   it('no bloquea bots por un presupuesto global interno', () => {
