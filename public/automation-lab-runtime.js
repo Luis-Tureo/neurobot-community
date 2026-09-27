@@ -3,8 +3,6 @@ let csrfToken = null;
 let pollsAvailable = false;
 let authorizedGroups = [];
 let selectedGroupKeys = new Set();
-let botValidation = null;
-let botValidationSignature = '';
 let validationTimerId = null;
 let validationCountdown = 30;
 const digestTrackers = new Map();
@@ -65,8 +63,6 @@ function startValidationAutoClear() {
 function hideValidationResult() {
   const container = query('#lab-validation-container');
   if (container) container.classList.add('hidden');
-  botValidation = null;
-  botValidationSignature = '';
   const summary = query('#lab-validation-summary');
   if (summary) {
     summary.dataset.state = 'idle';
@@ -191,14 +187,9 @@ function selectedGroups() {
   return groupKeys;
 }
 
-function selectionSignature(groupKeys = [...selectedGroupKeys]) {
-  return `${botId || ''}:${[...groupKeys].sort().join(',')}`;
-}
 
 function invalidateBotValidation() {
   clearValidationTimer();
-  botValidation = null;
-  botValidationSignature = '';
   const summary = query('#lab-validation-summary');
   if (summary) {
     summary.dataset.state = 'idle';
@@ -773,8 +764,6 @@ async function validateSelectedBot(testProvider = true) {
       method: 'POST',
       body: JSON.stringify({ botId, groupKeys, testProvider }),
     });
-    botValidation = validation;
-    botValidationSignature = selectionSignature(groupKeys);
     renderBotValidation(validation);
     return validation;
   } finally {
@@ -830,8 +819,6 @@ window.addEventListener('bot-services-load', (event) => {
   moduleLoadGeneration += 1;
   stopAllDigestTracking();
   botId = event.detail.botId;
-  botValidation = null;
-  botValidationSignature = '';
   createModule();
   bindValidation();
   const visible = new Set(event.detail.visibleModules || []).has('automatic-messages');
