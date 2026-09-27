@@ -7,8 +7,6 @@ let botValidation = null;
 let botValidationSignature = '';
 let validationTimerId = null;
 let validationCountdown = 30;
-let simulatorTimerId = null;
-let simulatorCountdown = 30;
 const digestTrackers = new Map();
 const activeDigestStatuses = new Set([
   'queued',
@@ -77,49 +75,6 @@ function hideValidationResult() {
   query('#lab-validation-checks')?.replaceChildren();
 }
 
-function clearSimulatorTimer() {
-  if (simulatorTimerId) {
-    window.clearInterval(simulatorTimerId);
-    simulatorTimerId = null;
-  }
-  const timerBadge = query('#lab-chat-timer');
-  if (timerBadge) {
-    timerBadge.classList.add('hidden');
-    timerBadge.textContent = '';
-  }
-}
-
-function startSimulatorAutoClear() {
-  clearSimulatorTimer();
-  const timerBadge = query('#lab-chat-timer');
-  if (!timerBadge) return;
-  simulatorCountdown = 30;
-  timerBadge.textContent = `Se ocultará en ${simulatorCountdown} s`;
-  timerBadge.classList.remove('hidden');
-
-  simulatorTimerId = window.setInterval(() => {
-    simulatorCountdown -= 1;
-    if (simulatorCountdown > 0) {
-      timerBadge.textContent = `Se ocultará en ${simulatorCountdown} s`;
-    } else {
-      clearSimulatorTimer();
-      resetSimulatorUI();
-    }
-  }, 1000);
-}
-
-function resetSimulatorUI() {
-  const container = query('#lab-chat-container');
-  if (container) container.classList.add('hidden');
-  const chat = query('#lab-chat');
-  if (!chat) return;
-  chat.replaceChildren();
-  const empty = document.createElement('p');
-  empty.className = 'lab-chat-empty';
-  empty.textContent = 'Selecciona uno o más grupos, valida el bot y escribe una pregunta.';
-  chat.append(empty);
-}
-
 function botPath(path) {
   const separator = path.includes('?') ? '&' : '?';
   return `${path}${separator}botId=${encodeURIComponent(botId)}`;
@@ -178,34 +133,6 @@ function createModule() {
         <div id="lab-group-options" class="lab-group-options"></div>
       </details>
     </fieldset>
-    <article class="card inset lab-ai-simulator-card" data-collapsible data-open="true">
-      <div class="section-heading">
-        <div>
-          <h3>Simulador conversacional con IA</h3>
-          <p class="muted">Escribe como un integrante y revisa la respuesta que produciría el pipeline real del asistente.</p>
-        </div>
-      </div>
-      <form id="lab-chat-form" class="lab-chat-form">
-        <label for="lab-chat-question">Pregunta de prueba</label>
-        <textarea id="lab-chat-question" rows="3" maxlength="3000" placeholder="Ejemplo: ¿De qué se trata este grupo?" required></textarea>
-        <div class="lab-chat-actions">
-          <p class="muted">No se envía a WhatsApp. Si el pipeline necesita consultar la IA real, el consumo de tokens sí se registra.</p>
-          <div class="lab-chat-action-buttons">
-            <button id="lab-clear-chat" class="secondary" type="button">Limpiar conversación</button>
-            <button id="lab-chat-send" type="submit">Enviar al bot</button>
-          </div>
-        </div>
-      </form>
-      <div id="lab-chat-container" class="lab-chat-container hidden">
-        <div class="lab-chat-header">
-          <h4 class="lab-chat-title">Respuesta del simulador</h4>
-          <span id="lab-chat-timer" class="lab-timer-badge hidden" aria-live="polite">Se ocultará en 30 s</span>
-        </div>
-        <div id="lab-chat" class="lab-chat" aria-live="polite">
-          <p class="lab-chat-empty">Selecciona uno o más grupos, valida el bot y escribe una pregunta.</p>
-        </div>
-      </div>
-    </article>
     <article class="card inset lab-test-options-card" data-collapsible data-open="true">
       <div class="section-heading">
         <div>
@@ -219,7 +146,7 @@ function createModule() {
       <div class="section-heading">
         <div>
           <h3>Validación del funcionamiento del bot</h3>
-          <p class="muted">Comprueba que el asistente, WhatsApp, la IA y los grupos estén disponibles antes de probar conversaciones.</p>
+          <p class="muted">Comprueba que el asistente, WhatsApp, la IA y los grupos estén disponibles antes de ejecutar pruebas.</p>
         </div>
         <div class="section-heading-actions">
           <button id="lab-validate-bot" class="secondary" type="button">Validar bot</button>
@@ -238,7 +165,7 @@ function createModule() {
     if (window.configureCollapsible) window.configureCollapsible(card);
   });
   bindModule();
-  bindSimulator();
+  bindValidation();
   renderTests();
 }
 
@@ -855,104 +782,9 @@ async function validateSelectedBot(testProvider = true) {
   }
 }
 
-async function ensureConversationValidation(groupKeys) {
-  const signature = selectionSignature(groupKeys);
-  if (botValidation?.healthy && botValidationSignature === signature) return botValidation;
-  const validation = await validateSelectedBot(true);
-  if (!validation.healthy) {
-    throw new Error(
-      'El bot no está completamente operativo. Corrige el diagnóstico antes de probar la conversación.',
-    );
-  }
-  return validation;
-}
-
-function appendChatMessage(role, text, meta = '') {
-  const chat = query('#lab-chat');
-  if (!chat) return;
-  query('.lab-chat-empty', chat)?.remove();
-  const message = document.createElement('article');
-  message.className = 'lab-chat-message';
-  message.dataset.role = role;
-  if (meta) {
-    const metadata = document.createElement('span');
-    metadata.className = 'lab-chat-meta';
-    metadata.textContent = meta;
-    message.append(metadata);
-  }
-  const body = document.createElement('p');
-  body.textContent = text;
-  message.append(body);
-  chat.append(message);
-  chat.scrollTop = chat.scrollHeight;
-}
-
-function clearSimulatorConversation() {
-  clearSimulatorTimer();
-  resetSimulatorUI();
-}
-
-async function sendSimulatorQuestion(event) {
-  event.preventDefault();
-  const input = query('#lab-chat-question');
-  const button = query('#lab-chat-send');
-  if (!input || !button || !botId) return;
-  const question = input.value.trim();
-  if (!question) return;
-
-  try {
-    const groupKeys = selectedGroups();
-    button.disabled = true;
-    clearSimulatorTimer();
-    query('#lab-chat-container')?.classList.remove('hidden');
-    await ensureConversationValidation(groupKeys);
-    appendChatMessage('user', question, 'Pregunta de prueba');
-    input.value = '';
-    const result = await api('/api/automation-lab/ai-simulator', {
-      method: 'POST',
-      body: JSON.stringify({
-        botId,
-        groupKeys,
-        question,
-        confirmed: true,
-      }),
-    });
-    (result.responses || []).forEach((response) => {
-      const metadata = `${response.groupName} · ${response.code} · ${response.durationMs} ms`;
-      appendChatMessage('assistant', response.text, metadata);
-    });
-    if ((result.responses || []).length === 0) {
-      appendChatMessage('error', 'El simulador no devolvió ninguna respuesta.', 'Simulador');
-    }
-    startSimulatorAutoClear();
-  } catch (error) {
-    if (error.validation) {
-      botValidation = error.validation;
-      botValidationSignature = selectionSignature();
-      renderBotValidation(error.validation);
-    }
-    appendChatMessage(
-      'error',
-      error.message || 'La prueba conversacional no pudo completarse.',
-      'Error de prueba',
-    );
-    startSimulatorAutoClear();
-  } finally {
-    button.disabled = false;
-  }
-}
-
-function bindSimulator() {
+function bindValidation() {
   query('#lab-validate-bot')?.addEventListener('click', () => {
     void validateSelectedBot(true).catch((error) => showNotice(error.message, true));
-  });
-  query('#lab-clear-chat')?.addEventListener('click', clearSimulatorConversation);
-  query('#lab-chat-form')?.addEventListener('submit', (event) => void sendSimulatorQuestion(event));
-  query('#lab-chat-question')?.addEventListener('keydown', (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-      event.preventDefault();
-      query('#lab-chat-form')?.requestSubmit();
-    }
   });
 }
 
@@ -1001,7 +833,7 @@ window.addEventListener('bot-services-load', (event) => {
   botValidation = null;
   botValidationSignature = '';
   createModule();
-  bindSimulator();
+  bindValidation();
   const visible = new Set(event.detail.visibleModules || []).has('automatic-messages');
   queryAll('[data-section="automation-lab"], option[value="automation-lab"]').forEach((item) => {
     item.hidden = !visible;
@@ -1014,4 +846,5 @@ window.addEventListener('bot-services-load', (event) => {
 window.addEventListener('pagehide', stopAllDigestTracking);
 
 createModule();
-bindSimulator();
+bindValidation();
+

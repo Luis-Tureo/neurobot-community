@@ -5,18 +5,16 @@ const labScript = readFileSync('public/automation-lab-runtime.js', 'utf8');
 const panelUi = readFileSync('public/panel-ui-core.js', 'utf8');
 const styles = readFileSync('src/admin/panel.css', 'utf8');
 
-describe('requerimiento 20 - Centro de pruebas', () => {
-  it('mantiene colapsables solo el simulador y las opciones de prueba', () => {
+describe('Centro de pruebas sin simulador conversacional', () => {
+  it('mantiene colapsable únicamente las opciones de prueba y retira el simulador', () => {
     const collapsibleCards = labScript.match(/data-collapsible data-open="true"/g) ?? [];
 
-    expect(collapsibleCards).toHaveLength(2);
+    expect(collapsibleCards).toHaveLength(1);
     expect(labScript).toContain('<article class="card inset lab-bot-validation-card">');
     expect(labScript).not.toContain(
       '<article class="card inset lab-bot-validation-card" data-collapsible',
     );
-    expect(labScript).toContain(
-      '<article class="card inset lab-ai-simulator-card" data-collapsible data-open="true">',
-    );
+    expect(labScript).not.toContain('lab-ai-simulator-card');
     expect(labScript).toContain(
       '<article class="card inset lab-test-options-card" data-collapsible data-open="true">',
     );
@@ -27,54 +25,42 @@ describe('requerimiento 20 - Centro de pruebas', () => {
     expect(panelUi).toContain("button.setAttribute('aria-expanded', String(open))");
   });
 
-  it('coloca Limpiar conversación inmediatamente a la izquierda de Enviar al bot', () => {
-    const simulatorStart = labScript.indexOf('lab-ai-simulator-card');
-    const simulatorForm = labScript.indexOf('id="lab-chat-form"', simulatorStart);
-    const actionButtons = labScript.indexOf('class="lab-chat-action-buttons"', simulatorForm);
-    const clearAction = labScript.indexOf('id="lab-clear-chat"', actionButtons);
-    const sendAction = labScript.indexOf('id="lab-chat-send"', actionButtons);
-    const formEnd = labScript.indexOf('</form>', simulatorForm);
-
-    expect(simulatorStart).toBeGreaterThanOrEqual(0);
-    expect(simulatorForm).toBeGreaterThan(simulatorStart);
-    expect(actionButtons).toBeGreaterThan(simulatorForm);
-    expect(clearAction).toBeGreaterThan(actionButtons);
-    expect(sendAction).toBeGreaterThan(clearAction);
-    expect(formEnd).toBeGreaterThan(sendAction);
-    expect(styles).toContain('[data-collapsible].is-collapsed > :not(.section-heading)');
-    expect(styles).toContain('display: none !important;');
+  it('no contiene elementos de chat ni formulario de simulación conversacional', () => {
+    for (const removed of [
+      'lab-ai-simulator-card',
+      'id="lab-chat-form"',
+      'id="lab-clear-chat"',
+      'id="lab-chat-send"',
+      'simulatorCountdown',
+      'clearSimulatorTimer',
+      'resetSimulatorUI',
+    ]) {
+      expect(labScript).not.toContain(removed);
+    }
   });
 
   it('deja la validación del bot al final del Centro de pruebas', () => {
-    const simulatorStart = labScript.indexOf('lab-ai-simulator-card');
     const testOptionsStart = labScript.indexOf('lab-test-options-card');
     const validationStart = labScript.indexOf('lab-bot-validation-card');
     const templateEnd = labScript.indexOf('`;\n  reference.insertAdjacentElement', validationStart);
 
-    expect(simulatorStart).toBeGreaterThanOrEqual(0);
-    expect(testOptionsStart).toBeGreaterThan(simulatorStart);
+    expect(testOptionsStart).toBeGreaterThanOrEqual(0);
     expect(validationStart).toBeGreaterThan(testOptionsStart);
     expect(templateEnd).toBeGreaterThan(validationStart);
   });
 
-  it('mantiene contadores independientes de 30 segundos y limpia los resultados', () => {
+  it('mantiene contador de 30 segundos para la validación del bot y limpia resultados', () => {
     expect(labScript).toContain('let validationCountdown = 30;');
-    expect(labScript).toContain('let simulatorCountdown = 30;');
     expect(labScript).toContain('validationCountdown = 30;');
-    expect(labScript).toContain('simulatorCountdown = 30;');
     expect(labScript).toContain('Se ocultará en ${validationCountdown} s');
-    expect(labScript).toContain('Se ocultará en ${simulatorCountdown} s');
     expect(labScript).toContain('window.setInterval(() => {');
     expect(labScript).toContain('}, 1000);');
     expect(labScript).toContain('clearValidationTimer();');
-    expect(labScript).toContain('clearSimulatorTimer();');
     expect(labScript).toContain('hideValidationResult();');
-    expect(labScript).toContain('resetSimulatorUI();');
     expect(labScript).toContain('startValidationAutoClear();');
-    expect(labScript).toContain('startSimulatorAutoClear();');
   });
 
-  it('deja Tailwind como única fuente de estilos del Centro de pruebas', () => {
+  it('mantiene los estilos limpios en panel.css sin inyecciones dinámicas de estilos', () => {
     expect(labScript).not.toContain('installSimulatorStyles');
     expect(labScript).not.toContain('automation-lab-simulator-styles');
     expect(labScript).not.toContain("document.createElement('style')");
@@ -84,10 +70,6 @@ describe('requerimiento 20 - Centro de pruebas', () => {
       '.lab-bot-validation-card',
       '.lab-validation-container',
       '.lab-validation-check',
-      '.lab-ai-simulator-card',
-      '.lab-chat-form',
-      '.lab-chat-container',
-      '.lab-chat-message',
       '.lab-test-options-card',
       '.automation-test-item',
       '.digest-test-status',
@@ -96,7 +78,5 @@ describe('requerimiento 20 - Centro de pruebas', () => {
     ]) {
       expect(styles).toContain(selector);
     }
-    expect(labScript).not.toContain("document.createElement('style')");
-    expect(labScript).not.toContain("style.setProperty('--digest-progress'");
   });
 });

@@ -12,11 +12,10 @@ import { hashPassword } from '../src/security/password.js';
 
 type Authentication = { cookie: string; csrf: string };
 
-describe('simulador conversacional del Centro de pruebas', () => {
+describe('Centro de pruebas sin simulador conversacional', () => {
   let app: FastifyInstance;
   let database: AppDatabase;
   let client: SimulatedMessagingClient;
-  let providerRequests: Array<Parameters<AIProvider['generateGroundedResponse']>[0]>;
 
   beforeEach(async () => {
     database = new AppDatabase(':memory:');
@@ -32,7 +31,6 @@ describe('simulador conversacional del Centro de pruebas', () => {
     });
     database.upsertDetectedGroup('grupo-laboratorio@g.us', 'Grupo laboratorio');
     database.setGroupAuthorized('grupo-laboratorio@g.us', true);
-    providerRequests = [];
 
     client = new SimulatedMessagingClient();
     const logger = createLogger('silent');
@@ -56,11 +54,10 @@ describe('simulador conversacional del Centro de pruebas', () => {
     const provider: AIProvider = {
       isConfigured: () => true,
       testConnection: async () => ({ successful: true }),
-      generateGroundedResponse: async (request) => {
-        providerRequests.push(request);
+      generateGroundedResponse: async () => {
         return {
-          text: 'Respuesta generada durante la prueba.',
-          usage: { inputTokens: 3, outputTokens: 4, totalTokens: 7 },
+          text: 'Respuesta de prueba',
+          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
         };
       },
       getModelInformation: () => ({ provider: 'test', model: 'modelo-prueba' }),
@@ -91,7 +88,7 @@ describe('simulador conversacional del Centro de pruebas', () => {
     database.close();
   });
 
-  it('valida el funcionamiento y responde usando el pipeline real sin enviar a WhatsApp', async () => {
+  it('valida el funcionamiento del bot y proveedor de IA', async () => {
     const auth = await login(app);
     const automatic = await app.inject({
       method: 'GET',
@@ -121,33 +118,9 @@ describe('simulador conversacional del Centro de pruebas', () => {
       provider: { configured: true, connection: 'successful' },
     });
     expect(validation.json().checks.every((check: { ok: boolean }) => check.ok)).toBe(true);
-
-    const simulation = await app.inject({
-      method: 'POST',
-      url: '/api/automation-lab/ai-simulator',
-      headers: {
-        cookie: auth.cookie,
-        'x-csrf-token': auth.csrf,
-      },
-      payload: {
-        botId: 'neurobot',
-        groupKeys: [groupKey],
-        question: 'hola',
-        confirmed: true,
-      },
-    });
-    expect(simulation.statusCode).toBe(200);
-    expect(simulation.json()).toMatchObject({
-      simulation: true,
-      pipeline: 'AssistantQueryService',
-      sentToWhatsApp: false,
-      responses: [{ groupKey, groupName: 'Grupo laboratorio', code: 'COMMUNITY_GREETING' }],
-    });
-    expect(simulation.json().responses[0].text.length).toBeGreaterThan(0);
-    expect(client.sentMessages).toHaveLength(0);
   });
 
-  it('bloquea la simulación cuando el grupo no está disponible', async () => {
+  it('confirma que el endpoint del simulador conversacional ha sido retirado (404)', async () => {
     const auth = await login(app);
     const simulation = await app.inject({
       method: 'POST',
@@ -158,84 +131,14 @@ describe('simulador conversacional del Centro de pruebas', () => {
       },
       payload: {
         botId: 'neurobot',
-        groupKeys: ['z'.repeat(20)],
+        groupKeys: ['any-group'],
         question: 'hola',
         confirmed: true,
       },
     });
-    expect(simulation.statusCode).toBe(409);
-    expect(simulation.json()).toMatchObject({
-      code: 'BOT_VALIDATION_FAILED',
-      validation: { healthy: false },
-    });
-  });
-
-  it('usa la misma composición contextual para preguntas internas y educativas', async () => {
-    const auth = await login(app);
-    const automatic = await app.inject({
-      method: 'GET',
-      url: '/api/automatic-messages',
-      headers: { cookie: auth.cookie },
-    });
-    const groupKey = automatic.json().authorizedGroups[0]?.key as string | undefined;
-    expect(groupKey).toHaveLength(20);
-    const profile = database.getBotProfile('neurobot');
-    const category = database.listKnowledgeCategories(profile.id)[0];
-    expect(category).toBeDefined();
-    database.saveKnowledgeEntry({
-      id: 0,
-      profileId: profile.id,
-      categoryId: category?.id as number,
-      title: 'Propósito de Grupo laboratorio',
-      content:
-        'La finalidad confirmada de Grupo laboratorio es probar el asistente con contexto real.',
-      keywords: ['sirve', 'grupo', 'propósito'],
-      synonyms: [],
-      enabled: true,
-      priority: 100,
-      internalSource: 'approved:automation-lab-test',
-    });
-
-    const purpose = await simulate(app, auth, groupKey as string, '¿Para qué sirve este grupo?');
-    const education = await simulate(
-      app,
-      auth,
-      groupKey as string,
-      '¿Qué es la sobrecarga sensorial?',
-    );
-
-    expect(purpose.statusCode).toBe(200);
-    expect(education.statusCode).toBe(200);
-    expect(purpose.json()).toMatchObject({
-      pipeline: 'AssistantQueryService',
-      sentToWhatsApp: false,
-      responses: [{ groupKey, code: 'AI_RESPONSE' }],
-    });
-    expect(education.json()).toMatchObject({
-      pipeline: 'AssistantQueryService',
-      responses: [{ groupKey, code: 'AI_RESPONSE' }],
-    });
-    expect(providerRequests[0]?.context).toContain('Grupo laboratorio');
-    expect(providerRequests[1]?.context).toContain('GENERAL_EDUCATION');
+    expect(simulation.statusCode).toBe(404);
   });
 });
-
-function simulate(app: FastifyInstance, auth: Authentication, groupKey: string, question: string) {
-  return app.inject({
-    method: 'POST',
-    url: '/api/automation-lab/ai-simulator',
-    headers: {
-      cookie: auth.cookie,
-      'x-csrf-token': auth.csrf,
-    },
-    payload: {
-      botId: 'neurobot',
-      groupKeys: [groupKey],
-      question,
-      confirmed: true,
-    },
-  });
-}
 
 async function login(app: FastifyInstance): Promise<Authentication> {
   const response = await app.inject({

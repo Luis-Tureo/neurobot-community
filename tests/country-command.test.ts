@@ -2,14 +2,6 @@
  * Tests del comando !pais / !país en el MessageProcessor.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import type {
-  AIProviderConnectionResult,
-  AIProviderErrorCode,
-  GroundedResponseRequest,
-  GroundedResponseResult,
-} from '../src/ai/ai-provider.js';
-import type { AIProvider } from '../src/ai/ai-provider.js';
-import { AssistantQueryService } from '../src/ai/assistant-query-service.js';
 import { MessageProcessor } from '../src/core/message-processor.js';
 import { CommunityCountryService } from '../src/core/community-country-service.js';
 import { CountryResolver } from '../src/core/country-resolver.js';
@@ -18,17 +10,6 @@ import { createLogger } from '../src/infrastructure/logger.js';
 import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { Anonymizer } from '../src/security/anonymizer.js';
-
-class FakeAIProvider implements AIProvider {
-  public isConfigured(): boolean { return true; }
-  public async testConnection(): Promise<AIProviderConnectionResult> { return { successful: true }; }
-  public async generateGroundedResponse(_r: GroundedResponseRequest): Promise<GroundedResponseResult> {
-    return { text: 'respuesta AI', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }, finishReason: 'stop' };
-  }
-  public getModelInformation(): { provider: string; model: string } { return { provider: 'fake', model: 'fake' }; }
-  public normalizeUsage(): { inputTokens: number; outputTokens: number; totalTokens: number } { return { inputTokens: 0, outputTokens: 0, totalTokens: 0 }; }
-  public classifyProviderError(): AIProviderErrorCode { return 'AI_TEMPORARY_ERROR'; }
-}
 
 const GROUP_ID = 'grupo-test@g.us';
 const PARTICIPANT_ID = '56912345678@c.us';
@@ -62,7 +43,6 @@ function createSubject() {
   const client = new SimulatedMessagingClient();
   const anonymizer = new Anonymizer('x'.repeat(32));
   const logger = createLogger('silent');
-  const provider = new FakeAIProvider();
   const countryService = new CommunityCountryService(
     database,
     new CountryResolver({ logger }),
@@ -73,14 +53,6 @@ function createSubject() {
   const processor = new MessageProcessor(
     database,
     client,
-    new AssistantQueryService(
-      database,
-      provider,
-      logger,
-      'neurobot',
-      undefined,
-      (id) => anonymizer.identifier(id),
-    ),
     anonymizer,
     logger,
     () => ({
