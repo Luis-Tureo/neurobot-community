@@ -355,7 +355,7 @@ async function loadSelectedBot() {
   await Promise.all(loaders);
 }
 
-async function loadBotSummary(refreshForms = true) {
+async function loadBotSummary() {
   const result = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}`);
   panelState.bot = result.bot;
   panelState.profile = result.profile;
@@ -990,7 +990,7 @@ async function restartBot(botId = panelState.selectedBotId) {
   notify('Conexión reiniciada.');
   await Promise.all([
     loadBots(),
-    botId === panelState.selectedBotId ? loadBotSummary(false) : Promise.resolve(),
+    botId === panelState.selectedBotId ? loadBotSummary() : Promise.resolve(),
     botId === panelState.selectedBotId ? loadWhatsApp() : Promise.resolve(),
   ]);
 }
@@ -1017,7 +1017,7 @@ async function changeBotNumber() {
   document.dispatchEvent(
     new window.CustomEvent('neurobot:linking-started', { detail: { botId: bot.id } }),
   );
-  await Promise.all([loadBots(), loadBotSummary(false), loadWhatsApp()]);
+  await Promise.all([loadBots(), loadBotSummary(), loadWhatsApp()]);
 }
 
 async function toggleBot(bot) {
@@ -1034,7 +1034,7 @@ async function toggleBot(bot) {
       menuType: detail.bot.menuType,
     }),
   });
-  await Promise.all([loadBots(), loadBotSummary(false)]);
+  await Promise.all([loadBots(), loadBotSummary()]);
   notify(detail.bot.enabled ? 'Asistente desactivado.' : 'Asistente activado.');
 }
 
@@ -1245,7 +1245,7 @@ function configureForms() {
         displayName: panelState.aiCurrentProvider?.name || 'Groq',
         enabled,
       });
-      await Promise.all([loadAI(), loadBotSummary(false), loadBots()]);
+      await Promise.all([loadAI(), loadBotSummary(), loadBots()]);
       notify(`Inteligencia artificial ${enabled ? 'activada' : 'desactivada'}.`);
     } catch (error) {
       await loadAI().catch(() => {});
@@ -1512,7 +1512,7 @@ function configureForms() {
     try {
       await saveAIProvider(payload);
       form.elements.apiKey.value = '';
-      await Promise.all([loadAI(), loadBotSummary(false), loadBots()]);
+      await Promise.all([loadAI(), loadBotSummary(), loadBots()]);
       notify('Configuración actualizada.');
       setAIProviderEditorOpen(false);
     } catch (error) {
@@ -1563,7 +1563,7 @@ let initializationRetryTimer = null;
 async function refreshVisibleBotStatus() {
   if (document.hidden) return;
   await loadBots();
-  if (panelState.selectedBotId) await loadBotSummary(false);
+  if (panelState.selectedBotId) await loadBotSummary();
 }
 
 function startBotStatusRefresh() {
