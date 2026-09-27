@@ -771,7 +771,7 @@ describe('API administrativa', () => {
     expect(preview.body).not.toContain('pendiente@g.us');
   });
 
-  it('administra respuestas guardadas sin exponer identificadores de usuarios o grupos', async () => {
+  it('confirma que las rutas de respuestas guardadas fueron retiradas', async () => {
     const auth = await login(app);
     const created = await injectAuthenticated(app, auth, {
       method: 'POST',
@@ -784,39 +784,13 @@ describe('API administrativa', () => {
         variants: ['Dime las reglas'],
       },
     });
-    expect(created.statusCode).toBe(201);
-    const id = created.json().answer.id;
+    expect(created.statusCode).toBe(404);
     const listed = await app.inject({
       method: 'GET',
       url: '/api/bots/neurobot/cached-answers?search=normas',
       headers: { cookie: auth.cookie },
     });
-    expect(listed.statusCode).toBe(200);
-    expect(listed.json().answers[0]).toMatchObject({
-      id,
-      sourceType: 'ADMIN_FAQ',
-      status: 'ADMIN_APPROVED',
-      variants: ['Dime las reglas'],
-    });
-    expect(listed.body).not.toContain('groupHash');
-    expect(listed.body).not.toContain('userHash');
-    expect(
-      (
-        await injectAuthenticated(app, auth, {
-          method: 'PATCH',
-          url: `/api/bots/neurobot/cached-answers/${id}`,
-          payload: { action: 'disable' },
-        })
-      ).json().answer.status,
-    ).toBe('DISABLED');
-    expect(
-      (
-        await injectAuthenticated(app, auth, {
-          method: 'DELETE',
-          url: `/api/bots/neurobot/cached-answers/${id}`,
-        })
-      ).statusCode,
-    ).toBe(200);
+    expect(listed.statusCode).toBe(404);
   });
 
   it('rechaza módulos comunitarios en un negocio y administra la papelera', async () => {
@@ -1119,37 +1093,9 @@ describe('API administrativa', () => {
     });
   });
 
-  it('filtra respuestas en caché que tienen la categoría "Error de IA"', async () => {
-    database.saveCachedAnswer({
-      botId: 'neurobot',
-      canonicalQuestion: 'Pregunta normal',
-      normalizedQuestionHash: '0000000000000000000000000000000000000000000000000000000000000001',
-      answer: 'Respuesta normal',
-      category: 'General',
-      knowledgeSourceIds: [],
-      knowledgeVersion: '1',
-      promptVersion: '1',
-      status: 'ADMIN_APPROVED',
-      sourceType: 'ADMIN_FAQ',
-      confidence: 1.0,
-    });
-    database.saveCachedAnswer({
-      botId: 'neurobot',
-      canonicalQuestion: 'Pregunta errónea',
-      normalizedQuestionHash: '0000000000000000000000000000000000000000000000000000000000000002',
-      answer: 'Hubo un error de IA',
-      category: 'Error de IA',
-      knowledgeSourceIds: [],
-      knowledgeVersion: '1',
-      promptVersion: '1',
-      status: 'ADMIN_APPROVED',
-      sourceType: 'ADMIN_FAQ',
-      confidence: 1.0,
-    });
-
+  it('confirma que las respuestas en caché ya no se almacenan ni listan', async () => {
     const list = database.listReusableCachedAnswers('neurobot');
-    expect(list.some((a) => a.category === 'Error de IA')).toBe(false);
-    expect(list.some((a) => a.category === 'General')).toBe(true);
+    expect(list).toEqual([]);
   });
 });
 

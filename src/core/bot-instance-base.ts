@@ -1,6 +1,5 @@
 import type { Logger } from 'pino';
 import type { AIProvider } from '../ai/ai-provider.js';
-import { AssistantQueryService } from '../ai/assistant-query-service.js';
 import { AIRequestQueueService } from '../ai/ai-request-queue-service.js';
 import type {
   BotRecord,
@@ -152,14 +151,6 @@ export class BotInstance {
     );
     this.aiQueue = new AIRequestQueueService(database, logger, bot.id);
     this.outboundQueue = new OutboundMessageQueueService(client, database, logger, bot.id);
-    const query = new AssistantQueryService(
-      database,
-      provider,
-      logger,
-      bot.id,
-      this.aiQueue,
-      (identifier) => anonymizer.identifier(identifier),
-    );
     if (bot.capabilities.communitySingleTurnMode) database.clearConversationStates(bot.id);
     const flow =
       bot.capabilities.conversationContinuationEnabled || bot.capabilities.interactiveMenusEnabled
@@ -169,7 +160,6 @@ export class BotInstance {
             logger,
             bot.id,
             options.mediaRoot,
-            query,
             this.outboundQueue,
           )
         : undefined;
@@ -202,7 +192,6 @@ export class BotInstance {
     this.processor = new MessageProcessor(
       database,
       client,
-      query,
       anonymizer,
       logger,
       () => this.connection.snapshot(),

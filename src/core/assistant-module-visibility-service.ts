@@ -9,7 +9,6 @@ export type AssistantModuleKey =
   | 'media'
   | 'hours'
   | 'knowledge'
-  | 'cached-answers'
   | 'ai'
   | 'automatic-messages'
   | 'polls'
@@ -22,7 +21,6 @@ const common: AssistantModuleKey[] = [
   'whatsapp',
   'profile',
   'knowledge',
-  'cached-answers',
   'ai',
 ];
 const community: AssistantModuleKey[] = [

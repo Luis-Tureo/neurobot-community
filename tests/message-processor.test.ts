@@ -1,58 +1,19 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { Logger } from 'pino';
-import type {
-  AIProvider,
-  AIProviderConnectionResult,
-  AIProviderErrorCode,
-  GroundedResponseRequest,
-  GroundedResponseResult,
-} from '../src/ai/ai-provider.js';
-import { AssistantQueryService } from '../src/ai/assistant-query-service.js';
 import { ConversationFlowService } from '../src/core/conversation-flow-service.js';
-import { containsActivationAlias, MessageProcessor } from '../src/core/message-processor.js';
+import { MessageProcessor } from '../src/core/message-processor.js';
 import { createDefaultAssistantProfile } from '../src/core/assistant-profile-defaults.js';
-import { OutboundMessageQueueService } from '../src/core/outbound-message-queue-service.js';
+import { CommunityCountryService } from '../src/core/community-country-service.js';
+import { CountryResolver } from '../src/core/country-resolver.js';
 import type { IncomingMessage } from '../src/domain/types.js';
 import { createLogger } from '../src/infrastructure/logger.js';
 import { SimulatedMessagingClient } from '../src/messaging/simulated-client.js';
 import { AppDatabase } from '../src/persistence/database.js';
 import { Anonymizer } from '../src/security/anonymizer.js';
 
-class FakeAIProvider implements AIProvider {
-  public calls = 0;
-  public readonly requests: GroundedResponseRequest[] = [];
-  public response = 'Estas son las normas oficiales del grupo.';
-
-  public isConfigured(): boolean {
-    return true;
-  }
-  public async testConnection(): Promise<AIProviderConnectionResult> {
-    return { successful: true };
-  }
-  public async generateGroundedResponse(
-    request: GroundedResponseRequest,
-  ): Promise<GroundedResponseResult> {
-    this.calls += 1;
-    this.requests.push(request);
-    return {
-      text: this.response,
-      usage: { inputTokens: 30, outputTokens: 10, totalTokens: 40 },
-      finishReason: 'stop',
-    };
-  }
-  public getModelInformation(): { provider: string; model: string } {
-    return { provider: 'fake', model: 'fake-model' };
-  }
-  public normalizeUsage(): { inputTokens: number; outputTokens: number; totalTokens: number } {
-    return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
-  }
-  public classifyProviderError(): AIProviderErrorCode {
-    return 'AI_TEMPORARY_ERROR';
-  }
-}
-
 function message(overrides: Partial<IncomingMessage> = {}): IncomingMessage {
   return {
-    id: 'message-1',
+    id: `msg-${Math.random()}`,
     chatId: 'group-1@g.us',
     participantId: '56912345678@c.us',
     body: 'Hola',
@@ -68,54 +29,19 @@ function message(overrides: Partial<IncomingMessage> = {}): IncomingMessage {
   };
 }
 
-function enableAI(database: AppDatabase, botId = 'neurobot'): void {
-  const profile = database.getBotProfile(botId);
-  const settings = database.getAISettings(profile.id);
-  database.saveAISettings({ ...settings, enabled: true });
-}
-
-function addGeneralKnowledge(database: AppDatabase, keyword: string): void {
-  const profile = database.getBotProfile('neurobot');
-  const category = database.listKnowledgeCategories(profile.id)[0];
-  if (category === undefined) throw new Error('Falta la categoría de conocimiento de prueba.');
-  database.saveKnowledgeEntry({
-    id: 0,
-    profileId: profile.id,
-    categoryId: category.id,
-    title: 'Información oficial',
-    content: 'Esta fuente contiene información oficial del Grupo de prueba y de la comunidad.',
-    keywords: [keyword],
-    synonyms: [],
-    enabled: true,
-    priority: 100,
-    internalSource: 'Documento oficial revisado',
-  });
-}
-
 function createProcessor(input: {
   database: AppDatabase;
   client: SimulatedMessagingClient;
-  provider: FakeAIProvider;
   logger?: Logger;
   botId?: string;
   flow?: ConversationFlowService;
-  queryService?: AssistantQueryService;
-  outboundQueue?: OutboundMessageQueueService;
+  countryService?: CommunityCountryService;
 }): MessageProcessor {
   const botId = input.botId ?? 'neurobot';
   const anonymizer = new Anonymizer('x'.repeat(32));
   return new MessageProcessor(
     input.database,
     input.client,
-    input.queryService ??
-      new AssistantQueryService(
-        input.database,
-        input.provider,
-        input.logger ?? createLogger('silent'),
-        botId,
-        undefined,
-        (identifier) => anonymizer.identifier(identifier),
-      ),
     anonymizer,
     input.logger ?? createLogger('silent'),
     () => ({
@@ -134,428 +60,288 @@ function createProcessor(input: {
     { maxMessageLength: 2000 },
     botId,
     input.flow,
-    input.outboundQueue,
+    undefined,
+    input.countryService,
   );
 }
 
-describe('procesamiento por mención real y por modo', () => {
+describe('MessageProcessor - comportamiento pasivo y retiro de asistente conversacional', () => {
   let database: AppDatabase;
   let client: SimulatedMessagingClient;
-  let provider: FakeAIProvider;
   let processor: MessageProcessor;
+  let anonymizer: Anonymizer;
+  let countryService: CommunityCountryService;
 
   beforeEach(() => {
     database = new AppDatabase(':memory:');
     database.migrate();
     database.upsertDetectedGroup('group-1@g.us', 'Grupo de prueba');
-    enableAI(database);
+    database.setGroupAuthorized('group-1@g.us', true);
+
     client = new SimulatedMessagingClient();
-    provider = new FakeAIProvider();
-    processor = createProcessor({ database, client, provider });
+    anonymizer = new Anonymizer('x'.repeat(32));
+    const logger = createLogger('silent');
+    countryService = new CommunityCountryService(
+      database,
+      new CountryResolver({ logger }),
+      anonymizer,
+      logger,
+    );
+    processor = createProcessor({ database, client, countryService });
   });
 
   afterEach(() => database.close());
 
-  it('ignora mensajes sin mención, comandos públicos y respuestas sin nueva mención', async () => {
-    await expect(processor.process(message())).resolves.toBe('ignored');
-    await expect(processor.process(message({ id: 'command', body: '!ayuda' }))).resolves.toBe(
-      'ignored',
-    );
-    await expect(
-      processor.process(message({ id: 'reply', body: 'gracias', isReplyToBot: true })),
-    ).resolves.toBe('ignored');
-    expect(client.sentMessages).toHaveLength(0);
-    expect(provider.calls).toBe(0);
-  });
-
-  it('acepta @neurobot escrito como alias sin depender del contacto guardado', async () => {
-    await expect(processor.process(message({ body: '@neurobot dime las reglas' }))).resolves.toBe(
-      'responded',
-    );
-    expect(client.sentMessages).toHaveLength(1);
-    expect(provider.calls).toBe(0);
-  });
-
-  it('preserva la pregunta sobre el propósito del grupo y la entrega a la IA', async () => {
-    addGeneralKnowledge(database, 'sirve');
-
-    await expect(
-      processor.process(
-        message({ id: 'group-purpose', body: '@Neurobot para que sirve este grupo?' }),
-      ),
-    ).resolves.toBe('responded');
-
-    expect(provider.requests).toHaveLength(1);
-    expect(provider.requests[0]?.question).toBe('para que sirve este grupo?');
-    expect(provider.requests[0]?.context).toContain('Grupo de prueba');
-    expect(provider.requests[0]?.context).not.toContain('group-1@g.us');
-    expect(client.sentMessages).toHaveLength(1);
-    expect(client.sentMessages[0]?.text).toBe(provider.response);
-    expect(client.sentMessages[0]?.text).not.toContain('Soy Neurobot');
-    expect(database.getTechnicalEvents()).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ event_type: 'BOT_QUERY_EXTRACTED', result: 'PRESERVED' }),
-        expect.objectContaining({ event_type: 'BOT_ROUTE_SELECTED', result: 'AI_RESPONSE' }),
-        expect.objectContaining({ event_type: 'BOT_RESPONSE_SENT', result: 'AI_RESPONSE' }),
-      ]),
-    );
-  });
-
-  it('preserva la pregunta posterior a una mención nativa', async () => {
-    addGeneralKnowledge(database, 'sirve');
-    client.ownIdentifiers.add('56900000000@c.us');
-    client.ownIdentifiers.add('neurobot-real@lid');
-
-    await expect(
-      processor.process(
+  describe('menciones al bot ignoradas pasivamente', () => {
+    it('ignora menciones @Neurobot sin enviar respuesta ni llamar a ningún asistente', async () => {
+      const result = await processor.process(
         message({
-          id: 'native-group-purpose',
-          body: '@56900000000 para que sirve este grupo?',
-          mentionedIds: ['neurobot-real@lid'],
+          id: 'mention-1',
+          body: '@Neurobot ¿qué es el autismo?',
+          mentionsBot: true,
         }),
-      ),
-    ).resolves.toBe('responded');
+      );
+      expect(result).toBe('ignored');
+      expect(client.sentMessages).toHaveLength(0);
+    });
 
-    expect(provider.requests[0]?.question).toBe('para que sirve este grupo?');
-    expect(client.sentMessages).toHaveLength(1);
-  });
-
-  it('preserva la pregunta posterior al número completo del bot', async () => {
-    addGeneralKnowledge(database, 'sirve');
-    client.ownIdentifiers.add('56900000000@c.us');
-
-    await expect(
-      processor.process(
+    it('ignora menciones en minúsculas @neurobot', async () => {
+      const result = await processor.process(
         message({
-          id: 'phone-group-purpose',
-          body: '+56 9 0000 0000 para que sirve este grupo?',
+          id: 'mention-2',
+          body: '@neurobot dime las reglas del grupo',
+          mentionsBot: true,
         }),
-      ),
-    ).resolves.toBe('responded');
-
-    expect(provider.requests[0]?.question).toBe('para que sirve este grupo?');
-    expect(client.sentMessages).toHaveLength(1);
-  });
-
-  it('envía una pregunta general no clasificada al flujo de IA', async () => {
-    addGeneralKnowledge(database, 'actividades');
-
-    await expect(
-      processor.process(
-        message({ id: 'general-query', body: '@Neurobot qué actividades se hacen aquí?' }),
-      ),
-    ).resolves.toBe('responded');
-
-    expect(provider.requests[0]?.question).toBe('qué actividades se hacen aquí?');
-    expect(client.sentMessages[0]?.text).toBe(provider.response);
-  });
-
-  it('responde una pregunta general mediante el mismo pipeline de salida de WhatsApp', async () => {
-    provider.response = 'La capital de Japón es Tokio.';
-    const outboundQueue = new OutboundMessageQueueService(
-      client,
-      database,
-      createLogger('silent'),
-      'neurobot',
-      async () => undefined,
-    );
-    processor = createProcessor({ database, client, provider, outboundQueue });
-
-    await expect(
-      processor.process(
-        message({ id: 'general-education', body: '@Neurobot ¿cuál es la capital de Japón?' }),
-      ),
-    ).resolves.toBe('responded');
-
-    expect(provider.requests).toHaveLength(1);
-    expect(provider.requests[0]?.question).toBe('¿cuál es la capital de Japón?');
-    expect(provider.requests[0]?.context).toContain('GENERAL_EDUCATION');
-    expect(client.sentMessages).toEqual([
-      expect.objectContaining({ chatId: 'group-1@g.us', text: 'La capital de Japón es Tokio.' }),
-    ]);
-  });
-
-  it('acepta @neurobot sin distinguir mayúsculas y evita coincidencias parciales', async () => {
-    await expect(
-      processor.process(message({ id: 'upper', body: '@NEUROBOT dime las reglas' })),
-    ).resolves.toBe('responded');
-    await expect(
-      processor.process(message({ id: 'partial', body: '@neurobot-falso dime las reglas' })),
-    ).resolves.toBe('ignored');
-    expect(client.sentMessages).toHaveLength(1);
-  });
-
-  it('no abre menús y rechaza 1 sin una nueva activación', async () => {
-    const flow = new ConversationFlowService(
-      database,
-      client,
-      createLogger('silent'),
-      'neurobot',
-      'data/media',
-    );
-    processor = createProcessor({ database, client, provider, flow });
-    await expect(processor.process(message({ id: 'hello', body: '@neurobot hola' }))).resolves.toBe(
-      'responded',
-    );
-    expect(client.sentSelectableMenus).toHaveLength(0);
-    expect(client.sentMessages).toHaveLength(1);
-    await expect(processor.process(message({ id: 'selection', body: '1' }))).resolves.toBe(
-      'ignored',
-    );
-    expect(client.sentMessages).toHaveLength(1);
-  });
-
-  it('ignora votos de encuestas comunitarias como entrada conversacional', async () => {
-    const flow = new ConversationFlowService(
-      database,
-      client,
-      createLogger('silent'),
-      'neurobot',
-      'data/media',
-    );
-    processor = createProcessor({ database, client, provider, flow });
-    await expect(
-      processor.process(
-        message({ id: 'poll-selection', body: 'Normas', messageType: 'poll_vote' }),
-      ),
-    ).resolves.toBe('ignored');
-    expect(client.sentMessages).toHaveLength(0);
-    expect(provider.calls).toBe(0);
-  });
-
-  it('responde una sola vez a una mención real y envía al mismo grupo', async () => {
-    const incoming = message({
-      body: '@123456789 dime las reglas',
-      mentionsBot: true,
-      botMentionToken: '@123456789',
+      );
+      expect(result).toBe('ignored');
+      expect(client.sentMessages).toHaveLength(0);
     });
-    await expect(processor.process(incoming)).resolves.toBe('responded');
-    await expect(processor.process(incoming)).resolves.toBe('duplicate');
-    expect(client.sentMessages).toHaveLength(1);
-    expect(client.sentMessages[0]?.chatId).toBe('group-1@g.us');
-    expect(client.sentMessages[0]?.text).toContain('Normas de la comunidad');
-    expect(provider.calls).toBe(0);
-  });
 
-  it('invoca por el número real completo y registra el método normalizado', async () => {
-    client.ownIdentifiers.add('56900000000@c.us');
-    await expect(
-      processor.process(
-        message({ id: 'phone-invocation', body: '+56 9 0000 0000 ¿cuáles son las reglas?' }),
-      ),
-    ).resolves.toBe('responded');
-    expect(client.sentMessages).toHaveLength(1);
-    expect(
-      database
-        .getTechnicalEvents()
-        .some(
-          (event) =>
-            event.event_type === 'PHONE_NUMBER_RECEIVED' &&
-            event.activation_type === 'phone_number',
-        ),
-    ).toBe(true);
-    expect(database.getBotOperationalMetrics('neurobot').activations).toBe(1);
-  });
-
-  it('no responde a otro número ni a su propio mensaje', async () => {
-    client.ownIdentifiers.add('56900000000@c.us');
-    await expect(
-      processor.process(message({ id: 'other-phone', body: '+56911111111 hola' })),
-    ).resolves.toBe('ignored');
-    await expect(
-      processor.process(
-        message({ id: 'from-bot', body: '@neurobot +56900000000 hola', fromMe: true }),
-      ),
-    ).resolves.toBe('ignored');
-    expect(client.sentMessages).toHaveLength(0);
-  });
-
-  it('procesa alias, mención nativa y número como una única consulta', async () => {
-    client.ownIdentifiers.add('56900000000@c.us');
-    client.ownIdentifiers.add('neurobot-real@lid');
-    const incoming = message({
-      id: 'all-invocations',
-      body: '@neurobot @56900000000 +56900000000 ¿cuáles son las reglas?',
-      mentionedIds: ['neurobot-real@lid'],
-    });
-    await expect(processor.process(incoming)).resolves.toBe('responded');
-    await expect(processor.process(incoming)).resolves.toBe('duplicate');
-    expect(client.sentMessages).toHaveLength(1);
-    expect(
-      database.getTechnicalEvents().filter((event) => event.event_type === 'REAL_MENTION_RECEIVED'),
-    ).toHaveLength(1);
-  });
-
-  it('entrega limpia la consulta reportada al motor normal conservando el grupo', async () => {
-    client.ownIdentifiers.add('56900000000@c.us');
-    client.ownIdentifiers.add('neurobot-real@lid');
-    const queryService = new AssistantQueryService(
-      database,
-      provider,
-      createLogger('silent'),
-      'neurobot',
-    );
-    const answerQuestion = vi.spyOn(queryService, 'answerQuestion');
-    processor = createProcessor({ database, client, provider, queryService });
-
-    await expect(
-      processor.process(
+    it('ignora menciones nativas con identificador o número de WhatsApp', async () => {
+      client.ownIdentifiers.add('56900000000@c.us');
+      const result = await processor.process(
         message({
-          id: 'reported-native-question',
-          chatId: 'group-1@g.us',
+          id: 'mention-3',
+          body: '@56900000000 hola',
+          mentionedIds: ['56900000000@c.us'],
+        }),
+      );
+      expect(result).toBe('ignored');
+      expect(client.sentMessages).toHaveLength(0);
+    });
+
+    it('ignora menciones vacías o llamadas sin texto', async () => {
+      const result = await processor.process(
+        message({
+          id: 'mention-4',
+          body: '@Neurobot',
+          mentionsBot: true,
+        }),
+      );
+      expect(result).toBe('ignored');
+      expect(client.sentMessages).toHaveLength(0);
+    });
+
+    it('ignora menciones con consultas médicas', async () => {
+      const result = await processor.process(
+        message({
+          id: 'mention-med',
+          body: '@Neurobot ¿qué medicamento debo tomar para el dolor de cabeza?',
+          mentionsBot: true,
+        }),
+      );
+      expect(result).toBe('ignored');
+      expect(client.sentMessages).toHaveLength(0);
+    });
+  });
+
+  describe('mensajes ordinarios en grupos', () => {
+    it('ignora mensajes cotidianos sin comandos', async () => {
+      const result = await processor.process(
+        message({
+          id: 'chat-1',
+          body: 'Hola a todos en la comunidad, buenos días',
+        }),
+      );
+      expect(result).toBe('ignored');
+      expect(client.sentMessages).toHaveLength(0);
+    });
+
+    it('ignora respuestas a mensajes del bot', async () => {
+      const result = await processor.process(
+        message({
+          id: 'reply-1',
+          body: 'muchas gracias',
+          isReplyToBot: true,
+        }),
+      );
+      expect(result).toBe('ignored');
+      expect(client.sentMessages).toHaveLength(0);
+    });
+
+    it('ignora mensajes enviados por el propio bot', async () => {
+      const result = await processor.process(
+        message({
+          id: 'from-me-1',
+          body: 'Mensaje propio',
+          fromMe: true,
+        }),
+      );
+      expect(result).toBe('ignored');
+      expect(client.sentMessages).toHaveLength(0);
+    });
+
+    it('detecta y descarta mensajes duplicados', async () => {
+      const incoming = message({
+        id: 'dup-1',
+        body: 'Hola mundo',
+      });
+      const first = await processor.process(incoming);
+      expect(first).toBe('ignored');
+      const second = await processor.process(incoming);
+      expect(second).toBe('duplicate');
+    });
+  });
+
+  describe('validación de estados del grupo y bot', () => {
+    it('retorna unauthorized_group cuando el grupo está bloqueado', async () => {
+      database.setGroupBlocked('group-1@g.us', true);
+      const result = await processor.process(
+        message({
+          id: 'unauth-1',
+          body: '!pais Chile',
+        }),
+      );
+      expect(result).toBe('unauthorized_group');
+      expect(client.sentMessages).toHaveLength(0);
+    });
+
+    it('retorna bot_disabled cuando el bot está desactivado globalmente', async () => {
+      database.setSetting('bot_enabled', false);
+      const result = await processor.process(
+        message({
+          id: 'disabled-1',
+          body: '!pais Chile',
+        }),
+      );
+      expect(result).toBe('bot_disabled');
+      expect(client.sentMessages).toHaveLength(0);
+    });
+
+    it('retorna silenced cuando el grupo está en período de silencio', async () => {
+      database.setSilence('group-1@g.us', new Date(Date.now() + 60_000));
+      const result = await processor.process(
+        message({
+          id: 'silenced-1',
+          body: '!pais Chile',
+        }),
+      );
+      expect(result).toBe('silenced');
+      expect(client.sentMessages).toHaveLength(0);
+    });
+  });
+
+  describe('comandos comunitarios activos (!pais)', () => {
+    it('responde al comando !pais con país asignado', async () => {
+      const result = await processor.process(
+        message({
+          id: 'cmd-pais-1',
+          body: '!pais Chile',
           participantId: '56912345678@c.us',
-          body: '@56900000000 ¿de qué se trata este grupo?',
-          mentionedIds: ['neurobot-real@lid'],
-          timestampMs: 1_789_000_000_000,
         }),
-      ),
-    ).resolves.toBe('responded');
-
-    const identity = new Anonymizer('x'.repeat(32));
-    expect(answerQuestion).toHaveBeenCalledWith(
-      '¿de qué se trata este grupo?',
-      identity.identifier('group-1@g.us'),
-      identity.identifier('56912345678@c.us'),
-      expect.any(Date),
-      expect.any(Function),
-    );
-    expect(client.sentMessages).toHaveLength(1);
-    expect(client.sentMessages[0]?.chatId).toBe('group-1@g.us');
-  });
-
-  it('responde localmente a una mención sin pregunta sin consumir IA', async () => {
-    await expect(
-      processor.process(
-        message({ body: '@123456789', mentionsBot: true, botMentionToken: '@123456789' }),
-      ),
-    ).resolves.toBe('responded');
-    expect(client.sentMessages[0]?.text).toBe('Escribe tu pregunta después de llamar a Neurobot.');
-    expect(provider.calls).toBe(0);
-    expect(database.countActiveConversationStates('neurobot')).toBe(0);
-  });
-
-  it('tolera metadata nativa sin texto y utiliza el prompt existente', async () => {
-    client.ownIdentifiers.add('neurobot-real@lid');
-    await expect(
-      processor.process(
-        message({ id: 'empty-native-mention', body: '', mentionedIds: ['neurobot-real@lid'] }),
-      ),
-    ).resolves.toBe('responded');
-    expect(client.sentMessages[0]?.text).toBe('Escribe tu pregunta después de llamar a Neurobot.');
-    expect(provider.calls).toBe(0);
-  });
-
-  it('responde dos mensajes distintos aunque contengan la misma consulta', async () => {
-    await expect(
-      processor.process(message({ id: 'query-1', body: '@neurobot hola' })),
-    ).resolves.toBe('responded');
-    await expect(
-      processor.process(message({ id: 'query-2', body: '@neurobot hola' })),
-    ).resolves.toBe('responded');
-    expect(client.sentMessages).toHaveLength(2);
-  });
-
-  it('permite que usuarios distintos consulten lo mismo consecutivamente', async () => {
-    await processor.process(
-      message({ id: 'query-user-1', participantId: 'user-1@lid', body: '@neurobot hola' }),
-    );
-    await processor.process(
-      message({ id: 'query-user-2', participantId: 'user-2@lid', body: '@neurobot hola' }),
-    );
-    expect(client.sentMessages).toHaveLength(2);
-  });
-
-  it('responde varias consultas legítimas consecutivas sin enfriamiento', async () => {
-    await processor.process(message({ id: 'query-sequence-1', body: '@neurobot hola' }));
-    await processor.process(message({ id: 'query-sequence-2', body: '@neurobot ayuda' }));
-    await processor.process(message({ id: 'query-sequence-3', body: '@neurobot hola otra vez' }));
-    expect(client.sentMessages).toHaveLength(3);
-  });
-
-  it('acepta una consulta general que la identidad antigua habría rechazado', async () => {
-    await expect(
-      processor.process(
-        message({ id: 'out-of-scope', body: '@neurobot recomiéndame un teléfono celular' }),
-      ),
-    ).resolves.toBe('responded');
-    expect(client.sentMessages[0]?.text).toBe(provider.response);
-    expect(provider.calls).toBe(1);
-  });
-
-  it('bloquea consultas médicas localmente y no consume IA', async () => {
-    await processor.process(
-      message({
-        body: '@123456789 qué medicamento debo tomar',
-        mentionsBot: true,
-        botMentionToken: '@123456789',
-      }),
-    );
-    expect(client.sentMessages[0]?.text).toContain('no diagnósticos');
-    expect(provider.calls).toBe(0);
-  });
-
-  it('no responde en un grupo bloqueado', async () => {
-    database.setGroupBlocked('group-1@g.us', true);
-    await expect(
-      processor.process(
-        message({ body: '@123456789 reglas', mentionsBot: true, botMentionToken: '@123456789' }),
-      ),
-    ).resolves.toBe('unauthorized_group');
-    expect(client.sentMessages).toHaveLength(0);
-  });
-
-  it('Neurobot no responde mensajes privados', async () => {
-    await expect(
-      processor.process(message({ id: 'private', chatId: '56912345678@c.us', isGroup: false })),
-    ).resolves.toBe('ignored');
-  });
-
-  it('un bot comercial inicia un menú privado y acepta una selección numérica', async () => {
-    const profile = createDefaultAssistantProfile({
-      organizationName: 'Tienda de prueba',
-      botName: 'Asistente',
-      organizationType: 'Tienda',
-      timezone: 'America/Santiago',
+      );
+      expect(result).toBe('responded');
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]?.text).toContain('Chile');
     });
-    database.createBot({
-      id: 'tienda-prueba',
-      mode: 'business',
-      sessionPath: 'data/test-session',
-      profile,
-    });
-    const commercialClient = new SimulatedMessagingClient();
-    const flow = new ConversationFlowService(
-      database,
-      commercialClient,
-      createLogger('silent'),
-      'tienda-prueba',
-      'data/media',
-    );
-    const commercial = createProcessor({
-      database,
-      client: commercialClient,
-      provider,
-      botId: 'tienda-prueba',
-      flow,
-    });
-    await expect(
-      commercial.process(
-        message({ id: 'private-start', chatId: '56911111111@c.us', isGroup: false, body: 'Hola' }),
-      ),
-    ).resolves.toBe('responded');
-    expect(commercialClient.sentMessages[0]?.text).toContain('Selecciona una opción');
-    await commercial.process(
-      message({ id: 'private-option', chatId: '56911111111@c.us', isGroup: false, body: '3' }),
-    );
-    expect(commercialClient.sentMessages.at(-1)?.text).toContain('horarios');
-  });
-});
 
-describe('alias público del asistente', () => {
-  it('reconoce límites seguros e ignora mayúsculas', () => {
-    expect(containsActivationAlias('Hola @NEUROBOT, ayuda', '@neurobot')).toBe(false);
-    expect(containsActivationAlias('@neurobot', '@Neurobot')).toBe(true);
-    expect(containsActivationAlias('texto@neurobot', '@neurobot')).toBe(false);
-    expect(containsActivationAlias('@neurobot-falso', '@neurobot')).toBe(false);
+    it('responde al comando !país con tilde', async () => {
+      const result = await processor.process(
+        message({
+          id: 'cmd-pais-2',
+          body: '!país Argentina',
+          participantId: '5491112345678@c.us',
+        }),
+      );
+      expect(result).toBe('responded');
+      expect(client.sentMessages).toHaveLength(1);
+      expect(client.sentMessages[0]?.text).toContain('Argentina');
+    });
+
+    it('informa el país actual cuando se llama !pais sin argumentos', async () => {
+      await processor.process(
+        message({
+          id: 'cmd-pais-set',
+          body: '!pais Chile',
+          participantId: '56912345678@c.us',
+        }),
+      );
+
+      const result = await processor.process(
+        message({
+          id: 'cmd-pais-query',
+          body: '!pais',
+          participantId: '56912345678@c.us',
+        }),
+      );
+      expect(result).toBe('responded');
+      expect(client.sentMessages).toHaveLength(2);
+      expect(client.sentMessages[1]?.text).toContain('Tu país registrado es Chile');
+    });
+  });
+
+  describe('chats privados', () => {
+    it('Neurobot ignora mensajes privados por tener el canal privado desactivado', async () => {
+      const result = await processor.process(
+        message({
+          id: 'private-1',
+          chatId: '56912345678@c.us',
+          isGroup: false,
+          body: 'Hola',
+        }),
+      );
+      expect(result).toBe('ignored');
+      expect(client.sentMessages).toHaveLength(0);
+    });
+
+    it('un bot comercial con chat privado habilitado puede iniciar un flujo de menú', async () => {
+      const profile = createDefaultAssistantProfile({
+        organizationName: 'Tienda de prueba',
+        botName: 'Asistente',
+        organizationType: 'Tienda',
+        timezone: 'America/Santiago',
+      });
+      database.createBot({
+        id: 'tienda-prueba',
+        mode: 'business',
+        sessionPath: 'data/test-session',
+        profile,
+      });
+      const commercialClient = new SimulatedMessagingClient();
+      const flow = new ConversationFlowService(
+        database,
+        commercialClient,
+        createLogger('silent'),
+        'tienda-prueba',
+        'data/media',
+      );
+      const commercial = createProcessor({
+        database,
+        client: commercialClient,
+        botId: 'tienda-prueba',
+        flow,
+      });
+
+      const result = await commercial.process(
+        message({
+          id: 'private-biz-1',
+          chatId: '56911111111@c.us',
+          isGroup: false,
+          body: 'Hola',
+        }),
+      );
+      expect(result).toBe('responded');
+      expect(commercialClient.sentMessages[0]?.text).toContain('Selecciona una opción');
+    });
   });
 });

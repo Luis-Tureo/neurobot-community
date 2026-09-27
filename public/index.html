@@ -87,7 +87,6 @@
             </optgroup>
             <optgroup label="Más opciones" data-bot-only>
               <option value="media" data-bot-only data-module="media">Imágenes</option>
-              <option value="cached-answers" data-bot-only>Respuestas guardadas</option>
               <option value="automatic-messages" data-bot-only data-module="automatic-messages">
                 Automatizaciones
               </option>
@@ -129,9 +128,6 @@
               </button>
 
               <p class="nav-group-title bot-only hidden">Contenido</p>
-              <button data-section="cached-answers" class="bot-only hidden">
-                <span aria-hidden="true">?</span> Historial
-              </button>
               <button data-section="menus" data-module="menus" class="bot-only hidden">
                 <span aria-hidden="true">☷</span> Menú
               </button>
@@ -348,132 +344,93 @@
 
             <section id="section-ai" class="panel-section hidden">
               <div class="section-heading"><h2>Inteligencia Artificial</h2></div>
-              <p class="info-callout">
-                El asistente responde preguntas generales y usa los datos confirmados de la
-                organización cuando son pertinentes. El nombre y los alias solo determinan cómo se
-                presenta y cómo se invoca; no limitan los temas que puede responder.
-              </p>
-              <form id="profile-form" class="card inset">
-                <label
-                  >Nombre de la organización<input name="organizationName" maxlength="160" required
-                /></label>
-                <div class="form-row">
-                  <label>Nombre del bot<input name="botName" maxlength="80" required /></label>
-                  <label data-community-channel
-                    >Alias visible<input
-                      name="activationAlias"
-                      maxlength="80"
-                      placeholder="@Asistente"
-                      required
-                  /></label>
+              <article class="card inset ai-provider-summary" aria-live="polite">
+                <div>
+                  <p class="eyebrow">Inteligencia artificial actual</p>
+                  <div class="ai-provider-current-line">
+                    <strong id="ai-provider-current-name">Sin IA configurada</strong>
+                    <span
+                      id="ai-provider-current-model"
+                      class="muted"
+                      style="font-size: 0.88rem; margin-left: 0.5rem"
+                    ></span>
+                  </div>
+                  <p id="ai-provider-current-provider" class="muted">Groq · Proveedor: GroqCloud</p>
                 </div>
-                <p id="neurobot-alias-help" class="info-callout hidden">
-                  Neurobot siempre se activa escribiendo <strong>@neurobot</strong>, sin importar
-                  mayúsculas, el número o cómo esté guardado el contacto.
-                </p>
-                <div id="activation-aliases-card" class="card inset hidden">
-                  <label
-                    >Alias adicionales (uno por línea)<textarea
-                      id="activation-aliases"
-                      rows="3"
-                      placeholder="@neuroayuda"
-                    ></textarea>
-                  </label>
-                  <p class="muted">
-                    El alias @neurobot siempre se conserva. Los alias solo activan al bot cuando
-                    aparecen al comienzo.
-                  </p>
-                  <button id="save-activation-aliases" type="button">Guardar alias</button>
+                <div
+                  class="ai-token-display-line"
+                  style="
+                    font-size: 0.88rem;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.35rem;
+                  "
+                >
+                  <span class="muted">Token: </span>
+                  <span id="ai-provider-token-status">No hay token configurado</span>
                 </div>
-                <div class="form-row">
-                  <label
-                    >Tipo de organización<select name="organizationType" required>
-                      <option>Comunidad</option>
-                      <option>Tienda</option>
-                      <option>Restaurante</option>
-                      <option>Distribuidora</option>
-                      <option>Servicio profesional</option>
-                      <option>Organización social</option>
-                      <option>Institución educativa</option>
-                      <option>Otro</option>
-                    </select></label
+                <div class="ai-provider-summary-actions">
+                  <button id="test-ai-connection" class="secondary" type="button">
+                    Probar conexión
+                  </button>
+                  <button
+                    id="open-ai-provider-form"
+                    class="secondary"
+                    type="button"
+                    aria-controls="ai-provider-form"
+                    aria-expanded="false"
                   >
-                  <label>Zona horaria<input name="timezone" maxlength="80" required /></label>
+                    Cambiar configuración de Groq
+                  </button>
+                  <button
+                    id="toggle-ai-enabled"
+                    class="status-switch"
+                    type="button"
+                    role="switch"
+                    aria-checked="false"
+                    aria-label="Activar inteligencia artificial"
+                  >
+                    Inactivo
+                  </button>
                 </div>
-                <label
-                  >Información confirmada de la organización<textarea
-                    name="description"
-                    maxlength="1000"
-                    rows="3"
-                    required
-                  ></textarea>
+              </article>
+              <form id="ai-provider-form" class="card inset ai-provider-form hidden">
+                <h3>Configuración de inteligencia artificial</h3>
+                <label>
+                  Nombre de la IA
+                  <input name="displayName" maxlength="80" placeholder="Ej.: Groq" required />
                 </label>
-                <label
-                  >Mensaje sin información interna<textarea
-                    name="noInformationMessage"
-                    maxlength="600"
-                    rows="3"
-                    required
-                  ></textarea>
+                <div class="form-field">
+                  <span class="field-label">Modelo principal</span>
+                  <output id="ai-provider-form-model" class="muted"
+                    >GPT-OSS 120B preferido · fallback GPT-OSS 20B automático</output
+                  >
+                </div>
+                <label>
+                  Token o nuevo token
+                  <input
+                    name="apiKey"
+                    type="password"
+                    autocomplete="new-password"
+                    minlength="16"
+                    maxlength="500"
+                    placeholder="Pega el token para agregarlo o cambiarlo"
+                  />
                 </label>
-                <div class="form-row">
-                  <label
-                    >Mensaje por límite<textarea
-                      name="limitMessage"
-                      maxlength="600"
-                      rows="3"
-                      required
-                    ></textarea>
-                  </label>
-                  <label
-                    >Mensaje ante error de IA<textarea
-                      name="aiErrorMessage"
-                      maxlength="600"
-                      rows="3"
-                      required
-                    ></textarea>
-                  </label>
+                <p id="ai-token-help" class="muted">
+                  Agrega el token para poder activar la inteligencia artificial.
+                </p>
+                <div class="actions">
+                  <button id="cancel-ai-provider-form" class="secondary" type="button">
+                    Cancelar
+                  </button>
+                  <button type="submit">Guardar configuración</button>
                 </div>
-                <div class="form-row">
-                  <label
-                    >Mensaje médico<textarea
-                      name="medicalMessage"
-                      maxlength="600"
-                      rows="3"
-                      required
-                    ></textarea>
-                  </label>
-                  <label
-                    >Mensaje al mencionar sin pregunta<textarea
-                      name="mentionPromptMessage"
-                      maxlength="600"
-                      rows="3"
-                      required
-                    ></textarea>
-                  </label>
-                </div>
-                <div class="form-row">
-                  <label
-                    >Contacto<textarea
-                      name="contactInformation"
-                      maxlength="1000"
-                      rows="3"
-                    ></textarea>
-                  </label>
-                  <label
-                    >Horarios<textarea name="businessHours" maxlength="1000" rows="3"></textarea>
-                  </label>
-                </div>
-                <label>Dirección opcional<input name="address" maxlength="500" /></label>
-                <input name="applicationName" type="hidden" />
-                <input name="headerText" type="hidden" />
-                <input name="footerText" type="hidden" />
-                <input name="supportInformation" type="hidden" />
-                <input name="primaryColor" type="hidden" />
-                <input name="secondaryColor" type="hidden" />
-                <input name="logoPath" type="hidden" />
-                <button type="submit">Guardar asistente</button>
               </form>
+              <article class="card inset ai-provider-history-card" data-collapsible>
+                <div class="section-heading"><h3>Historial de cambios de IA</h3></div>
+                <div id="ai-provider-history" class="list" aria-live="polite"></div>
+              </article>
             </section>
 
             <section id="section-menus" class="panel-section hidden">
@@ -778,128 +735,6 @@
               <div id="commands-list" class="list"></div>
             </section>
 
-            <section id="section-cached-answers" class="panel-section hidden">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">Consultas respondidas</p>
-                  <h2>Historial de preguntas</h2>
-                </div>
-                <button type="button" id="refresh-cached-answers" class="secondary">
-                  Actualizar historial
-                </button>
-              </div>
-              <div
-                class="table-shell"
-                role="region"
-                aria-label="Historial de preguntas"
-                tabindex="0"
-              >
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>Pregunta y respuesta</th>
-                      <th>Categoría</th>
-                      <th>Consultas</th>
-                      <th>Repetida</th>
-                      <th>Estado</th>
-                      <th>Actualización</th>
-                      <th>Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody id="cached-answers-list"></tbody>
-                </table>
-              </div>
-            </section>
-
-            <section id="ai-provider-content" class="hidden">
-              <article class="card inset ai-provider-summary" aria-live="polite">
-                <div>
-                  <p class="eyebrow">Inteligencia artificial actual</p>
-                  <div class="ai-provider-current-line">
-                    <strong id="ai-provider-current-name">Sin IA configurada</strong>
-                    <span
-                      id="ai-provider-current-model"
-                      class="muted"
-                      style="font-size: 0.88rem; margin-left: 0.5rem"
-                    ></span>
-                  </div>
-                  <p id="ai-provider-current-provider" class="muted">Groq · Proveedor: GroqCloud</p>
-                </div>
-                <div
-                  class="ai-token-display-line"
-                  style="
-                    font-size: 0.88rem;
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 0.35rem;
-                  "
-                >
-                  <span class="muted">Token: </span>
-                  <span id="ai-provider-token-status">No hay token configurado</span>
-                </div>
-                <div class="ai-provider-summary-actions">
-                  <button id="test-ai-connection" class="secondary" type="button">
-                    Probar conexión
-                  </button>
-                  <button
-                    id="open-ai-provider-form"
-                    class="secondary"
-                    type="button"
-                    aria-controls="ai-provider-form"
-                    aria-expanded="false"
-                  >
-                    Cambiar configuración de Groq
-                  </button>
-                  <button
-                    id="toggle-ai-enabled"
-                    class="status-switch"
-                    type="button"
-                    role="switch"
-                    aria-checked="false"
-                    aria-label="Activar inteligencia artificial"
-                  >
-                    Inactivo
-                  </button>
-                </div>
-              </article>
-              <form id="ai-provider-form" class="card inset ai-provider-form hidden">
-                <h3>Configuración de inteligencia artificial</h3>
-                <label>
-                  Nombre de la IA
-                  <input name="displayName" maxlength="80" placeholder="Ej.: Groq" required />
-                </label>
-                <div class="form-field">
-                  <span class="field-label">Modelo principal</span>
-                  <output id="ai-provider-form-model" class="muted"
-                    >GPT-OSS 120B preferido · fallback GPT-OSS 20B automático</output
-                  >
-                </div>
-                <label>
-                  Token o nuevo token
-                  <input
-                    name="apiKey"
-                    type="password"
-                    autocomplete="new-password"
-                    minlength="16"
-                    maxlength="500"
-                    placeholder="Pega el token para agregarlo o cambiarlo"
-                  />
-                </label>
-                <p id="ai-token-help" class="muted">
-                  Agrega el token para poder activar la inteligencia artificial.
-                </p>
-                <div class="actions">
-                  <button id="cancel-ai-provider-form" class="secondary" type="button">
-                    Cancelar
-                  </button>
-                  <button type="submit">Guardar configuración</button>
-                </div>
-              </form>
-              <article class="card inset ai-provider-history-card" data-collapsible>
-                <div class="section-heading"><h3>Historial de cambios de IA</h3></div>
-                <div id="ai-provider-history" class="list" aria-live="polite"></div>
-              </article>
-            </section>
 
             <section id="section-settings" class="panel-section hidden">
               <p class="eyebrow">Comportamiento general</p>

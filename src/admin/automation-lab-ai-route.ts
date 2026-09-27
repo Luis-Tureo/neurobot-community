@@ -1,6 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { AssistantQueryService } from '../ai/assistant-query-service.js';
 import type { AIProvider } from '../ai/ai-provider.js';
 import type { AdminServerContext } from './server-base.js';
 import { SessionStore, type PanelSession } from './session-store.js';
@@ -18,15 +17,6 @@ const validateSchema = z
     botId: botIdSchema,
     groupKeys: groupKeysSchema,
     testProvider: z.boolean().default(true),
-  })
-  .strict();
-
-const simulateSchema = z
-  .object({
-    botId: botIdSchema,
-    groupKeys: groupKeysSchema,
-    question: z.string().trim().min(1).max(3000),
-    confirmed: z.literal(true),
   })
   .strict();
 
@@ -61,88 +51,6 @@ export function registerAutomationLabAIRoutes(app: FastifyInstance, context: Adm
       ...(validation.healthy ? {} : { errorCode: 'BOT_VALIDATION_FAILED' }),
     });
     return validation;
-  });
-
-  app.post('/api/automation-lab/ai-simulator', async (request, reply) => {
-    const session = requireAutomationLabSession(request, reply, sessions, true);
-    if (session === null) return;
-    const input = simulateSchema.parse(request.body);
-    const validation = await validateBot(context, input.botId, input.groupKeys, false);
-    if (!validation.healthy) {
-      return reply.code(409).send({
-        error: 'El bot no superó la validación previa. Revisa el diagnóstico antes de continuar.',
-        code: 'BOT_VALIDATION_FAILED',
-        validation,
-      });
-    }
-
-    const provider = providerFor(context, input.botId);
-    if (provider === undefined) {
-      return reply.code(503).send({
-        error: 'El proveedor de inteligencia artificial no está disponible.',
-        code: 'AI_NOT_CONFIGURED',
-      });
-    }
-
-    const queue = context.multiBotManager?.aiQueue(input.botId) ?? undefined;
-    const anonymizeGroupId = (identifier: string): string =>
-      context.anonymizer.identifier(identifier);
-    const queryService =
-      queue === undefined
-        ? new AssistantQueryService(
-            context.database,
-            provider,
-            context.logger,
-            input.botId,
-            undefined,
-            anonymizeGroupId,
-          )
-        : new AssistantQueryService(
-            context.database,
-            provider,
-            context.logger,
-            input.botId,
-            queue,
-            anonymizeGroupId,
-          );
-    const userHash = context.anonymizer.identifier(`automation-lab:${input.botId}`);
-    const groupNames = new Map(validation.groups.map((group) => [group.key, group.name]));
-    const responses: Array<{
-      groupKey: string;
-      groupName: string;
-      text: string;
-      code: string;
-      durationMs: number;
-      coalesced: boolean;
-    }> = [];
-
-    for (const groupKey of input.groupKeys) {
-      const startedAt = Date.now();
-      const result = await queryService.answerQuestion(input.question, groupKey, userHash);
-      responses.push({
-        groupKey,
-        groupName: groupNames.get(groupKey) ?? 'Grupo seleccionado',
-        text: result.text,
-        code: result.code,
-        durationMs: Date.now() - startedAt,
-        coalesced: result.coalesced === true,
-      });
-      context.database.recordTechnicalEvent({
-        botId: input.botId,
-        eventType: 'AUTOMATION_LAB_AI_SIMULATION',
-        groupHash: groupKey,
-        result: result.code,
-      });
-    }
-
-    return {
-      simulation: true,
-      pipeline: 'AssistantQueryService',
-      consumesAIWhenRequired: true,
-      sentToWhatsApp: false,
-      validation,
-      responses,
-    };
   });
 }
 

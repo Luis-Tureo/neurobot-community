@@ -7,11 +7,15 @@ const css = readFileSync('src/admin/panel.css', 'utf8');
 describe('módulo mínimo de inteligencia artificial', () => {
   it('resume la IA actual y despliega el formulario solamente para cambiarla', () => {
     expect(html).toContain('<h2>Inteligencia Artificial</h2>');
-    expect(html).toContain('name="botName"');
-    expect(html).toContain('name="activationAlias"');
-    expect(html).toContain('preguntas generales');
+    expect(html).not.toContain('name="activationAlias"');
+    const aiSection = html.slice(
+      html.indexOf('id="section-ai"'),
+      html.indexOf('id="section-menus"'),
+    );
     for (const removed of [
       'Prompt de comportamiento',
+      'name="botName"',
+      'name="activationAlias"',
       'name="objective"',
       'name="allowedTopics"',
       'name="excludedTopics"',
@@ -21,7 +25,7 @@ describe('módulo mínimo de inteligencia artificial', () => {
       'name="preset"',
       'Guardar identidad',
     ]) {
-      expect(html).not.toContain(removed);
+      expect(aiSection).not.toContain(removed);
     }
     expect(html).toContain('id="ai-provider-form"');
     expect(html).toContain('ai-provider-form hidden');

@@ -67,11 +67,9 @@ describe('interfaz simplificada del panel', () => {
     expect(styles).toContain('border: 1px solid #cbd5e1');
   });
 
-  it('mantiene la identidad fija de Neurobot y actualiza su estado', () => {
-    expect(html).toContain('id="neurobot-alias-help"');
-    expect(html).toContain('<strong>@neurobot</strong>');
-    expect(panel).toContain("botName.value = 'Neurobot'");
-    expect(panel).toContain("activationAlias.value = '@neurobot'");
+  it('actualiza el estado visible del bot y no expone alias conversacionales', () => {
+    expect(html).not.toContain('id="neurobot-alias-help"');
+    expect(panel).not.toContain("activationAlias.value = '@neurobot'");
     expect(panel).toContain('refreshVisibleBotStatus');
   });
 

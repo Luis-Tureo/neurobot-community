@@ -34,7 +34,7 @@ describe('panel sin módulo administrativo de información', () => {
   it('mantiene la configuración operativa dentro de inteligencia artificial', () => {
     expect(html).toContain('>Inteligencia Artificial</option>');
     expect(html).toContain('<span aria-hidden="true">✦</span> Inteligencia Artificial');
-    expect(html).toContain('<button type="submit">Guardar asistente</button>');
+    expect(html).toContain('<button type="submit">Guardar configuración</button>');
     expect(html).not.toContain('name="objective"');
     expect(html).not.toContain('name="tone"');
     expect(html).not.toContain('value="profile"');

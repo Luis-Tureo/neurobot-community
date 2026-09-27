@@ -2739,6 +2739,15 @@ export class AppDatabase {
             ON bot_themed_day_deliveries(bot_id, local_date DESC, day_key);
         `,
       },
+      {
+        version: 45,
+        sql: `
+          -- Retiro del módulo de IA conversacional por mención en grupos
+          DROP TABLE IF EXISTS cached_answer_variants;
+          DROP TABLE IF EXISTS cached_answers;
+          DROP TABLE IF EXISTS bot_activation_aliases;
+        `,
+      },
     ];
 
     const apply = this.db.transaction((version: number, sql: string) => {
@@ -5374,39 +5383,12 @@ export class AppDatabase {
     return operation();
   }
 
-  public listBotActivationAliases(botId: string): string[] {
-    const aliases = (
-      this.db
-        .prepare('SELECT alias FROM bot_activation_aliases WHERE bot_id = ? ORDER BY alias')
-        .all(botId) as Array<{ alias: string }>
-    ).map((row) => row.alias);
-    if (aliases.length > 0) return aliases;
-    const profile = this.db
-      .prepare(
-        `SELECT profiles.activation_alias AS alias FROM bot_profiles mapping
-         JOIN assistant_profiles profiles ON profiles.id = mapping.profile_id
-         WHERE mapping.bot_id = ?`,
-      )
-      .get(botId) as { alias: string } | undefined;
-    return profile === undefined ? [] : [profile.alias.toLocaleLowerCase('es')];
+  public listBotActivationAliases(_botId: string): string[] {
+    return [];
   }
 
-  public saveBotActivationAliases(botId: string, aliases: string[]): string[] {
-    if (this.getBot(botId) === null) throw new Error('El asistente no existe.');
-    this.replaceBotActivationAliases(botId, aliases, new Date().toISOString());
-    return this.listBotActivationAliases(botId);
-  }
-
-  private replaceBotActivationAliases(botId: string, aliases: string[], now: string): void {
-    const normalized = [...new Set(aliases.map(normalizeActivationAlias))];
-    if (normalized.length === 0) throw new Error('Debe existir al menos un alias de activación.');
-    if (normalized.length > 10)
-      throw new Error('Se permiten como máximo diez alias de activación.');
-    this.db.prepare('DELETE FROM bot_activation_aliases WHERE bot_id = ?').run(botId);
-    const insert = this.db.prepare(
-      'INSERT INTO bot_activation_aliases(bot_id, alias, created_at) VALUES (?, ?, ?)',
-    );
-    for (const alias of normalized) insert.run(botId, alias, now);
+  public saveBotActivationAliases(_botId: string, _aliases: string[]): string[] {
+    return [];
   }
 
   public createBot(input: {
@@ -5530,7 +5512,6 @@ export class AppDatabase {
       this.seedBotInitialMenu(botId, input.mode, now);
       this.seedBotAutomation(botId, defaultAutomaticConfiguration(input.profile.timezone), now);
       this.seedBotPollTemplates(botId, input.profile.timezone, now);
-      this.replaceBotActivationAliases(botId, [input.profile.activationAlias], now);
       this.db
         .prepare(
           `UPDATE bot_channel_settings SET private_initial_menu_id = (
@@ -6889,17 +6870,6 @@ export class AppDatabase {
           profileId,
         );
       this.saveProfileBranding(profileId, values, now);
-
-      const mapping = this.db
-        .prepare('SELECT bot_id FROM bot_profiles WHERE profile_id = ?')
-        .get(profileId) as { bot_id: string } | undefined;
-      if (mapping !== undefined && existing.activationAlias !== values.activationAlias) {
-        const aliases = this.listBotActivationAliases(mapping.bot_id).filter(
-          (alias) =>
-            alias.toLocaleLowerCase('es') !== existing.activationAlias.toLocaleLowerCase('es'),
-        );
-        this.replaceBotActivationAliases(mapping.bot_id, [values.activationAlias, ...aliases], now);
-      }
     });
     save();
     return this.getAssistantProfile(profileId) as AssistantProfile;
@@ -7211,79 +7181,31 @@ export class AppDatabase {
     return fragments;
   }
 
-  public listCachedAnswers(botId: string, search = ''): CachedAnswer[] {
-    const normalizedSearch = search.trim();
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM cached_answers
-         WHERE bot_id = ? AND (? = '' OR canonical_question LIKE ? OR answer LIKE ? OR category LIKE ?)
-         ORDER BY updated_at DESC, id DESC`,
-      )
-      .all(
-        botId,
-        normalizedSearch,
-        `%${normalizedSearch}%`,
-        `%${normalizedSearch}%`,
-        `%${normalizedSearch}%`,
-      ) as Array<Record<string, unknown>>;
-    const variants = this.db.prepare(
-      'SELECT variant FROM cached_answer_variants WHERE cached_answer_id = ? ORDER BY id',
-    );
-    return rows.map((row) =>
-      mapCachedAnswer(
-        row,
-        (variants.all(Number(row.id)) as Array<{ variant: string }>).map((item) => item.variant),
-      ),
-    );
+  public listCachedAnswers(_botId: string, _search = ''): CachedAnswer[] {
+    return [];
   }
 
-  public getCachedAnswer(botId: string, id: number): CachedAnswer | null {
-    return this.listCachedAnswers(botId).find((answer) => answer.id === id) ?? null;
+  public getCachedAnswer(_botId: string, _id: number): CachedAnswer | null {
+    return null;
   }
 
-  public getCachedAnswerByHash(botId: string, normalizedQuestionHash: string): CachedAnswer | null {
-    const row = this.db
-      .prepare(
-        'SELECT id FROM cached_answers WHERE bot_id = ? AND normalized_question_hash = ? LIMIT 1',
-      )
-      .get(botId, normalizedQuestionHash) as { id: number } | undefined;
-    if (row === undefined) return null;
-    return this.getCachedAnswer(botId, Number(row.id));
+  public getCachedAnswerByHash(_botId: string, _normalizedQuestionHash: string): CachedAnswer | null {
+    return null;
   }
 
   public findExactCachedAnswer(
-    botId: string,
-    normalizedQuestionHash: string,
-    now = new Date(),
+    _botId: string,
+    _normalizedQuestionHash: string,
+    _now = new Date(),
   ): CachedAnswer | null {
-    const row = this.db
-      .prepare(
-        `SELECT DISTINCT answers.* FROM cached_answers answers
-         LEFT JOIN cached_answer_variants variants ON variants.cached_answer_id = answers.id
-         WHERE answers.bot_id = ?
-           AND (answers.normalized_question_hash = ? OR variants.normalized_question_hash = ?)
-           AND answers.status IN ('AUTO_VERIFIED', 'ADMIN_APPROVED', 'ADMIN_EDITED')
-           AND (answers.expires_at IS NULL OR answers.expires_at > ?)
-         ORDER BY CASE answers.source_type WHEN 'ADMIN_FAQ' THEN 0 ELSE 1 END,
-           CASE answers.status WHEN 'ADMIN_APPROVED' THEN 0 WHEN 'ADMIN_EDITED' THEN 1 ELSE 2 END
-         LIMIT 1`,
-      )
-      .get(botId, normalizedQuestionHash, normalizedQuestionHash, now.toISOString()) as
-      Record<string, unknown> | undefined;
-    if (row === undefined) return null;
-    return this.getCachedAnswer(botId, Number(row.id));
+    return null;
   }
 
-  public listReusableCachedAnswers(botId: string, now = new Date()): CachedAnswer[] {
-    return this.listCachedAnswers(botId).filter(
-      (answer) =>
-        ['AUTO_VERIFIED', 'ADMIN_APPROVED', 'ADMIN_EDITED'].includes(answer.status) &&
-        answer.category !== 'Error de IA' &&
-        (answer.expiresAt === null || answer.expiresAt > now.toISOString()),
-    );
+  public listReusableCachedAnswers(_botId: string, _now = new Date()): CachedAnswer[] {
+    return [];
   }
 
-  public saveCachedAnswer(input: {
+  public saveCachedAnswer(_input: {
     id?: number;
     botId: string;
     canonicalQuestion: string;
@@ -7300,180 +7222,38 @@ export class AppDatabase {
     invalidatedAt?: string | null;
     invalidationReason?: string | null;
   }): CachedAnswer {
-    const canonicalQuestion = validatePlainText(input.canonicalQuestion, 'pregunta canónica', 1000);
-    const answer = validatePlainText(input.answer, 'respuesta guardada', 8000);
-    const category = validatePlainText(input.category, 'categoría', 200);
-    if (!/^[a-f0-9]{64}$/u.test(input.normalizedQuestionHash))
-      throw new Error('La huella de la pregunta no es válida.');
-    if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1)
-      throw new Error('La confianza no es válida.');
-    const sourceIds = [
-      ...new Set(input.knowledgeSourceIds.map((id) => Math.trunc(id)).filter((id) => id > 0)),
-    ];
-    const now = new Date().toISOString();
-    const isInvalidated = input.status === 'INVALIDATED';
-    const invalidatedAt = isInvalidated ? (input.invalidatedAt ?? now) : null;
-    const invalidationReason = isInvalidated ? (input.invalidationReason ?? 'UNANSWERED') : null;
-    let id = input.id;
-    if (id === undefined) {
-      const result = this.db
-        .prepare(
-          `INSERT INTO cached_answers(
-           bot_id, canonical_question, normalized_question_hash, answer, category,
-           knowledge_source_ids, knowledge_version, prompt_version, status, source_type,
-           confidence, created_at, updated_at, expires_at, invalidated_at, invalidation_reason
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(bot_id, normalized_question_hash) DO UPDATE SET
-           canonical_question = excluded.canonical_question, answer = excluded.answer,
-           category = excluded.category, knowledge_source_ids = excluded.knowledge_source_ids,
-           knowledge_version = excluded.knowledge_version, prompt_version = excluded.prompt_version,
-           status = excluded.status, source_type = excluded.source_type,
-           confidence = excluded.confidence, updated_at = excluded.updated_at,
-           expires_at = excluded.expires_at,
-           invalidated_at = excluded.invalidated_at,
-           invalidation_reason = excluded.invalidation_reason`,
-        )
-        .run(
-          input.botId,
-          canonicalQuestion,
-          input.normalizedQuestionHash,
-          answer,
-          category,
-          JSON.stringify(sourceIds),
-          input.knowledgeVersion,
-          input.promptVersion,
-          input.status,
-          input.sourceType,
-          input.confidence,
-          now,
-          now,
-          input.expiresAt ?? null,
-          invalidatedAt,
-          invalidationReason,
-        );
-      id =
-        result.changes === 1
-          ? Number(
-              (
-                this.db
-                  .prepare(
-                    'SELECT id FROM cached_answers WHERE bot_id = ? AND normalized_question_hash = ?',
-                  )
-                  .get(input.botId, input.normalizedQuestionHash) as { id: number }
-              ).id,
-            )
-          : Number(result.lastInsertRowid);
-    } else {
-      const changed = this.db
-        .prepare(
-          `UPDATE cached_answers SET canonical_question = ?, normalized_question_hash = ?,
-           answer = ?, category = ?, knowledge_source_ids = ?, knowledge_version = ?,
-           prompt_version = ?, status = ?, source_type = ?, confidence = ?, updated_at = ?,
-           expires_at = ?, invalidated_at = ?, invalidation_reason = ?
-         WHERE id = ? AND bot_id = ?`,
-        )
-        .run(
-          canonicalQuestion,
-          input.normalizedQuestionHash,
-          answer,
-          category,
-          JSON.stringify(sourceIds),
-          input.knowledgeVersion,
-          input.promptVersion,
-          input.status,
-          input.sourceType,
-          input.confidence,
-          now,
-          input.expiresAt ?? null,
-          invalidatedAt,
-          invalidationReason,
-          id,
-          input.botId,
-        );
-      if (changed.changes !== 1) throw new Error('La respuesta guardada no existe.');
-    }
-    return this.getCachedAnswer(input.botId, id) as CachedAnswer;
+    throw new Error('El almacenamiento en caché de respuestas fue descontinuado.');
+    
   }
 
   public addCachedAnswerVariant(
-    botId: string,
-    answerId: number,
-    variant: string,
-    normalizedHash: string,
+    _botId: string,
+    _answerId: number,
+    _variant: string,
+    _normalizedHash: string,
   ): CachedAnswer {
-    if (this.getCachedAnswer(botId, answerId) === null)
-      throw new Error('La respuesta guardada no existe.');
-    if (!/^[a-f0-9]{64}$/u.test(normalizedHash))
-      throw new Error('La huella de la variante no es válida.');
-    this.db
-      .prepare(
-        `INSERT INTO cached_answer_variants(cached_answer_id, variant, normalized_question_hash, created_at)
-       VALUES (?, ?, ?, ?) ON CONFLICT(cached_answer_id, normalized_question_hash) DO UPDATE SET variant = excluded.variant`,
-      )
-      .run(
-        answerId,
-        validatePlainText(variant, 'variante', 1000),
-        normalizedHash,
-        new Date().toISOString(),
-      );
-    return this.getCachedAnswer(botId, answerId) as CachedAnswer;
+    throw new Error('El almacenamiento en caché de respuestas fue descontinuado.');
   }
 
   public setCachedAnswerStatus(
-    botId: string,
-    answerId: number,
-    status: CachedAnswerStatus,
-    reason: string | null = null,
+    _botId: string,
+    _answerId: number,
+    _status: CachedAnswerStatus,
+    _reason: string | null = null,
   ): CachedAnswer {
-    const now = new Date().toISOString();
-    const invalidated = status === 'INVALIDATED';
-    const changed = this.db
-      .prepare(
-        `UPDATE cached_answers SET status = ?, updated_at = ?, invalidated_at = ?, invalidation_reason = ?
-       WHERE id = ? AND bot_id = ?`,
-      )
-      .run(
-        status,
-        now,
-        invalidated ? now : null,
-        invalidated ? validatePlainText(reason ?? 'ADMIN_INVALIDATION', 'motivo', 200) : null,
-        answerId,
-        botId,
-      );
-    if (changed.changes !== 1) throw new Error('La respuesta guardada no existe.');
-    return this.getCachedAnswer(botId, answerId) as CachedAnswer;
+    throw new Error('El almacenamiento en caché de respuestas fue descontinuado.');
   }
 
-  public deleteCachedAnswer(botId: string, answerId: number): boolean {
-    return (
-      this.db.prepare('DELETE FROM cached_answers WHERE id = ? AND bot_id = ?').run(answerId, botId)
-        .changes === 1
-    );
+  public deleteCachedAnswer(_botId: string, _answerId: number): boolean {
+    return false;
   }
 
-  public recordCachedAnswerHit(botId: string, answerId: number): void {
-    this.db
-      .prepare(
-        `UPDATE cached_answers SET hit_count = hit_count + 1, api_calls_saved = api_calls_saved + 1,
-       last_used_at = ?, updated_at = ? WHERE id = ? AND bot_id = ?`,
-      )
-      .run(new Date().toISOString(), new Date().toISOString(), answerId, botId);
+  public recordCachedAnswerHit(_botId: string, _answerId: number): void {
+    // No-op
   }
 
-  public invalidateCachedAnswersForKnowledgeEntry(profileId: number, entryId: number): number {
-    const owner = this.db
-      .prepare('SELECT bot_id FROM assistant_profiles WHERE id = ?')
-      .get(profileId) as { bot_id: string } | undefined;
-    if (owner === undefined) return 0;
-    const now = new Date().toISOString();
-    return this.db
-      .prepare(
-        `UPDATE cached_answers SET status = 'INVALIDATED', invalidated_at = ?, updated_at = ?,
-         invalidation_reason = 'KNOWLEDGE_SOURCE_CHANGED'
-       WHERE bot_id = ? AND status IN ('AUTO_VERIFIED', 'ADMIN_APPROVED', 'ADMIN_EDITED')
-         AND EXISTS (SELECT 1 FROM json_each(cached_answers.knowledge_source_ids) WHERE value = ?)`,
-      )
-      .run(now, now, owner.bot_id, entryId).changes;
+  public invalidateCachedAnswersForKnowledgeEntry(_profileId: number, _entryId: number): number {
+    return 0;
   }
 
   public getBotAIModel(botId: string): string | null {
@@ -10586,43 +10366,6 @@ function mapKnowledgeEntry(row: KnowledgeEntryRow): KnowledgeEntry {
   };
 }
 
-function mapCachedAnswer(row: Record<string, unknown>, variants: string[]): CachedAnswer {
-  return {
-    id: Number(row.id),
-    botId: String(row.bot_id),
-    canonicalQuestion: String(row.canonical_question),
-    normalizedQuestionHash: String(row.normalized_question_hash),
-    answer: String(row.answer),
-    category: String(row.category),
-    knowledgeSourceIds: parseNumberArray(String(row.knowledge_source_ids)),
-    knowledgeVersion: String(row.knowledge_version),
-    promptVersion: String(row.prompt_version),
-    status: String(row.status) as CachedAnswerStatus,
-    sourceType: String(row.source_type) as CachedAnswerSourceType,
-    confidence: Number(row.confidence),
-    hitCount: Number(row.hit_count),
-    apiCallsSaved: Number(row.api_calls_saved),
-    variants,
-    createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at),
-    lastUsedAt: row.last_used_at === null ? null : String(row.last_used_at),
-    expiresAt: row.expires_at === null ? null : String(row.expires_at),
-    invalidatedAt: row.invalidated_at === null ? null : String(row.invalidated_at),
-    invalidationReason: row.invalidation_reason === null ? null : String(row.invalidation_reason),
-  };
-}
-
-function parseNumberArray(value: string): number[] {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is number => Number.isInteger(item) && item > 0)
-      : [];
-  } catch {
-    return [];
-  }
-}
-
 function mapAISettings(row: Record<string, number | string | null>): AISettings {
   return {
     profileId: Number(row.profile_id),
@@ -11182,12 +10925,4 @@ function capabilitiesFor(mode: BotMode): BotCapabilities {
     catalogEnabled: commercial,
     humanAssistanceEnabled: commercial,
   };
-}
-
-function normalizeActivationAlias(value: string): string {
-  const alias = value.normalize('NFKC').trim().toLocaleLowerCase('es');
-  if (!/^@[\p{L}\p{N}_.-]{2,40}$/u.test(alias)) {
-    throw new Error('Cada alias debe comenzar con @ y contener entre 2 y 40 caracteres válidos.');
-  }
-  return alias;
 }

@@ -11,7 +11,6 @@ import QRCode from 'qrcode';
 import { z } from 'zod';
 import type { AIProvider } from '../ai/ai-provider.js';
 import type { AIProviderFactory } from '../ai/ai-provider-factory.js';
-import { hashNormalizedQuestion, normalizeQuestionForCache } from '../ai/answer-cache-service.js';
 import {
   GROQ_API_BACKEND,
   GROQ_API_VERSION,
@@ -74,17 +73,7 @@ const activeProfileConfigurationSchema = z
   .object({
     organizationName: z.string().trim().min(1).max(160),
     botName: z.string().trim().min(1).max(80),
-    activationAlias: z.string().trim().startsWith('@').max(80),
-    description: z.string().trim().min(1).max(1000),
     organizationType: organizationTypeSchema,
-    noInformationMessage: z.string().trim().min(1).max(600),
-    limitMessage: z.string().trim().min(1).max(600),
-    aiErrorMessage: z.string().trim().min(1).max(600),
-    medicalMessage: z.string().trim().min(1).max(600),
-    mentionPromptMessage: z.string().trim().min(1).max(600),
-    contactInformation: z.string().trim().max(1000),
-    businessHours: z.string().trim().max(1000),
-    address: z.string().trim().max(500).nullable(),
     logoPath: z.string().trim().max(200).nullable(),
     primaryColor: z.string().regex(/^#[0-9a-f]{6}$/iu),
     secondaryColor: z.string().regex(/^#[0-9a-f]{6}$/iu),
@@ -140,34 +129,6 @@ const aiSettingsSchema = z
     globalMonthlyTokenLimit: z.number().int().min(1).max(1_000_000_000),
     timeoutMs: z.number().int().min(1000).max(60_000),
     confirmIncreasedLimits: z.boolean().default(false),
-  })
-  .strict();
-
-const cachedAnswerCreateSchema = z
-  .object({
-    canonicalQuestion: z.string().trim().min(1).max(1000),
-    answer: z.string().trim().min(1).max(8000),
-    category: z.string().trim().min(1).max(200),
-    sourceType: z.enum(['ADMIN_FAQ', 'MANUAL']).default('ADMIN_FAQ'),
-    variants: z.array(z.string().trim().min(1).max(1000)).max(30).default([]),
-  })
-  .strict();
-
-const cachedAnswerActionSchema = z
-  .object({
-    action: z.enum([
-      'approve',
-      'edit',
-      'disable',
-      'invalidate',
-      'convert_faq',
-      'add_variant',
-      'regenerate',
-      'view_sources',
-    ]),
-    answer: z.string().trim().min(1).max(8000).optional(),
-    category: z.string().trim().min(1).max(200).optional(),
-    variant: z.string().trim().min(1).max(1000).optional(),
   })
   .strict();
 
@@ -253,20 +214,6 @@ const botConfigurationSchema = z
     realMentionRequired: z.boolean(),
     continuedConversationsEnabled: z.boolean(),
     menuType: z.enum(['automatic', 'native_buttons', 'native_list', 'numbered']),
-  })
-  .strict();
-
-const activationAliasesSchema = z
-  .object({
-    aliases: z
-      .array(
-        z
-          .string()
-          .trim()
-          .regex(/^@[\p{L}\p{N}_.-]{2,40}$/u),
-      )
-      .min(1)
-      .max(10),
   })
   .strict();
 
@@ -987,7 +934,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       groups: context.database.listBotGroups(botId, (identifier) =>
         context.anonymizer.identifier(identifier),
       ),
-      activationAliases: context.database.listBotActivationAliases(botId),
       activeConversations: context.database.countActiveConversationStates(botId),
       pendingRequests: context.database
         .listHumanAssistanceRequests(botId)
@@ -995,21 +941,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
     };
   });
 
-  app.put(
-    '/api/bots/:botId/activation-aliases',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      const input = activationAliasesSchema.parse(request.body);
-      const profile = context.database.getBotProfile(botId);
-      const aliases = context.database.saveBotActivationAliases(botId, [
-        profile.activationAlias,
-        ...input.aliases,
-      ]);
-      audit(context, 'bot_activation_aliases_update', botId, 'ok', botId);
-      return { aliases };
-    },
-  );
 
   app.patch(
     '/api/bots/:botId/configuration',
@@ -1045,11 +976,14 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       const input = activeProfileConfigurationSchema.parse(request.body);
       const fixedInvocation =
         botId === 'neurobot'
-          ? { ...input, botName: 'Neurobot', activationAlias: '@neurobot' }
+          ? { ...input, botName: 'Neurobot' }
           : input;
       const profile = context.database.saveActiveAssistantProfileConfiguration(
         existing.id,
-        fixedInvocation,
+        {
+          ...existing,
+          ...fixedInvocation,
+        },
       );
       audit(context, 'bot_profile_update', String(profile.id), 'ok', botId);
       return { profile: activeProfileResponse(profile) };
@@ -1114,134 +1048,6 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
       if (!context.database.deleteKnowledgeEntry(profile.id, id))
         return reply.code(404).send({ error: 'Entrada no encontrada.' });
       audit(context, 'bot_knowledge_entry_delete', String(id), 'ok', botId);
-      return { deleted: true };
-    },
-  );
-
-  app.get(
-    '/api/bots/:botId/cached-answers',
-    { preHandler: requireSession(sessions) },
-    async (request) => {
-      const botId = parseBotId(request.params);
-      const search = z
-        .object({ search: z.string().trim().max(200).default('') })
-        .parse(request.query).search;
-      return { answers: context.database.listCachedAnswers(botId, search) };
-    },
-  );
-
-  app.post(
-    '/api/bots/:botId/cached-answers',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const input = cachedAnswerCreateSchema.parse(request.body);
-      const normalized = normalizeQuestionForCache(input.canonicalQuestion);
-      const answer = context.database.saveCachedAnswer({
-        botId,
-        canonicalQuestion: input.canonicalQuestion,
-        normalizedQuestionHash: hashNormalizedQuestion(normalized),
-        answer: input.answer,
-        category: input.category,
-        knowledgeSourceIds: [],
-        knowledgeVersion: '',
-        promptVersion: 'admin-v1',
-        status: input.sourceType === 'ADMIN_FAQ' ? 'ADMIN_APPROVED' : 'ADMIN_EDITED',
-        sourceType: input.sourceType,
-        confidence: 1,
-      });
-      for (const variant of input.variants) {
-        context.database.addCachedAnswerVariant(
-          botId,
-          answer.id,
-          variant,
-          hashNormalizedQuestion(normalizeQuestionForCache(variant)),
-        );
-      }
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: 'ANSWER_CACHE_ADMIN_APPROVED',
-        result: input.sourceType,
-      });
-      audit(context, 'cached_answer_create', String(answer.id), 'ok', botId);
-      return reply.code(201).send({ answer: context.database.getCachedAnswer(botId, answer.id) });
-    },
-  );
-
-  app.patch(
-    '/api/bots/:botId/cached-answers/:id',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      const input = cachedAnswerActionSchema.parse(request.body);
-      const existing = context.database.getCachedAnswer(botId, id);
-      if (existing === null)
-        return reply.code(404).send({ error: 'Respuesta guardada no encontrada.' });
-      if (input.action === 'view_sources')
-        return { answer: existing, sourceIds: existing.knowledgeSourceIds };
-      let answer: typeof existing;
-      let technicalEvent = 'ANSWER_CACHE_ADMIN_EDITED';
-      if (input.action === 'approve') {
-        answer = context.database.setCachedAnswerStatus(botId, id, 'ADMIN_APPROVED');
-        technicalEvent = 'ANSWER_CACHE_ADMIN_APPROVED';
-      } else if (input.action === 'disable') {
-        answer = context.database.setCachedAnswerStatus(botId, id, 'DISABLED');
-      } else if (input.action === 'invalidate' || input.action === 'regenerate') {
-        answer = context.database.setCachedAnswerStatus(
-          botId,
-          id,
-          'INVALIDATED',
-          input.action === 'regenerate' ? 'MANUAL_REGENERATE' : 'ADMIN_INVALIDATION',
-        );
-        technicalEvent = 'ANSWER_CACHE_INVALIDATED';
-      } else if (input.action === 'add_variant') {
-        if (input.variant === undefined)
-          return reply.code(400).send({ error: 'Escribe la variante.' });
-        answer = context.database.addCachedAnswerVariant(
-          botId,
-          id,
-          input.variant,
-          hashNormalizedQuestion(normalizeQuestionForCache(input.variant)),
-        );
-      } else {
-        const sourceType = input.action === 'convert_faq' ? 'ADMIN_FAQ' : existing.sourceType;
-        answer = context.database.saveCachedAnswer({
-          id,
-          botId,
-          canonicalQuestion: existing.canonicalQuestion,
-          normalizedQuestionHash: existing.normalizedQuestionHash,
-          answer: input.answer ?? existing.answer,
-          category: input.category ?? existing.category,
-          knowledgeSourceIds: existing.knowledgeSourceIds,
-          knowledgeVersion: existing.knowledgeVersion,
-          promptVersion: existing.promptVersion,
-          status: input.action === 'convert_faq' ? 'ADMIN_APPROVED' : 'ADMIN_EDITED',
-          sourceType,
-          confidence: existing.confidence,
-          expiresAt: existing.expiresAt,
-        });
-        if (input.action === 'convert_faq') technicalEvent = 'ANSWER_CACHE_ADMIN_APPROVED';
-      }
-      context.database.recordTechnicalEvent({
-        botId,
-        eventType: technicalEvent,
-        result: input.action,
-      });
-      audit(context, `cached_answer_${input.action}`, String(id), 'ok', botId);
-      return { answer };
-    },
-  );
-
-  app.delete(
-    '/api/bots/:botId/cached-answers/:id',
-    { preHandler: [requireSession(sessions), requireCsrf(sessions)] },
-    async (request, reply) => {
-      const botId = parseBotId(request.params);
-      const id = z.object({ id: z.coerce.number().int().positive() }).parse(request.params).id;
-      if (!context.database.deleteCachedAnswer(botId, id))
-        return reply.code(404).send({ error: 'Respuesta guardada no encontrada.' });
-      audit(context, 'cached_answer_delete', String(id), 'ok', botId);
       return { deleted: true };
     },
   );
@@ -3275,17 +3081,7 @@ function activeProfileResponse(profile: ReturnType<AppDatabase['getBotProfile']>
     id: profile.id,
     organizationName: profile.organizationName,
     botName: profile.botName,
-    activationAlias: profile.activationAlias,
-    description: profile.description,
     organizationType: profile.organizationType,
-    noInformationMessage: profile.noInformationMessage,
-    limitMessage: profile.limitMessage,
-    aiErrorMessage: profile.aiErrorMessage,
-    medicalMessage: profile.medicalMessage,
-    mentionPromptMessage: profile.mentionPromptMessage,
-    contactInformation: profile.contactInformation,
-    businessHours: profile.businessHours,
-    address: profile.address,
     logoPath: profile.logoPath,
     primaryColor: profile.primaryColor,
     secondaryColor: profile.secondaryColor,

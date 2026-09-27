@@ -8,7 +8,6 @@ const panelState = {
   profile: null,
   visibleModules: [],
   bots: [],
-  cachedAnswers: [],
   aiSettings: null,
   aiCurrentProvider: null,
   menus: [],
@@ -347,7 +346,7 @@ async function loadSelectedBot() {
   if (!panelState.selectedBotId) return;
   await loadBotSummary();
   const visible = new Set(panelState.visibleModules);
-  const loaders = [loadWhatsApp(), loadCachedAnswers(), loadAI()];
+  const loaders = [loadWhatsApp(), loadAI()];
   if (visible.has('menus')) loaders.push(loadMenus());
   if (visible.has('catalog')) loaders.push(loadCatalog());
   if (visible.has('media')) loaders.push(loadMedia());
@@ -356,7 +355,7 @@ async function loadSelectedBot() {
   await Promise.all(loaders);
 }
 
-async function loadBotSummary(refreshForms = true) {
+async function loadBotSummary() {
   const result = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}`);
   panelState.bot = result.bot;
   panelState.profile = result.profile;
@@ -444,37 +443,6 @@ async function loadBotSummary(refreshForms = true) {
     );
   }
 
-  if (refreshForms) {
-    fillProfile(result.profile);
-    fillActivationAliases(result.activationAliases);
-  }
-}
-
-function fillActivationAliases(aliases = []) {
-  const card = document.querySelector('#activation-aliases-card');
-  const input = document.querySelector('#activation-aliases');
-  if (!card || !input) return;
-  card.classList.toggle('hidden', panelState.selectedBotId !== 'neurobot');
-  input.value = aliases.filter((alias) => alias.toLowerCase() !== '@neurobot').join('\n');
-}
-
-function fillProfile(profile) {
-  const form = document.querySelector('#profile-form');
-  Object.entries(profile).forEach(([field, value]) => {
-    const input = form.elements[field];
-    if (!input) return;
-    input.value = Array.isArray(value) ? value.join('\n') : (value ?? '');
-  });
-  const fixedNeurobotName = panelState.selectedBotId === 'neurobot';
-  const botName = form.elements.botName;
-  const activationAlias = form.elements.activationAlias;
-  if (fixedNeurobotName) {
-    botName.value = 'Neurobot';
-    activationAlias.value = '@neurobot';
-  }
-  botName.readOnly = fixedNeurobotName;
-  activationAlias.readOnly = fixedNeurobotName;
-  document.querySelector('#neurobot-alias-help')?.classList.toggle('hidden', !fixedNeurobotName);
 }
 
 async function loadWhatsApp() {
@@ -538,154 +506,6 @@ function renderBotGroups(groups) {
     target.append(item);
   });
 }
-
-function enableInlineCachedAnswerEditing(answer, answerText, editor, saveStatus) {
-  let saveTimer = null;
-  let saveQueue = Promise.resolve();
-
-  const persist = (closeAfterSave = false) => {
-    if (saveTimer !== null) {
-      window.clearTimeout(saveTimer);
-      saveTimer = null;
-    }
-    const value = editor.value.trim();
-    saveQueue = saveQueue.then(async () => {
-      if (value === '') {
-        saveStatus.textContent = 'La respuesta no puede estar vacía.';
-        editor.classList.add('invalid');
-        return;
-      }
-      editor.classList.remove('invalid');
-      if (value !== answer.answer) {
-        saveStatus.textContent = 'Guardando…';
-        try {
-          await panelApi(
-            `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers/${answer.id}`,
-            { method: 'PATCH', body: JSON.stringify({ action: 'edit', answer: value }) },
-          );
-          answer.answer = value;
-          answerText.textContent = value;
-          saveStatus.textContent = 'Guardado';
-        } catch (error) {
-          saveStatus.textContent = 'No se pudo guardar.';
-          notify(error.message, true);
-          return;
-        }
-      }
-      if (closeAfterSave) {
-        editor.classList.add('hidden');
-        answerText.classList.remove('hidden');
-      }
-    });
-  };
-
-  editor.addEventListener('input', () => {
-    editor.classList.remove('invalid');
-    saveStatus.textContent = 'Editando…';
-    if (saveTimer !== null) window.clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(() => persist(), 600);
-  });
-  editor.addEventListener('blur', () => persist(true));
-
-  return () => {
-    answerText.classList.add('hidden');
-    editor.classList.remove('hidden');
-    editor.focus();
-    editor.setSelectionRange(editor.value.length, editor.value.length);
-    saveStatus.textContent = 'Editando…';
-  };
-}
-
-async function loadCachedAnswers(search = '') {
-  if (!panelState.selectedBotId) return;
-  const target = document.querySelector('#cached-answers-list');
-  if (target) target.classList.add('loading-pulse');
-  try {
-    const suffix = search ? `?search=${encodeURIComponent(search)}` : '';
-    const result = await panelApi(
-      `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers${suffix}`,
-    );
-    panelState.cachedAnswers = result.answers;
-    if (target) {
-      target.replaceChildren();
-      result.answers.forEach((answer) => {
-        const row = node('tr');
-        const question = node('td', undefined, 'question-cell');
-        const answerText = node('p', answer.answer, 'cached-answer-text');
-        const editor = node('textarea', undefined, 'cached-answer-editor hidden');
-        editor.value = answer.answer;
-        editor.rows = 5;
-        editor.maxLength = 8000;
-        editor.setAttribute('aria-label', `Editar respuesta para: ${answer.canonicalQuestion}`);
-        const saveStatus = node('small', '', 'inline-save-status');
-        saveStatus.setAttribute('aria-live', 'polite');
-        const startEditing = enableInlineCachedAnswerEditing(
-          answer,
-          answerText,
-          editor,
-          saveStatus,
-        );
-        question.append(node('strong', answer.canonicalQuestion), answerText, editor, saveStatus);
-
-        const semanticallyRepeated = answer.variants.length > 0;
-        const repeated = answer.hitCount > 0 || semanticallyRepeated;
-        const repeatedLabel = semanticallyRepeated ? 'Sí · similar' : repeated ? 'Sí' : 'No';
-        const repeatedCell = node('td');
-        const repeatedBadge = node(
-          'span',
-          repeatedLabel,
-          `status-badge repeat-status ${repeated ? 'repeated' : 'inactive'}`,
-        );
-        if (semanticallyRepeated) {
-          repeatedBadge.title = `Preguntas similares detectadas: ${answer.variants.join(' · ')}`;
-        }
-        repeatedCell.append(repeatedBadge);
-
-        const actionsCell = node('td', undefined, 'history-actions-cell');
-        const actions = node('div', undefined, 'actions history-actions');
-        actions.append(
-          actionButton('Editar', 'history-edit-action', startEditing),
-          actionButton('Eliminar', 'danger', async () => {
-            if (
-              !(await confirmAction('¿Eliminar esta pregunta y su respuesta del historial?', {
-                title: 'Eliminar historial',
-                confirmLabel: 'Eliminar',
-              }))
-            )
-              return;
-            await panelApi(
-              `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/cached-answers/${answer.id}`,
-              { method: 'DELETE' },
-            );
-            await loadCachedAnswers();
-            notify('Respuesta eliminada.');
-          }),
-        );
-        actionsCell.append(actions);
-        row.append(
-          question,
-          node('td', answer.category),
-          node('td', String(answer.hitCount), 'numeric-cell'),
-          repeatedCell,
-          node('td', answer.status),
-          node('td', safeDate(answer.updatedAt)),
-          actionsCell,
-        );
-        target.append(row);
-      });
-      if (result.answers.length === 0) {
-        const row = node('tr');
-        const cell = node('td', 'Todavía no hay preguntas registradas.', 'empty-table-cell');
-        cell.colSpan = 7;
-        row.append(cell);
-        target.append(row);
-      }
-    }
-  } finally {
-    if (target) target.classList.remove('loading-pulse');
-  }
-}
-
 async function loadMenus() {
   if (!panelState.selectedBotId) return;
   const result = await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/menus`);
@@ -1170,7 +990,7 @@ async function restartBot(botId = panelState.selectedBotId) {
   notify('Conexión reiniciada.');
   await Promise.all([
     loadBots(),
-    botId === panelState.selectedBotId ? loadBotSummary(false) : Promise.resolve(),
+    botId === panelState.selectedBotId ? loadBotSummary() : Promise.resolve(),
     botId === panelState.selectedBotId ? loadWhatsApp() : Promise.resolve(),
   ]);
 }
@@ -1197,7 +1017,7 @@ async function changeBotNumber() {
   document.dispatchEvent(
     new window.CustomEvent('neurobot:linking-started', { detail: { botId: bot.id } }),
   );
-  await Promise.all([loadBots(), loadBotSummary(false), loadWhatsApp()]);
+  await Promise.all([loadBots(), loadBotSummary(), loadWhatsApp()]);
 }
 
 async function toggleBot(bot) {
@@ -1214,7 +1034,7 @@ async function toggleBot(bot) {
       menuType: detail.bot.menuType,
     }),
   });
-  await Promise.all([loadBots(), loadBotSummary(false)]);
+  await Promise.all([loadBots(), loadBotSummary()]);
   notify(detail.bot.enabled ? 'Asistente desactivado.' : 'Asistente activado.');
 }
 
@@ -1365,12 +1185,6 @@ function clearForm(form, defaults = {}) {
 }
 
 function configureForms() {
-  const aiSection = document.querySelector('#section-ai');
-  const aiProviderContent = document.querySelector('#ai-provider-content');
-  if (aiSection && aiProviderContent) {
-    aiSection.append(...aiProviderContent.children);
-    aiProviderContent.remove();
-  }
   document
     .querySelector('#open-ai-provider-form')
     .addEventListener('click', () => setAIProviderEditorOpen(true));
@@ -1431,7 +1245,7 @@ function configureForms() {
         displayName: panelState.aiCurrentProvider?.name || 'Groq',
         enabled,
       });
-      await Promise.all([loadAI(), loadBotSummary(false), loadBots()]);
+      await Promise.all([loadAI(), loadBotSummary(), loadBots()]);
       notify(`Inteligencia artificial ${enabled ? 'activada' : 'desactivada'}.`);
     } catch (error) {
       await loadAI().catch(() => {});
@@ -1520,47 +1334,6 @@ function configureForms() {
       notify('Asistente creado con datos y sesión independientes.');
       await loadBots();
       await selectBot(result.bot.id, 'whatsapp');
-    } catch (error) {
-      notify(error.message, true);
-    }
-  });
-
-  document.querySelector('#profile-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    try {
-      const payload = {};
-      [...form.elements].forEach((input) => {
-        if (!input.name) return;
-        payload[input.name] =
-          ['address', 'logoPath'].includes(input.name) && input.value.trim() === ''
-            ? null
-            : input.value.trim();
-      });
-      await panelApi(`/api/bots/${encodeURIComponent(panelState.selectedBotId)}/profile`, {
-        method: 'PATCH',
-        body: JSON.stringify(payload),
-      });
-      notify('Asistente guardado.');
-      await Promise.all([loadBotSummary(), loadBots()]);
-    } catch (error) {
-      notify(error.message, true);
-    }
-  });
-
-  document.querySelector('#save-activation-aliases')?.addEventListener('click', async () => {
-    try {
-      await panelApi(
-        `/api/bots/${encodeURIComponent(panelState.selectedBotId)}/activation-aliases`,
-        {
-          method: 'PUT',
-          body: JSON.stringify({
-            aliases: ['@neurobot', ...lines(document.querySelector('#activation-aliases').value)],
-          }),
-        },
-      );
-      notify('Alias de activación guardados.');
-      await loadBotSummary(false);
     } catch (error) {
       notify(error.message, true);
     }
@@ -1739,7 +1512,7 @@ function configureForms() {
     try {
       await saveAIProvider(payload);
       form.elements.apiKey.value = '';
-      await Promise.all([loadAI(), loadBotSummary(false), loadBots()]);
+      await Promise.all([loadAI(), loadBotSummary(), loadBots()]);
       notify('Configuración actualizada.');
       setAIProviderEditorOpen(false);
     } catch (error) {
@@ -1756,22 +1529,6 @@ function configureForms() {
   document.querySelector('#refresh-bot-groups').addEventListener('click', () => {
     void loadWhatsApp().catch((error) => notify(error.message, true));
   });
-  const refreshCachedAnswersBtn = document.querySelector('#refresh-cached-answers');
-  if (refreshCachedAnswersBtn) {
-    refreshCachedAnswersBtn.addEventListener('click', async () => {
-      try {
-        refreshCachedAnswersBtn.disabled = true;
-        refreshCachedAnswersBtn.textContent = '🔄 Actualizando...';
-        await loadCachedAnswers();
-        notify('Historial de preguntas actualizado.');
-      } catch (error) {
-        notify(error.message, true);
-      } finally {
-        refreshCachedAnswersBtn.disabled = false;
-        refreshCachedAnswersBtn.textContent = 'Actualizar historial';
-      }
-    });
-  }
 }
 
 function clearMenu() {
@@ -1806,7 +1563,7 @@ let initializationRetryTimer = null;
 async function refreshVisibleBotStatus() {
   if (document.hidden) return;
   await loadBots();
-  if (panelState.selectedBotId) await loadBotSummary(false);
+  if (panelState.selectedBotId) await loadBotSummary();
 }
 
 function startBotStatusRefresh() {
