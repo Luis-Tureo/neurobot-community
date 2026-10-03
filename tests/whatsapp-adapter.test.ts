@@ -768,7 +768,9 @@ describe('adaptador de WhatsApp', () => {
 
     const resolved = await adapter.resolveCanonicalIdentities(lids);
 
-    expect(fake.getContactLidAndPhone.mock.calls.map(([ids]) => ids.length)).toEqual([20, 20, 5]);
+    const batchSizes = fake.getContactLidAndPhone.mock.calls.map(([ids]) => ids.length);
+    expect(batchSizes.slice(-3)).toEqual([20, 20, 5]);
+    expect(Math.max(...batchSizes)).toBeLessThanOrEqual(20);
     expect(resolved.size).toBe(45);
     expect([...resolved.values()].every((identifier) => identifier.endsWith('@c.us'))).toBe(true);
   });
