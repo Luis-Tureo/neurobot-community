@@ -53,6 +53,8 @@ const DEFAULT_GROUP_ADMINISTRATOR_RETRY_COOLDOWN_MS = 30_000;
 const DEFAULT_LIVENESS_CHECK_INTERVAL_MS = 60_000;
 const DEFAULT_LIVENESS_CHECK_TIMEOUT_MS = 15_000;
 const DEFAULT_LIVENESS_FAILURE_THRESHOLD = 2;
+const DEFAULT_PUPPETEER_PROTOCOL_TIMEOUT_MS = 300_000;
+const LID_RESOLUTION_BATCH_SIZE = 20;
 let nextClientGeneration = 0;
 
 type GroupAdministratorCacheEntry = {
@@ -410,6 +412,7 @@ export function buildWhatsAppClientOptions(options: WhatsAppAdapterOptions): Wha
     ...(options.freshLinkingSession === true ? { webVersionCache: { type: 'none' as const } } : {}),
     puppeteer: {
       headless: true,
+      protocolTimeout: DEFAULT_PUPPETEER_PROTOCOL_TIMEOUT_MS,
       ...(options.chromeExecutablePath === undefined
         ? {}
         : { executablePath: options.chromeExecutablePath }),
@@ -2429,39 +2432,44 @@ export class WhatsAppWebAdapter implements MessagingClient {
     const lids = sourceIds.filter((identifier) => classifyWhatsAppId(identifier) === 'lid');
     if (lids.length === 0) return canonicalIdentities;
 
-    try {
-      const mappings = await client.getContactLidAndPhone(lids);
-      let collapsedAliases = 0;
-      for (const mapping of mappings) {
-        const lid = getSerializedId(mapping.lid);
-        const phoneId = getSerializedId(mapping.pn);
-        const phone = phoneId === null ? null : canonicalPhoneIdentity(phoneId);
-        if (lid === null || phone === null || classifyWhatsAppId(lid) !== 'lid') continue;
+    let collapsedAliases = 0;
+    for (let offset = 0; offset < lids.length; offset += LID_RESOLUTION_BATCH_SIZE) {
+      const batch = lids.slice(offset, offset + LID_RESOLUTION_BATCH_SIZE);
+      try {
+        const mappings = await client.getContactLidAndPhone(batch);
+        for (const mapping of mappings) {
+          const lid = getSerializedId(mapping.lid);
+          const phoneId = getSerializedId(mapping.pn);
+          const phone = phoneId === null ? null : canonicalPhoneIdentity(phoneId);
+          if (lid === null || phone === null || classifyWhatsAppId(lid) !== 'lid') continue;
 
-        const normalizedLid = normalizeParticipantId(lid);
-        if (canonicalIdentities.has(normalizedLid)) {
-          canonicalIdentities.set(normalizedLid, phone);
-          collapsedAliases += 1;
+          const normalizedLid = normalizeParticipantId(lid);
+          if (canonicalIdentities.has(normalizedLid)) {
+            canonicalIdentities.set(normalizedLid, phone);
+            collapsedAliases += 1;
+          }
         }
-      }
-
-      if (collapsedAliases > 0) {
-        this.logger.debug(
+      } catch (error) {
+        this.logger.warn(
           {
-            operation: 'WELCOME_IDENTITY_ALIASES_COLLAPSED',
-            aliasCount: collapsedAliases,
+            ...serializeError(error, 'GROUP_PARTICIPANT_IDENTITY_UNRESOLVED', false),
+            operation: 'resolveGroupParticipantIdentities',
+            unresolvedCount: batch.length,
+            batchOffset: offset,
+            batchSize: batch.length,
           },
-          'Se unificaron identidades equivalentes antes de procesar la bienvenida',
+          'No fue posible resolver un lote de identidades LID del grupo',
         );
       }
-    } catch (error) {
-      this.logger.warn(
+    }
+
+    if (collapsedAliases > 0) {
+      this.logger.debug(
         {
-          ...serializeError(error, 'GROUP_PARTICIPANT_IDENTITY_UNRESOLVED', false),
-          operation: 'resolveGroupParticipantIdentities',
-          unresolvedCount: lids.length,
+          operation: 'WELCOME_IDENTITY_ALIASES_COLLAPSED',
+          aliasCount: collapsedAliases,
         },
-        'No fue posible resolver algunas identidades LID del grupo',
+        'Se unificaron identidades equivalentes antes de procesar la bienvenida',
       );
     }
 

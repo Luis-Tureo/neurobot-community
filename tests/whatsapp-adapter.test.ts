@@ -168,6 +168,7 @@ describe('adaptador de WhatsApp', () => {
       developmentMode: false,
     };
     expect(buildWhatsAppClientOptions(base).webVersionCache).toBeUndefined();
+    expect(buildWhatsAppClientOptions(base).puppeteer?.protocolTimeout).toBe(300_000);
     expect(
       buildWhatsAppClientOptions({ ...base, freshLinkingSession: true }).webVersionCache,
     ).toEqual({ type: 'none' });
@@ -753,6 +754,25 @@ describe('adaptador de WhatsApp', () => {
     await expect(adapter.listGroups()).resolves.toMatchObject([
       { id: 'grupo-normal@g.us', name: 'Nombre recuperado' },
     ]);
+  });
+
+  it('divide resoluciones LID grandes para no bloquear una sola llamada del protocolo', async () => {
+    const { adapter, fake } = createSubject();
+    const lids = Array.from({ length: 45 }, (_, index) => `persona-${index}@lid`);
+    fake.lidMappings = lids.map((lid, index) => ({
+      lid,
+      pn: `569100000${String(index).padStart(2, '0')}@c.us`,
+    }));
+    await adapter.initialize();
+    fake.emit('ready');
+
+    const resolved = await adapter.resolveCanonicalIdentities(lids);
+
+    const batchSizes = fake.getContactLidAndPhone.mock.calls.map(([ids]) => ids.length);
+    expect(batchSizes.slice(-3)).toEqual([20, 20, 5]);
+    expect(Math.max(...batchSizes)).toBeLessThanOrEqual(20);
+    expect(resolved.size).toBe(45);
+    expect([...resolved.values()].every((identifier) => identifier.endsWith('@c.us'))).toBe(true);
   });
 
   it('resuelve participantes @lid durante la sincronización sin registrarlos', async () => {

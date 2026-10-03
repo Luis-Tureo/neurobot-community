@@ -648,6 +648,34 @@ describe('API administrativa', () => {
     expect(sent.body).not.toContain('grupo-manual@g.us');
   });
 
+  it('devuelve causa segura cuando falla una prueba de mensaje automático', async () => {
+    database.upsertDetectedGroup('grupo-fallo@g.us', 'Grupo fallo');
+    database.setGroupAuthorized('grupo-fallo@g.us', true);
+    client.failSending = true;
+    const auth = await login(app);
+    const view = await app.inject({
+      method: 'GET',
+      url: '/api/automatic-messages',
+      headers: { cookie: auth.cookie },
+    });
+    const groupKey = view.json().authorizedGroups[0].key;
+
+    const failed = await injectAuthenticated(app, auth, {
+      method: 'POST',
+      url: '/api/automatic-messages/send/greeting',
+      payload: { groupKey, confirmed: true },
+    });
+
+    expect(failed.statusCode).toBe(502);
+    expect(failed.json()).toMatchObject({
+      status: 'FAILED',
+      code: 'AUTOMATIC_SEND_FAILED',
+      errorCode: 'AUTOMATIC_SEND_FAILED',
+      error: 'no fue posible enviar el mensaje automático',
+    });
+    expect(failed.body).not.toContain('grupo-fallo@g.us');
+  });
+
   it('previsualiza la bienvenida y elimina la segunda configuración por grupo', async () => {
     database.upsertDetectedGroup('grupo-bienvenida@g.us', 'Grupo bienvenida');
     database.setGroupAuthorized('grupo-bienvenida@g.us', true);
