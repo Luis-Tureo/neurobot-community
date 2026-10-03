@@ -87,8 +87,9 @@ async function api(path, options = {}) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(payload.error || 'La prueba no pudo completarse.');
-    error.code = payload.code;
-    error.causeCode = payload.causeCode;
+    error.code = payload.code || payload.errorCode || null;
+    error.causeCode = payload.causeCode || payload.errorCode || null;
+    error.errorCode = payload.errorCode || null;
     error.validation = payload.validation;
     throw error;
   }
@@ -704,13 +705,12 @@ async function resumeActiveDigestTests() {
 
 function formatTestFailure(error) {
   const message = error instanceof Error ? error.message : 'La prueba no pudo completarse.';
-  const causeCode =
-    typeof error?.causeCode === 'string' && /^[A-Z][A-Z0-9_-]{2,79}$/.test(error.causeCode)
-      ? error.causeCode
-      : null;
-  return causeCode === null || message.endsWith(`· ${causeCode}`)
+  const rawCode = error?.causeCode || error?.errorCode || error?.code || null;
+  const errorCode =
+    typeof rawCode === 'string' && /^[A-Z][A-Z0-9_-]{2,79}$/.test(rawCode) ? rawCode : null;
+  return errorCode === null || message.endsWith(`· ${errorCode}`)
     ? message
-    : `${message} · ${causeCode}`;
+    : `${message} · ${errorCode}`;
 }
 
 function renderBotValidation(validation) {
