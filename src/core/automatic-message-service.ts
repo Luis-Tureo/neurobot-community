@@ -1392,6 +1392,8 @@ export function automaticRejectionReason(errorCode: string): string {
     PRIVATE_CHAT: 'el evento no pertenece a un grupo compatible',
     GROUP_SILENCED: 'el grupo está pausado por un administrador',
     GROUP_TEMPORARILY_DISABLED: 'el grupo está en recuperación temporal',
+    AUTOMATIC_SEND_FAILED: 'no fue posible enviar el mensaje automático',
+    GROUP_DESTINATION_UNAVAILABLE: 'el grupo ya no está disponible en WhatsApp',
     BOT_JOIN_BASELINE_CREATED: 'se creó la línea base al incorporar el bot',
     BASELINE_PENDING: 'la línea base de participantes aún no está disponible',
   };
