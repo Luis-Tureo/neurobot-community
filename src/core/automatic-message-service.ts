@@ -1373,7 +1373,7 @@ function automaticLogPresentation(
   return { level: 'debug', message: 'Evento técnico de automatizaciones' };
 }
 
-function automaticRejectionReason(errorCode: string): string {
+export function automaticRejectionReason(errorCode: string): string {
   const descriptions: Record<string, string> = {
     GROUP_NOT_SELECTED_FOR_AUTOMATIONS: 'grupo no seleccionado para automatizaciones',
     WELCOME_DISABLED: 'bienvenida desactivada',
