@@ -19,7 +19,10 @@ import {
   GROQ_PROVIDER_LABEL,
   GROQ_PROVIDER_NAME,
 } from '../ai/groq-constants.js';
-import type { AutomaticMessageService } from '../core/automatic-message-service.js';
+import {
+  automaticRejectionReason,
+  type AutomaticMessageService,
+} from '../core/automatic-message-service.js';
 import { CatalogService } from '../core/catalog-service.js';
 import {
   AUTOMATIC_TEMPLATE_KEYS,
@@ -2855,6 +2858,15 @@ export async function buildAdminServer(context: AdminServerContext): Promise<Fas
         botId,
       );
       const statusCode = result.status === 'SENT' ? 200 : result.status === 'FAILED' ? 502 : 409;
+      if (result.status !== 'SENT') {
+        const errorCode = result.errorCode ?? 'AUTOMATIC_SEND_FAILED';
+        return reply.code(statusCode).send({
+          taskType,
+          ...result,
+          code: errorCode,
+          error: automaticRejectionReason(errorCode),
+        });
+      }
       return reply.code(statusCode).send({ taskType, ...result });
     },
   );
