@@ -63,6 +63,12 @@ describe('centro de pruebas de automatizaciones', () => {
     expect(script).toContain('JSON.stringify({ groupKeys, period, confirmed: true })');
   });
 
+  it('conserva el código técnico seguro cuando una prueba manual falla', () => {
+    expect(script).toContain('payload.code || payload.errorCode || null');
+    expect(script).toContain('payload.causeCode || payload.errorCode || null');
+    expect(script).toContain('error?.causeCode || error?.errorCode || error?.code || null');
+  });
+
   it('consulta el estado sin reejecutar y solo muestra fallo al recibir el estado final', () => {
     for (const status of [
       'queued',
