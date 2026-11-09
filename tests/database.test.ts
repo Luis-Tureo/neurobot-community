@@ -61,6 +61,37 @@ describe('persistencia SQLite', () => {
     database.close();
   });
 
+  it('identifica el conector faltante si la inicialización no pudo crearlo', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'neurobot-missing-connector-'));
+    const path = join(directory, 'test.db');
+    const database = new AppDatabase(path);
+    try {
+      database.migrate();
+      const raw = new BetterSqlite3(path);
+      try {
+        raw.exec(`
+          UPDATE bots SET active_connector_id = NULL WHERE id = 'neurobot';
+          DELETE FROM assistant_connectors WHERE assistant_id = 'neurobot';
+        `);
+      } finally {
+        raw.close();
+      }
+      database.setBotSessionPath('neurobot', 'data/sessions/neurobot-test');
+      // El otro asistente ocupa la ruta que intenta usar la semilla de Neurobot.
+      database.createBot({
+        id: 'asistente-ficticio',
+        mode: 'community',
+        sessionPath: './data/whatsapp-session',
+        profile: database.getBotProfile('neurobot'),
+      });
+
+      expect(() => database.migrate()).toThrow(/NEUROBOT_CONNECTOR_MISSING/);
+    } finally {
+      database.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('la migración Groq conserva ciphertext y fingerprint per_bot y normaliza la configuración activa', () => {
     const directory = mkdtempSync(join(tmpdir(), 'neurobot-groq-migration-'));
     const path = join(directory, 'test.db');
