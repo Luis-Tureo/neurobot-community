@@ -3052,7 +3052,12 @@ export class AppDatabase {
       .prepare(
         "SELECT id FROM assistant_connectors WHERE assistant_id = 'neurobot' ORDER BY id LIMIT 1",
       )
-      .get() as { id: number };
+      .get() as { id: number } | undefined;
+    if (connector === undefined) {
+      throw new Error(
+        'NEUROBOT_CONNECTOR_MISSING: Falta el conector de Neurobot tras la inicialización de SQLite.',
+      );
+    }
     this.db
       .prepare(
         `UPDATE bots SET assistant_type='COMMUNITY_GROUPS',
